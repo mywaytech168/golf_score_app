@@ -1,5 +1,5 @@
-import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.JavaVersion
+import org.gradle.api.tasks.compile.JavaCompile
 
 allprojects {
     repositories {
@@ -25,16 +25,25 @@ tasks.register<Delete>("clean") {
 }
 
 subprojects {
-    // 統一 Kotlin 與 Java 的編譯目標版本為 11，避免模組間版本不一致
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    // 子模組評估完成後再統一編譯設定，避免被各模組覆寫
+    afterEvaluate {
         // 強制 Kotlin 使用 JVM 11
-        kotlinOptions {
-            jvmTarget = "11"
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            kotlinOptions {
+                jvmTarget = "11"
+            }
         }
-    }
-    tasks.withType<JavaCompile>().configureEach {
         // 統一 Java 編譯版本為 11
-        sourceCompatibility = JavaVersion.VERSION_11.toString()
-        targetCompatibility = JavaVersion.VERSION_11.toString()
+        tasks.withType<JavaCompile>().configureEach {
+            sourceCompatibility = JavaVersion.VERSION_11.toString()
+            targetCompatibility = JavaVersion.VERSION_11.toString()
+        }
+        // 如為 Android 專案則同步設定 compileOptions，確保 Java 版本一致
+        extensions.findByType<com.android.build.gradle.BaseExtension>()?.apply {
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_11
+                targetCompatibility = JavaVersion.VERSION_11
+            }
+        }
     }
 }
