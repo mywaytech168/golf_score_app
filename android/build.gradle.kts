@@ -32,6 +32,7 @@ subprojects {
     tasks.withType<JavaCompile>().configureEach {
         // 設定編譯目標為 Java 11，避免模組自行設定不同版本
         options.release.set(11)
+        // 不直接覆寫 sourceCompatibility，避免屬性已終結導致建置失敗
     }
 
     // 統一 Kotlin 編譯設定，確保所有模組皆使用 JVM 11
@@ -39,24 +40,6 @@ subprojects {
         // 強制 Kotlin 使用 JVM 11，避免與 Java 版本不一致
         kotlinOptions {
             jvmTarget = "11"
-        }
-    }
-
-    // 若為 Android 專案則同步覆寫 compileOptions，保持版本一致
-    plugins.withId("com.android.application") {
-        extensions.configure<BaseExtension> {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_11
-                targetCompatibility = JavaVersion.VERSION_11
-            }
-        }
-    }
-    plugins.withId("com.android.library") {
-        extensions.configure<BaseExtension> {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_11
-                targetCompatibility = JavaVersion.VERSION_11
-            }
         }
     }
 }
