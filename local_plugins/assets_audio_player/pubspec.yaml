@@ -6,7 +6,7 @@ version: 3.1.1
 homepage: https://github.com/florent37/Flutter-AssetsAudioPlayer
 
 environment:
-  sdk: ">=2.19.0 <3.0.0"
+  sdk: ">=2.19.0 <4.0.0" # 放寬限制以支援 Dart 3
   flutter: ">=2.0.0"
 
 dependencies:
