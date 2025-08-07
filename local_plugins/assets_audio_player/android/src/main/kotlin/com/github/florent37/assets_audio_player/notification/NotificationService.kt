@@ -27,7 +27,8 @@ import android.app.PendingIntent.FLAG_IMMUTABLE
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.annotation.RequiresApi
 import com.github.florent37.assets_audio_player.AssetsAudioPlayerPlugin
-import com.github.florent37.assets_audio_player.R
+// 引入 ExoPlayer UI 的資源，透過別名避免與本地 R 衝突
+import com.google.android.exoplayer2.ui.R as ExoPlayerR
 
 class NotificationService : Service() {
 
@@ -165,27 +166,33 @@ class NotificationService : Service() {
     }
 
     private fun getSmallIcon(context: Context): Int {
-        return getCustomIconOrDefault(context, manifestIcon, null, R.drawable.exo_icon_circular_play)
+        // 預設使用 ExoPlayer 提供的播放圖示
+        return getCustomIconOrDefault(context, manifestIcon, null, ExoPlayerR.drawable.exo_icon_circular_play)
     }
 
     private fun getPlayIcon(context: Context, resourceName: String?): Int {
-        return getCustomIconOrDefault(context, manifestIconPlay, resourceName, R.drawable.exo_icon_play)
+        // 使用 ExoPlayer 提供的播放圖示
+        return getCustomIconOrDefault(context, manifestIconPlay, resourceName, ExoPlayerR.drawable.exo_icon_play)
     }
 
     private fun getPauseIcon(context: Context, resourceName: String?): Int {
-        return getCustomIconOrDefault(context, manifestIconPause, resourceName, R.drawable.exo_icon_pause)
+        // 使用 ExoPlayer 提供的暫停圖示
+        return getCustomIconOrDefault(context, manifestIconPause, resourceName, ExoPlayerR.drawable.exo_icon_pause)
     }
 
     private fun getNextIcon(context: Context, resourceName: String?): Int {
-        return getCustomIconOrDefault(context, manifestIconNext, resourceName, R.drawable.exo_icon_next)
+        // 使用 ExoPlayer 提供的下一首圖示
+        return getCustomIconOrDefault(context, manifestIconNext, resourceName, ExoPlayerR.drawable.exo_icon_next)
     }
 
     private fun getPrevIcon(context: Context, resourceName: String?): Int {
-        return getCustomIconOrDefault(context, manifestIconPrev, resourceName, R.drawable.exo_icon_previous)
+        // 使用 ExoPlayer 提供的上一首圖示
+        return getCustomIconOrDefault(context, manifestIconPrev, resourceName, ExoPlayerR.drawable.exo_icon_previous)
     }
 
     private fun getStopIcon(context: Context, resourceName: String?): Int {
-        return getCustomIconOrDefault(context, manifestIconStop, resourceName, R.drawable.exo_icon_stop)
+        // 使用 ExoPlayer 提供的停止圖示
+        return getCustomIconOrDefault(context, manifestIconStop, resourceName, ExoPlayerR.drawable.exo_icon_stop)
     }
 
     private fun getCustomIconOrDefault(context: Context, manifestName: String, resourceName: String?, defaultIcon: Int): Int {
