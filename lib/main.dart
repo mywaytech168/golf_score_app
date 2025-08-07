@@ -78,20 +78,55 @@ void initVolumeKeyListener() {
 }
 
 
-  Future<void> playCountdownAndStart() async {
-    final sounds = ['1'];
+  /// 播放倒數音檔並等待播放完成
+  Future<void> _playCountdown() async {
+    await _audioPlayer.open(
+      Audio('assets/sounds/1.mp3'),
+      autoStart: true,
+      showNotification: false,
+    );
+    // 監聽播放完成事件，確保倒數音檔播放完畢
+    await _audioPlayer.playlistFinished.first;
+  }
 
-    for (final s in sounds) {
-      _audioPlayer.open(
-        Audio('assets/sounds/$s.mp3'),
-        autoStart: true,
-        showNotification: false,
-      );
-      await Future.delayed(Duration(seconds: 1));
+  /// 進行單次錄影流程
+  Future<void> _recordOnce(int index) async {
+    try {
+      waveformAccumulated.clear();
+      await initAudioCapture();
+      await controller!.startVideoRecording();
+
+      // 預設錄影 6 秒
+      await Future.delayed(Duration(seconds: 6));
+
+      final XFile videoFile = await controller!.stopVideoRecording();
+      await _audioCapture.stop();
+      _receivePort?.close();
+      _isolate.kill(priority: Isolate.immediate);
+
+      // 以 run 序號與時間戳作為檔名
+      final directory = Directory('/storage/emulated/0/Download');
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final newPath = '${directory.path}/run_${index + 1}_$timestamp.mp4';
+      await File(videoFile.path).copy(newPath);
+      print('✅ 儲存為 run_${index + 1}_$timestamp.mp4');
+    } catch (e) {
+      print('❌ 錄影時出錯：$e');
     }
+  }
 
-    print('🎬 倒數完畢，開始錄影！');
-    start();
+  /// 按一次後自動執行五次倒數與錄影
+  Future<void> playCountdownAndStart() async {
+    setState(() => isRecording = true);
+    for (int i = 0; i < 5; i++) {
+      // 倒數音檔播放完畢後才開始錄影
+      await _playCountdown();
+      await _recordOnce(i);
+    }
+    setState(() => isRecording = false);
   }
 
   Future<void> pickAndPlayVideo() async {
@@ -195,65 +230,7 @@ Map<String, dynamic> analyzeCrispness(List<double> data, int sampleRate) {
   void onError(Object e) {
     log("❌ Audio Capture Error: $e");
   }
-
-  Future<void> start() async {
-    try {
-      waveformAccumulated.clear();
-      await initAudioCapture();
-      await controller!.startVideoRecording();
-      setState(() => isRecording = true);
-
-      Future.delayed(Duration(seconds: 6), () async {
-        await stop();
-      });
-    } catch (e) {
-      print('❌ 錯誤: $e');
-    }
-  }
-
-Future<void> stop() async {
-  try {
-    final XFile videoFile = await controller!.stopVideoRecording();
-
-    await _audioCapture.stop();
-    _receivePort?.close();
-    _isolate.kill(priority: Isolate.immediate);
-
-    final result = analyzeCrispness(waveformAccumulated, 22050);
-    score = result['score'];
-    print('🔔 最清脆聲音時間：${result['timestamp']} 秒，分數：${result['score']}');
-
-    /// ✅ 等待使用者輸入球桿 & 自評分
-    final userInput = await showClubAndScoreDialog();
-    if (userInput != null) {
-      final club = userInput['club'].replaceAll(RegExp(r'[^\w\d]'), '_'); // 安全化字串
-      final userScore = userInput['userScore'];
-
-      // ✅ 時間戳 + 組合檔名
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final newFileName = '${timestamp}_${club}_${userScore}.mp4';
-
-      final directory = Directory('/storage/emulated/0/Download');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-
-      final newPath = '${directory.path}/$newFileName';
-      await File(videoFile.path).copy(newPath);
-
-      print('✅ 儲存為 $newFileName');
-    } else {
-      print('⚠️ 使用者取消輸入，使用預設檔名');
-      final fallbackPath = '/storage/emulated/0/Download/golf_${DateTime.now().millisecondsSinceEpoch}.mp4';
-      await File(videoFile.path).copy(fallbackPath);
-    }
-  } catch (e) {
-    print('❌ 停止錄影時出錯：$e');
-  }
-
-  setState(() => isRecording = false);
-}
-
+  // 原本的 start/stop 流程已整合至 _recordOnce
 
   @override
   void dispose() {
@@ -286,20 +263,17 @@ Future<void> stop() async {
                   repaintNotifier: repaintNotifier,
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text('分數：${score.toStringAsFixed(1)}', style: TextStyle(fontSize: 20)),
-              ),
-            ],
-          ),
-          Positioned(
-            bottom: 20,
-            right: 20,
-            child: ElevatedButton(
-              onPressed: isRecording ? null : start,
-              child: Text(isRecording ? '錄製中...' : '開始錄製'),
+                // 移除結束評分顯示
+              ],
             ),
-          ),
+            Positioned(
+              bottom: 20,
+              right: 20,
+              child: ElevatedButton(
+                onPressed: isRecording ? null : playCountdownAndStart,
+                child: Text(isRecording ? '錄製中...' : '開始錄製'),
+              ),
+            ),
           Positioned(
             bottom: 20,
             left: 20,
@@ -312,72 +286,6 @@ Future<void> stop() async {
       ),
     );
   }
-Future<Map<String, dynamic>?> showClubAndScoreDialog() async {
-  String selectedClub = '';
-  double userScore = 5;
-
-  final TextEditingController clubController = TextEditingController();
-
-  return showDialog<Map<String, dynamic>>(
-    context: context,
-    builder: (context) {
-      return AlertDialog(
-        title: Text('請填寫打擊資訊'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: clubController,
-              decoration: InputDecoration(
-                labelText: '球桿號碼（例如：7、1W、PW）',
-              ),
-            ),
-            SizedBox(height: 20),
-            Text('自我評分：${userScore.toInt()}'),
-            Slider(
-              value: userScore,
-              min: 1,
-              max: 10,
-              divisions: 9,
-              label: userScore.toInt().toString(),
-              onChanged: (value) {
-                userScore = value;
-                // 要用 setState 才會更新 Slider 的 UI，需要用 StatefulBuilder
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), // 取消
-            child: Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              selectedClub = clubController.text;
-              Navigator.pop(context, {
-                'club': selectedClub,
-                'userScore': userScore.toInt(),
-              });
-            },
-            child: Text('確定'),
-          ),
-        ],
-      );
-    },
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
 }
 
 class WaveformWidget extends StatelessWidget {
