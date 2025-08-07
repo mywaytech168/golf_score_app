@@ -119,12 +119,17 @@ void initVolumeKeyListener() {
   }
 
   /// 按一次後自動執行五次倒數與錄影
+  /// 每次錄影結束後會休息 10 秒再進行下一球
   Future<void> playCountdownAndStart() async {
     setState(() => isRecording = true);
     for (int i = 0; i < 5; i++) {
       // 倒數音檔播放完畢後才開始錄影
       await _playCountdown();
       await _recordOnce(i);
+      // 打完一球後休息 10 秒，再進入下一次循環
+      if (i < 4) {
+        await Future.delayed(const Duration(seconds: 10));
+      }
     }
     setState(() => isRecording = false);
   }
