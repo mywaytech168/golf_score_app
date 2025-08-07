@@ -22,9 +22,10 @@ tasks.register<Delete>("clean") {
 }
 
 subprojects {
+    // 統一 Kotlin 與 Java 的編譯目標版本為 11，避免模組間版本不一致
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         kotlinOptions {
-            jvmTarget = "1.8" // 這裡可以是 1.8 或 11
+            jvmTarget = "11"
         }
     }
 }
