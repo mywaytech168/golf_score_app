@@ -64,19 +64,17 @@ class _RecorderPageState extends State<RecorderPage> {
     initVolumeKeyListener();
   }
 
-
-void initVolumeKeyListener() {
-  _volumeChannel.setMethodCallHandler((call) async {
-    if (call.method == 'volume_down') {
-      if (!_isCountingDown && !isRecording) {
-        _isCountingDown = true;
-        await playCountdownAndStart();
-        _isCountingDown = false;
+  void initVolumeKeyListener() {
+    _volumeChannel.setMethodCallHandler((call) async {
+      if (call.method == 'volume_down') {
+        if (!_isCountingDown && !isRecording) {
+          _isCountingDown = true;
+          await playCountdownAndStart();
+          _isCountingDown = false;
+        }
       }
-    }
-  });
-}
-
+    });
+  }
 
   /// 播放倒數音檔並等待播放完成
   Future<void> _playCountdown() async {
@@ -112,9 +110,9 @@ void initVolumeKeyListener() {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final newPath = '${directory.path}/run_${index + 1}_$timestamp.mp4';
       await File(videoFile.path).copy(newPath);
-      print('✅ 儲存為 run_${index + 1}_$timestamp.mp4');
+      debugPrint('✅ 儲存為 run_${index + 1}_$timestamp.mp4'); // 記錄成功儲存的檔案資訊
     } catch (e) {
-      print('❌ 錄影時出錯：$e');
+      debugPrint('❌ 錄影時出錯：$e'); // 記錄錯誤以利除錯
     }
   }
 
@@ -123,16 +121,16 @@ void initVolumeKeyListener() {
   Future<void> playCountdownAndStart() async {
     setState(() => isRecording = true);
     for (int i = 0; i < 5; i++) {
-
-      if(i==1)
-      {
+      if (i == 1) {
         var duration = const Duration(seconds: 8);
-        sleep(duration);
+        // 改用非阻塞延遲，避免 UI 卡頓
+        await Future.delayed(duration);
       }
       // 倒數音檔播放完畢後才開始錄影
       await _playCountdown();
       var duration = const Duration(seconds: 3);
-      sleep(duration);
+      // 改用非阻塞延遲，避免 UI 卡頓
+      await Future.delayed(duration);
       await _recordOnce(i);
       // 打完一球後休息 10 秒，再進入下一次循環
       if (i < 4) {
@@ -148,28 +146,27 @@ void initVolumeKeyListener() {
       initialDirectory: '/storage/emulated/0/Download',
     );
 
+    // 若元件已卸載則不再使用 context 避免錯誤
+    if (!mounted) return;
+
     if (result != null && result.files.single.path != null) {
       final filePath = result.files.single.path!;
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => VideoPlayerPage(videoPath: filePath),
-        ),
+        MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: filePath)),
       );
     }
   }
-
-
-
-
-
 
   Future<void> init() async {
     await Permission.camera.request();
     await Permission.microphone.request();
     await Permission.storage.request();
 
-    controller = CameraController(widget.cameras.first, ResolutionPreset.medium);
+    controller = CameraController(
+      widget.cameras.first,
+      ResolutionPreset.medium,
+    );
     await controller!.initialize();
     setState(() {});
   }
@@ -182,18 +179,30 @@ void initVolumeKeyListener() {
           waveform = data;
           waveformAccumulated.addAll(data);
 
-          final double avg = waveform.fold(0.0, (prev, el) => prev + el.abs()) / waveform.length;
-          final double stdev = math.sqrt(waveform.map((e) => math.pow(e.abs() - avg, 2)).reduce((a, b) => a + b) / waveform.length);
+          final double avg =
+              waveform.fold(0.0, (prev, el) => prev + el.abs()) /
+              waveform.length;
+          final double stdev = math.sqrt(
+            waveform
+                    .map((e) => math.pow(e.abs() - avg, 2))
+                    .reduce((a, b) => a + b) /
+                waveform.length,
+          );
           final double focus = avg / (stdev + 1e-6);
           score = (focus / (focus + 1)).clamp(0.0, 1.0);
 
           repaintNotifier.value++;
         }
       });
-      _isolate = await Isolate.spawn(_audioProcessingIsolate, _receivePort!.sendPort);
+      _isolate = await Isolate.spawn(
+        _audioProcessingIsolate,
+        _receivePort!.sendPort,
+      );
       await _audioCapture.init();
       await _audioCapture.start(
-        (data) => _receivePort?.sendPort.send(List<double>.from((data as List).map((e) => e as double))),
+        (data) => _receivePort?.sendPort.send(
+          List<double>.from((data as List).map((e) => e as double)),
+        ),
         onError,
         sampleRate: 22050,
         bufferSize: 512,
@@ -203,7 +212,8 @@ void initVolumeKeyListener() {
       rethrow;
     }
   }
-Map<String, dynamic> analyzeCrispness(List<double> data, int sampleRate) {
+
+  Map<String, dynamic> analyzeCrispness(List<double> data, int sampleRate) {
     final frameSize = (0.1 * sampleRate).toInt(); // 每100ms
     final hopSize = frameSize;
 
@@ -228,15 +238,11 @@ Map<String, dynamic> analyzeCrispness(List<double> data, int sampleRate) {
         maxIndex = i;
       }
     }
-  
-  double bestTime = maxIndex / sampleRate;
 
-  return {
-    'score': (maxScore * 10).clamp(0.0, 10.0),
-    'timestamp': bestTime
-  };
-}
+    double bestTime = maxIndex / sampleRate;
 
+    return {'score': (maxScore * 10).clamp(0.0, 10.0), 'timestamp': bestTime};
+  }
 
   static void _audioProcessingIsolate(SendPort sendPort) {}
 
@@ -276,17 +282,17 @@ Map<String, dynamic> analyzeCrispness(List<double> data, int sampleRate) {
                   repaintNotifier: repaintNotifier,
                 ),
               ),
-                // 移除結束評分顯示
-              ],
+              // 移除結束評分顯示
+            ],
+          ),
+          Positioned(
+            bottom: 20,
+            right: 20,
+            child: ElevatedButton(
+              onPressed: isRecording ? null : playCountdownAndStart,
+              child: Text(isRecording ? '錄製中...' : '開始錄製'),
             ),
-            Positioned(
-              bottom: 20,
-              right: 20,
-              child: ElevatedButton(
-                onPressed: isRecording ? null : playCountdownAndStart,
-                child: Text(isRecording ? '錄製中...' : '開始錄製'),
-              ),
-            ),
+          ),
           Positioned(
             bottom: 20,
             left: 20,
@@ -304,7 +310,11 @@ Map<String, dynamic> analyzeCrispness(List<double> data, int sampleRate) {
 class WaveformWidget extends StatelessWidget {
   final List<double> waveformAccumulated;
   final ValueNotifier<int> repaintNotifier;
-  const WaveformWidget({super.key, required this.waveformAccumulated, required this.repaintNotifier});
+  const WaveformWidget({
+    super.key,
+    required this.waveformAccumulated,
+    required this.repaintNotifier,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -345,7 +355,6 @@ class WaveformPainter extends CustomPainter {
       canvas.drawLine(Offset(x, middle), Offset(x, y), paint);
     }
   }
-
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
