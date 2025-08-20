@@ -2,9 +2,7 @@ name: macOS Flutter 建置與部署
 
 # 當有 push 或 pull_request 觸發時執行 workflow
 on:
-  push:
-    branches: ["main"]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
