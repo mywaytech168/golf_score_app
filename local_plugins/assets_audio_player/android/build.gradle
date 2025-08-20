@@ -46,8 +46,13 @@ android {
         exclude "DebugProbesKt.bin"
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        // 統一 Java 編譯目標版本為 11
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    // 統一 Kotlin 編譯目標版本為 11
+    kotlinOptions {
+        jvmTarget = "11"
     }
 }
 
@@ -66,6 +71,8 @@ dependencies {
     implementation "com.google.android.exoplayer:exoplayer-hls:$exoPlayerVersion"
     implementation "com.google.android.exoplayer:exoplayer-dash:$exoPlayerVersion"
     implementation "com.google.android.exoplayer:exoplayer-smoothstreaming:$exoPlayerVersion"
+    // 引入 ExoPlayer UI 以使用內建圖示資源
+    implementation "com.google.android.exoplayer:exoplayer-ui:$exoPlayerVersion"
     implementation 'com.github.bumptech.glide:glide:4.14.2'
     annotationProcessor 'com.github.bumptech.glide:compiler:4.14.2'
     implementation 'androidx.media:media:1.6.0'

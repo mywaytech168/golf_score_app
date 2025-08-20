@@ -1,3 +1,5 @@
+import org.gradle.api.file.Directory
+
 allprojects {
     repositories {
         google()
@@ -21,10 +23,6 @@ tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
 
-subprojects {
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        kotlinOptions {
-            jvmTarget = "1.8" // 這裡可以是 1.8 或 11
-        }
-    }
-}
+// ---------- 編譯設定說明 ----------
+// 各子模組需自行設定 Java 與 Kotlin 版本，避免在此全域覆寫造成 sourceCompatibility 終結錯誤
+
