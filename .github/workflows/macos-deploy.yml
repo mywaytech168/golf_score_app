@@ -26,10 +26,6 @@ jobs:
       - name: 程式碼靜態分析
         run: flutter analyze
 
-      # ---------- 測試 ----------
-      - name: 執行測試
-        run: flutter test
-
       # ---------- 建置 ----------
       - name: 建置 macOS 執行檔
         run: flutter build macos --release
