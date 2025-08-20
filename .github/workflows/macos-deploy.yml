@@ -1,0 +1,44 @@
+name: macOS Flutter 建置與部署
+
+# 當有 push 或 pull_request 觸發時執行 workflow
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      # 取得最新程式碼
+      - name: 取得程式碼
+        uses: actions/checkout@v3
+
+      # 設定 Flutter 環境
+      - name: 設定 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # ---------- 安裝套件 ----------
+      - name: 安裝套件
+        run: flutter pub get
+
+      # ---------- 程式檢查 ----------
+      - name: 程式碼靜態分析
+        run: flutter analyze
+
+      # ---------- 測試 ----------
+      - name: 執行測試
+        run: flutter test
+
+      # ---------- 建置 ----------
+      - name: 建置 macOS 執行檔
+        run: flutter build macos --release
+
+      # ---------- 產出 ----------
+      - name: 上傳建置產物
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-build
+          path: build/macos/Build/Products/Release
