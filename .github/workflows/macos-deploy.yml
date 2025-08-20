@@ -27,7 +27,13 @@ jobs:
         run: flutter analyze
 
       # ---------- 建置 ----------
+      # 先啟用 macOS 桌面支援，使 Flutter 能產生 macOS 執行檔
+      - name: 啟用 macOS 桌面支援
+        run: flutter config --enable-macos-desktop
+
       - name: 建置 macOS 執行檔
+        # 指定專案根目錄，避免路徑錯誤
+        working-directory: ./
         run: flutter build macos --release
 
       # ---------- 產出 ----------
