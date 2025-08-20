@@ -96,8 +96,8 @@ void initVolumeKeyListener() {
       await initAudioCapture();
       await controller!.startVideoRecording();
 
-      // 預設錄影 6 秒
-      await Future.delayed(Duration(seconds: 6));
+      // 預設錄影 15 秒
+      await Future.delayed(Duration(seconds: 15));
 
       final XFile videoFile = await controller!.stopVideoRecording();
       await _audioCapture.stop();
@@ -123,8 +123,16 @@ void initVolumeKeyListener() {
   Future<void> playCountdownAndStart() async {
     setState(() => isRecording = true);
     for (int i = 0; i < 5; i++) {
+
+      if(i==1)
+      {
+        var duration = const Duration(seconds: 8);
+        sleep(duration);
+      }
       // 倒數音檔播放完畢後才開始錄影
       await _playCountdown();
+      var duration = const Duration(seconds: 3);
+      sleep(duration);
       await _recordOnce(i);
       // 打完一球後休息 10 秒，再進入下一次循環
       if (i < 4) {
