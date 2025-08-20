@@ -57,7 +57,8 @@ jobs:
       # ---------- 建置 ----------
       - name: 建置 macOS 執行檔
         working-directory: ${{ steps.where.outputs.dir }}
-        run: flutter build macos --release --no-codesign
+        # Flutter 3.35.1 不支援 --no-codesign，預設已不進行簽名
+        run: flutter build macos --release
 
       # ---------- 產出 ----------
       - name: 打包應用程式
