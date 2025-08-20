@@ -10,35 +10,64 @@ jobs:
     steps:
       # 取得最新程式碼
       - name: 取得程式碼
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 設定 Flutter 環境
       - name: 設定 Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.35.1'
+
+      # ---------- 建置前準備 ----------
+      # 啟用 macOS 桌面支援
+      - name: 啟用 macOS 桌面支援
+        run: flutter config --enable-macos-desktop
+
+      # 判斷專案類型，Plugin 需到 example/ 中操作
+      - name: 判斷專案類型
+        id: where
+        shell: bash
+        run: |
+          if grep -q '^plugin:' pubspec.yaml; then
+            echo "dir=example" >> $GITHUB_OUTPUT
+          else
+            echo "dir=." >> $GITHUB_OUTPUT
+          fi
+
+      # 確保 macOS 平台資料夾存在，避免 CI 缺少 macOS 導致建置失敗
+      - name: 確保 macOS 平台資料夾
+        working-directory: ${{ steps.where.outputs.dir }}
+        run: |
+          if [ ! -d macos ]; then
+            flutter create --platforms=macos .
+          fi
+          ls -la macos || true
 
       # ---------- 安裝套件 ----------
       - name: 安裝套件
+        working-directory: ${{ steps.where.outputs.dir }}
         run: flutter pub get
 
       # ---------- 程式檢查 ----------
       - name: 程式碼靜態分析
+        working-directory: ${{ steps.where.outputs.dir }}
         run: flutter analyze
 
       # ---------- 建置 ----------
-      # 先啟用 macOS 桌面支援，使 Flutter 能產生 macOS 執行檔
-      - name: 啟用 macOS 桌面支援
-        run: flutter config --enable-macos-desktop
-
       - name: 建置 macOS 執行檔
-        # 指定專案根目錄，避免路徑錯誤
-        working-directory: ./
-        run: flutter build macos --release
+        working-directory: ${{ steps.where.outputs.dir }}
+        run: flutter build macos --release --no-codesign
 
       # ---------- 產出 ----------
+      - name: 打包應用程式
+        working-directory: ${{ steps.where.outputs.dir }}
+        run: |
+          APP=$(ls build/macos/Build/Products/Release/*.app | head -n1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP" app-macos.zip
+
       - name: 上傳建置產物
         uses: actions/upload-artifact@v4
         with:
-          name: macos-build
-          path: build/macos/Build/Products/Release
+          name: app-macos
+          path: ${{ steps.where.outputs.dir }}/app-macos.zip
