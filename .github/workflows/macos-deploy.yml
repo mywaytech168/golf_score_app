@@ -35,13 +35,11 @@ jobs:
             echo "dir=." >> $GITHUB_OUTPUT
           fi
 
-      # 確保 macOS 平台資料夾存在，避免 CI 缺少 macOS 導致建置失敗
+      # 確保 macOS 平台資料夾存在並更新，避免未設定導致建置失敗
       - name: 確保 macOS 平台資料夾
         working-directory: ${{ steps.where.outputs.dir }}
         run: |
-          if [ ! -d macos ]; then
-            flutter create --platforms=macos .
-          fi
+          flutter create --platforms=macos --overwrite .
           ls -la macos || true
 
       # ---------- 安裝套件 ----------
