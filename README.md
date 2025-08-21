@@ -14,3 +14,14 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Web 版本建置
+
+網頁端改採 Vite + Vue + Element Plus，請參考以下步驟啟動與打包：
+
+```bash
+cd web
+npm install
+npm run dev     # 啟動開發伺服器
+npm run build   # 建置生產版本
+```
