@@ -27,7 +27,11 @@ jobs:
       # 安裝缺少的 iOS 平台，避免因 Xcode 未安裝對應版本而建置失敗
       - name: 安裝 iOS 平台
         run: |
+          # 啟動 Xcode 相關服務，避免無法連線至模擬器
+          sudo xcodebuild -runFirstLaunch
+          # 接受授權條款，確保後續操作合法
           sudo xcodebuild -license accept
+          # 下載 iOS 平台以供建置使用
           sudo xcodebuild -downloadPlatform iOS
 
       # 判斷專案類型，Plugin 需到 example/ 中操作
