@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>相機錄影示範</title>
+  <!-- Element Plus CSS -->
   <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
 </head>
 <body>
@@ -25,94 +26,85 @@
     </el-container>
   </div>
 
-  <script type="module">
-    import { createApp, ref, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
-    import ElementPlus from 'https://unpkg.com/element-plus/dist/index.full.mjs';
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Element Plus CDN -->
+  <script src="https://unpkg.com/element-plus"></script>
+
+  <script>
+    const { createApp, ref, onMounted } = Vue
 
     createApp({
       setup() {
         // ---------- 狀態區 ----------
-        const isRecording = ref(false); // 是否正在錄影
-        const streamRef = ref(null); // 儲存相機串流
-        const mediaRecorderRef = ref(null); // MediaRecorder 實例
-        const recordedChunks = ref([]); // 暫存錄影片段
-        const videoList = ref([]); // 儲存所有錄影結果
-        const previewRef = ref(null); // 預覽用 video 標籤
+        const isRecording = ref(false)
+        const streamRef = ref(null)
+        const mediaRecorderRef = ref(null)
+        const recordedChunks = ref([])
+        const videoList = ref([])
+        const previewRef = ref(null)
 
-        // ---------- API 呼叫區 ----------
+        // ---------- API ----------
         const initCamera = async () => {
           try {
-            // 取得使用者相機與麥克風權限
             streamRef.value = await navigator.mediaDevices.getUserMedia({
               video: true,
               audio: true
-            });
-            // 將串流綁定至預覽 video
-            previewRef.value.srcObject = streamRef.value;
+            })
+            previewRef.value.srcObject = streamRef.value
           } catch (err) {
-            // 若無法取得權限則提示使用者
-            alert('無法存取相機或麥克風：' + err.message);
+            alert('無法存取相機或麥克風：' + err.message)
           }
-        };
+        }
 
-        // ---------- 方法區 ----------
-        // 播放倒數音效，模擬 iOS 倒數邏輯
         const playCountdown = () => {
           return new Promise(resolve => {
-            const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
-            audio.play();
-            audio.onended = resolve; // 音效播放完畢後才進行錄影
-          });
-        };
+            const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg')
+            audio.play()
+            audio.onended = resolve
+          })
+        }
 
-        // 進行一次錄影並回傳影片 Blob
         const recordOnce = () => {
           return new Promise(resolve => {
-            recordedChunks.value = [];
-            mediaRecorderRef.value = new MediaRecorder(streamRef.value);
+            recordedChunks.value = []
+            mediaRecorderRef.value = new MediaRecorder(streamRef.value)
             mediaRecorderRef.value.ondataavailable = e => {
-              if (e.data.size > 0) recordedChunks.value.push(e.data);
-            };
+              if (e.data.size > 0) recordedChunks.value.push(e.data)
+            }
             mediaRecorderRef.value.onstop = () => {
-              const blob = new Blob(recordedChunks.value, { type: 'video/webm' });
-              resolve(blob); // 回傳完成的影片
-            };
-            mediaRecorderRef.value.start();
-            // 預設錄影 15 秒
-            setTimeout(() => mediaRecorderRef.value.stop(), 15000);
-          });
-        };
+              const blob = new Blob(recordedChunks.value, { type: 'video/webm' })
+              resolve(blob)
+            }
+            mediaRecorderRef.value.start()
+            setTimeout(() => mediaRecorderRef.value.stop(), 15000)
+          })
+        }
 
-        // 一次性自動錄製五球，並在每球間隔 10 秒
         const startAutoRecord = async () => {
-          if (!streamRef.value) return;
-          isRecording.value = true;
-          videoList.value = [];
+          if (!streamRef.value) return
+          isRecording.value = true
+          videoList.value = []
           for (let i = 0; i < 5; i++) {
-            await playCountdown(); // 播放倒數音效
-            const blob = await recordOnce(); // 錄製一次
-            const url = URL.createObjectURL(blob);
-            videoList.value.push({ index: i + 1, url, blob });
-            // 每次錄影後休息 10 秒
-            await new Promise(r => setTimeout(r, 10000));
+            await playCountdown()
+            const blob = await recordOnce()
+            const url = URL.createObjectURL(blob)
+            videoList.value.push({ index: i + 1, url, blob })
+            await new Promise(r => setTimeout(r, 10000))
           }
-          isRecording.value = false;
-        };
+          isRecording.value = false
+        }
 
-        // 下載單一錄影結果
         const downloadVideo = (video) => {
-          const a = document.createElement('a');
-          a.href = video.url;
-          a.download = `run_${video.index}.webm`;
-          a.click();
-        };
+          const a = document.createElement('a')
+          a.href = video.url
+          a.download = `run_${video.index}.webm`
+          a.click()
+        }
 
-        // ---------- 生命週期 ----------
         onMounted(() => {
-          // Safari iPhone 需使用者互動後才能呼叫相機，
-          // 但仍先嘗試初始化以提升使用體驗。
-          initCamera();
-        });
+          initCamera()
+        })
 
         return {
           isRecording,
@@ -120,11 +112,11 @@
           previewRef,
           startAutoRecord,
           downloadVideo
-        };
+        }
       }
     })
     .use(ElementPlus)
-    .mount('#app');
+    .mount('#app')
   </script>
 </body>
 </html>
