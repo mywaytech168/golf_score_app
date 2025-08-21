@@ -62,8 +62,9 @@ jobs:
       # ---------- 產出 ----------
       - name: 打包應用程式
         working-directory: ${{ steps.where.outputs.dir }}
+        # 以 find 取得 .app 目錄，避免 ls 顯示內容造成路徑錯誤
         run: |
-          APP=$(ls build/macos/Build/Products/Release/*.app | head -n1)
+          APP=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" -print -quit)
           ditto -c -k --sequesterRsrc --keepParent "$APP" app-macos.zip
 
       - name: 上傳建置產物
