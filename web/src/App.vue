@@ -18,18 +18,17 @@ const mediaStream = ref(null)
 // 錄影相關狀態
 const mediaRecorder = ref(null)
 const recordedChunks = ref([])
-const downloadUrl = ref('')
 const isRecording = ref(false)
 
 // 使用者選擇的影片格式，預設 webm
 const selectedFormat = ref('webm')
-// 上一次錄影使用的格式，供單支下載時設定副檔名
-const lastFormat = ref('webm')
 // 多次錄影設定：錄影次數與每段秒數
 const recordTimes = ref(1)
 const intervalSec = ref(3)
 // 累積所有錄影檔案
 const allBlobs = ref([])
+// 錄影過程 log
+const logs = ref([])
 
 // 取得可用鏡頭清單
 async function loadDevices() {
@@ -101,29 +100,19 @@ function handleStop() {
   isRecording.value = false
   const mimeType = currentFormat === 'mp4' ? 'video/mp4' : 'video/webm'
   const blob = new Blob(recordedChunks.value, { type: mimeType })
-  downloadUrl.value = URL.createObjectURL(blob)
-  lastFormat.value = currentFormat
   allBlobs.value.push({ blob, format: currentFormat })
-}
-
-// 下載最新一支影片
-function downloadVideo() {
-  if (!downloadUrl.value) return
-  const a = document.createElement('a')
-  a.href = downloadUrl.value
-  a.download = `record.${lastFormat.value}`
-  a.click()
-  URL.revokeObjectURL(downloadUrl.value)
-  downloadUrl.value = ''
 }
 
 // 自動多次錄影，依設定次數與秒數重複錄影
 async function autoRecord() {
   allBlobs.value = []
+  logs.value = []
   for (let i = 0; i < recordTimes.value; i++) {
+    logs.value.push(`目前錄製中第${i + 1}輪`)
     startRecording()
     await wait(intervalSec.value * 1000)
     await stopRecording()
+    logs.value.push(`第${i + 1}輪完成錄影`)
   }
 }
 
@@ -176,22 +165,17 @@ onMounted(async () => {
         <el-option label="MP4" value="mp4" />
       </el-select>
 
-      <!-- 錄影與下載按鈕 -->
-      <div class="btn-group">
-        <el-button type="primary" @click="isRecording ? stopRecording() : startRecording()">
-          {{ isRecording ? '停止錄影' : '開始錄影' }}
-        </el-button>
-        <el-button type="success" :disabled="!downloadUrl" @click="downloadVideo">
-          下載影片
-        </el-button>
-      </div>
-
       <!-- 多次錄影設定與下載全部 -->
       <div class="multi-group">
         <el-input-number v-model="recordTimes" :min="1" label="錄影次數" />
         <el-input-number v-model="intervalSec" :min="1" label="每段秒數" />
         <el-button type="warning" @click="autoRecord">多次錄影</el-button>
         <el-button type="success" :disabled="allBlobs.length === 0" @click="downloadAll">下載所有影片</el-button>
+      </div>
+
+      <!-- 錄影進度 log -->
+      <div class="log-group">
+        <p v-for="(item, idx) in logs" :key="idx">{{ item }}</p>
       </div>
     </el-main>
   </el-container>
@@ -209,16 +193,14 @@ onMounted(async () => {
   background: #000;
 }
 
-.btn-group {
-  margin-top: 20px;
-  display: flex;
-  gap: 10px;
-}
-
 .multi-group {
   margin-top: 20px;
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.log-group {
+  margin-top: 20px;
 }
 </style>
