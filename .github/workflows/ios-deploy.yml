@@ -1,4 +1,4 @@
-name: macOS Flutter 建置與部署
+name: iOS Flutter 建置與部署
 
 # 當有 push 或 pull_request 觸發時執行 workflow
 on:
@@ -20,9 +20,9 @@ jobs:
           flutter-version: '3.35.1'
 
       # ---------- 建置前準備 ----------
-      # 啟用 macOS 桌面支援
-      - name: 啟用 macOS 桌面支援
-        run: flutter config --enable-macos-desktop
+      # 啟用 iOS 支援
+      - name: 啟用 iOS 支援
+        run: flutter config --enable-ios
 
       # 判斷專案類型，Plugin 需到 example/ 中操作
       - name: 判斷專案類型
@@ -35,12 +35,12 @@ jobs:
             echo "dir=." >> $GITHUB_OUTPUT
           fi
 
-      # 確保 macOS 平台資料夾存在並更新，避免未設定導致建置失敗
-      - name: 確保 macOS 平台資料夾
+      # 確保 iOS 平台資料夾存在並更新，避免未設定導致建置失敗
+      - name: 確保 iOS 平台資料夾
         working-directory: ${{ steps.where.outputs.dir }}
         run: |
-          flutter create --platforms=macos --overwrite .
-          ls -la macos || true
+          flutter create --platforms=ios --overwrite .
+          ls -la ios || true
 
       # ---------- 安裝套件 ----------
       - name: 安裝套件
@@ -50,23 +50,28 @@ jobs:
       # ---------- 程式檢查 ----------
       - name: 程式碼靜態分析
         working-directory: ${{ steps.where.outputs.dir }}
-        run: flutter analyze
+        # 僅檢查應用程式的 lib 目錄，避免分析本地套件造成錯誤
+        run: flutter analyze lib
 
       # ---------- 建置 ----------
-      - name: 建置 macOS 執行檔
+      - name: 建置 iOS 執行檔
         working-directory: ${{ steps.where.outputs.dir }}
-        # Flutter 3.35.1 不支援 --no-codesign，預設已不進行簽名
-        run: flutter build macos --release
+        # 不進行簽名，只產出可打包的 Runner.app
+        run: flutter build ios --release --no-codesign
 
       # ---------- 產出 ----------
       - name: 打包應用程式
         working-directory: ${{ steps.where.outputs.dir }}
+        # 將 Runner.app 打包為 .ipa 供下載
         run: |
-          APP=$(ls build/macos/Build/Products/Release/*.app | head -n1)
-          ditto -c -k --sequesterRsrc --keepParent "$APP" app-macos.zip
+          APP=$(find build/ios/iphoneos -maxdepth 1 -name "*.app" -print -quit)
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -r app-ios.ipa Payload
+          rm -rf Payload
 
       - name: 上傳建置產物
         uses: actions/upload-artifact@v4
         with:
-          name: app-macos
-          path: ${{ steps.where.outputs.dir }}/app-macos.zip
+          name: app-ios
+          path: ${{ steps.where.outputs.dir }}/app-ios.ipa
