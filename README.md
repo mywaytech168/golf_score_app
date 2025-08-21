@@ -17,7 +17,7 @@ samples, guidance on mobile development, and a full API reference.
 
 ## Web 版本建置
 
-網頁端改採 Vite + Vue + Element Plus，請參考以下步驟啟動與打包：
+網頁端改採 Vite + Vue + Element Plus，需先安裝 Node.js 18 LTS 以上版本，再參考以下步驟啟動與打包：
 
 ```bash
 cd web
