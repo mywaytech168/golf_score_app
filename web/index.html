@@ -30,21 +30,27 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <!-- Element Plus CDN -->
   <script src="https://unpkg.com/element-plus"></script>
+  <!-- 引入 ffmpeg.wasm 用於轉檔 -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.4/dist/ffmpeg.min.js"></script>
 
   <script>
     const { createApp, ref, onMounted } = Vue
+    const { createFFmpeg, fetchFile } = FFmpeg
 
     createApp({
       setup() {
         // ---------- 狀態區 ----------
-        const isRecording = ref(false)
-        const streamRef = ref(null)
-        const mediaRecorderRef = ref(null)
-        const recordedChunks = ref([])
-        const videoList = ref([])
-        const previewRef = ref(null)
+        const isRecording = ref(false)                 // 是否正在錄影
+        const streamRef = ref(null)                   // 使用者媒體串流
+        const mediaRecorderRef = ref(null)            // MediaRecorder 實例
+        const recordedChunks = ref([])                // 暫存錄影片段
+        const videoList = ref([])                     // 已錄製影片列表
+        const previewRef = ref(null)                  // 預覽畫面元素
+        const ffmpeg = createFFmpeg({ log: false })   // ffmpeg 實例
+        const ffmpegLoaded = ref(false)               // ffmpeg 是否已載入
 
-        // ---------- API ----------
+        // ---------- API 呼叫區 ----------
+        // 初始化相機
         const initCamera = async () => {
           try {
             streamRef.value = await navigator.mediaDevices.getUserMedia({
@@ -57,6 +63,8 @@
           }
         }
 
+        // ---------- 方法區 ----------
+        // 播放倒數提示音
         const playCountdown = () => {
           return new Promise(resolve => {
             const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg')
@@ -65,6 +73,7 @@
           })
         }
 
+        // 單次錄影邏輯
         const recordOnce = () => {
           return new Promise(resolve => {
             recordedChunks.value = []
@@ -77,31 +86,49 @@
               resolve(blob)
             }
             mediaRecorderRef.value.start()
-            setTimeout(() => mediaRecorderRef.value.stop(), 15000)
+            setTimeout(() => mediaRecorderRef.value.stop(), 15000) // 錄影15秒
           })
         }
 
+        // 轉換為 mp4
+        const convertToMp4 = async (webmBlob) => {
+          if (!ffmpegLoaded.value) {
+            await ffmpeg.load()
+            ffmpegLoaded.value = true
+          }
+          ffmpeg.FS('writeFile', 'input.webm', await fetchFile(webmBlob))
+          await ffmpeg.run('-i', 'input.webm', 'output.mp4')
+          const data = ffmpeg.FS('readFile', 'output.mp4')
+          ffmpeg.FS('unlink', 'input.webm')
+          ffmpeg.FS('unlink', 'output.mp4')
+          return new Blob([data.buffer], { type: 'video/mp4' })
+        }
+
+        // 自動連續錄影五次
         const startAutoRecord = async () => {
           if (!streamRef.value) return
           isRecording.value = true
           videoList.value = []
           for (let i = 0; i < 5; i++) {
             await playCountdown()
-            const blob = await recordOnce()
-            const url = URL.createObjectURL(blob)
-            videoList.value.push({ index: i + 1, url, blob })
-            await new Promise(r => setTimeout(r, 10000))
+            const webmBlob = await recordOnce()
+            const mp4Blob = await convertToMp4(webmBlob)
+            const url = URL.createObjectURL(mp4Blob)
+            videoList.value.push({ index: i + 1, url })
+            await new Promise(r => setTimeout(r, 10000)) // 間隔10秒
           }
           isRecording.value = false
         }
 
+        // 下載指定影片
         const downloadVideo = (video) => {
           const a = document.createElement('a')
           a.href = video.url
-          a.download = `run_${video.index}.webm`
+          a.download = `run_${video.index}.mp4`
           a.click()
         }
 
+        // ---------- 生命週期 ----------
         onMounted(() => {
           initCamera()
         })
