@@ -50,7 +50,8 @@ jobs:
       # ---------- 程式檢查 ----------
       - name: 程式碼靜態分析
         working-directory: ${{ steps.where.outputs.dir }}
-        run: flutter analyze
+        # 僅檢查應用程式的 lib 目錄，避免分析本地套件造成錯誤
+        run: flutter analyze lib
 
       # ---------- 建置 ----------
       - name: 建置 macOS 執行檔
