@@ -21,6 +21,16 @@ const recordedChunks = ref([])
 const downloadUrl = ref('')
 const isRecording = ref(false)
 
+// 使用者選擇的影片格式，預設 webm
+const selectedFormat = ref('webm')
+// 上一次錄影使用的格式，供單支下載時設定副檔名
+const lastFormat = ref('webm')
+// 多次錄影設定：錄影次數與每段秒數
+const recordTimes = ref(1)
+const intervalSec = ref(3)
+// 累積所有錄影檔案
+const allBlobs = ref([])
+
 // 取得可用鏡頭清單
 async function loadDevices() {
   // 呼叫硬體取得所有媒體裝置
@@ -51,40 +61,88 @@ async function switchCamera(id) {
   await startCamera()
 }
 
+// 取得當前可用的 MIME 類型，若瀏覽器不支援 mp4 則退回 webm
+function getMimeType(format) {
+  const type = format === 'mp4' ? 'video/mp4' : 'video/webm'
+  return MediaRecorder.isTypeSupported(type) ? type : 'video/webm'
+}
+
 // 開始錄影
+let currentFormat = 'webm'
 function startRecording() {
   if (!mediaStream.value) return
   recordedChunks.value = []
-  mediaRecorder.value = new MediaRecorder(mediaStream.value)
+  // 確認瀏覽器支援的格式
+  const mimeType = getMimeType(selectedFormat.value)
+  currentFormat = mimeType === 'video/mp4' ? 'mp4' : 'webm'
+  mediaRecorder.value = new MediaRecorder(mediaStream.value, { mimeType })
   mediaRecorder.value.ondataavailable = e => recordedChunks.value.push(e.data)
-  mediaRecorder.value.onstop = handleStop
   mediaRecorder.value.start()
   isRecording.value = true
 }
 
-// 停止錄影
+// 停止錄影，回傳 Promise 以利自動化流程等待
 function stopRecording() {
-  if (mediaRecorder.value && isRecording.value) {
-    mediaRecorder.value.stop()
-  }
+  return new Promise(resolve => {
+    if (mediaRecorder.value && isRecording.value) {
+      mediaRecorder.value.onstop = () => {
+        handleStop()
+        resolve()
+      }
+      mediaRecorder.value.stop()
+    } else {
+      resolve()
+    }
+  })
 }
 
 // 錄影結束後處理檔案
 function handleStop() {
   isRecording.value = false
-  const blob = new Blob(recordedChunks.value, { type: 'video/webm' })
+  const mimeType = currentFormat === 'mp4' ? 'video/mp4' : 'video/webm'
+  const blob = new Blob(recordedChunks.value, { type: mimeType })
   downloadUrl.value = URL.createObjectURL(blob)
+  lastFormat.value = currentFormat
+  allBlobs.value.push({ blob, format: currentFormat })
 }
 
-// 下載影片
+// 下載最新一支影片
 function downloadVideo() {
   if (!downloadUrl.value) return
   const a = document.createElement('a')
   a.href = downloadUrl.value
-  a.download = 'record.webm'
+  a.download = `record.${lastFormat.value}`
   a.click()
   URL.revokeObjectURL(downloadUrl.value)
   downloadUrl.value = ''
+}
+
+// 自動多次錄影，依設定次數與秒數重複錄影
+async function autoRecord() {
+  allBlobs.value = []
+  for (let i = 0; i < recordTimes.value; i++) {
+    startRecording()
+    await wait(intervalSec.value * 1000)
+    await stopRecording()
+  }
+}
+
+// 下載所有影片
+function downloadAll() {
+  if (allBlobs.value.length === 0) return
+  allBlobs.value.forEach((item, idx) => {
+    const url = URL.createObjectURL(item.blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `record_${idx + 1}.${item.format}`
+    a.click()
+    URL.revokeObjectURL(url)
+  })
+}
+
+// 通用等待函式
+function wait(ms) {
+  return new Promise(res => setTimeout(res, ms))
 }
 
 // ---------- 生命週期 ----------
@@ -112,6 +170,12 @@ onMounted(async () => {
       <!-- 鏡頭畫面 -->
       <video ref="videoEl" class="preview" autoplay muted></video>
 
+      <!-- 影片格式選擇 -->
+      <el-select v-model="selectedFormat" placeholder="下載格式">
+        <el-option label="WebM" value="webm" />
+        <el-option label="MP4" value="mp4" />
+      </el-select>
+
       <!-- 錄影與下載按鈕 -->
       <div class="btn-group">
         <el-button type="primary" @click="isRecording ? stopRecording() : startRecording()">
@@ -120,6 +184,14 @@ onMounted(async () => {
         <el-button type="success" :disabled="!downloadUrl" @click="downloadVideo">
           下載影片
         </el-button>
+      </div>
+
+      <!-- 多次錄影設定與下載全部 -->
+      <div class="multi-group">
+        <el-input-number v-model="recordTimes" :min="1" label="錄影次數" />
+        <el-input-number v-model="intervalSec" :min="1" label="每段秒數" />
+        <el-button type="warning" @click="autoRecord">多次錄影</el-button>
+        <el-button type="success" :disabled="allBlobs.length === 0" @click="downloadAll">下載所有影片</el-button>
       </div>
     </el-main>
   </el-container>
@@ -141,5 +213,12 @@ onMounted(async () => {
   margin-top: 20px;
   display: flex;
   gap: 10px;
+}
+
+.multi-group {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 </style>
