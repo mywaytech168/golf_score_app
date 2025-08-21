@@ -24,6 +24,12 @@ jobs:
       - name: 啟用 iOS 支援
         run: flutter config --enable-ios
 
+      # 安裝缺少的 iOS 平台，避免因 Xcode 未安裝對應版本而建置失敗
+      - name: 安裝 iOS 平台
+        run: |
+          sudo xcodebuild -license accept
+          sudo xcodebuild -downloadPlatform iOS
+
       # 判斷專案類型，Plugin 需到 example/ 中操作
       - name: 判斷專案類型
         id: where
