@@ -12,12 +12,14 @@
       <el-main>
         <!-- 預覽使用者相機畫面 -->
         <video ref="previewRef" autoplay playsinline style="width:100%;"></video>
-        <!-- 播放錄影完成的影片 -->
-        <video ref="recordedRef" controls style="width:100%; display:none;"></video>
+        <!-- 依序顯示每一次錄影結果 -->
+        <div v-for="video in videoList" :key="video.index" style="margin-top: 16px;">
+          <p>第 {{ video.index }} 球</p>
+          <video :src="video.url" controls style="width:100%;"></video>
+          <el-button @click="downloadVideo(video)" style="margin-top:8px;">下載影片 {{ video.index }}</el-button>
+        </div>
         <div style="margin-top: 16px;">
-          <el-button type="primary" @click="startRecord" :disabled="isRecording">開始錄影</el-button>
-          <el-button type="danger" @click="stopRecord" :disabled="!isRecording">停止錄影</el-button>
-          <el-button @click="downloadVideo" :disabled="!recordedBlob">下載影片</el-button>
+          <el-button type="primary" @click="startAutoRecord" :disabled="isRecording">開始五次錄影流程</el-button>
         </div>
       </el-main>
     </el-container>
@@ -34,9 +36,8 @@
         const streamRef = ref(null); // 儲存相機串流
         const mediaRecorderRef = ref(null); // MediaRecorder 實例
         const recordedChunks = ref([]); // 暫存錄影片段
-        const recordedBlob = ref(null); // 儲存完成影片
+        const videoList = ref([]); // 儲存所有錄影結果
         const previewRef = ref(null); // 預覽用 video 標籤
-        const recordedRef = ref(null); // 播放錄影結果的 video 標籤
 
         // ---------- API 呼叫區 ----------
         const initCamera = async () => {
@@ -55,40 +56,55 @@
         };
 
         // ---------- 方法區 ----------
-        const startRecord = () => {
-          if (!streamRef.value) return;
-          recordedChunks.value = [];
-          // 建立 MediaRecorder 並開始收集資料
-          mediaRecorderRef.value = new MediaRecorder(streamRef.value);
-          mediaRecorderRef.value.ondataavailable = e => {
-            if (e.data.size > 0) recordedChunks.value.push(e.data);
-          };
-          mediaRecorderRef.value.onstop = () => {
-            // 將片段組合成完整影片 Blob
-            recordedBlob.value = new Blob(recordedChunks.value, { type: 'video/webm' });
-            // 播放錄影結果
-            const url = URL.createObjectURL(recordedBlob.value);
-            recordedRef.value.src = url;
-            recordedRef.value.style.display = 'block';
-          };
-          mediaRecorderRef.value.start();
-          isRecording.value = true;
+        // 播放倒數音效，模擬 iOS 倒數邏輯
+        const playCountdown = () => {
+          return new Promise(resolve => {
+            const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+            audio.play();
+            audio.onended = resolve; // 音效播放完畢後才進行錄影
+          });
         };
 
-        const stopRecord = () => {
-          if (!mediaRecorderRef.value) return;
-          mediaRecorderRef.value.stop();
+        // 進行一次錄影並回傳影片 Blob
+        const recordOnce = () => {
+          return new Promise(resolve => {
+            recordedChunks.value = [];
+            mediaRecorderRef.value = new MediaRecorder(streamRef.value);
+            mediaRecorderRef.value.ondataavailable = e => {
+              if (e.data.size > 0) recordedChunks.value.push(e.data);
+            };
+            mediaRecorderRef.value.onstop = () => {
+              const blob = new Blob(recordedChunks.value, { type: 'video/webm' });
+              resolve(blob); // 回傳完成的影片
+            };
+            mediaRecorderRef.value.start();
+            // 預設錄影 15 秒
+            setTimeout(() => mediaRecorderRef.value.stop(), 15000);
+          });
+        };
+
+        // 一次性自動錄製五球，並在每球間隔 10 秒
+        const startAutoRecord = async () => {
+          if (!streamRef.value) return;
+          isRecording.value = true;
+          videoList.value = [];
+          for (let i = 0; i < 5; i++) {
+            await playCountdown(); // 播放倒數音效
+            const blob = await recordOnce(); // 錄製一次
+            const url = URL.createObjectURL(blob);
+            videoList.value.push({ index: i + 1, url, blob });
+            // 每次錄影後休息 10 秒
+            await new Promise(r => setTimeout(r, 10000));
+          }
           isRecording.value = false;
         };
 
-        const downloadVideo = () => {
-          if (!recordedBlob.value) return;
-          const url = URL.createObjectURL(recordedBlob.value);
+        // 下載單一錄影結果
+        const downloadVideo = (video) => {
           const a = document.createElement('a');
-          a.href = url;
-          a.download = 'record.webm';
+          a.href = video.url;
+          a.download = `run_${video.index}.webm`;
           a.click();
-          URL.revokeObjectURL(url);
         };
 
         // ---------- 生命週期 ----------
@@ -100,11 +116,9 @@
 
         return {
           isRecording,
-          recordedBlob,
+          videoList,
           previewRef,
-          recordedRef,
-          startRecord,
-          stopRecord,
+          startAutoRecord,
           downloadVideo
         };
       }
