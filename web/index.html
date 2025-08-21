@@ -1,38 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-Hant">
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
-  <base href="$FLUTTER_BASE_HREF">
-
-  <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="golf_score_app">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>golf_score_app</title>
-  <link rel="manifest" href="manifest.json">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>相機錄影示範</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <div id="app">
+    <el-container>
+      <el-main>
+        <!-- 預覽使用者相機畫面 -->
+        <video ref="previewRef" autoplay playsinline style="width:100%;"></video>
+        <!-- 播放錄影完成的影片 -->
+        <video ref="recordedRef" controls style="width:100%; display:none;"></video>
+        <div style="margin-top: 16px;">
+          <el-button type="primary" @click="startRecord" :disabled="isRecording">開始錄影</el-button>
+          <el-button type="danger" @click="stopRecord" :disabled="!isRecording">停止錄影</el-button>
+          <el-button @click="downloadVideo" :disabled="!recordedBlob">下載影片</el-button>
+        </div>
+      </el-main>
+    </el-container>
+  </div>
+
+  <script type="module">
+    import { createApp, ref, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+    import ElementPlus from 'https://unpkg.com/element-plus/dist/index.full.mjs';
+
+    createApp({
+      setup() {
+        // ---------- 狀態區 ----------
+        const isRecording = ref(false); // 是否正在錄影
+        const streamRef = ref(null); // 儲存相機串流
+        const mediaRecorderRef = ref(null); // MediaRecorder 實例
+        const recordedChunks = ref([]); // 暫存錄影片段
+        const recordedBlob = ref(null); // 儲存完成影片
+        const previewRef = ref(null); // 預覽用 video 標籤
+        const recordedRef = ref(null); // 播放錄影結果的 video 標籤
+
+        // ---------- API 呼叫區 ----------
+        const initCamera = async () => {
+          try {
+            // 取得使用者相機與麥克風權限
+            streamRef.value = await navigator.mediaDevices.getUserMedia({
+              video: true,
+              audio: true
+            });
+            // 將串流綁定至預覽 video
+            previewRef.value.srcObject = streamRef.value;
+          } catch (err) {
+            // 若無法取得權限則提示使用者
+            alert('無法存取相機或麥克風：' + err.message);
+          }
+        };
+
+        // ---------- 方法區 ----------
+        const startRecord = () => {
+          if (!streamRef.value) return;
+          recordedChunks.value = [];
+          // 建立 MediaRecorder 並開始收集資料
+          mediaRecorderRef.value = new MediaRecorder(streamRef.value);
+          mediaRecorderRef.value.ondataavailable = e => {
+            if (e.data.size > 0) recordedChunks.value.push(e.data);
+          };
+          mediaRecorderRef.value.onstop = () => {
+            // 將片段組合成完整影片 Blob
+            recordedBlob.value = new Blob(recordedChunks.value, { type: 'video/webm' });
+            // 播放錄影結果
+            const url = URL.createObjectURL(recordedBlob.value);
+            recordedRef.value.src = url;
+            recordedRef.value.style.display = 'block';
+          };
+          mediaRecorderRef.value.start();
+          isRecording.value = true;
+        };
+
+        const stopRecord = () => {
+          if (!mediaRecorderRef.value) return;
+          mediaRecorderRef.value.stop();
+          isRecording.value = false;
+        };
+
+        const downloadVideo = () => {
+          if (!recordedBlob.value) return;
+          const url = URL.createObjectURL(recordedBlob.value);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'record.webm';
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        // ---------- 生命週期 ----------
+        onMounted(() => {
+          // Safari iPhone 需使用者互動後才能呼叫相機，
+          // 但仍先嘗試初始化以提升使用體驗。
+          initCamera();
+        });
+
+        return {
+          isRecording,
+          recordedBlob,
+          previewRef,
+          recordedRef,
+          startRecord,
+          stopRecord,
+          downloadVideo
+        };
+      }
+    })
+    .use(ElementPlus)
+    .mount('#app');
+  </script>
 </body>
 </html>
