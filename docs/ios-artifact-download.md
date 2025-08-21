@@ -8,3 +8,5 @@
 3. 在頁面底部找到 **Artifacts** 區塊，下載 `app-ios` 檔案。
 
 > 下載後取得的為 `.ipa` 檔，可直接安裝至裝置或透過 TestFlight 測試。
+
+如需在 iPhone 上安裝測試，請參考 [在 iPhone 上測試 IPA 檔案](./ios-ipa-test.md)。
