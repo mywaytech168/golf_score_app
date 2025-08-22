@@ -15,7 +15,7 @@
     <script>
       // 取得後端已上傳的影片並顯示
       async function loadCloudVideos() {
-        const baseUrl = 'http://localhost:5000'
+        const baseUrl = 'https://9eazqxfttdu2jv6j.atk.tw'
         const res = await fetch(baseUrl + '/videos')
         const files = await res.json()
         const gallery = document.getElementById('cloud-gallery')

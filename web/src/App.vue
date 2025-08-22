@@ -74,6 +74,10 @@ function getMimeType(format) {
   return MediaRecorder.isTypeSupported(type) ? type : 'video/webm'
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 // 開始錄影
 let currentFormat = 'webm'
 function startRecording() {
@@ -147,29 +151,28 @@ async function uploadAll() {
   for (let i = 0; i < allBlobs.value.length; i++) {
     const item = allBlobs.value[i]
     const form = new FormData()
-    form.append('file', item.blob, `record_${i + 1}.${item.format}`)
-    // 透過 HTTP POST 將檔案送至後端
+    
+    // 建立時間字串 (yyyyMMdd_HHmmss)
+    const now = new Date()
+    const timestamp = now.toISOString().replace(/[-:T]/g, "").split(".")[0] // 20250822T153045 → 20250822T153045
+    const filename = `record_${timestamp}_${i + 1}.${item.format}`
+
+    form.append('file', item.blob, filename)
+
     try {
       await fetch(`${apiBase}/upload`, {
         method: 'POST',
         body: form
       })
-      // 上傳成功時紀錄
-      logs.value.push(`第${i + 1}個檔案上傳成功`)
+      logs.value.push(`第${i + 1}個檔案上傳成功 (${filename})`)
     } catch (err) {
-      // 上傳失敗也在畫面上提示
       logs.value.push(`第${i + 1}個檔案上傳失敗`)
     }
   }
-  // 呼叫 index.html 的影片清單更新函式
   window.loadCloudVideos && window.loadCloudVideos()
   logs.value.push('所有影片已上傳')
 }
 
-// 通用等待函式
-function wait(ms) {
-  return new Promise(res => setTimeout(res, ms))
-}
 
 // ---------- 生命週期 ----------
 onMounted(async () => {
