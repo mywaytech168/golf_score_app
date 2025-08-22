@@ -7,7 +7,30 @@
   </head>
   <body>
     <div id="app"></div>
+    <!-- 雲端影片清單區 -->
+    <h2>雲端影片清單</h2>
+    <div id="cloud-gallery"></div>
     <!-- 以 ES 模組方式載入進入點 -->
     <script type="module" src="/src/main.js"></script>
+    <script>
+      // 取得後端已上傳的影片並顯示
+      async function loadCloudVideos() {
+        const baseUrl = 'http://localhost:5000'
+        const res = await fetch(baseUrl + '/videos')
+        const files = await res.json()
+        const gallery = document.getElementById('cloud-gallery')
+        gallery.innerHTML = ''
+        for (const name of files) {
+          const video = document.createElement('video')
+          video.src = baseUrl + '/videos/' + encodeURIComponent(name)
+          video.controls = true
+          video.width = 300
+          gallery.appendChild(video)
+        }
+      }
+      loadCloudVideos()
+      // 暴露給外部以便錄影頁面呼叫刷新
+      window.loadCloudVideos = loadCloudVideos
+    </script>
   </body>
 </html>
