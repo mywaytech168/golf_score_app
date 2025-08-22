@@ -266,3 +266,8 @@ Podfile.lock
 # Firebase / GoogleService
 ios/Runner/GoogleService-Info.plist
 android/app/google-services.json
+
+# Node / Vite
+**/node_modules/
+web/dist/
+
