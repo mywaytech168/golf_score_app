@@ -1,7 +1,9 @@
 <script setup>
 // ---------- API 呼叫區 ----------
-// WebDAV 伺服器根網址
-const webDavUrl = 'http://192.168.1.50/videos/'
+// WebDAV 伺服器資訊
+const webDavUrl = 'https://9eazqxfttdu2jv6j.atk.tw/'
+// 基本認證字串：實務上建議改從環境變數取得
+const webDavAuth = 'Basic ' + btoa('myway_public:OYY]8e{2}')
 
 // ---------- 方法區 ----------
 import { ref, onMounted } from 'vue'
@@ -141,9 +143,10 @@ async function uploadAll() {
   for (let i = 0; i < allBlobs.value.length; i++) {
     const item = allBlobs.value[i]
     const filename = `record_${i + 1}.${item.format}`
-    // 透過 HTTP PUT 將檔案上傳至指定目錄
+    // 透過 HTTP PUT 將檔案上傳至 WebDAV 伺服器並附帶基本認證
     await fetch(webDavUrl + filename, {
       method: 'PUT',
+      headers: { Authorization: webDavAuth },
       body: item.blob
     })
   }

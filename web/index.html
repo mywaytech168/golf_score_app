@@ -15,23 +15,37 @@
     <script>
       // 取得 WebDAV 伺服器中的影片並顯示
       async function loadCloudVideos() {
-        const res = await fetch('http://192.168.1.50/videos/', { method: 'PROPFIND' })
+        // WebDAV 伺服器位址與基本認證字串
+        const baseUrl = 'https://9eazqxfttdu2jv6j.atk.tw/'
+        const auth = 'Basic ' + btoa('myway_public:OYY]8e{2}')
+        // 先發出 PROPFIND 取得檔案列表
+        const res = await fetch(baseUrl, {
+          method: 'PROPFIND',
+          headers: { Authorization: auth }
+        })
         const text = await res.text()
         const parser = new DOMParser()
         const xml = parser.parseFromString(text, 'application/xml')
         const hrefs = Array.from(xml.getElementsByTagName('d:href'))
         const gallery = document.getElementById('cloud-gallery')
         gallery.innerHTML = ''
-        hrefs.forEach(h => {
+        for (const h of hrefs) {
           const name = decodeURIComponent(h.textContent)
+          // 只處理 mp4 與 webm 檔，且排除資料夾本身
           if (/\.(mp4|webm)$/.test(name) && !name.endsWith('/')) {
+            // 透過帶有授權標頭的 fetch 取得影片 Blob
+            const fileRes = await fetch(baseUrl + name.replace(/^\//, ''), {
+              headers: { Authorization: auth }
+            })
+            const blob = await fileRes.blob()
+            const videoUrl = URL.createObjectURL(blob)
             const video = document.createElement('video')
-            video.src = 'http://192.168.1.50' + name
+            video.src = videoUrl
             video.controls = true
             video.width = 300
             gallery.appendChild(video)
           }
-        })
+        }
       }
       loadCloudVideos()
       // 暴露給外部以便錄影頁面呼叫刷新
