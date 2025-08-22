@@ -1,7 +1,7 @@
 <script setup>
 // ---------- API 呼叫區 ----------
 // 後端 API 根網址
-const apiBase = 'http://localhost:5000'
+const apiBase = 'https://9eazqxfttdu2jv6j.atk.tw'
 
 // ---------- 方法區 ----------
 import { ref, onMounted } from 'vue'

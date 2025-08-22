@@ -55,4 +55,20 @@ app.MapPost("/upload", async (HttpRequest request) =>
     return Results.Ok(new { file.FileName });
 });
 
+// Vue 前端打包目錄 (假設放在 wwwroot/dist)
+var vueDist = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "dist");
+
+// 提供 Vue 的靜態檔案
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(vueDist),
+    RequestPath = "" // 不加前綴，直接根目錄就能存取
+});
+
+// 當找不到 API route 時，回傳 index.html (支援 Vue Router history 模式)
+app.MapFallbackToFile("index.html", new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(vueDist)
+});
+
 app.Run();
