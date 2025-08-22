@@ -1,6 +1,7 @@
 <script setup>
 // ---------- API 呼叫區 ----------
-// 此元件不涉及外部 API
+// WebDAV 伺服器根網址
+const webDavUrl = 'http://192.168.1.50/videos/'
 
 // ---------- 方法區 ----------
 import { ref, onMounted } from 'vue'
@@ -134,6 +135,22 @@ function downloadAll() {
   })
 }
 
+// 上傳所有影片至 WebDAV 伺服器
+async function uploadAll() {
+  if (allBlobs.value.length === 0) return
+  for (let i = 0; i < allBlobs.value.length; i++) {
+    const item = allBlobs.value[i]
+    const filename = `record_${i + 1}.${item.format}`
+    // 透過 HTTP PUT 將檔案上傳至指定目錄
+    await fetch(webDavUrl + filename, {
+      method: 'PUT',
+      body: item.blob
+    })
+  }
+  // 嘗試呼叫 index.html 的影片清單更新函式
+  window.loadCloudVideos && window.loadCloudVideos()
+}
+
 // 通用等待函式
 function wait(ms) {
   return new Promise(res => setTimeout(res, ms))
@@ -180,6 +197,7 @@ onMounted(async () => {
           <el-input-number v-model="gapSec" :min="0" />
           <el-button type="warning" @click="autoRecord">多次錄影</el-button>
           <el-button type="success" :disabled="allBlobs.length === 0" @click="downloadAll">下載所有影片</el-button>
+          <el-button type="primary" :disabled="allBlobs.length === 0" @click="uploadAll">上傳雲端</el-button>
         </div>
 
       <!-- 錄影進度 log -->
