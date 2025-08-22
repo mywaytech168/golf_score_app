@@ -1,9 +1,7 @@
 <script setup>
 // ---------- API 呼叫區 ----------
-// WebDAV 伺服器資訊
-const webDavUrl = 'https://9eazqxfttdu2jv6j.atk.tw/'
-// 基本認證字串：實務上建議改從環境變數取得
-const webDavAuth = 'Basic ' + btoa('myway_public:OYY]8e{2}')
+// 後端 API 根網址
+const apiBase = 'http://localhost:5000'
 
 // ---------- 方法區 ----------
 import { ref, onMounted } from 'vue'
@@ -137,20 +135,20 @@ function downloadAll() {
   })
 }
 
-// 上傳所有影片至 WebDAV 伺服器
+// 上傳所有影片至後端 API
 async function uploadAll() {
   if (allBlobs.value.length === 0) return
   for (let i = 0; i < allBlobs.value.length; i++) {
     const item = allBlobs.value[i]
-    const filename = `record_${i + 1}.${item.format}`
-    // 透過 HTTP PUT 將檔案上傳至 WebDAV 伺服器並附帶基本認證
-    await fetch(webDavUrl + filename, {
-      method: 'PUT',
-      headers: { Authorization: webDavAuth },
-      body: item.blob
+    const form = new FormData()
+    form.append('file', item.blob, `record_${i + 1}.${item.format}`)
+    // 透過 HTTP POST 將檔案送至後端
+    await fetch(`${apiBase}/upload`, {
+      method: 'POST',
+      body: form
     })
   }
-  // 嘗試呼叫 index.html 的影片清單更新函式
+  // 呼叫 index.html 的影片清單更新函式
   window.loadCloudVideos && window.loadCloudVideos()
 }
 
