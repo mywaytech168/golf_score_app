@@ -48,16 +48,16 @@ async function startCamera() {
   if (mediaStream.value) {
     mediaStream.value.getTracks().forEach(t => t.stop())
   }
-  // 僅開啟影像串流並關閉聲音以避免回聲
+  // 開啟影像與聲音串流，預覽時靜音避免回聲
   mediaStream.value = await navigator.mediaDevices.getUserMedia({
     video: selectedDeviceId.value ? { deviceId: { exact: selectedDeviceId.value } } : true,
-    audio: false
+    audio: true
   })
   // 取得權限後重新整理鏡頭清單以便切換前後鏡頭
   await loadDevices()
   if (videoEl.value) {
     videoEl.value.srcObject = mediaStream.value
-    videoEl.value.muted = true
+    videoEl.value.muted = true // 靜音預覽避免聲音外放
     await videoEl.value.play()
   }
 }
