@@ -37,7 +37,8 @@ async function loadDevices() {
   // 呼叫硬體取得所有媒體裝置
   const devices = await navigator.mediaDevices.enumerateDevices()
   videoDevices.value = devices.filter(d => d.kind === 'videoinput')
-  if (videoDevices.value.length > 0) {
+  // 若尚未選擇鏡頭，預設使用第一個
+  if (!selectedDeviceId.value && videoDevices.value.length > 0) {
     selectedDeviceId.value = videoDevices.value[0].deviceId
   }
 }
@@ -47,11 +48,16 @@ async function startCamera() {
   if (mediaStream.value) {
     mediaStream.value.getTracks().forEach(t => t.stop())
   }
+  // 僅開啟影像串流並關閉聲音以避免回聲
   mediaStream.value = await navigator.mediaDevices.getUserMedia({
-    video: selectedDeviceId.value ? { deviceId: { exact: selectedDeviceId.value } } : true
+    video: selectedDeviceId.value ? { deviceId: { exact: selectedDeviceId.value } } : true,
+    audio: false
   })
+  // 取得權限後重新整理鏡頭清單以便切換前後鏡頭
+  await loadDevices()
   if (videoEl.value) {
     videoEl.value.srcObject = mediaStream.value
+    videoEl.value.muted = true
     await videoEl.value.play()
   }
 }
@@ -66,6 +72,10 @@ async function switchCamera(id) {
 function getMimeType(format) {
   const type = format === 'mp4' ? 'video/mp4' : 'video/webm'
   return MediaRecorder.isTypeSupported(type) ? type : 'video/webm'
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 // 開始錄影
@@ -141,21 +151,28 @@ async function uploadAll() {
   for (let i = 0; i < allBlobs.value.length; i++) {
     const item = allBlobs.value[i]
     const form = new FormData()
-    form.append('file', item.blob, `record_${i + 1}.${item.format}`)
-    // 透過 HTTP POST 將檔案送至後端
-    await fetch(`${apiBase}/upload`, {
-      method: 'POST',
-      body: form
-    })
+    
+    // 建立時間字串 (yyyyMMdd_HHmmss)
+    const now = new Date()
+    const timestamp = now.toISOString().replace(/[-:T]/g, "").split(".")[0] // 20250822T153045 → 20250822T153045
+    const filename = `record_${timestamp}_${i + 1}.${item.format}`
+
+    form.append('file', item.blob, filename)
+
+    try {
+      await fetch(`${apiBase}/upload`, {
+        method: 'POST',
+        body: form
+      })
+      logs.value.push(`第${i + 1}個檔案上傳成功 (${filename})`)
+    } catch (err) {
+      logs.value.push(`第${i + 1}個檔案上傳失敗`)
+    }
   }
-  // 呼叫 index.html 的影片清單更新函式
   window.loadCloudVideos && window.loadCloudVideos()
+  logs.value.push('所有影片已上傳')
 }
 
-// 通用等待函式
-function wait(ms) {
-  return new Promise(res => setTimeout(res, ms))
-}
 
 // ---------- 生命週期 ----------
 onMounted(async () => {
@@ -226,9 +243,23 @@ onMounted(async () => {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .log-group {
   margin-top: 20px;
+}
+
+@media (max-width: 600px) {
+  .app-container {
+    padding: 20px;
+  }
+  .multi-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .multi-group > * {
+    width: 100%;
+  }
 }
 </style>
