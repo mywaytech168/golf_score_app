@@ -270,4 +270,5 @@ android/app/google-services.json
 # Node / Vite
 **/node_modules/
 web/dist/
+server/wwwroot/dist/
 
