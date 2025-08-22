@@ -22,9 +22,10 @@ const isRecording = ref(false)
 
 // 使用者選擇的影片格式，預設 webm
 const selectedFormat = ref('webm')
-// 多次錄影設定：錄影次數與每段秒數
-const recordTimes = ref(1)
-const intervalSec = ref(3)
+// 多次錄影設定：錄影次數、每段持續秒數與間隔秒數
+const recordCount = ref(1)
+const durationSec = ref(3)
+const gapSec = ref(1)
 // 累積所有錄影檔案
 const allBlobs = ref([])
 // 錄影過程 log
@@ -103,16 +104,20 @@ function handleStop() {
   allBlobs.value.push({ blob, format: currentFormat })
 }
 
-// 自動多次錄影，依設定次數與秒數重複錄影
+// 自動多次錄影，依設定次數、持續時間與間隔重複錄影
 async function autoRecord() {
   allBlobs.value = []
   logs.value = []
-  for (let i = 0; i < recordTimes.value; i++) {
+  for (let i = 0; i < recordCount.value; i++) {
     logs.value.push(`目前錄製中第${i + 1}輪`)
     startRecording()
-    await wait(intervalSec.value * 1000)
+    await wait(durationSec.value * 1000)
     await stopRecording()
     logs.value.push(`第${i + 1}輪完成錄影`)
+    if (i < recordCount.value - 1) {
+      logs.value.push(`等待 ${gapSec.value} 秒後開始下一輪`)
+      await wait(gapSec.value * 1000)
+    }
   }
 }
 
@@ -166,12 +171,16 @@ onMounted(async () => {
       </el-select>
 
       <!-- 多次錄影設定與下載全部 -->
-      <div class="multi-group">
-        <el-input-number v-model="recordTimes" :min="1" label="錄影次數" />
-        <el-input-number v-model="intervalSec" :min="1" label="每段秒數" />
-        <el-button type="warning" @click="autoRecord">多次錄影</el-button>
-        <el-button type="success" :disabled="allBlobs.length === 0" @click="downloadAll">下載所有影片</el-button>
-      </div>
+        <div class="multi-group">
+          <span>錄影次數</span>
+          <el-input-number v-model="recordCount" :min="1" />
+          <span>持續秒數</span>
+          <el-input-number v-model="durationSec" :min="1" />
+          <span>間隔秒數</span>
+          <el-input-number v-model="gapSec" :min="0" />
+          <el-button type="warning" @click="autoRecord">多次錄影</el-button>
+          <el-button type="success" :disabled="allBlobs.length === 0" @click="downloadAll">下載所有影片</el-button>
+        </div>
 
       <!-- 錄影進度 log -->
       <div class="log-group">
