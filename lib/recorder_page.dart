@@ -1,19 +1,13 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:isolate';
-import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:assets_audio_player/assets_audio_player.dart';
-import 'package:video_player/video_player.dart';
 
-/// 錄影頁面負責串接鏡頭、音訊偵測與檔案儲存
+import 'pages/recording_session_page.dart';
+
+/// 錄影入口頁面：專責處理藍牙 IMU 配對與引導使用者前往錄影畫面
 class RecorderPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
 
@@ -25,21 +19,6 @@ class RecorderPage extends StatefulWidget {
 
 class _RecorderPageState extends State<RecorderPage> {
   // ---------- 狀態變數區 ----------
-  CameraController? controller; // 控制鏡頭操作
-  bool isRecording = false; // 標記是否正在錄影
-  List<double> waveform = []; // 即時波形資料
-  List<double> waveformAccumulated = []; // 累積波形資料供繪圖使用
-  double score = 0; // 音訊分析結果（目前保留原邏輯）
-  final ValueNotifier<int> repaintNotifier = ValueNotifier(0); // 用於觸發波形重繪
-
-  final FlutterAudioCapture _audioCapture = FlutterAudioCapture(); // 音訊擷取工具
-  ReceivePort? _receivePort; // 與 Isolate 溝通的管道
-  Isolate? _isolate; // 處理音訊的背景執行緒，可能尚未建立
-
-  final AssetsAudioPlayer _audioPlayer = AssetsAudioPlayer(); // 播放倒數音效
-  final MethodChannel _volumeChannel = const MethodChannel('volume_button_channel'); // 監聽音量鍵
-  bool _isCountingDown = false; // 避免倒數重複觸發
-
   StreamSubscription<List<ScanResult>>? _scanSubscription; // 藍牙掃描訂閱
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription; // 藍牙狀態監聽
   StreamSubscription<BluetoothConnectionState>? _deviceConnectionSubscription; // 裝置連線狀態監聽
@@ -51,30 +30,23 @@ class _RecorderPageState extends State<RecorderPage> {
 
   bool _isScanning = false; // 是否正在搜尋裝置
   bool _isConnecting = false; // 是否正處於連線流程
+  bool _isOpeningSession = false; // 是否正在切換至錄影頁面
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
   int? _lastRssi; // 紀錄訊號強度供顯示
   String? _foundDeviceName; // 掃描到的裝置名稱
   final String _targetNameKeyword = 'TekSwing-IMU'; // 目標裝置名稱關鍵字
-  final String _mockBatteryLevel = '82%'; // 假資料電量資訊
-  final String _mockFirmwareVersion = '韌體 1.0.3'; // 假資料韌體版本
+  final String _mockBatteryLevel = '82%'; // 假資料電量資訊（尚無實作藍牙服務）
+  final String _mockFirmwareVersion = '韌體 1.0.3'; // 假資料韌體版本（待後續串接）
 
   // ---------- 生命週期 ----------
   @override
   void initState() {
     super.initState();
-    init(); // 啟動鏡頭權限與初始化
-    initVolumeKeyListener(); // 設定音量鍵快速啟動
-    initBluetooth(); // 準備藍牙配對流程
+    initBluetooth(); // 啟動藍牙權限申請與自動搜尋流程
   }
 
   @override
   void dispose() {
-    controller?.dispose();
-    _audioCapture.stop();
-    _receivePort?.close();
-    _isolate?.kill(priority: Isolate.immediate);
-    _isolate = null;
-    _audioPlayer.dispose();
     _scanSubscription?.cancel();
     _adapterStateSubscription?.cancel();
     _deviceConnectionSubscription?.cancel();
@@ -83,81 +55,11 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   // ---------- 初始化流程 ----------
-  /// 申請必要權限並初始化相機控制器
-  Future<void> init() async {
-    await Permission.camera.request();
-    await Permission.microphone.request();
-    await Permission.storage.request();
-
-    controller = CameraController(
-      widget.cameras.first,
-      ResolutionPreset.medium,
-    );
-    await controller!.initialize();
-    if (!mounted) return;
-    setState(() {}); // 更新畫面顯示預覽
-  }
-
-  /// 建立音量鍵監聽器，讓使用者快速啟動錄影
-  void initVolumeKeyListener() {
-    _volumeChannel.setMethodCallHandler((call) async {
-      if (call.method == 'volume_down') {
-        if (!_isCountingDown && !isRecording) {
-          _isCountingDown = true;
-          await playCountdownAndStart();
-          _isCountingDown = false;
-        }
-      }
-    });
-  }
-
-  /// 初始化音訊擷取並將資料傳入獨立 Isolate
-  Future<void> initAudioCapture() async {
-    try {
-      _receivePort = ReceivePort();
-      _receivePort!.listen((data) {
-        if (data is List<double>) {
-          waveform = data;
-          waveformAccumulated.addAll(data);
-
-          // 計算音訊資訊以更新得分，保留原有邏輯以利後續擴充
-          final double avg =
-              waveform.fold(0.0, (prev, el) => prev + el.abs()) / waveform.length;
-          final double stdev = math.sqrt(
-            waveform
-                    .map((e) => math.pow(e.abs() - avg, 2))
-                    .reduce((a, b) => a + b) /
-                waveform.length,
-          );
-          final double focus = avg / (stdev + 1e-6);
-          score = (focus / (focus + 1)).clamp(0.0, 1.0);
-
-          repaintNotifier.value++; // 通知波形重繪
-        }
-      });
-      _isolate = await Isolate.spawn(
-        _audioProcessingIsolate,
-        _receivePort!.sendPort,
-      );
-      await _audioCapture.init();
-      await _audioCapture.start(
-        (data) => _receivePort?.sendPort.send(
-          List<double>.from((data as List).map((e) => e as double)),
-        ),
-        onError,
-        sampleRate: 22050,
-        bufferSize: 512,
-      );
-    } catch (e) {
-      debugPrint('🎙️ 初始化失敗: $e');
-      rethrow;
-    }
-  }
-
   /// 初始化藍牙狀態與權限，確保錄影前完成 IMU 配對
   Future<void> initBluetooth() async {
     await _requestBluetoothPermissions();
 
+    // 監聽手機藍牙開關狀態，並視情況重新觸發掃描
     _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
       if (!mounted) return;
       setState(() {
@@ -210,6 +112,7 @@ class _RecorderPageState extends State<RecorderPage> {
     await Permission.locationWhenInUse.request();
   }
 
+  // ---------- 方法區 ----------
   /// 掃描 TekSwing IMU 裝置並更新顯示資訊
   Future<void> scanForImu() async {
     await _scanSubscription?.cancel();
@@ -350,100 +253,32 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 比對字串是否符合目標關鍵字
   bool _matchTarget(String name) => name.contains(_targetNameKeyword);
 
-  // ---------- 方法區 ----------
-  /// 播放倒數音效並等待音檔結束
-  Future<void> _playCountdown() async {
-    await _audioPlayer.open(
-      Audio('assets/sounds/1.mp3'),
-      autoStart: true,
-      showNotification: false,
-    );
-    await _audioPlayer.playlistFinished.first;
-  }
+  /// 切換至錄影專用頁面，讓錄影與配對流程分離
+  Future<void> _openRecordingSession() async {
+    if (_isOpeningSession) return; // 避免重複點擊快速開啟多個頁面
 
-  /// 進行一次錄影流程（倒數 -> 錄影 -> 儲存）
-  Future<void> _recordOnce(int index) async {
-    try {
-      waveformAccumulated.clear();
-      await initAudioCapture();
-      await controller!.startVideoRecording();
-
-      await Future.delayed(const Duration(seconds: 15));
-
-      final XFile videoFile = await controller!.stopVideoRecording();
-      await _audioCapture.stop();
-      _receivePort?.close();
-      _isolate?.kill(priority: Isolate.immediate);
-      _isolate = null;
-
-      final directory = Directory('/storage/emulated/0/Download');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final newPath = '${directory.path}/run_${index + 1}_$timestamp.mp4';
-      await File(videoFile.path).copy(newPath);
-      debugPrint('✅ 儲存為 run_${index + 1}_$timestamp.mp4');
-    } catch (e) {
-      debugPrint('❌ 錄影時出錯：$e');
-    }
-  }
-
-  /// 按一次後自動執行五次倒數與錄影，中間保留休息時間
-  Future<void> playCountdownAndStart() async {
-    if (isRecording) {
-      return; // 避免重複點擊時重入流程
-    }
-
-    if (!isImuConnected && mounted) {
-      // 若尚未連線 IMU，仍允許錄影但提示使用者僅能取得畫面
+    if (widget.cameras.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('尚未連線 IMU，將以純錄影模式進行。')),
+        const SnackBar(content: Text('沒有可用鏡頭，無法開始錄影。')),
       );
+      return;
     }
 
-    setState(() => isRecording = true);
-    for (int i = 0; i < 5; i++) {
-      if (i == 1) {
-        await Future.delayed(const Duration(seconds: 8));
-      }
-      await _playCountdown();
-      await Future.delayed(const Duration(seconds: 3));
-      await _recordOnce(i);
-      if (i < 4) {
-        await Future.delayed(const Duration(seconds: 10));
-      }
-    }
-    setState(() => isRecording = false);
-  }
-
-  /// 讓使用者自選影片並播放
-  Future<void> pickAndPlayVideo() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      initialDirectory: '/storage/emulated/0/Download',
+    setState(() => _isOpeningSession = true);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RecordingSessionPage(
+          cameras: widget.cameras,
+          isImuConnected: isImuConnected,
+        ),
+      ),
     );
-
     if (!mounted) return;
-
-    if (result != null && result.files.single.path != null) {
-      final filePath = result.files.single.path!;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: filePath)),
-      );
-    }
+    setState(() => _isOpeningSession = false);
   }
 
-  /// 音訊處理的 Isolate 主體（保留為預留擴充）
-  static void _audioProcessingIsolate(SendPort sendPort) {}
-
-  /// 音訊擷取錯誤處理
-  void onError(Object e) {
-    debugPrint('❌ Audio Capture Error: $e');
-  }
-
-  // ---------- UI 建構區 ----------
   /// 建構 IMU 連線卡片，提示使用者完成藍牙配對
   Widget _buildImuConnectionCard() {
     final bool connected = isImuConnected;
@@ -602,168 +437,69 @@ class _RecorderPageState extends State<RecorderPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (controller == null || !controller!.value.isInitialized) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Golf Recorder')),
-      body: Column(
-        children: [
-          _buildImuConnectionCard(),
-          Expanded(
-            child: Stack(
-              children: [
-                Column(
-                  children: [
-                    Expanded(child: CameraPreview(controller!)),
-                    SizedBox(
-                      height: 200,
-                      width: double.infinity,
-                      child: WaveformWidget(
-                        waveformAccumulated: List.from(waveformAccumulated),
-                        repaintNotifier: repaintNotifier,
-                      ),
-                    ),
-                  ],
-                ),
-                Positioned(
-                  bottom: 20,
-                  right: 20,
-                  child: ElevatedButton(
-                    onPressed: isRecording ? null : playCountdownAndStart,
-                    child: Text(
-                      isRecording
-                          ? '錄製中...'
-                          : (isImuConnected ? '開始錄製' : '開始錄製（僅相機）'),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 20,
-                  left: 20,
-                  child: ElevatedButton(
-                    onPressed: pickAndPlayVideo,
-                    child: const Text('播放影片'),
-                  ),
-                ),
-              ],
+  /// 說明錄影流程的卡片，提醒使用者會切換到新畫面
+  Widget _buildRecordingGuideCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F7FB),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            '錄影流程說明',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF123B70),
             ),
+          ),
+          SizedBox(height: 12),
+          Text(
+            '開始錄影後會跳轉至新的錄影畫面，錄影畫面專注於鏡頭預覽、倒數與波形，避免與 IMU 配對資訊混在一起。',
+            style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
+          ),
+          SizedBox(height: 8),
+          Text(
+            '若尚未連線 IMU，新的錄影畫面仍可啟動純錄影模式，稍後可再返回此頁重新配對。',
+            style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
           ),
         ],
       ),
     );
   }
-}
 
-/// 用於顯示波形的 Widget，接收累積資料並觸發重繪
-class WaveformWidget extends StatelessWidget {
-  final List<double> waveformAccumulated; // 波形資料來源
-  final ValueNotifier<int> repaintNotifier; // 外部通知刷新
-
-  const WaveformWidget({
-    super.key,
-    required this.waveformAccumulated,
-    required this.repaintNotifier,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: repaintNotifier,
-      builder: (context, value, child) {
-        return CustomPaint(
-          size: Size.infinite,
-          painter: WaveformPainter(List.from(waveformAccumulated)),
-        );
-      },
-    );
-  }
-}
-
-/// 自訂波形畫家，將音訊振幅轉成畫面線條
-class WaveformPainter extends CustomPainter {
-  final List<double> waveform;
-  WaveformPainter(this.waveform);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 1.0;
-
-    if (waveform.isEmpty) return;
-
-    final double middle = size.height / 2;
-    final int maxSamples = size.width.toInt();
-    final int skip = waveform.length ~/ maxSamples;
-    if (skip == 0) return;
-
-    for (int i = 0; i < maxSamples; i++) {
-      final int idx = i * skip;
-      if (idx >= waveform.length) break;
-      final double x = i.toDouble();
-      final double y = middle - waveform[idx] * 500;
-      canvas.drawLine(Offset(x, middle), Offset(x, y), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-/// 影片播放頁面，提供錄製檔案的立即檢視
-class VideoPlayerPage extends StatefulWidget {
-  final String videoPath; // 影片檔案路徑
-  const VideoPlayerPage({super.key, required this.videoPath});
-
-  @override
-  State<VideoPlayerPage> createState() => _VideoPlayerPageState();
-}
-
-class _VideoPlayerPageState extends State<VideoPlayerPage> {
-  late VideoPlayerController _videoController;
-
-  @override
-  void initState() {
-    super.initState();
-    _videoController = VideoPlayerController.file(File(widget.videoPath))
-      ..initialize().then((_) {
-        setState(() {});
-        _videoController.play();
-      });
-  }
-
-  @override
-  void dispose() {
-    _videoController.dispose();
-    super.dispose();
-  }
-
+  // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('影片播放')),
-      body: Center(
-        child: _videoController.value.isInitialized
-            ? AspectRatio(
-                aspectRatio: _videoController.value.aspectRatio,
-                child: VideoPlayer(_videoController),
-              )
-            : const CircularProgressIndicator(),
+      appBar: AppBar(title: const Text('Golf Recorder')),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        children: [
+          _buildImuConnectionCard(),
+          const SizedBox(height: 8),
+          _buildRecordingGuideCard(),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() {
-            _videoController.value.isPlaying
-                ? _videoController.pause()
-                : _videoController.play();
-          });
-        },
-        child: Icon(
-          _videoController.value.isPlaying ? Icons.pause : Icons.play_arrow,
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: FilledButton(
+            onPressed: _isOpeningSession ? null : _openRecordingSession,
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              backgroundColor: const Color(0xFF123B70),
+            ),
+            child: Text(
+              isImuConnected ? '進入錄影畫面' : '進入錄影畫面（純錄影）',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ),
         ),
       ),
     );
