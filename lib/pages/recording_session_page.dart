@@ -11,6 +11,9 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 
+import '../models/recording_history_entry.dart';
+import '../widgets/recording_history_sheet.dart';
+
 /// 錄影專用頁面：專注鏡頭預覽、倒數與音訊波形，與 IMU 配對頁面分離
 class RecordingSessionPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
@@ -48,6 +51,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   bool _shouldCancelRecording = false; // 控制流程是否應該中斷
   Completer<void>? _cancelCompleter; // 將取消訊號傳遞給等待中的 Future
   static const int _restSecondsBetweenRounds = 10; // 每輪錄影間預設的休息秒數
+  final List<RecordingHistoryEntry> _recordedRuns = []; // 累積此次錄影產生的檔案
 
   // ---------- 生命週期 ----------
   @override
@@ -253,7 +257,25 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final newPath = '${directory.path}/run_${index + 1}_$timestamp.mp4';
       await File(videoFile.path).copy(newPath);
-      debugPrint('✅ 儲存為 run_${index + 1}_$timestamp.mp4');
+
+      final entry = RecordingHistoryEntry(
+        filePath: newPath,
+        roundIndex: index + 1,
+        recordedAt: DateTime.now(),
+        durationSeconds: widget.durationSeconds,
+        imuConnected: widget.isImuConnected,
+      );
+
+      if (mounted) {
+        setState(() {
+          // 新紀錄置頂顯示，方便使用者快速找到最新檔案
+          _recordedRuns.insert(0, entry);
+        });
+      } else {
+        _recordedRuns.insert(0, entry);
+      }
+
+      debugPrint('✅ 儲存為 ${entry.fileName}');
     } catch (e) {
       debugPrint('❌ 錄影時出錯：$e');
     }
@@ -314,7 +336,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   }
 
   /// 讓使用者自選影片並播放
-  Future<void> pickAndPlayVideo() async {
+  Future<void> _pickAndPlayVideo() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       initialDirectory: '/storage/emulated/0/Download',
@@ -324,11 +346,27 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
     if (result != null && result.files.single.path != null) {
       final filePath = result.files.single.path!;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: filePath)),
-      );
+      _openVideoPlayer(filePath);
     }
+  }
+
+  /// 直接開啟影片播放頁面，統一處理導覽流程
+  Future<void> _openVideoPlayer(String filePath) async {
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: filePath)),
+    );
+  }
+
+  /// 彈出歷史列表，提供使用者快速檢視本次錄影成果
+  Future<void> _showRecordedRunsSheet() {
+    return showRecordingHistorySheet(
+      context: context,
+      entries: _recordedRuns,
+      onPlayEntry: (entry) => _openVideoPlayer(entry.filePath),
+      onPickExternal: _pickAndPlayVideo,
+    );
   }
 
   /// 音訊處理的 Isolate 主體（保留為預留擴充）
@@ -343,7 +381,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   Future<bool> _handleWillPop() async {
     _triggerCancel();
     await _stopActiveRecording();
-    return true;
+
+    if (mounted) {
+      Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_recordedRuns));
+    }
+    return false;
   }
 
   // ---------- 畫面建構 ----------
@@ -417,14 +459,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                     bottom: 20,
                     left: 20,
                     child: ElevatedButton(
-                      onPressed: pickAndPlayVideo,
+                      onPressed: _showRecordedRunsSheet,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF123B70),
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                       ),
                       child: const Text(
-                        '播放影片',
+                        '曾經錄影紀錄',
                         style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
                     ),
