@@ -318,20 +318,59 @@ class _RecorderPageState extends State<RecorderPage> {
                     style: TextStyle(fontSize: 13, height: 1.4),
                   ),
                   const SizedBox(height: 16),
-                  _buildConfigRow(
+                  _buildConfigSlider(
                     label: '錄影次數',
-                    value: rounds,
-                    options: List.generate(10, (index) => index + 1),
-                    onChanged: (value) => setModalState(() => rounds = value),
+                    description: '可自訂本次要錄影的輪數，建議依自身練習需求調整。',
+                    value: rounds.toDouble(),
+                    min: 1,
+                    max: 12,
+                    division: 11,
                     unit: '次',
+                    onChanged: (value) {
+                      // 透過 round() 與上下界控制確保數值落在合法範圍
+                      setModalState(() {
+                        rounds = value.round();
+                        if (rounds < 1) rounds = 1;
+                        if (rounds > 12) rounds = 12;
+                      });
+                    },
+                    onInputChanged: (value) {
+                      final parsed = int.tryParse(value);
+                      if (parsed != null) {
+                        setModalState(() {
+                          rounds = parsed;
+                          if (rounds < 1) rounds = 1;
+                          if (rounds > 12) rounds = 12;
+                        });
+                      }
+                    },
                   ),
-                  const SizedBox(height: 12),
-                  _buildConfigRow(
+                  const SizedBox(height: 16),
+                  _buildConfigSlider(
                     label: '每次長度',
-                    value: seconds,
-                    options: const [5, 10, 15, 20, 25, 30],
-                    onChanged: (value) => setModalState(() => seconds = value),
+                    description: '調整每輪錄影秒數，支援 3 至 60 秒細緻設定。',
+                    value: seconds.toDouble(),
+                    min: 3,
+                    max: 60,
+                    division: 57,
                     unit: '秒',
+                    onChanged: (value) {
+                      setModalState(() {
+                        seconds = value.round();
+                        if (seconds < 3) seconds = 3;
+                        if (seconds > 60) seconds = 60;
+                      });
+                    },
+                    onInputChanged: (value) {
+                      final parsed = int.tryParse(value);
+                      if (parsed != null) {
+                        setModalState(() {
+                          seconds = parsed;
+                          if (seconds < 3) seconds = 3;
+                          if (seconds > 60) seconds = 60;
+                        });
+                      }
+                    },
                   ),
                 ],
               ),
@@ -352,35 +391,80 @@ class _RecorderPageState extends State<RecorderPage> {
     );
   }
 
-  /// 建構設定錄影參數用的單列，提供下拉選擇器與單位描述
-  Widget _buildConfigRow({
+  /// 建構設定錄影參數的滑桿與輸入欄位，提供使用者細緻調整能力
+  Widget _buildConfigSlider({
     required String label,
-    required int value,
-    required List<int> options,
-    required ValueChanged<int> onChanged,
+    required String description,
+    required double value,
+    required double min,
+    required double max,
+    required int division,
     required String unit,
+    required ValueChanged<double> onChanged,
+    required ValueChanged<String> onInputChanged,
   }) {
-    return Row(
+    final controller = TextEditingController(text: value.round().toString());
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
-        DropdownButton<int>(
-          value: value,
-          onChanged: (val) {
-            if (val != null) onChanged(val);
-          },
-          items: options
-              .map(
-                (option) => DropdownMenuItem(
-                  value: option,
-                  child: Text('$option $unit'),
+        const SizedBox(height: 4),
+        Text(
+          description,
+          style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+        ),
+        Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          divisions: division,
+          label: '${value.round()} $unit',
+          onChanged: onChanged,
+        ),
+        Row(
+          children: [
+            // 透過 IconButton 提供快速微調
+            IconButton(
+              icon: const Icon(Icons.remove_circle_outline),
+              onPressed: () {
+                final nextValue = (value - 1).clamp(min, max);
+                onChanged(nextValue);
+              },
+            ),
+            SizedBox(
+              width: 72,
+              child: TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  suffixText: unit,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-              )
-              .toList(),
+                onChanged: onInputChanged,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: () {
+                final nextValue = (value + 1).clamp(min, max);
+                onChanged(nextValue);
+              },
+            ),
+            const Spacer(),
+            Text(
+              '範圍 ${min.round()}~${max.round()} $unit',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
+            ),
+          ],
         ),
       ],
     );
