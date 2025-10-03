@@ -391,12 +391,15 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 按一次後自動執行五次倒數與錄影，中間保留休息時間
   Future<void> playCountdownAndStart() async {
-    if (!isImuConnected) {
-      if (!mounted) return;
+    if (isRecording) {
+      return; // 避免重複點擊時重入流程
+    }
+
+    if (!isImuConnected && mounted) {
+      // 若尚未連線 IMU，仍允許錄影但提示使用者僅能取得畫面
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('請先連線 TekSwing IMU 裝置後再開始錄影')),
+        const SnackBar(content: Text('尚未連線 IMU，將以純錄影模式進行。')),
       );
-      return;
     }
 
     setState(() => isRecording = true);
@@ -579,7 +582,7 @@ class _RecorderPageState extends State<RecorderPage> {
               if (!connected)
                 Expanded(
                   child: Text(
-                    '裝置需先完成配對，錄影按鈕才會解鎖。',
+                    '未連線 IMU 亦可錄影，建議配對以取得揮桿數據。',
                     style: const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
                     textAlign: TextAlign.right,
                   ),
@@ -630,11 +633,11 @@ class _RecorderPageState extends State<RecorderPage> {
                   bottom: 20,
                   right: 20,
                   child: ElevatedButton(
-                    onPressed: isRecording || !isImuConnected ? null : playCountdownAndStart,
+                    onPressed: isRecording ? null : playCountdownAndStart,
                     child: Text(
                       isRecording
                           ? '錄製中...'
-                          : (isImuConnected ? '開始錄製' : '請先配對 IMU'),
+                          : (isImuConnected ? '開始錄製' : '開始錄製（僅相機）'),
                     ),
                   ),
                 ),
