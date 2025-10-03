@@ -20,7 +20,8 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Golf App',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E88E5)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E8E5A)),
+        scaffoldBackgroundColor: const Color(0xFFF5F7FB),
         useMaterial3: true,
       ),
       home: LoginPage(cameras: cameras),
