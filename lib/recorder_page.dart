@@ -31,6 +31,8 @@ class _RecorderPageState extends State<RecorderPage> {
   bool _isScanning = false; // 是否正在搜尋裝置
   bool _isConnecting = false; // 是否正處於連線流程
   bool _isOpeningSession = false; // 是否正在切換至錄影頁面
+  int _selectedRounds = 5; // 使用者預設要錄影的次數
+  int _recordingDurationSeconds = 15; // 使用者預設每次錄影長度（秒）
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
   int? _lastRssi; // 紀錄訊號強度供顯示
   String? _foundDeviceName; // 掃描到的裝置名稱
@@ -266,17 +268,122 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     setState(() => _isOpeningSession = true);
+
+    // 進入錄影前先彈出設定視窗，讓使用者選擇要錄影的次數與長度
+    final config = await _showRecordingConfigDialog();
+    if (config == null) {
+      if (!mounted) return;
+      setState(() => _isOpeningSession = false);
+      return; // 使用者取消設定則不進入錄影畫面
+    }
+
+    setState(() {
+      _selectedRounds = config['rounds']!;
+      _recordingDurationSeconds = config['seconds']!;
+    });
+
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => RecordingSessionPage(
           cameras: widget.cameras,
           isImuConnected: isImuConnected,
+          totalRounds: _selectedRounds,
+          durationSeconds: _recordingDurationSeconds,
         ),
       ),
     );
     if (!mounted) return;
     setState(() => _isOpeningSession = false);
+  }
+
+  /// 顯示設定錄影次數與秒數的彈窗，確保使用者可以自訂錄影需求
+  Future<Map<String, int>?> _showRecordingConfigDialog() async {
+    int rounds = _selectedRounds;
+    int seconds = _recordingDurationSeconds;
+
+    return showDialog<Map<String, int>>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: const Text('設定錄影參數'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '請選擇本次錄影的輪數與每輪秒數，稍後錄影畫面將依據設定自動執行。',
+                    style: TextStyle(fontSize: 13, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildConfigRow(
+                    label: '錄影次數',
+                    value: rounds,
+                    options: List.generate(10, (index) => index + 1),
+                    onChanged: (value) => setModalState(() => rounds = value),
+                    unit: '次',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildConfigRow(
+                    label: '每次長度',
+                    value: seconds,
+                    options: const [5, 10, 15, 20, 25, 30],
+                    onChanged: (value) => setModalState(() => seconds = value),
+                    unit: '秒',
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, {'rounds': rounds, 'seconds': seconds}),
+                  child: const Text('確定開始'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 建構設定錄影參數用的單列，提供下拉選擇器與單位描述
+  Widget _buildConfigRow({
+    required String label,
+    required int value,
+    required List<int> options,
+    required ValueChanged<int> onChanged,
+    required String unit,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ),
+        DropdownButton<int>(
+          value: value,
+          onChanged: (val) {
+            if (val != null) onChanged(val);
+          },
+          items: options
+              .map(
+                (option) => DropdownMenuItem(
+                  value: option,
+                  child: Text('$option $unit'),
+                ),
+              )
+              .toList(),
+        ),
+      ],
+    );
   }
 
   /// 建構 IMU 連線卡片，提示使用者完成藍牙配對
@@ -488,17 +595,29 @@ class _RecorderPageState extends State<RecorderPage> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: FilledButton(
-            onPressed: _isOpeningSession ? null : _openRecordingSession,
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-              backgroundColor: const Color(0xFF123B70),
-            ),
-            child: Text(
-              isImuConnected ? '進入錄影畫面' : '進入錄影畫面（純錄影）',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '本次將錄影 $_selectedRounds 次，每次 $_recordingDurationSeconds 秒。',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF465A71)),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              FilledButton(
+                onPressed: _isOpeningSession ? null : _openRecordingSession,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  backgroundColor: const Color(0xFF123B70),
+                ),
+                child: Text(
+                  isImuConnected ? '進入錄影畫面' : '進入錄影畫面（純錄影）',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
           ),
         ),
       ),

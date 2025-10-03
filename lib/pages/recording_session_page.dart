@@ -15,11 +15,15 @@ import 'package:video_player/video_player.dart';
 class RecordingSessionPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
   final bool isImuConnected; // 是否已配對 IMU，決定提示訊息
+  final int totalRounds; // 本次預計錄影的輪數
+  final int durationSeconds; // 每輪錄影秒數
 
   const RecordingSessionPage({
     super.key,
     required this.cameras,
     required this.isImuConnected,
+    required this.totalRounds,
+    required this.durationSeconds,
   });
 
   @override
@@ -41,6 +45,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   final AssetsAudioPlayer _audioPlayer = AssetsAudioPlayer(); // 播放倒數音效
   final MethodChannel _volumeChannel = const MethodChannel('volume_button_channel'); // 監聽音量鍵
   bool _isCountingDown = false; // 避免倒數重複觸發
+  bool _shouldCancelRecording = false; // 控制流程是否應該中斷
+  Completer<void>? _cancelCompleter; // 將取消訊號傳遞給等待中的 Future
+  static const int _restSecondsBetweenRounds = 10; // 每輪錄影間預設的休息秒數
 
   // ---------- 生命週期 ----------
   @override
@@ -52,11 +59,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   @override
   void dispose() {
+    _triggerCancel(); // 優先發出取消訊號，停止所有倒數與錄影
+    _stopActiveRecording(updateUi: false); // 嘗試停止仍在進行的錄影與音訊擷取
     controller?.dispose();
-    _audioCapture.stop();
-    _receivePort?.close();
-    _isolate?.kill(priority: Isolate.immediate);
-    _isolate = null;
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
     super.dispose();
@@ -95,11 +100,64 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       if (call.method == 'volume_down') {
         if (!_isCountingDown && !isRecording && controller != null && controller!.value.isInitialized) {
           _isCountingDown = true;
-          await playCountdownAndStart();
-          _isCountingDown = false;
+          try {
+            await playCountdownAndStart();
+          } finally {
+            _isCountingDown = false;
+          }
         }
       }
     });
+  }
+
+  /// 發送取消錄影訊號，讓倒數與錄影流程可以即時中斷
+  void _triggerCancel() {
+    _shouldCancelRecording = true;
+    if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
+      _cancelCompleter!.complete();
+    }
+  }
+
+  /// 主動停止鏡頭錄影與音訊擷取，確保返回上一頁後不再持續錄製
+  Future<void> _stopActiveRecording({bool updateUi = true}) async {
+    if (!isRecording && !_isCountingDown && controller != null && !(controller!.value.isRecordingVideo)) {
+      return; // 若沒有任何錄影流程在進行，可直接返回
+    }
+
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {
+      // 音檔可能尚未播放完成，忽略停止時的錯誤
+    }
+
+    if (controller != null && controller!.value.isRecordingVideo) {
+      try {
+        await controller!.stopVideoRecording();
+      } catch (_) {
+        // 若已停止或尚未開始錄影，忽略錯誤
+      }
+    }
+
+    await _closeAudioPipeline();
+
+    if (mounted && updateUi) {
+      setState(() => isRecording = false);
+    } else {
+      isRecording = false;
+    }
+  }
+
+  /// 停止音訊擷取並回收相關資源，確保下次錄影前狀態乾淨
+  Future<void> _closeAudioPipeline() async {
+    try {
+      await _audioCapture.stop();
+    } catch (_) {
+      // 可能尚未成功啟動音訊擷取，忽略錯誤避免阻斷流程
+    }
+    _receivePort?.close();
+    _receivePort = null;
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
   }
 
   /// 初始化音訊擷取並將資料傳入獨立 Isolate
@@ -134,30 +192,59 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   }
 
   // ---------- 方法區 ----------
-  /// 播放倒數音效並等待音檔結束
+  /// 依秒數逐步等待，遇到取消訊號時即刻跳出
+  Future<void> _waitForDuration(int seconds) async {
+    for (int i = 0; i < seconds && !_shouldCancelRecording; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (_shouldCancelRecording) {
+        break;
+      }
+    }
+  }
+
+  /// 播放倒數音效並等待音檔結束或取消
   Future<void> _playCountdown() async {
     await _audioPlayer.open(
       Audio('assets/sounds/1.mp3'),
       autoStart: true,
       showNotification: false,
     );
-    await _audioPlayer.playlistFinished.first;
+    await Future.any([
+      _audioPlayer.playlistFinished.first,
+      if (_cancelCompleter != null) _cancelCompleter!.future,
+    ]);
   }
 
   /// 進行一次錄影流程（倒數 -> 錄影 -> 儲存）
   Future<void> _recordOnce(int index) async {
+    if (_shouldCancelRecording) {
+      return; // 若已收到取消訊號則直接跳出，避免繼續操作鏡頭
+    }
+
     try {
       waveformAccumulated.clear();
       await initAudioCapture();
+      if (_shouldCancelRecording) {
+        await _closeAudioPipeline();
+        return;
+      }
+
       await controller!.startVideoRecording();
 
-      await Future.delayed(const Duration(seconds: 15));
+      await _waitForDuration(widget.durationSeconds);
+
+      if (_shouldCancelRecording) {
+        if (controller!.value.isRecordingVideo) {
+          try {
+            await controller!.stopVideoRecording();
+          } catch (_) {}
+        }
+        await _closeAudioPipeline();
+        return;
+      }
 
       final XFile videoFile = await controller!.stopVideoRecording();
-      await _audioCapture.stop();
-      _receivePort?.close();
-      _isolate?.kill(priority: Isolate.immediate);
-      _isolate = null;
+      await _closeAudioPipeline();
 
       final directory = Directory('/storage/emulated/0/Download');
       if (!await directory.exists()) {
@@ -172,7 +259,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
   }
 
-  /// 按一次後自動執行五次倒數與錄影，中間保留休息時間
+  /// 依使用者設定自動執行多輪倒數與錄影，中間保留休息時間
   Future<void> playCountdownAndStart() async {
     if (controller == null || !controller!.value.isInitialized) {
       return; // 鏡頭尚未準備完成時不執行
@@ -189,20 +276,41 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
     }
 
-    setState(() => isRecording = true);
-    for (int i = 0; i < 5; i++) {
-      if (i == 1) {
-        await Future.delayed(const Duration(seconds: 8));
+    if (mounted) {
+      setState(() => isRecording = true);
+    } else {
+      isRecording = true;
+    }
+
+    _shouldCancelRecording = false;
+    _cancelCompleter = Completer<void>();
+
+    try {
+      for (int i = 0; i < widget.totalRounds; i++) {
+        if (_shouldCancelRecording) break;
+
+        await _playCountdown();
+        if (_shouldCancelRecording) break;
+
+        await _waitForDuration(3); // 倒數結束後保留緩衝時間
+        if (_shouldCancelRecording) break;
+
+        await _recordOnce(i);
+        if (_shouldCancelRecording) break;
+
+        if (i < widget.totalRounds - 1) {
+          await _waitForDuration(_restSecondsBetweenRounds);
+        }
       }
-      await _playCountdown();
-      await Future.delayed(const Duration(seconds: 3));
-      await _recordOnce(i);
-      if (i < 4) {
-        await Future.delayed(const Duration(seconds: 10));
+    } finally {
+      _cancelCompleter = null;
+      _shouldCancelRecording = false;
+      if (mounted) {
+        setState(() => isRecording = false);
+      } else {
+        isRecording = false;
       }
     }
-    if (!mounted) return;
-    setState(() => isRecording = false);
   }
 
   /// 讓使用者自選影片並播放
@@ -231,6 +339,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     debugPrint('❌ Audio Capture Error: $e');
   }
 
+  /// 處理返回上一頁事件：先停止錄影再允許跳轉
+  Future<bool> _handleWillPop() async {
+    _triggerCancel();
+    await _stopActiveRecording();
+    return true;
+  }
+
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
@@ -238,75 +353,87 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('錄影進行中'),
-        backgroundColor: const Color(0xFF123B70),
-      ),
-      body: Column(
-        children: [
-          if (!widget.isImuConnected)
+    return WillPopScope(
+      onWillPop: _handleWillPop,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('錄影進行中'),
+          backgroundColor: const Color(0xFF123B70),
+        ),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!widget.isImuConnected)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                color: const Color(0xFFFFF4E5),
+                child: const Text(
+                  '目前為純錄影模式，返回上一頁可再次嘗試配對 IMU。',
+                  style: TextStyle(color: Color(0xFF9A6A2F), fontSize: 13),
+                ),
+              ),
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              color: const Color(0xFFFFF4E5),
-              child: const Text(
-                '目前為純錄影模式，返回上一頁可再次嘗試配對 IMU。',
-                style: TextStyle(color: Color(0xFF9A6A2F), fontSize: 13),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              color: const Color(0xFFF4F7FB),
+              child: Text(
+                '本次預計錄影 ${widget.totalRounds} 次，每次 ${widget.durationSeconds} 秒。',
+                style: const TextStyle(fontSize: 14, color: Color(0xFF123B70), fontWeight: FontWeight.w600),
               ),
             ),
-          Expanded(
-            child: Stack(
-              children: [
-                Column(
-                  children: [
-                    Expanded(child: CameraPreview(controller!)),
-                    SizedBox(
-                      height: 200,
-                      width: double.infinity,
-                      child: WaveformWidget(
-                        waveformAccumulated: List.from(waveformAccumulated),
-                        repaintNotifier: repaintNotifier,
+            Expanded(
+              child: Stack(
+                children: [
+                  Column(
+                    children: [
+                      Expanded(child: CameraPreview(controller!)),
+                      SizedBox(
+                        height: 200,
+                        width: double.infinity,
+                        child: WaveformWidget(
+                          waveformAccumulated: List.from(waveformAccumulated),
+                          repaintNotifier: repaintNotifier,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    bottom: 20,
+                    right: 20,
+                    child: ElevatedButton(
+                      onPressed: isRecording ? null : playCountdownAndStart,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1E8E5A),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                      ),
+                      child: Text(
+                        isRecording ? '錄製中...' : '重新錄製',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
                     ),
-                  ],
-                ),
-                Positioned(
-                  bottom: 20,
-                  right: 20,
-                  child: ElevatedButton(
-                    onPressed: isRecording ? null : playCountdownAndStart,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E8E5A),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: Text(
-                      isRecording ? '錄製中...' : '重新錄製',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                  Positioned(
+                    bottom: 20,
+                    left: 20,
+                    child: ElevatedButton(
+                      onPressed: pickAndPlayVideo,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF123B70),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                      ),
+                      child: const Text(
+                        '播放影片',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
-                ),
-                Positioned(
-                  bottom: 20,
-                  left: 20,
-                  child: ElevatedButton(
-                    onPressed: pickAndPlayVideo,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF123B70),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: const Text(
-                      '播放影片',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
