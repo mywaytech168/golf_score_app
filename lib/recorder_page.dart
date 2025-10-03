@@ -34,13 +34,12 @@ class _RecorderPageState extends State<RecorderPage> {
 
   final FlutterAudioCapture _audioCapture = FlutterAudioCapture(); // 音訊擷取工具
   ReceivePort? _receivePort; // 與 Isolate 溝通的管道
-  late Isolate _isolate; // 處理音訊的背景執行緒
+  Isolate? _isolate; // 處理音訊的背景執行緒，可能尚未建立
 
   final AssetsAudioPlayer _audioPlayer = AssetsAudioPlayer(); // 播放倒數音效
   final MethodChannel _volumeChannel = const MethodChannel('volume_button_channel'); // 監聽音量鍵
   bool _isCountingDown = false; // 避免倒數重複觸發
 
-  final FlutterBluePlus _bluetooth = FlutterBluePlus.instance; // 管理藍牙掃描與連線
   StreamSubscription<List<ScanResult>>? _scanSubscription; // 藍牙掃描訂閱
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription; // 藍牙狀態監聽
   StreamSubscription<BluetoothConnectionState>? _deviceConnectionSubscription; // 裝置連線狀態監聽
@@ -73,12 +72,13 @@ class _RecorderPageState extends State<RecorderPage> {
     controller?.dispose();
     _audioCapture.stop();
     _receivePort?.close();
-    _isolate.kill(priority: Isolate.immediate);
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
     _audioPlayer.dispose();
     _scanSubscription?.cancel();
     _adapterStateSubscription?.cancel();
     _deviceConnectionSubscription?.cancel();
-    _bluetooth.stopScan();
+    FlutterBluePlus.stopScan();
     super.dispose();
   }
 
@@ -158,7 +158,7 @@ class _RecorderPageState extends State<RecorderPage> {
   Future<void> initBluetooth() async {
     await _requestBluetoothPermissions();
 
-    _adapterStateSubscription = _bluetooth.state.listen((state) {
+    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
       if (!mounted) return;
       setState(() {
         _adapterState = state;
@@ -174,11 +174,11 @@ class _RecorderPageState extends State<RecorderPage> {
       }
     });
 
-    final initialState = await _bluetooth.state.first;
+    final initialState = await FlutterBluePlus.adapterState.first;
     if (!mounted) return;
     setState(() => _adapterState = initialState);
 
-    final connectedDevices = await _bluetooth.connectedDevices;
+    final connectedDevices = FlutterBluePlus.connectedDevices;
     if (!mounted) return;
 
     for (final device in connectedDevices) {
@@ -213,7 +213,7 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 掃描 TekSwing IMU 裝置並更新顯示資訊
   Future<void> scanForImu() async {
     await _scanSubscription?.cancel();
-    await _bluetooth.stopScan();
+    await FlutterBluePlus.stopScan();
 
     if (!mounted) return;
     setState(() {
@@ -224,7 +224,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _connectionMessage = '搜尋 $_targetNameKeyword 裝置中...';
     });
 
-    _scanSubscription = _bluetooth.scanResults.listen((results) {
+    _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
       if (!mounted || _foundDevice != null) {
         return;
       }
@@ -243,7 +243,7 @@ class _RecorderPageState extends State<RecorderPage> {
             _lastRssi = result.rssi;
             _connectionMessage = '找到 $displayName，可進行配對';
           });
-          _bluetooth.stopScan();
+          FlutterBluePlus.stopScan();
           break;
         }
       }
@@ -255,7 +255,7 @@ class _RecorderPageState extends State<RecorderPage> {
     });
 
     try {
-      await _bluetooth.startScan(timeout: const Duration(seconds: 8));
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -277,7 +277,7 @@ class _RecorderPageState extends State<RecorderPage> {
       return;
     }
 
-    await _bluetooth.stopScan();
+    await FlutterBluePlus.stopScan();
 
     setState(() {
       _isConnecting = true;
@@ -373,7 +373,8 @@ class _RecorderPageState extends State<RecorderPage> {
       final XFile videoFile = await controller!.stopVideoRecording();
       await _audioCapture.stop();
       _receivePort?.close();
-      _isolate.kill(priority: Isolate.immediate);
+      _isolate?.kill(priority: Isolate.immediate);
+      _isolate = null;
 
       final directory = Directory('/storage/emulated/0/Download');
       if (!await directory.exists()) {
