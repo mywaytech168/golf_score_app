@@ -265,7 +265,7 @@ class _RecorderPageState extends State<RecorderPage> {
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 10),
         // 依 Nordic Android Library 建議使用低延遲掃描模式以提升連線準備速度
-        androidScanMode: BluetoothScanMode.lowLatency,
+        androidScanMode: AndroidScanMode.lowLatency,
         withServices: [_nordicUartServiceUuid],
       );
 
