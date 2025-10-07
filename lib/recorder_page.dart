@@ -944,11 +944,10 @@ class _RecorderPageState extends State<RecorderPage> {
 
       try {
         if (characteristic.descriptors.isEmpty) {
-          // ---------- 補抓描述符 ----------
-          // 某些裝置初次連線時不會同步 CCCD，需要手動觸發探索
-          await characteristic.discoverDescriptors();
+          // ---------- 描述符缺失 ----------
+          // FlutterBluePlus 目前沒有額外探索描述符的 API，只能依賴裝置初次回報
           _logBle(
-            '重新探索 ${characteristic.uuid.str} 描述符，共 ${characteristic.descriptors.length} 筆',
+            '特徵 ${characteristic.uuid.str} 未回報描述符，可能無法開啟通知',
           );
         }
 
