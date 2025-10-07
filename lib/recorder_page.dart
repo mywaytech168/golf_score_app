@@ -60,6 +60,8 @@ class _RecorderPageState extends State<RecorderPage> {
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
   int? _lastRssi; // 紀錄訊號強度供顯示
   String? _foundDeviceName; // 掃描到的裝置名稱
+  final Map<String, _ImuScanCandidate> _scanCandidates = {}; // 目前掃描到的藍牙裝置列表
+  Completer<void>? _activeScanStopper; // 追蹤目前掃描流程以便在外部中止等待
   final Guid _nordicUartServiceUuid =
       Guid('6E400001-B5A3-F393-E0A9-E50E24DCCA9E'); // 依 Nordic UART 定義的服務 UUID
   final Guid _serviceBno086Uuid =
@@ -153,6 +155,10 @@ class _RecorderPageState extends State<RecorderPage> {
     _scanSubscription?.cancel();
     _adapterStateSubscription?.cancel();
     _deviceConnectionSubscription?.cancel();
+    if (_activeScanStopper != null && !_activeScanStopper!.isCompleted) {
+      // 若仍有掃描流程在等待，主動結束避免懸掛 Future
+      _activeScanStopper!.complete();
+    }
     unawaited(_clearImuSession()); // 統一釋放所有藍牙訂閱與特徵引用
     FlutterBluePlus.stopScan();
     super.dispose();
@@ -320,45 +326,76 @@ class _RecorderPageState extends State<RecorderPage> {
 
     await _stopScan(resetFoundDevice: true); // 先停止前一次掃描，遵循 Nordic 範例先清除舊狀態
 
+    // 建立新的 completer，之後若外部主動停止掃描即可提前結束等待
+    _activeScanStopper = Completer<void>();
+
     if (!mounted) return;
     setState(() {
       _isScanning = true;
       _connectionMessage = '以低延遲模式掃描相容的 IMU 裝置...';
+      _scanCandidates.clear();
     });
-    _logBle('開始掃描目標裝置，改以服務 UUID 過濾而非名稱關鍵字');
+    _logBle('開始掃描目標裝置，將掃描結果同步顯示於下方列表供使用者選擇');
 
-    final completer = Completer<void>();
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
-      if (!mounted || _foundDevice != null || _isConnecting) {
-        return; // 若已找到裝置或正在連線則忽略後續結果
+      if (!mounted || !_isScanning) {
+        return;
       }
+
+      final Map<String, _ImuScanCandidate> updatedEntries = {};
+      bool hasUpdates = false;
+      BluetoothDevice? autoSelectDevice;
+      String? autoSelectName;
+      int? autoSelectRssi;
 
       for (final result in results) {
         final advertisement = result.advertisementData;
-        if (!_isImuAdvertisement(advertisement)) {
-          // 不符合目標服務時直接略過，避免錯誤挑選其他藍牙裝置
-          _logBle('掃描結果略過：${result.device.remoteId} 不含 IMU 服務 UUID');
-          continue;
-        }
         final advertisementName = advertisement.advName;
         final deviceName = result.device.platformName;
         final displayName = deviceName.isNotEmpty
             ? deviceName
             : (advertisementName.isNotEmpty ? advertisementName : '未命名裝置');
+        final matchesImuService = _isImuAdvertisement(advertisement);
 
-        if (!mounted) return;
-        setState(() {
-          // Nordic Library 建議選到目標後即停止掃描並交由連線流程處理
-          _foundDevice = result.device;
-          _foundDeviceName = displayName;
-          _lastRssi = result.rssi;
-          _connectionMessage = '偵測到 $displayName，準備建立安全連線';
-        });
-        _logBle('已偵測到目標裝置：$displayName，RSSI：${result.rssi}');
-        if (!completer.isCompleted) {
-          completer.complete();
+        final candidate = _ImuScanCandidate(
+          device: result.device,
+          displayName: displayName,
+          rssi: result.rssi,
+          matchesImuService: matchesImuService,
+          lastSeen: DateTime.now(),
+        );
+        final id = result.device.remoteId.str;
+        updatedEntries[id] = candidate;
+
+        final existing = _scanCandidates[id];
+        if (existing == null || existing.shouldUpdate(candidate)) {
+          hasUpdates = true;
+          _logBle(
+              '掃描結果更新：$displayName (${result.device.remoteId.str}) RSSI=${result.rssi}，符合服務=$matchesImuService');
         }
-        break;
+
+        if (matchesImuService &&
+            (_foundDevice == null ||
+                _foundDevice?.remoteId == result.device.remoteId)) {
+          autoSelectDevice = result.device;
+          autoSelectName = displayName;
+          autoSelectRssi = result.rssi;
+        }
+      }
+
+      if ((hasUpdates || autoSelectDevice != null) && mounted) {
+        setState(() {
+          for (final entry in updatedEntries.entries) {
+            _scanCandidates[entry.key] = entry.value;
+          }
+          if (autoSelectDevice != null) {
+            _foundDevice = autoSelectDevice;
+            _foundDeviceName = autoSelectName;
+            _lastRssi = autoSelectRssi;
+            _connectionMessage =
+                '偵測到 ${autoSelectName ?? 'IMU 裝置'}，請點擊配對裝置以建立連線';
+          }
+        });
       }
     }, onError: (error) {
       if (!mounted) return;
@@ -366,30 +403,28 @@ class _RecorderPageState extends State<RecorderPage> {
         _connectionMessage = '搜尋失敗：$error';
       });
       _logBle('掃描流程發生錯誤', error: error);
-      if (!completer.isCompleted) {
-        completer.completeError(error);
+      if (_activeScanStopper != null && !_activeScanStopper!.isCompleted) {
+        _activeScanStopper!.completeError(error);
       }
     });
 
     try {
       await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 10),
+        timeout: const Duration(seconds: 12),
         // 依 Nordic Android Library 建議使用低延遲掃描模式以提升連線準備速度
         androidScanMode: AndroidScanMode.lowLatency,
-        withServices: [_nordicUartServiceUuid],
       );
       _logBle('已向系統請求開始掃描，等待裝置回應');
 
-      // 最多等待 10 秒取得第一筆目標裝置，逾時則回報失敗
-      await completer.future.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          if (!completer.isCompleted) {
-            completer.completeError('未在時間內找到裝置');
-          }
-          _logBle('掃描逾時：未在 10 秒內找到符合條件的裝置');
-        },
-      );
+      // 最多等待 12 秒或直到外部主動停止掃描，避免掃描流程無限等待
+      if (_activeScanStopper != null) {
+        await Future.any([
+          Future.delayed(const Duration(seconds: 12)),
+          _activeScanStopper!.future,
+        ]);
+      } else {
+        await Future.delayed(const Duration(seconds: 12));
+      }
     } catch (e, stackTrace) {
       if (!mounted) return;
       setState(() {
@@ -410,9 +445,13 @@ class _RecorderPageState extends State<RecorderPage> {
       }
     } finally {
       await _stopScan();
+      _activeScanStopper = null;
       if (!mounted) return;
       setState(() {
         _isScanning = false;
+        if (_scanCandidates.isEmpty) {
+          _connectionMessage = '未找到符合條件的裝置，請確認 IMU 已開機並靠近手機';
+        }
       });
       _logBle('掃描流程結束，已重置狀態');
     }
@@ -493,6 +532,10 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 停止掃描流程並視需求重置搜尋結果，避免背景掃描持續耗電
   Future<void> _stopScan({bool resetFoundDevice = false}) async {
     _logBle('停止掃描流程，reset=$resetFoundDevice');
+    if (_activeScanStopper != null && !_activeScanStopper!.isCompleted) {
+      // 若外部正在等待掃描結束，這裡主動完成等待，避免卡住 Future.any
+      _activeScanStopper!.complete();
+    }
     await _scanSubscription?.cancel();
     _scanSubscription = null;
     await FlutterBluePlus.stopScan();
@@ -1679,6 +1722,7 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 建構 IMU 連線卡片，提示使用者完成藍牙配對
   Widget _buildImuConnectionCard() {
     final bool connected = isImuConnected;
+    final bool hasCandidate = _foundDevice != null;
     final String displayName = connected
         ? _resolveDeviceName(_connectedDevice!)
         : (_foundDeviceName ?? 'IMU 裝置');
@@ -1777,7 +1821,8 @@ class _RecorderPageState extends State<RecorderPage> {
               ),
               const SizedBox(width: 12),
               FilledButton(
-                onPressed: connected || _isConnecting ? null : connectToImu,
+                onPressed:
+                    (connected || _isConnecting || !hasCandidate) ? null : connectToImu,
                 style: FilledButton.styleFrom(
                   backgroundColor: connected ? const Color(0xFF1E8E5A) : const Color(0xFF123B70),
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -1790,7 +1835,9 @@ class _RecorderPageState extends State<RecorderPage> {
                         child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                       )
                     : Text(
-                        connected ? '已連線' : (_foundDevice != null ? '配對裝置' : '搜尋中'),
+                        connected
+                            ? '已連線'
+                            : (hasCandidate ? '配對裝置' : '等待裝置'),
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
               ),
@@ -1833,6 +1880,10 @@ class _RecorderPageState extends State<RecorderPage> {
                 ),
             ],
           ),
+          if (!connected) ...[
+            const SizedBox(height: 20),
+            _buildScanCandidatesSection(),
+          ],
           if (connected) ...[
             const SizedBox(height: 20),
             const Divider(),
@@ -1848,6 +1899,129 @@ class _RecorderPageState extends State<RecorderPage> {
         ],
       ),
     );
+  }
+
+  /// 建構掃描結果列表，列出目前搜尋到的藍牙裝置供使用者挑選
+  Widget _buildScanCandidatesSection() {
+    if (_scanCandidates.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F8FB),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE1E8F0)),
+        ),
+        child: Text(
+          _isScanning
+              ? '正在掃描中，請稍候數秒以取得周邊裝置列表。'
+              : '尚未掃描到符合條件的裝置，請確認 IMU 已開機並靠近手機。',
+          style: const TextStyle(fontSize: 13, color: Color(0xFF7D8B9A)),
+        ),
+      );
+    }
+
+    final List<_ImuScanCandidate> entries = _scanCandidates.values.toList()
+      ..sort((a, b) {
+        if (a.matchesImuService != b.matchesImuService) {
+          return a.matchesImuService ? -1 : 1;
+        }
+        return b.rssi.compareTo(a.rssi);
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '掃描到的裝置',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF123B70),
+          ),
+        ),
+        const SizedBox(height: 12),
+        for (final candidate in entries) _buildScanCandidateTile(candidate),
+      ],
+    );
+  }
+
+  /// 建構單一掃描結果卡片，提供裝置資訊與選擇按鈕
+  Widget _buildScanCandidateTile(_ImuScanCandidate candidate) {
+    final bool isSelected =
+        _foundDevice?.remoteId == candidate.device.remoteId;
+    final bool matchesService = candidate.matchesImuService;
+    final Color borderColor = isSelected
+        ? const Color(0xFF123B70)
+        : (matchesService ? const Color(0xFF1E8E5A) : const Color(0xFFE1E8F0));
+    final Color iconColor = matchesService
+        ? const Color(0xFF1E8E5A)
+        : const Color(0xFF7D8B9A);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0xFFE8F0FF) : const Color(0xFFF9FBFD),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1.3),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            matchesService ? Icons.sensors : Icons.bluetooth_searching,
+            color: iconColor,
+            size: 28,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  candidate.displayName,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF123B70),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${matchesService ? '含 IMU 服務' : '未標示 IMU 服務'} · RSSI ${candidate.rssi} dBm',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '最後出現：${_formatTimeOfDay(candidate.lastSeen)}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF9AA8B6)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonal(
+            onPressed: _isConnecting ? null : () => _selectScanCandidate(candidate),
+            child: Text(isSelected ? '準備連線' : '選擇'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 設定使用者選取的藍牙裝置並更新提示文字
+  void _selectScanCandidate(_ImuScanCandidate candidate) {
+    if (_isConnecting) {
+      return; // 連線流程進行中時避免切換目標造成混亂
+    }
+    _logBle('使用者選取裝置：${candidate.displayName} (${candidate.device.remoteId.str})');
+    if (!mounted) return;
+    setState(() {
+      _foundDevice = candidate.device;
+      _foundDeviceName = candidate.displayName;
+      _lastRssi = candidate.rssi;
+      _connectionMessage = '已選擇 ${candidate.displayName}，請按下方按鈕開始配對';
+    });
   }
 
   /// 說明錄影流程的卡片，提醒使用者會切換到新畫面
@@ -1933,5 +2107,34 @@ class _RecorderPageState extends State<RecorderPage> {
         ),
       ),
     );
+  }
+}
+
+/// 代表一次掃描到的藍牙裝置資訊，便於建立列表顯示與更新判斷
+class _ImuScanCandidate {
+  final BluetoothDevice device; // 對應的藍牙裝置物件
+  final String displayName; // 顯示於 UI 的名稱
+  final int rssi; // 訊號強度，單位 dBm
+  final bool matchesImuService; // 是否包含 IMU 相關服務 UUID
+  final DateTime lastSeen; // 最近一次在掃描結果中出現的時間
+
+  const _ImuScanCandidate({
+    required this.device,
+    required this.displayName,
+    required this.rssi,
+    required this.matchesImuService,
+    required this.lastSeen,
+  });
+
+  /// 判斷是否需要以新的掃描結果覆蓋目前資料
+  bool shouldUpdate(_ImuScanCandidate other) {
+    if (other.matchesImuService != matchesImuService) {
+      return true;
+    }
+    if (other.rssi != rssi) {
+      return true;
+    }
+    // 若超過 1 秒未更新則刷新顯示時間，確保列表資訊保持即時
+    return other.lastSeen.difference(lastSeen).inSeconds.abs() >= 1;
   }
 }
