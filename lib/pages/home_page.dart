@@ -4,7 +4,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
+import 'recording_history_page.dart';
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
@@ -20,6 +22,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   // ---------- 狀態管理區 ----------
   int _currentIndex = 2; // 底部導覽預設聚焦在 Quick Start
+  final List<RecordingHistoryEntry> _recordingHistory = []; // 首頁內部維護的錄影紀錄
 
   // ---------- 方法區 ----------
   /// 建立統計資訊卡片，方便重複使用與維持一致風格
@@ -149,12 +152,104 @@ class _HomePageState extends State<HomePage> {
     if (index == 2) {
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => RecorderPage(cameras: widget.cameras),
+          builder: (_) => RecorderPage(
+            cameras: widget.cameras,
+            initialHistory: _recordingHistory,
+            onHistoryChanged: _handleHistoryUpdated,
+          ),
         ),
       );
       return;
     }
     setState(() => _currentIndex = index);
+  }
+
+  /// 接收錄影頁回傳的歷史紀錄，統一更新首頁資料來源
+  void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
+    setState(() {
+      _recordingHistory
+        ..clear()
+        ..addAll(entries);
+    });
+  }
+
+  /// 開啟獨立的錄影歷史頁面，讓使用者專注瀏覽過往影片
+  void _openRecordingHistoryPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecordingHistoryPage(entries: _recordingHistory),
+      ),
+    );
+  }
+
+  /// 建立首頁的錄影歷史快捷卡片，提供統計資訊與導覽按鈕
+  Widget _buildHistoryShortcutCard() {
+    final historyCount = _recordingHistory.length;
+    final latestEntry = historyCount > 0 ? _recordingHistory.first : null;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 5)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF123B70),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.video_library_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '錄影歷史',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF123B70),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      historyCount > 0
+                          ? '已累積 $historyCount 筆紀錄，最新一筆是第 ${latestEntry!.roundIndex} 輪。'
+                          : '尚未有錄影紀錄，完成錄影後可於此快速檢視。',
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF6F7B86), height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          FilledButton(
+            onPressed: _openRecordingHistoryPage,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1E8E5A),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: const Text(
+              '檢視完整錄影列表',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -435,6 +530,8 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
+            const SizedBox(height: 32),
+            _buildHistoryShortcutCard(),
             const SizedBox(height: 32),
           ],
         ),

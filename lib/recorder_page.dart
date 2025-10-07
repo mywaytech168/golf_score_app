@@ -1,21 +1,25 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'pages/recording_session_page.dart';
 import 'models/recording_history_entry.dart';
-import 'widgets/recording_history_sheet.dart';
 
 /// 錄影入口頁面：專責處理藍牙 IMU 配對與引導使用者前往錄影畫面
 class RecorderPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
+  final List<RecordingHistoryEntry> initialHistory; // 外部帶入的歷史紀錄
+  final ValueChanged<List<RecordingHistoryEntry>> onHistoryChanged; // 回傳更新後的歷史資料
 
-  const RecorderPage({super.key, required this.cameras});
+  const RecorderPage({
+    super.key,
+    required this.cameras,
+    required this.initialHistory,
+    required this.onHistoryChanged,
+  });
 
   @override
   State<RecorderPage> createState() => _RecorderPageState();
@@ -43,7 +47,8 @@ class _RecorderPageState extends State<RecorderPage> {
   final String _targetNameKeyword = 'TekSwing-IMU'; // 目標裝置名稱關鍵字
   final String _mockBatteryLevel = '82%'; // 假資料電量資訊（尚無實作藍牙服務）
   final String _mockFirmwareVersion = '韌體 1.0.3'; // 假資料韌體版本（待後續串接）
-  final List<RecordingHistoryEntry> _recordingHistory = []; // 累積曾經錄影的檔案資訊
+  late final List<RecordingHistoryEntry> _recordingHistory =
+      List<RecordingHistoryEntry>.from(widget.initialHistory); // 累積曾經錄影的檔案資訊
 
   // ---------- 生命週期 ----------
   @override
@@ -308,6 +313,9 @@ class _RecorderPageState extends State<RecorderPage> {
           }
         }
       });
+      widget.onHistoryChanged(
+        List<RecordingHistoryEntry>.from(_recordingHistory),
+      ); // 即時回傳最新清單給首頁同步顯示
     }
     setState(() => _isOpeningSession = false);
   }
@@ -673,170 +681,13 @@ class _RecorderPageState extends State<RecorderPage> {
             '若尚未連線 IMU，新的錄影畫面仍可啟動純錄影模式，稍後可再返回此頁重新配對。',
             style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// 建構錄影紀錄卡片，列出近期錄影檔案並支援快速播放
-  Widget _buildHistoryCard() {
-    final displayEntries = _recordingHistory.take(5).toList();
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 12, offset: Offset(0, 6)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                '曾經錄影紀錄',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF123B70),
-                ),
-              ),
-              TextButton(
-                onPressed: _recordingHistory.isEmpty ? null : _openHistorySheet,
-                child: const Text('檢視全部'),
-              ),
-            ],
+          SizedBox(height: 8),
+          Text(
+            '錄影完成後的歷史影片已移至首頁的「錄影歷史」按鈕中，方便集中管理。',
+            style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
           ),
-          const SizedBox(height: 12),
-          if (displayEntries.isEmpty)
-            const Text(
-              '目前尚無錄影紀錄，完成錄影後會顯示在此處。',
-              style: TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
-            )
-          else
-            ...displayEntries.map(
-              (entry) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: InkWell(
-                  onTap: () => _playRecordedEntry(entry),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF4F7FB),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF123B70),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Text(
-                            entry.roundIndex.toString(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                entry.displayTitle,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF123B70),
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${_formatHistoryTimestamp(entry.recordedAt)} · ${entry.durationSeconds} 秒 · ${entry.modeLabel}',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                entry.fileName,
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF9AA6B2)),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.play_arrow_rounded, color: Color(0xFF1E8E5A)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
-    );
-  }
-
-  /// 將日期時間格式化為簡潔字串，方便列表顯示
-  String _formatHistoryTimestamp(DateTime time) {
-    final month = time.month.toString().padLeft(2, '0');
-    final day = time.day.toString().padLeft(2, '0');
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '${time.year}/$month/$day $hour:$minute';
-  }
-
-  /// 檢視完整歷史列表，呼叫共用底部彈窗
-  Future<void> _openHistorySheet() {
-    return showRecordingHistorySheet(
-      context: context,
-      entries: _recordingHistory,
-      onPlayEntry: _playRecordedEntry,
-      onPickExternal: _pickAndPlayVideo,
-      title: '所有錄影紀錄',
-    );
-  }
-
-  /// 從資料夾挑選影片後播放，供使用者檢視舊檔案
-  Future<void> _pickAndPlayVideo() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      initialDirectory: '/storage/emulated/0/Download',
-    );
-
-    if (result != null && result.files.single.path != null) {
-      await _playVideoByPath(result.files.single.path!);
-    }
-  }
-
-  /// 播放錄影紀錄，若檔案不存在會提示錯誤訊息
-  Future<void> _playRecordedEntry(RecordingHistoryEntry entry) async {
-    await _playVideoByPath(entry.filePath, missingFileName: entry.fileName);
-  }
-
-  /// 依路徑開啟影片播放畫面，統一處理檔案檢查與錯誤提示
-  Future<void> _playVideoByPath(String path, {String? missingFileName}) async {
-    final file = File(path);
-    if (!await file.exists()) {
-      if (!mounted) return;
-      final name = missingFileName ?? path.split(RegExp(r'[\\/]')).last;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('找不到影片檔案 $name，請確認檔案是否已被移除。')),
-      );
-      return;
-    }
-
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: path)),
     );
   }
 
@@ -851,7 +702,6 @@ class _RecorderPageState extends State<RecorderPage> {
           _buildImuConnectionCard(),
           const SizedBox(height: 8),
           _buildRecordingGuideCard(),
-          _buildHistoryCard(),
         ],
       ),
       bottomNavigationBar: SafeArea(
