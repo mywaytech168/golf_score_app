@@ -940,41 +940,34 @@ class _RecorderPageState extends State<RecorderPage> {
         listenToUpdates && (characteristic.properties.notify || characteristic.properties.indicate);
 
     if (shouldListen) {
-      bool enableNotification = true;
-
       try {
         if (characteristic.descriptors.isEmpty) {
-          // ---------- 描述符缺失 ----------
-          // FlutterBluePlus 目前沒有額外探索描述符的 API，只能依賴裝置初次回報
-          _logBle(
-            '特徵 ${characteristic.uuid.str} 未回報描述符，可能無法開啟通知',
-          );
+          // ---------- 某些裝置不會回報描述符 ----------
+          // 仍強制嘗試開啟通知，避免因缺少 CCCD 而錯失資料
+          _logBle('特徵 ${characteristic.uuid.str} 未附帶描述符，改以直接開啟通知');
+        } else {
+          final hasCccd =
+              characteristic.descriptors.any((descriptor) => descriptor.uuid == _cccdUuid);
+          if (!hasCccd) {
+            // ---------- 找不到 CCCD ----------
+            // 仍嘗試開啟通知，同時輸出除錯資訊方便排查韌體設定
+            _logBle('裝置未回傳 CCCD，改以直接開啟通知：${characteristic.uuid.str}');
+          }
         }
 
-        final hasCccd =
-            characteristic.descriptors.any((descriptor) => descriptor.uuid == _cccdUuid);
-        if (!hasCccd) {
-          // ---------- 無法啟用通知 ----------
-          enableNotification = false;
-          _logBle('裝置未提供 CCCD，略過通知啟用：${characteristic.uuid.str}');
-        } else if (!characteristic.isNotifying) {
-          // ---------- 正式開啟通知 ----------
+        if (!characteristic.isNotifying) {
+          // ---------- 直接請求開啟通知 ----------
           await characteristic.setNotifyValue(true);
-          _logBle('成功開啟通知：${characteristic.uuid.str}');
+          _logBle('成功請求開啟通知：${characteristic.uuid.str}');
         } else {
-          // ---------- 避免重複設定 ----------
+          // ---------- 避免重複啟用 ----------
           _logBle('通知已開啟，略過重複設定：${characteristic.uuid.str}');
         }
       } catch (error, stackTrace) {
         // 若裝置暫不支援通知則忽略錯誤，改以初始讀取補救
-        enableNotification = false;
+        shouldListen = false;
         _logBle('開啟通知失敗：${characteristic.uuid.str}，原因：$error',
             error: error, stackTrace: stackTrace);
-      }
-
-      if (!enableNotification) {
-        // ---------- 無法啟用通知時直接跳出監聽 ----------
-        shouldListen = false;
       }
     }
 
@@ -1064,6 +1057,10 @@ class _RecorderPageState extends State<RecorderPage> {
     if (sample == null || !mounted) {
       return;
     }
+
+    _logBle(
+      "Game Rotation Vector 更新：seq=${sample['seq']}、i=${sample['i']}、j=${sample['j']}、k=${sample['k']}、real=${sample['real']}",
+    );
 
     setState(() {
       _latestGameRotationVector = sample;
