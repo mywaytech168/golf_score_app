@@ -1,3 +1,5 @@
+import 'dart:io'; // 判斷平台以動態決定權限清單
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
@@ -22,19 +24,17 @@ class _LoginPageState extends State<LoginPage> {
   bool _rememberMe = true; // 記住使用者選項
   bool _isObscure = true; // 控制密碼顯示與否
   bool _hasRequestedInitialPermissions = false; // 避免重複觸發首次權限請求
+  late final Map<Permission, String> _blePermissions; // 依照平台動態產生的權限顯示名稱
   Map<Permission, PermissionStatus> _permissionStatuses = {}; // 儲存各項權限授權狀態
-
-  // 將需要的權限與顯示名稱整理成 map，方便統一管理與顯示
-  final Map<Permission, String> _blePermissions = {
-    Permission.bluetooth: '藍牙使用',
-    Permission.bluetoothScan: '藍牙掃描',
-    Permission.bluetoothConnect: '藍牙連線',
-    Permission.locationWhenInUse: '定位',
-  };
 
   @override
   void initState() {
     super.initState();
+    _blePermissions = _buildRequiredPermissions(); // 依平台建立權限清單，避免出現無法授權的項目
+    _permissionStatuses = {
+      for (final permission in _blePermissions.keys)
+        permission: PermissionStatus.denied, // 初始化為未授權，確保提示卡片顯示狀態
+    };
     // 於元件建立後立即排程權限請求，確保第一次進入登入頁面就彈出系統授權視窗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerInitialPermissionRequest();
@@ -103,6 +103,7 @@ class _LoginPageState extends State<LoginPage> {
     final updatedStatuses = <Permission, PermissionStatus>{};
 
     for (final entry in _blePermissions.entries) {
+      // 使用 request() 以觸發系統授權視窗，並紀錄回傳結果
       final status = await entry.key.request();
       updatedStatuses[entry.key] = status;
     }
@@ -162,10 +163,49 @@ class _LoginPageState extends State<LoginPage> {
 
   /// 判斷所有需要的權限是否都已授權
   bool get _arePermissionsAllGranted {
-    if (_permissionStatuses.isEmpty) {
+    if (_blePermissions.isEmpty) {
+      return true; // 當前平台不需額外權限時直接視為通過
+    }
+
+    if (_permissionStatuses.length < _blePermissions.length) {
       return false; // 尚未檢查過視為未授權
     }
-    return _permissionStatuses.values.every((status) => status.isGranted);
+    return _permissionStatuses.values.every(_isStatusEffectivelyGranted);
+  }
+
+  /// 判斷權限狀態是否等同於已授權（含 iOS limited / provisional）
+  bool _isStatusEffectivelyGranted(PermissionStatus? status) {
+    if (status == null) {
+      return false;
+    }
+    if (status.isGranted) {
+      return true;
+    }
+    return status == PermissionStatus.limited || status == PermissionStatus.provisional;
+  }
+
+  /// 依照平台與系統版本決定需要請求的權限項目
+  Map<Permission, String> _buildRequiredPermissions() {
+    // Android 需請求附近裝置（掃描 / 連線）與定位權限；iOS 則需藍牙與定位
+    if (Platform.isAndroid) {
+      return {
+        Permission.bluetoothScan: '藍牙掃描',
+        Permission.bluetoothConnect: '藍牙連線',
+        Permission.locationWhenInUse: '定位',
+      };
+    }
+
+    if (Platform.isIOS) {
+      return {
+        Permission.bluetooth: '藍牙使用',
+        Permission.locationWhenInUse: '定位',
+      };
+    }
+
+    // 其他平台僅保留定位權限，避免出現無法處理的藍牙授權項目
+    return {
+      Permission.locationWhenInUse: '定位',
+    };
   }
 
   // ---------- UI 建構區 ----------
@@ -370,7 +410,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget _buildPermissionReminder(ThemeData theme) {
     final chips = _blePermissions.entries.map((entry) {
       final status = _permissionStatuses[entry.key];
-      final granted = status?.isGranted ?? false;
+      final granted = _isStatusEffectivelyGranted(status);
       return Chip(
         avatar: Icon(
           granted ? Icons.check_circle : Icons.error_outline,

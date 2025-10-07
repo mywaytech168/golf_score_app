@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer; // 專責紀錄藍牙偵錯訊息
+import 'dart:io'; // 依平台動態決定權限需求
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -53,6 +54,7 @@ class _RecorderPageState extends State<RecorderPage> {
   bool _isConnecting = false; // 是否正處於連線流程
   bool _isOpeningSession = false; // 是否正在切換至錄影頁面
   bool _permissionsReady = false; // 記錄藍牙權限是否已完整授權
+  late final Map<Permission, String> _runtimeBlePermissions; // 不同平台需申請的權限列表
   int _selectedRounds = 5; // 使用者預設要錄影的次數
   int _recordingDurationSeconds = 15; // 使用者預設每次錄影長度（秒）
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
@@ -142,6 +144,8 @@ class _RecorderPageState extends State<RecorderPage> {
   @override
   void initState() {
     super.initState();
+    _runtimeBlePermissions = _resolveRuntimeBlePermissions(); // 先針對平台建立權限清單
+    _permissionsReady = _runtimeBlePermissions.isEmpty; // 若平台無需額外權限則直接視為已備妥
     initBluetooth(); // 啟動藍牙權限申請與自動搜尋流程
   }
 
@@ -225,16 +229,15 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 申請藍牙與定位權限，避免掃描過程被拒
   Future<bool> _requestBluetoothPermissions() async {
-    final permissions = <Permission, String>{
-      Permission.bluetooth: 'BLUETOOTH',
-      Permission.bluetoothScan: 'BLUETOOTH_SCAN',
-      Permission.bluetoothConnect: 'BLUETOOTH_CONNECT',
-      Permission.locationWhenInUse: 'ACCESS_FINE_LOCATION',
-    };
+    if (_runtimeBlePermissions.isEmpty) {
+      _logBle('當前平台無需額外藍牙權限，直接進入掃描流程');
+      _permissionsReady = true;
+      return true;
+    }
 
     bool allGranted = true; // 記錄是否全部授權
 
-    for (final entry in permissions.entries) {
+    for (final entry in _runtimeBlePermissions.entries) {
       final permission = entry.key;
       final label = entry.value;
       final status = await permission.request();
@@ -242,7 +245,7 @@ class _RecorderPageState extends State<RecorderPage> {
       // 詳細紀錄授權結果，方便在 console 中比對裝置設定
       _logBle('權限請求結果：$label -> $status');
 
-      if (!status.isGranted) {
+      if (!_isPermissionStatusGranted(status)) {
         allGranted = false;
 
         if (status.isPermanentlyDenied) {
@@ -257,6 +260,36 @@ class _RecorderPageState extends State<RecorderPage> {
 
     _permissionsReady = allGranted;
     return allGranted;
+  }
+
+  /// 依平台回傳需要申請的權限清單，避免要求不存在的藍牙權限
+  Map<Permission, String> _resolveRuntimeBlePermissions() {
+    if (Platform.isAndroid) {
+      return {
+        Permission.bluetoothScan: 'BLUETOOTH_SCAN',
+        Permission.bluetoothConnect: 'BLUETOOTH_CONNECT',
+        Permission.locationWhenInUse: 'ACCESS_FINE_LOCATION',
+      };
+    }
+
+    if (Platform.isIOS) {
+      return {
+        Permission.bluetooth: 'BLUETOOTH',
+        Permission.locationWhenInUse: 'LOCATION_WHEN_IN_USE',
+      };
+    }
+
+    return {
+      Permission.locationWhenInUse: 'ACCESS_FINE_LOCATION',
+    };
+  }
+
+  /// 將 limited / provisional 等同於已允許，避免誤判為拒絕
+  bool _isPermissionStatusGranted(PermissionStatus status) {
+    if (status.isGranted) {
+      return true;
+    }
+    return status == PermissionStatus.limited || status == PermissionStatus.provisional;
   }
 
   // ---------- 方法區 ----------
