@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
 
 import 'home_page.dart';
 
@@ -31,18 +32,82 @@ class _LoginPageState extends State<LoginPage> {
 
   // ---------- 方法區 ----------
   /// 當使用者按下登入按鈕時觸發，先驗證資料再導向首頁
-  void _handleLogin() {
-    if (_formKey.currentState?.validate() ?? false) {
-      // 驗證成功後直接導向首頁並帶入鏡頭資訊
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => HomePage(
-            userEmail: _emailController.text,
-            cameras: widget.cameras,
-          ),
-        ),
-      );
+  Future<void> _handleLogin() async {
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return; // 若表單驗證失敗則直接結束
     }
+
+    // 登入前先要求使用者授權藍牙與定位權限，確保後續流程正常運作
+    final permissionsGranted = await _ensureBlePermissions();
+    if (!mounted || !permissionsGranted) {
+      return; // 權限未完整授權時暫停導向首頁
+    }
+
+    // 權限與驗證皆通過後才導向首頁並帶入鏡頭資訊
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => HomePage(
+          userEmail: _emailController.text,
+          cameras: widget.cameras,
+        ),
+      ),
+    );
+  }
+
+  /// 於首次登入時請求藍牙／定位權限，並在拒絕時顯示操作提示
+  Future<bool> _ensureBlePermissions() async {
+    final permissions = <Permission, String>{
+      Permission.bluetooth: '藍牙使用權限',
+      Permission.bluetoothScan: '藍牙掃描權限',
+      Permission.bluetoothConnect: '藍牙連線權限',
+      Permission.locationWhenInUse: '定位權限',
+    };
+
+    bool allGranted = true; // 紀錄授權是否完整
+
+    for (final entry in permissions.entries) {
+      final status = await entry.key.request();
+      if (!status.isGranted) {
+        allGranted = false;
+      }
+    }
+
+    if (allGranted) {
+      return true; // 全部授權則允許進入首頁
+    }
+
+    if (!mounted) {
+      return false;
+    }
+
+    // 權限未取得時提示使用者前往系統設定開啟
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('需要藍牙與定位權限'),
+          content: const Text('請先開啟藍牙與定位權限，以便搜尋並連線 IMU 裝置。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('稍後再說'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await openAppSettings(); // 引導使用者前往系統設定頁面
+                // 關閉提示視窗以返回登入畫面
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
+              },
+              child: const Text('前往設定'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return false;
   }
 
   // ---------- UI 建構區 ----------
@@ -190,7 +255,7 @@ class _LoginPageState extends State<LoginPage> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: _handleLogin,
+                              onPressed: () => _handleLogin(), // 透過匿名函式呼叫非同步登入流程
                               style: ElevatedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 backgroundColor: const Color(0xFF1E8E5A),
