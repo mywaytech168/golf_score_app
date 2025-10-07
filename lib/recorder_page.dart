@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer; // 專責紀錄藍牙偵錯訊息
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +28,16 @@ class RecorderPage extends StatefulWidget {
 }
 
 class _RecorderPageState extends State<RecorderPage> {
+  void _logBle(String message, {Object? error, StackTrace? stackTrace}) {
+    // 集中處理藍牙相關紀錄，方便於 console 追蹤 bug
+    developer.log(
+      message,
+      name: 'BLE',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
+
   // ---------- 狀態變數區 ----------
   StreamSubscription<List<ScanResult>>? _scanSubscription; // 藍牙掃描訂閱
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription; // 藍牙狀態監聽
@@ -145,6 +156,7 @@ class _RecorderPageState extends State<RecorderPage> {
   // ---------- 初始化流程 ----------
   /// 初始化藍牙狀態與權限，確保錄影前完成 IMU 配對
   Future<void> initBluetooth() async {
+    _logBle('初始化藍牙流程');
     await _requestBluetoothPermissions();
 
     // 監聽手機藍牙開關狀態，並視情況重新觸發掃描
@@ -158,6 +170,7 @@ class _RecorderPageState extends State<RecorderPage> {
           _connectionMessage = '請開啟藍牙以搜尋裝置';
         }
       });
+      _logBle('藍牙狀態變更：$state');
 
       if (state == BluetoothAdapterState.on && !isImuConnected && !_isScanning && !_isConnecting) {
         scanForImu();
@@ -167,9 +180,12 @@ class _RecorderPageState extends State<RecorderPage> {
     final initialState = await FlutterBluePlus.adapterState.first;
     if (!mounted) return;
     setState(() => _adapterState = initialState);
+    _logBle('取得當前藍牙狀態：$initialState');
 
     final connectedDevices = FlutterBluePlus.connectedDevices;
     if (!mounted) return;
+
+    _logBle('系統回報已連線裝置數量：${connectedDevices.length}');
 
     for (final device in connectedDevices) {
       if (_matchTarget(device.platformName)) {
@@ -182,6 +198,7 @@ class _RecorderPageState extends State<RecorderPage> {
           _connectionState = BluetoothConnectionState.connected;
           _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
         });
+        _logBle('啟動時即偵測到已連線裝置：${_resolveDeviceName(device)}');
         return;
       }
     }
@@ -212,6 +229,7 @@ class _RecorderPageState extends State<RecorderPage> {
       setState(() {
         _connectionMessage = '請先開啟藍牙功能後再進行搜尋';
       });
+      _logBle('掃描中止：手機藍牙尚未開啟');
       return;
     }
 
@@ -222,6 +240,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _isScanning = true;
       _connectionMessage = '以低延遲模式掃描 $_targetNameKeyword...';
     });
+    _logBle('開始掃描目標裝置，關鍵字：$_targetNameKeyword');
 
     final completer = Completer<void>();
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
@@ -245,6 +264,7 @@ class _RecorderPageState extends State<RecorderPage> {
             _lastRssi = result.rssi;
             _connectionMessage = '偵測到 $displayName，準備建立安全連線';
           });
+          _logBle('已偵測到目標裝置：$displayName，RSSI：${result.rssi}');
           if (!completer.isCompleted) {
             completer.complete();
           }
@@ -256,6 +276,7 @@ class _RecorderPageState extends State<RecorderPage> {
       setState(() {
         _connectionMessage = '搜尋失敗：$error';
       });
+      _logBle('掃描流程發生錯誤', error: error);
       if (!completer.isCompleted) {
         completer.completeError(error);
       }
@@ -268,6 +289,7 @@ class _RecorderPageState extends State<RecorderPage> {
         androidScanMode: AndroidScanMode.lowLatency,
         withServices: [_nordicUartServiceUuid],
       );
+      _logBle('已向系統請求開始掃描，等待裝置回應');
 
       // 最多等待 10 秒取得第一筆目標裝置，逾時則回報失敗
       await completer.future.timeout(
@@ -276,19 +298,22 @@ class _RecorderPageState extends State<RecorderPage> {
           if (!completer.isCompleted) {
             completer.completeError('未在時間內找到裝置');
           }
+          _logBle('掃描逾時：未在 10 秒內找到符合條件的裝置');
         },
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
       if (!mounted) return;
       setState(() {
         _connectionMessage = '無法開始掃描或找不到裝置：$e';
       });
+      _logBle('掃描流程例外：$e', error: e, stackTrace: stackTrace);
     } finally {
       await _stopScan();
       if (!mounted) return;
       setState(() {
         _isScanning = false;
       });
+      _logBle('掃描流程結束，已重置狀態');
     }
   }
 
@@ -307,12 +332,14 @@ class _RecorderPageState extends State<RecorderPage> {
       _isConnecting = true;
       _connectionMessage = '正在與 ${_foundDeviceName ?? _resolveDeviceName(target)} 建立連線...';
     });
+    _logBle('準備連線至裝置：${_foundDeviceName ?? _resolveDeviceName(target)}');
 
     try {
       // 先嘗試中斷既有連線，確保流程以乾淨狀態開始
       await target.disconnect();
     } catch (_) {
       // 若裝置原本未連線會拋錯，忽略即可
+      _logBle('預斷線時裝置可能未連線，忽略錯誤');
     }
 
     try {
@@ -320,17 +347,21 @@ class _RecorderPageState extends State<RecorderPage> {
         timeout: const Duration(seconds: 12),
         autoConnect: false,
       );
+      _logBle('已送出連線請求，等待裝置回覆');
 
       // 依 Nordic 流程完成 GATT 初始化：等待真正連線並探索服務
       await target.connectionState.firstWhere(
         (state) => state == BluetoothConnectionState.connected,
       );
+      _logBle('裝置狀態已回報連線，開始探索服務');
       final services = await target.discoverServices();
 
       try {
         await target.requestMtu(247); // 嘗試提升 MTU 以利後續傳輸
-      } catch (_) {
+        _logBle('MTU 調整成功，已設定為 247');
+      } catch (error, stackTrace) {
         // 部分裝置不支援 MTU 調整，忽略錯誤即可
+        _logBle('MTU 調整失敗，裝置可能不支援：$error', error: error, stackTrace: stackTrace);
       }
 
       _connectedDevice = target;
@@ -340,23 +371,27 @@ class _RecorderPageState extends State<RecorderPage> {
       setState(() {
         _connectionMessage = '已連線至 ${_resolveDeviceName(target)}，可開始錄影';
       });
-    } catch (e) {
+      _logBle('成功連線並完成服務初始化，裝置：${_resolveDeviceName(target)}');
+    } catch (e, stackTrace) {
       if (!mounted) return;
       setState(() {
         _connectionMessage = '連線流程失敗：$e';
         _connectedDevice = null;
       });
+      _logBle('連線流程發生例外：$e', error: e, stackTrace: stackTrace);
       await _restartScanWithBackoff();
     } finally {
       if (!mounted) return;
       setState(() {
         _isConnecting = false;
       });
+      _logBle('連線流程結束，已更新旗標狀態');
     }
   }
 
   /// 停止掃描流程並視需求重置搜尋結果，避免背景掃描持續耗電
   Future<void> _stopScan({bool resetFoundDevice = false}) async {
+    _logBle('停止掃描流程，reset=$resetFoundDevice');
     await _scanSubscription?.cancel();
     _scanSubscription = null;
     await FlutterBluePlus.stopScan();
@@ -364,20 +399,25 @@ class _RecorderPageState extends State<RecorderPage> {
       _foundDevice = null;
       _foundDeviceName = null;
       _lastRssi = null;
+      _logBle('已清除先前掃描結果');
     }
   }
 
   /// 掃描逾時或連線失敗時等待片刻再重試，模擬 Nordic 範例的退避策略
   Future<void> _restartScanWithBackoff() async {
+    _logBle('啟動退避掃描策略，等待 2 秒後重試');
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted || _isScanning || _isConnecting) {
+      _logBle('退避結束但目前無法重新掃描，mounted=$mounted、isScanning=$_isScanning、isConnecting=$_isConnecting');
       return;
     }
+    _logBle('重新啟動掃描流程');
     await scanForImu();
   }
 
   /// 清除目前所有藍牙相關訂閱與狀態，確保重新連線時不會殘留舊資料
   Future<void> _clearImuSession({bool resetData = false}) async {
+    _logBle('清理 IMU 連線會話，resetData=$resetData');
     await _cancelNotificationSubscriptions();
     _resetCharacteristicReferences();
     if (resetData && !mounted) {
@@ -387,6 +427,7 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 逐一取消感測特徵的訂閱監聽，避免背景串流持續觸發
   Future<void> _cancelNotificationSubscriptions() async {
+    _logBle('取消所有感測通知訂閱，共 ${_notificationSubscriptions.length} 筆');
     for (final subscription in _notificationSubscriptions) {
       await subscription.cancel();
     }
@@ -395,6 +436,7 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 將所有特徵引用歸零，避免誤用已經失效的 characteristic 物件
   void _resetCharacteristicReferences() {
+    _logBle('重置所有特徵引用，避免使用到舊連線物件');
     _linearAccelerationCharacteristic = null;
     _gameRotationVectorCharacteristic = null;
     _buttonNotifyCharacteristic = null;
@@ -417,6 +459,7 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 重置所有感測顯示資料，讓 UI 反映目前沒有有效連線的狀態
   void _resetImuDataState() {
+    _logBle('重置 IMU 顯示資料，等待重新連線');
     _latestLinearAcceleration = null;
     _latestGameRotationVector = null;
     _buttonStatusText = '尚未接收到按鈕事件';
@@ -452,6 +495,7 @@ class _RecorderPageState extends State<RecorderPage> {
           _connectedDevice = device;
           _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
         });
+        _logBle('裝置持續回報連線狀態：${_resolveDeviceName(device)}');
         return;
       }
 
@@ -464,6 +508,7 @@ class _RecorderPageState extends State<RecorderPage> {
           _connectionMessage = '裝置已斷線，稍後自動重新搜尋';
           _resetImuDataState();
         });
+        _logBle('裝置連線中斷，準備重新掃描：${device.remoteId.str}');
         _restartScanWithBackoff();
         return;
       }
@@ -471,6 +516,7 @@ class _RecorderPageState extends State<RecorderPage> {
       setState(() {
         _connectionState = state;
       });
+      _logBle('裝置回報其他狀態：$state');
     });
   }
 
@@ -485,71 +531,108 @@ class _RecorderPageState extends State<RecorderPage> {
       _resetImuDataState();
     }
 
+    _logBle('開始建立 IMU 服務訂閱，共取得 ${services.length} 組服務');
+
     for (final service in services) {
       if (service.uuid == _serviceBno086Uuid) {
+        _logBle('匹配到 BNO086 感測服務');
         for (final characteristic in service.characteristics) {
           if (characteristic.uuid == _charLinearAccelerationUuid) {
             _linearAccelerationCharacteristic = characteristic;
+            _logBle('已綁定線性加速度特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charGameRotationVectorUuid) {
             _gameRotationVectorCharacteristic = characteristic;
+            _logBle('已綁定 Game Rotation Vector 特徵：${characteristic.uuid.str}');
           }
         }
       } else if (service.uuid == _serviceButtonUuid) {
+        _logBle('匹配到按鈕事件服務');
         for (final characteristic in service.characteristics) {
           if (characteristic.uuid == _charButtonNotifyUuid) {
             _buttonNotifyCharacteristic = characteristic;
+            _logBle('已綁定按鈕通知特徵：${characteristic.uuid.str}');
           }
         }
       } else if (service.uuid == _serviceMotorUuid) {
+        _logBle('匹配到馬達控制服務');
         for (final characteristic in service.characteristics) {
           if (characteristic.uuid == _charMotorToggleUuid) {
             _motorControlCharacteristic = characteristic;
+            _logBle('已綁定馬達控制特徵：${characteristic.uuid.str}');
           }
         }
       } else if (service.uuid == _serviceBatteryUuid) {
+        _logBle('匹配到電池狀態服務');
         for (final characteristic in service.characteristics) {
           if (characteristic.uuid == _charBatteryLevelUuid) {
             _batteryLevelCharacteristic = characteristic;
+            _logBle('已綁定電量特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charBatteryVoltageUuid) {
             _batteryVoltageCharacteristic = characteristic;
+            _logBle('已綁定電壓特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charBatteryChargeCurrentUuid) {
             _batteryChargeCurrentCharacteristic = characteristic;
+            _logBle('已綁定充電電流特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charBatteryTemperatureUuid) {
             _batteryTemperatureCharacteristic = characteristic;
+            _logBle('已綁定電池溫度特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charBatteryRemainingUuid) {
             _batteryRemainingCharacteristic = characteristic;
+            _logBle('已綁定剩餘電量特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charBatteryTimeToEmptyUuid) {
             _batteryTimeToEmptyCharacteristic = characteristic;
+            _logBle('已綁定預估用完時間特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charBatteryTimeToFullUuid) {
             _batteryTimeToFullCharacteristic = characteristic;
+            _logBle('已綁定預估充滿時間特徵：${characteristic.uuid.str}');
           }
         }
       } else if (service.uuid == _serviceDeviceInfoUuid) {
+        _logBle('匹配到裝置資訊服務');
         for (final characteristic in service.characteristics) {
           if (characteristic.uuid == _charDeviceModelUuid) {
             _deviceModelCharacteristic = characteristic;
+            _logBle('已綁定型號資訊特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charDeviceSerialUuid) {
             _deviceSerialCharacteristic = characteristic;
+            _logBle('已綁定序號資訊特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charFirmwareRevisionUuid) {
             _firmwareRevisionCharacteristic = characteristic;
+            _logBle('已綁定韌體版本特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charHardwareRevisionUuid) {
             _hardwareRevisionCharacteristic = characteristic;
+            _logBle('已綁定硬體版本特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charSoftwareRevisionUuid) {
             _softwareRevisionCharacteristic = characteristic;
+            _logBle('已綁定軟體版本特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charManufacturerUuid) {
             _manufacturerCharacteristic = characteristic;
+            _logBle('已綁定製造商資訊特徵：${characteristic.uuid.str}');
           }
         }
       } else if (service.uuid == _serviceDeviceNameUuid) {
+        _logBle('匹配到自訂名稱服務');
         for (final characteristic in service.characteristics) {
           if (characteristic.uuid == _charDeviceNameConfigUuid) {
             _deviceNameCharacteristic = characteristic;
+            _logBle('已綁定自訂名稱特徵：${characteristic.uuid.str}');
           }
         }
       }
     }
 
+    if (_linearAccelerationCharacteristic == null ||
+        _gameRotationVectorCharacteristic == null ||
+        _buttonNotifyCharacteristic == null) {
+      _logBle('關鍵感測特徵缺失，請確認韌體是否支援最新規格', error: {
+        'linear': _linearAccelerationCharacteristic != null,
+        'rotation': _gameRotationVectorCharacteristic != null,
+        'button': _buttonNotifyCharacteristic != null,
+      });
+    }
+
     if (_linearAccelerationCharacteristic != null) {
+      _logBle('準備訂閱線性加速度通知');
       await _initCharacteristic(
         characteristic: _linearAccelerationCharacteristic!,
         onData: _handleLinearAccelerationPacket,
@@ -557,6 +640,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_gameRotationVectorCharacteristic != null) {
+      _logBle('準備訂閱 Game Rotation Vector 通知');
       await _initCharacteristic(
         characteristic: _gameRotationVectorCharacteristic!,
         onData: _handleGameRotationVectorPacket,
@@ -564,6 +648,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_buttonNotifyCharacteristic != null) {
+      _logBle('準備訂閱按鈕事件通知');
       await _initCharacteristic(
         characteristic: _buttonNotifyCharacteristic!,
         onData: _handleButtonPacket,
@@ -573,6 +658,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryLevelCharacteristic != null) {
+      _logBle('準備讀取電池電量資訊');
       await _initCharacteristic(
         characteristic: _batteryLevelCharacteristic!,
         onData: _updateBatteryLevel,
@@ -581,6 +667,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryVoltageCharacteristic != null) {
+      _logBle('準備讀取電池電壓資訊');
       await _initCharacteristic(
         characteristic: _batteryVoltageCharacteristic!,
         onData: _updateBatteryVoltage,
@@ -589,6 +676,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryChargeCurrentCharacteristic != null) {
+      _logBle('準備讀取充電電流資訊');
       await _initCharacteristic(
         characteristic: _batteryChargeCurrentCharacteristic!,
         onData: _updateBatteryChargeCurrent,
@@ -597,6 +685,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryTemperatureCharacteristic != null) {
+      _logBle('準備讀取電池溫度資訊');
       await _initCharacteristic(
         characteristic: _batteryTemperatureCharacteristic!,
         onData: _updateBatteryTemperature,
@@ -605,6 +694,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryRemainingCharacteristic != null) {
+      _logBle('準備讀取剩餘電量資訊');
       await _initCharacteristic(
         characteristic: _batteryRemainingCharacteristic!,
         onData: _updateBatteryRemaining,
@@ -613,6 +703,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryTimeToEmptyCharacteristic != null) {
+      _logBle('準備讀取預估用完時間資訊');
       await _initCharacteristic(
         characteristic: _batteryTimeToEmptyCharacteristic!,
         onData: _updateBatteryTimeToEmpty,
@@ -621,6 +712,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (_batteryTimeToFullCharacteristic != null) {
+      _logBle('準備讀取預估充滿時間資訊');
       await _initCharacteristic(
         characteristic: _batteryTimeToFullCharacteristic!,
         onData: _updateBatteryTimeToFull,
@@ -628,30 +720,51 @@ class _RecorderPageState extends State<RecorderPage> {
       );
     }
 
+    if (_deviceModelCharacteristic != null) {
+      _logBle('準備讀取裝置型號資訊');
+    }
     await _readAndAssignString(
       _deviceModelCharacteristic,
       (value) => _deviceModelName = value,
     );
+    if (_deviceSerialCharacteristic != null) {
+      _logBle('準備讀取序號資訊');
+    }
     await _readAndAssignString(
       _deviceSerialCharacteristic,
       (value) => _deviceSerialNumber = value,
     );
+    if (_firmwareRevisionCharacteristic != null) {
+      _logBle('準備讀取韌體版本');
+    }
     await _readAndAssignString(
       _firmwareRevisionCharacteristic,
       (value) => _firmwareRevision = value,
     );
+    if (_hardwareRevisionCharacteristic != null) {
+      _logBle('準備讀取硬體版本');
+    }
     await _readAndAssignString(
       _hardwareRevisionCharacteristic,
       (value) => _hardwareRevision = value,
     );
+    if (_softwareRevisionCharacteristic != null) {
+      _logBle('準備讀取軟體版本');
+    }
     await _readAndAssignString(
       _softwareRevisionCharacteristic,
       (value) => _softwareRevision = value,
     );
+    if (_manufacturerCharacteristic != null) {
+      _logBle('準備讀取製造商資訊');
+    }
     await _readAndAssignString(
       _manufacturerCharacteristic,
       (value) => _manufacturerName = value,
     );
+    if (_deviceNameCharacteristic != null) {
+      _logBle('準備讀取自訂名稱資訊');
+    }
     await _readAndAssignString(
       _deviceNameCharacteristic,
       (value) => _customDeviceName = value,
@@ -668,8 +781,10 @@ class _RecorderPageState extends State<RecorderPage> {
     if (listenToUpdates && (characteristic.properties.notify || characteristic.properties.indicate)) {
       try {
         await characteristic.setNotifyValue(true);
-      } catch (_) {
+        _logBle('成功開啟通知：${characteristic.uuid.str}');
+      } catch (error, stackTrace) {
         // 若裝置暫不支援通知則忽略錯誤
+        _logBle('開啟通知失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
       }
       final subscription = characteristic.lastValueStream.listen(
         onData,
@@ -678,6 +793,7 @@ class _RecorderPageState extends State<RecorderPage> {
           setState(() {
             _connectionMessage = '讀取 ${characteristic.uuid.str} 時發生錯誤：$error';
           });
+          _logBle('特徵通知流錯誤：${characteristic.uuid.str}，錯誤：$error', error: error);
         },
       );
       _notificationSubscriptions.add(subscription);
@@ -689,8 +805,10 @@ class _RecorderPageState extends State<RecorderPage> {
         if (value.isNotEmpty) {
           onData(value);
         }
-      } catch (_) {
+        _logBle('已讀取初始值：${characteristic.uuid.str}，長度：${value.length}');
+      } catch (error, stackTrace) {
         // 初始讀取失敗時暫不處理，等待後續通知補上資料
+        _logBle('初始讀取失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
       }
     }
   }
@@ -772,6 +890,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final clickTimes = (raw >> 4) & 0x0F;
     final eventCode = raw & 0x0F;
     final description = _describeButtonEvent(eventCode);
+    _logBle('接收到按鈕事件：code=$eventCode、click=$clickTimes、raw=${value.first}');
     if (!mounted) return;
     setState(() {
       _buttonClickTimes = clickTimes;
@@ -899,6 +1018,7 @@ class _RecorderPageState extends State<RecorderPage> {
     void Function(String value) assign,
   ) async {
     if (characteristic == null || !characteristic.properties.read) {
+      _logBle('跳過讀取字串：特徵不存在或不可讀 ${characteristic?.uuid.str ?? 'null'}');
       return;
     }
     try {
@@ -908,8 +1028,10 @@ class _RecorderPageState extends State<RecorderPage> {
       setState(() {
         assign(text);
       });
-    } catch (_) {
+      _logBle('成功讀取字串特徵：${characteristic.uuid.str}，內容：$text');
+    } catch (error, stackTrace) {
       // 裝置若暫時無法讀取字串則忽略錯誤
+      _logBle('讀取字串特徵失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
     }
   }
 
