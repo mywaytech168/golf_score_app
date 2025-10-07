@@ -45,6 +45,8 @@ class _RecorderPageState extends State<RecorderPage> {
   int? _lastRssi; // 紀錄訊號強度供顯示
   String? _foundDeviceName; // 掃描到的裝置名稱
   final String _targetNameKeyword = 'TekSwing-IMU'; // 目標裝置名稱關鍵字
+  final Guid _nordicUartServiceUuid =
+      Guid('6E400001-B5A3-F393-E0A9-E50E24DCCA9E'); // 依 Nordic UART 定義的服務 UUID
   final String _mockBatteryLevel = '82%'; // 假資料電量資訊（尚無實作藍牙服務）
   final String _mockFirmwareVersion = '韌體 1.0.3'; // 假資料韌體版本（待後續串接）
   late final List<RecordingHistoryEntry> _recordingHistory =
@@ -127,21 +129,27 @@ class _RecorderPageState extends State<RecorderPage> {
   // ---------- 方法區 ----------
   /// 掃描 TekSwing IMU 裝置並更新顯示資訊
   Future<void> scanForImu() async {
-    await _scanSubscription?.cancel();
-    await FlutterBluePlus.stopScan();
+    if (_adapterState != BluetoothAdapterState.on) {
+      // 若藍牙尚未開啟則優先提示，避免重複觸發掃描與錯誤訊息
+      if (!mounted) return;
+      setState(() {
+        _connectionMessage = '請先開啟藍牙功能後再進行搜尋';
+      });
+      return;
+    }
+
+    await _stopScan(resetFoundDevice: true); // 先停止前一次掃描，遵循 Nordic 範例先清除舊狀態
 
     if (!mounted) return;
     setState(() {
       _isScanning = true;
-      _foundDevice = null;
-      _foundDeviceName = null;
-      _lastRssi = null;
-      _connectionMessage = '搜尋 $_targetNameKeyword 裝置中...';
+      _connectionMessage = '以低延遲模式掃描 $_targetNameKeyword...';
     });
 
+    final completer = Completer<void>();
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
-      if (!mounted || _foundDevice != null) {
-        return;
+      if (!mounted || _foundDevice != null || _isConnecting) {
+        return; // 若已找到裝置或正在連線則忽略後續結果
       }
 
       for (final result in results) {
@@ -152,31 +160,54 @@ class _RecorderPageState extends State<RecorderPage> {
             : (advertisementName.isNotEmpty ? advertisementName : _targetNameKeyword);
 
         if (_matchTarget(displayName)) {
+          if (!mounted) return;
           setState(() {
+            // Nordic Library 建議選到目標後即停止掃描並交由連線流程處理
             _foundDevice = result.device;
             _foundDeviceName = displayName;
             _lastRssi = result.rssi;
-            _connectionMessage = '找到 $displayName，可進行配對';
+            _connectionMessage = '偵測到 $displayName，準備建立安全連線';
           });
-          FlutterBluePlus.stopScan();
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
           break;
         }
       }
     }, onError: (error) {
       if (!mounted) return;
       setState(() {
-        _connectionMessage = '搜尋失敗，請確認藍牙權限狀態';
+        _connectionMessage = '搜尋失敗：$error';
       });
+      if (!completer.isCompleted) {
+        completer.completeError(error);
+      }
     });
 
     try {
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 10),
+        // 依 Nordic Android Library 建議使用低延遲掃描模式以提升連線準備速度
+        androidScanMode: BluetoothScanMode.lowLatency,
+        withServices: [_nordicUartServiceUuid],
+      );
+
+      // 最多等待 10 秒取得第一筆目標裝置，逾時則回報失敗
+      await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          if (!completer.isCompleted) {
+            completer.completeError('未在時間內找到裝置');
+          }
+        },
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _connectionMessage = '無法開始掃描：$e';
+        _connectionMessage = '無法開始掃描或找不到裝置：$e';
       });
     } finally {
+      await _stopScan();
       if (!mounted) return;
       setState(() {
         _isScanning = false;
@@ -184,7 +215,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
   }
 
-  /// 嘗試連線到掃描到的 IMU 裝置
+  /// 嘗試連線到掃描到的 IMU 裝置，並遵循 Nordic BLE Library 建議的手動連線流程
   Future<void> connectToImu() async {
     final target = _foundDevice ?? _connectedDevice;
     if (target == null) {
@@ -192,40 +223,79 @@ class _RecorderPageState extends State<RecorderPage> {
       return;
     }
 
-    await FlutterBluePlus.stopScan();
+    await _stopScan(); // 連線前先停止掃描，避免造成頻寬干擾
 
+    if (!mounted) return;
     setState(() {
       _isConnecting = true;
-      _connectionMessage = '正在連線 ${_foundDeviceName ?? _resolveDeviceName(target)}...';
+      _connectionMessage = '正在與 ${_foundDeviceName ?? _resolveDeviceName(target)} 建立連線...';
     });
 
     try {
-      await target.connect(timeout: const Duration(seconds: 10));
+      // 先嘗試中斷既有連線，確保流程以乾淨狀態開始
+      await target.disconnect();
+    } catch (_) {
+      // 若裝置原本未連線會拋錯，忽略即可
+    }
+
+    try {
+      await target.connect(
+        timeout: const Duration(seconds: 12),
+        autoConnect: false,
+      );
+
+      // 依 Nordic 流程完成 GATT 初始化：等待真正連線並探索服務
+      await target.connectionState.firstWhere(
+        (state) => state == BluetoothConnectionState.connected,
+      );
+      await target.discoverServices();
+
+      try {
+        await target.requestMtu(247); // 嘗試提升 MTU 以利後續傳輸
+      } catch (_) {
+        // 部分裝置不支援 MTU 調整，忽略錯誤即可
+      }
+
       _connectedDevice = target;
       _listenConnectionState(target);
       if (!mounted) return;
       setState(() {
-        _connectionMessage = '已連線至 ${_resolveDeviceName(target)}';
+        _connectionMessage = '已連線至 ${_resolveDeviceName(target)}，可開始錄影';
       });
     } catch (e) {
       if (!mounted) return;
-      if (e.toString().toLowerCase().contains('already')) {
-        _connectedDevice = target;
-        _listenConnectionState(target);
-        setState(() {
-          _connectionMessage = '裝置已連線，可開始錄影';
-        });
-      } else {
-        setState(() {
-          _connectionMessage = '連線失敗，請重新嘗試';
-        });
-      }
+      setState(() {
+        _connectionMessage = '連線流程失敗：$e';
+        _connectedDevice = null;
+      });
+      await _restartScanWithBackoff();
     } finally {
       if (!mounted) return;
       setState(() {
         _isConnecting = false;
       });
     }
+  }
+
+  /// 停止掃描流程並視需求重置搜尋結果，避免背景掃描持續耗電
+  Future<void> _stopScan({bool resetFoundDevice = false}) async {
+    await _scanSubscription?.cancel();
+    _scanSubscription = null;
+    await FlutterBluePlus.stopScan();
+    if (resetFoundDevice) {
+      _foundDevice = null;
+      _foundDeviceName = null;
+      _lastRssi = null;
+    }
+  }
+
+  /// 掃描逾時或連線失敗時等待片刻再重試，模擬 Nordic 範例的退避策略
+  Future<void> _restartScanWithBackoff() async {
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted || _isScanning || _isConnecting) {
+      return;
+    }
+    await scanForImu();
   }
 
   /// 監聽裝置連線狀態，若中斷則重新搜尋
@@ -240,12 +310,12 @@ class _RecorderPageState extends State<RecorderPage> {
           _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
         } else if (state == BluetoothConnectionState.disconnected) {
           _connectedDevice = null;
-          _connectionMessage = '裝置已斷線，正在重新搜尋';
+          _connectionMessage = '裝置已斷線，稍後自動重新搜尋';
         }
       });
 
       if (state == BluetoothConnectionState.disconnected) {
-        scanForImu();
+        _restartScanWithBackoff();
       }
     });
   }
