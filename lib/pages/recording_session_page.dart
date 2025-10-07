@@ -52,13 +52,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   Completer<void>? _cancelCompleter; // 將取消訊號傳遞給等待中的 Future
   static const int _restSecondsBetweenRounds = 10; // 每輪錄影間預設的休息秒數
   final List<RecordingHistoryEntry> _recordedRuns = []; // 累積此次錄影產生的檔案
+  bool _hasTriggeredRecording = false; // 記錄使用者是否啟動過錄影，控制按鈕提示
 
   // ---------- 生命週期 ----------
   @override
   void initState() {
     super.initState();
     initVolumeKeyListener(); // 建立音量鍵快捷鍵
-    _prepareSession(); // 非同步初始化鏡頭與自動倒數
+    _prepareSession(); // 非同步初始化鏡頭，等待使用者手動啟動
   }
 
   @override
@@ -72,7 +73,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   }
 
   // ---------- 初始化流程 ----------
-  /// 初始化鏡頭與權限，並在準備完成後自動觸發第一次錄影倒數
+  /// 初始化鏡頭與權限，僅建立預覽等待使用者手動啟動錄影
   Future<void> _prepareSession() async {
     await Permission.camera.request();
     await Permission.microphone.request();
@@ -93,9 +94,6 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     await controller!.initialize();
     if (!mounted) return;
     setState(() {}); // 更新畫面顯示預覽
-
-    // 預設自動啟動一次錄影流程，使用者可透過音量鍵再次觸發
-    await playCountdownAndStart();
   }
 
   /// 建立音量鍵監聽器，讓使用者快速啟動錄影
@@ -299,9 +297,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     if (mounted) {
-      setState(() => isRecording = true);
+      setState(() {
+        isRecording = true;
+        _hasTriggeredRecording = true; // 使用者已主動啟動錄影
+      });
     } else {
       isRecording = true;
+      _hasTriggeredRecording = true;
     }
 
     _shouldCancelRecording = false;
@@ -423,6 +425,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                 style: const TextStyle(fontSize: 14, color: Color(0xFF123B70), fontWeight: FontWeight.w600),
               ),
             ),
+            if (!_hasTriggeredRecording)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                color: const Color(0xFFE8F5E9),
+                child: const Text(
+                  '請確認站位後，點選右下角「開始錄影」才會啟動倒數。',
+                  style: TextStyle(color: Color(0xFF1E8E5A), fontSize: 13),
+                ),
+              ),
             Expanded(
               child: Stack(
                 children: [
@@ -459,7 +471,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                       ),
                       child: Text(
-                        isRecording ? '錄製中...' : '重新錄製',
+                        isRecording
+                            ? '錄製中...'
+                            : (_hasTriggeredRecording ? '再次錄製' : '開始錄影'),
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
                     ),
