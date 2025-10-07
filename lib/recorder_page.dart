@@ -60,7 +60,6 @@ class _RecorderPageState extends State<RecorderPage> {
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
   int? _lastRssi; // 紀錄訊號強度供顯示
   String? _foundDeviceName; // 掃描到的裝置名稱
-  final String _targetNameKeyword = 'TekSwing-IMU'; // 目標裝置名稱關鍵字
   final Guid _nordicUartServiceUuid =
       Guid('6E400001-B5A3-F393-E0A9-E50E24DCCA9E'); // 依 Nordic UART 定義的服務 UUID
   final Guid _serviceBno086Uuid =
@@ -203,19 +202,21 @@ class _RecorderPageState extends State<RecorderPage> {
     _logBle('系統回報已連線裝置數量：${connectedDevices.length}');
 
     for (final device in connectedDevices) {
-      if (_matchTarget(device.platformName)) {
-        _connectedDevice = device;
-        _listenConnectionState(device);
-        final services = await device.discoverServices();
-        await _setupImuServices(services);
-        if (!mounted) return;
-        setState(() {
-          _connectionState = BluetoothConnectionState.connected;
-          _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
-        });
-        _logBle('啟動時即偵測到已連線裝置：${_resolveDeviceName(device)}');
-        return;
+      final services = await device.discoverServices();
+      if (!_containsImuService(services)) {
+        _logBle('啟動時略過裝置：${device.remoteId} 未包含 IMU 服務');
+        continue;
       }
+      _connectedDevice = device;
+      _listenConnectionState(device);
+      await _setupImuServices(services);
+      if (!mounted) return;
+      setState(() {
+        _connectionState = BluetoothConnectionState.connected;
+        _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
+      });
+      _logBle('啟動時即偵測到已連線裝置：${_resolveDeviceName(device)}');
+      return;
     }
 
     if (initialState == BluetoothAdapterState.on) {
@@ -322,9 +323,9 @@ class _RecorderPageState extends State<RecorderPage> {
     if (!mounted) return;
     setState(() {
       _isScanning = true;
-      _connectionMessage = '以低延遲模式掃描 $_targetNameKeyword...';
+      _connectionMessage = '以低延遲模式掃描相容的 IMU 裝置...';
     });
-    _logBle('開始掃描目標裝置，關鍵字：$_targetNameKeyword');
+    _logBle('開始掃描目標裝置，改以服務 UUID 過濾而非名稱關鍵字');
 
     final completer = Completer<void>();
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
@@ -333,27 +334,31 @@ class _RecorderPageState extends State<RecorderPage> {
       }
 
       for (final result in results) {
-        final advertisementName = result.advertisementData.advName;
+        final advertisement = result.advertisementData;
+        if (!_isImuAdvertisement(advertisement)) {
+          // 不符合目標服務時直接略過，避免錯誤挑選其他藍牙裝置
+          _logBle('掃描結果略過：${result.device.remoteId} 不含 IMU 服務 UUID');
+          continue;
+        }
+        final advertisementName = advertisement.advName;
         final deviceName = result.device.platformName;
         final displayName = deviceName.isNotEmpty
             ? deviceName
-            : (advertisementName.isNotEmpty ? advertisementName : _targetNameKeyword);
+            : (advertisementName.isNotEmpty ? advertisementName : '未命名裝置');
 
-        if (_matchTarget(displayName)) {
-          if (!mounted) return;
-          setState(() {
-            // Nordic Library 建議選到目標後即停止掃描並交由連線流程處理
-            _foundDevice = result.device;
-            _foundDeviceName = displayName;
-            _lastRssi = result.rssi;
-            _connectionMessage = '偵測到 $displayName，準備建立安全連線';
-          });
-          _logBle('已偵測到目標裝置：$displayName，RSSI：${result.rssi}');
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-          break;
+        if (!mounted) return;
+        setState(() {
+          // Nordic Library 建議選到目標後即停止掃描並交由連線流程處理
+          _foundDevice = result.device;
+          _foundDeviceName = displayName;
+          _lastRssi = result.rssi;
+          _connectionMessage = '偵測到 $displayName，準備建立安全連線';
+        });
+        _logBle('已偵測到目標裝置：$displayName，RSSI：${result.rssi}');
+        if (!completer.isCompleted) {
+          completer.complete();
         }
+        break;
       }
     }, onError: (error) {
       if (!mounted) return;
@@ -1190,8 +1195,33 @@ class _RecorderPageState extends State<RecorderPage> {
     return device.remoteId.str;
   }
 
-  /// 比對字串是否符合目標關鍵字
-  bool _matchTarget(String name) => name.contains(_targetNameKeyword);
+  /// 判斷服務列表是否包含 TekSwing IMU 相關 UUID
+  bool _containsImuService(List<BluetoothService> services) {
+    for (final service in services) {
+      if (service.uuid == _serviceBno086Uuid || service.uuid == _nordicUartServiceUuid) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 根據廣播資料判斷是否為 IMU 裝置
+  bool _isImuAdvertisement(AdvertisementData data) {
+    // 以服務 UUID 為主進行比對，避免依賴容易變動的名稱
+    final serviceUuids = data.serviceUuids;
+    if (serviceUuids.contains(_serviceBno086Uuid) || serviceUuids.contains(_nordicUartServiceUuid)) {
+      return true;
+    }
+
+    // 若廣播未列出 serviceUuids，改從 serviceData key 再檢查一次
+    final serviceDataKeys = data.serviceData.keys;
+    for (final key in serviceDataKeys) {
+      if (key == _serviceBno086Uuid || key == _nordicUartServiceUuid) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// 切換至錄影專用頁面，讓錄影與配對流程分離
   Future<void> _openRecordingSession() async {
@@ -1651,7 +1681,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final bool connected = isImuConnected;
     final String displayName = connected
         ? _resolveDeviceName(_connectedDevice!)
-        : (_foundDeviceName ?? 'TekSwing-IMU-A12');
+        : (_foundDeviceName ?? 'IMU 裝置');
     final String signalText = _lastRssi != null ? '訊號 ${_lastRssi} dBm' : '訊號偵測中';
 
     final String batteryOverview = _batteryLevelText ?? '電量讀取中';
