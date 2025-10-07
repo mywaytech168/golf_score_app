@@ -994,20 +994,41 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 解析 Game Rotation Vector 封包並同步紀錄原始資料
   void _handleGameRotationVectorPacket(String deviceId, List<int> value) {
-    if (value.length < 16) return;
+    if (value.isEmpty) {
+      return; // 沒有資料時直接結束
+    }
+
     Map<String, dynamic>? sample;
-    for (int offset = 0; offset + 15 < value.length; offset += 16) {
-      final parsed = _parseRotationSample(value, offset);
-      if (parsed == null) continue;
+    int offset = 0;
+
+    // 逐步解析通知內容，支援 16 bytes（基本欄位）與 20 bytes（額外 accuracy、reserved）封包
+    while (offset < value.length) {
+      final remaining = value.length - offset;
+      final chunkSize = _determineRotationChunkSize(remaining);
+      if (chunkSize == null) {
+        _logBle('Game Rotation Vector 封包長度不足，剩餘 $remaining bytes 無法解析');
+        break;
+      }
+
+      final parsed = _parseRotationSample(value, offset, chunkSize);
+      if (parsed == null) {
+        _logBle('Game Rotation Vector 封包解析失敗，offset=$offset、length=$chunkSize');
+        break;
+      }
+
       sample = parsed;
       ImuDataLogger.instance.logGameRotationVector(
         deviceId,
         parsed,
-        value.sublist(offset, offset + 16),
+        value.sublist(offset, offset + chunkSize),
       );
+      offset += chunkSize;
     }
-    if (sample == null) return;
-    if (!mounted) return;
+
+    if (sample == null || !mounted) {
+      return;
+    }
+
     setState(() {
       _latestGameRotationVector = sample;
     });
@@ -1034,7 +1055,15 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 解析 Game Rotation Vector 專屬的四元數資料結構
-  Map<String, dynamic>? _parseRotationSample(List<int> data, int offset) {
+  Map<String, dynamic>? _parseRotationSample(
+    List<int> data,
+    int offset,
+    int length,
+  ) {
+    if (offset + length > data.length) {
+      return null; // 長度超出原始陣列界線時直接忽略
+    }
+
     final timestamp = _readUint32At(data, offset + 4);
     final i = _readInt16At(data, offset + 8);
     final j = _readInt16At(data, offset + 10);
@@ -1043,6 +1072,17 @@ class _RecorderPageState extends State<RecorderPage> {
     if (timestamp == null || i == null || j == null || k == null || real == null) {
       return null;
     }
+
+    // accuracy 與 reserved 僅存在於較新的韌體（20 bytes 封包），舊版則保持 null
+    int? accuracy;
+    int? reserved;
+    if (length >= 18) {
+      accuracy = _readInt16At(data, offset + 16);
+    }
+    if (length >= 20) {
+      reserved = _readInt16At(data, offset + 18);
+    }
+
     return {
       'id': data[offset],
       'seq': data[offset + 1],
@@ -1052,7 +1092,27 @@ class _RecorderPageState extends State<RecorderPage> {
       'j': j,
       'k': k,
       'real': real,
+      'accuracy': accuracy,
+      'reserved': reserved,
+      'packetLength': length,
     };
+  }
+
+  /// 判斷 Game Rotation Vector 封包長度，根據剩餘位元組推算應使用的解析長度
+  int? _determineRotationChunkSize(int remaining) {
+    if (remaining >= 20 && remaining % 20 == 0 && remaining % 16 != 0) {
+      return 20; // 偏好整除 20 的情境，代表每筆資料都附帶 accuracy/reserved
+    }
+    if (remaining >= 16 && remaining % 16 == 0) {
+      return 16; // 整除 16 代表舊版韌體僅有基本欄位
+    }
+    if (remaining >= 20) {
+      return 20; // 儘管無法整除，也優先嘗試較大的封包以保留額外欄位
+    }
+    if (remaining >= 16) {
+      return 16; // 最小需求 16 bytes（含四元數基本欄位）
+    }
+    return null;
   }
 
   /// 解析按鈕通知封包，轉換為可讀描述供 UI 顯示
@@ -1737,7 +1797,20 @@ class _RecorderPageState extends State<RecorderPage> {
     final seq = sample['seq'];
     final status = sample['status'];
     final timestamp = sample['timestampUs'];
-    return '序號 $seq · 狀態 $status · 時間標籤 ${timestamp ?? '--'} μs';
+    final accuracy = sample['accuracy'];
+    final packetLength = sample['packetLength'];
+    final buffer = <String>[
+      '序號 $seq',
+      '狀態 $status',
+      '時間標籤 ${timestamp ?? '--'} μs',
+    ];
+    if (accuracy != null) {
+      buffer.add('準確度 $accuracy');
+    }
+    if (packetLength != null) {
+      buffer.add('封包 ${packetLength} bytes');
+    }
+    return buffer.join(' · ');
   }
 
   /// 將時間格式化為 HH:mm:ss 字串

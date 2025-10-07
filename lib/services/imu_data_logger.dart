@@ -70,7 +70,7 @@ class ImuDataLogger {
       final filePath = p.join(directory.path, '${baseName}_$alias.csv');
       final sink = File(filePath).openWrite(mode: FileMode.writeOnlyAppend);
       sink.writeln(
-        'device_alias,type,id,seq,status,timestamp_us,x,y,z,i,j,k,real,raw_hex',
+        'device_alias,type,id,seq,status,timestamp_us,x,y,z,i,j,k,real,accuracy,reserved,raw_hex',
       );
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
@@ -104,7 +104,7 @@ class ImuDataLogger {
       ..write(sample['y'])
       ..write(',')
       ..write(sample['z'])
-      ..write(',,,,')
+      ..write(',,,,,,')
       ..write(_formatRawBytes(rawBytes));
     log.sink.writeln(line.toString());
   }
@@ -135,6 +135,10 @@ class ImuDataLogger {
       ..write(sample['k'])
       ..write(',')
       ..write(sample['real'])
+      ..write(',')
+      ..write(sample['accuracy'] ?? '')
+      ..write(',')
+      ..write(sample['reserved'] ?? '')
       ..write(',')
       ..write(_formatRawBytes(rawBytes));
     log.sink.writeln(line.toString());
