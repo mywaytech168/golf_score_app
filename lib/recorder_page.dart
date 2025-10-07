@@ -98,6 +98,7 @@ class _RecorderPageState extends State<RecorderPage> {
       Guid('3ab441e7-11f8-4bbc-a004-7716126c8868'); // 自訂裝置名稱服務
   final Guid _charDeviceNameConfigUuid =
       Guid('1b18c3ee-013a-4cb1-9923-95dc798de376'); // 自訂裝置名稱特徵值
+  final Guid _cccdUuid = Guid('00002902-0000-1000-8000-00805f9b34fb'); // 通知控制描述符 UUID
   final List<StreamSubscription<List<int>>> _notificationSubscriptions =
       []; // 收集所有感測通知的訂閱以便統一釋放
   BluetoothCharacteristic? _linearAccelerationCharacteristic; // 線性加速度特徵引用
@@ -935,14 +936,50 @@ class _RecorderPageState extends State<RecorderPage> {
     bool listenToUpdates = true,
     bool readInitialValue = true,
   }) async {
-    if (listenToUpdates && (characteristic.properties.notify || characteristic.properties.indicate)) {
+    bool shouldListen =
+        listenToUpdates && (characteristic.properties.notify || characteristic.properties.indicate);
+
+    if (shouldListen) {
+      bool enableNotification = true;
+
       try {
-        await characteristic.setNotifyValue(true);
-        _logBle('成功開啟通知：${characteristic.uuid.str}');
+        if (characteristic.descriptors.isEmpty) {
+          // ---------- 補抓描述符 ----------
+          // 某些裝置初次連線時不會同步 CCCD，需要手動觸發探索
+          await characteristic.discoverDescriptors();
+          _logBle(
+            '重新探索 ${characteristic.uuid.str} 描述符，共 ${characteristic.descriptors.length} 筆',
+          );
+        }
+
+        final hasCccd =
+            characteristic.descriptors.any((descriptor) => descriptor.uuid == _cccdUuid);
+        if (!hasCccd) {
+          // ---------- 無法啟用通知 ----------
+          enableNotification = false;
+          _logBle('裝置未提供 CCCD，略過通知啟用：${characteristic.uuid.str}');
+        } else if (!characteristic.isNotifying) {
+          // ---------- 正式開啟通知 ----------
+          await characteristic.setNotifyValue(true);
+          _logBle('成功開啟通知：${characteristic.uuid.str}');
+        } else {
+          // ---------- 避免重複設定 ----------
+          _logBle('通知已開啟，略過重複設定：${characteristic.uuid.str}');
+        }
       } catch (error, stackTrace) {
-        // 若裝置暫不支援通知則忽略錯誤
-        _logBle('開啟通知失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
+        // 若裝置暫不支援通知則忽略錯誤，改以初始讀取補救
+        enableNotification = false;
+        _logBle('開啟通知失敗：${characteristic.uuid.str}，原因：$error',
+            error: error, stackTrace: stackTrace);
       }
+
+      if (!enableNotification) {
+        // ---------- 無法啟用通知時直接跳出監聽 ----------
+        shouldListen = false;
+      }
+    }
+
+    if (shouldListen) {
       final deviceId = characteristic.remoteId.str;
       final subscription = characteristic.lastValueStream.listen(
         (value) => onData(deviceId, value),
