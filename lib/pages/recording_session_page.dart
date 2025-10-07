@@ -428,7 +428,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                 children: [
                   Column(
                     children: [
-                      Expanded(child: CameraPreview(controller!)),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            CameraPreview(controller!),
+                            const Positioned.fill(
+                              child: StanceGuideOverlay(),
+                            ),
+                          ],
+                        ),
+                      ),
                       SizedBox(
                         height: 200,
                         width: double.infinity,
@@ -535,6 +544,118 @@ class WaveformPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+/// 揮桿站位指引覆蓋層，協助使用者對齊姿勢
+class StanceGuideOverlay extends StatelessWidget {
+  const StanceGuideOverlay({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: CustomPaint(
+        painter: _StanceGuidePainter(),
+      ),
+    );
+  }
+}
+
+/// 自訂畫家：繪製左右對稱的揮桿人形與置中的箭頭提示
+class _StanceGuidePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // ---------- 畫面設定 ----------
+    final Paint guidelinePaint = Paint()
+      ..color = const Color(0x99FFFFFF)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+
+    final Paint fillPaint = Paint()
+      ..color = const Color(0x4D000000)
+      ..style = PaintingStyle.fill;
+
+    final double centerX = size.width / 2;
+    final double baseY = size.height * 0.75;
+    final double figureHeight = size.height * 0.35;
+    final double headRadius = figureHeight * 0.12;
+
+    // ---------- 畫出半透明底框，淡化鏡頭畫面並突顯指引 ----------
+    final Rect overlayRect = Rect.fromCenter(
+      center: Offset(centerX, size.height * 0.5),
+      width: size.width * 0.7,
+      height: size.height * 0.6,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(overlayRect, const Radius.circular(24)),
+      fillPaint,
+    );
+
+    // ---------- 定義左右人形的關鍵點 ----------
+    void drawFigure(bool isLeft) {
+      final double direction = isLeft ? -1 : 1; // 控制左右翻轉
+      final double torsoX = centerX + (size.width * 0.18 * direction);
+      final double headCenterY = baseY - figureHeight;
+      final Offset headCenter = Offset(torsoX, headCenterY);
+
+      // 頭部
+      canvas.drawCircle(headCenter, headRadius, guidelinePaint);
+
+      // 身體與腿部
+      final Offset hip = Offset(torsoX, baseY - headRadius);
+      final Offset knee = Offset(torsoX + direction * headRadius * 0.6, baseY - headRadius * 0.4);
+      final Offset foot = Offset(torsoX + direction * headRadius * 1.4, baseY);
+      canvas.drawLine(headCenter.translate(0, headRadius), hip, guidelinePaint);
+      canvas.drawLine(hip, knee, guidelinePaint);
+      canvas.drawLine(knee, foot, guidelinePaint);
+
+      // 手臂與球桿
+      final Offset shoulder = headCenter.translate(0, headRadius * 1.4);
+      final Offset hand = Offset(centerX + direction * headRadius * 1.8, baseY - headRadius * 0.8);
+      final Offset clubHead = Offset(centerX + direction * headRadius * 3.2, baseY + headRadius * 0.4);
+      canvas.drawLine(shoulder, hand, guidelinePaint);
+      canvas.drawLine(hand, clubHead, guidelinePaint);
+    }
+
+    drawFigure(true);
+    drawFigure(false);
+
+    // ---------- 畫出中央球與箭頭指引 ----------
+    final double ballRadius = headRadius * 0.9;
+    final Offset ballCenter = Offset(centerX, baseY - ballRadius * 0.2);
+    canvas.drawCircle(ballCenter, ballRadius, guidelinePaint);
+
+    final Path arrowPath = Path()
+      ..moveTo(centerX, ballCenter.dy - ballRadius * 1.4)
+      ..lineTo(centerX, ballCenter.dy - ballRadius * 3)
+      ..moveTo(centerX - ballRadius * 0.9, ballCenter.dy - ballRadius * 2.2)
+      ..lineTo(centerX, ballCenter.dy - ballRadius * 3)
+      ..lineTo(centerX + ballRadius * 0.9, ballCenter.dy - ballRadius * 2.2);
+    canvas.drawPath(arrowPath, guidelinePaint);
+
+    // ---------- 在頂部顯示指引文字 ----------
+    const String tip = '請對齊站位指引，確保雙腳與球心對稱';
+    final TextPainter textPainter = TextPainter(
+      text: const TextSpan(
+        text: tip,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          shadows: [Shadow(blurRadius: 6, color: Colors.black45, offset: Offset(0, 1))],
+        ),
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width * 0.8);
+
+    textPainter.paint(
+      canvas,
+      Offset(centerX - textPainter.width / 2, overlayRect.top + 16),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 /// 影片播放頁面，提供錄製檔案的立即檢視
