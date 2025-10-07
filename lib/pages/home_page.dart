@@ -147,7 +147,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 處理底部導覽點擊，若選擇錄影則立即導向 RecorderPage
+  /// 處理底部導覽點擊，依據不同索引執行對應導覽
   void _onBottomNavTap(int index) {
     if (index == 2) {
       Navigator.of(context).push(
@@ -159,6 +159,12 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
+      return;
+    }
+    if (index == 3) {
+      // 點選 Data Metrics 時直接導向錄影歷史頁，方便快速檢視過往紀錄
+      _openRecordingHistoryPage();
+      setState(() => _currentIndex = index);
       return;
     }
     setState(() => _currentIndex = index);
