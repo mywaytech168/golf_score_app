@@ -4,6 +4,7 @@ import 'dart:developer' as developer; // 專責紀錄藍牙偵錯訊息
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 辨識平台層例外以補充權限提示
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -51,6 +52,7 @@ class _RecorderPageState extends State<RecorderPage> {
   bool _isScanning = false; // 是否正在搜尋裝置
   bool _isConnecting = false; // 是否正處於連線流程
   bool _isOpeningSession = false; // 是否正在切換至錄影頁面
+  bool _permissionsReady = false; // 記錄藍牙權限是否已完整授權
   int _selectedRounds = 5; // 使用者預設要錄影的次數
   int _recordingDurationSeconds = 15; // 使用者預設每次錄影長度（秒）
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
@@ -157,7 +159,16 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 初始化藍牙狀態與權限，確保錄影前完成 IMU 配對
   Future<void> initBluetooth() async {
     _logBle('初始化藍牙流程');
-    await _requestBluetoothPermissions();
+    final permissionReady = await _requestBluetoothPermissions();
+    if (!permissionReady) {
+      // 權限不足時直接更新提示，避免進入掃描流程不斷拋錯
+      if (mounted) {
+        setState(() {
+          _connectionMessage = '請先授權藍牙與定位權限後再開始搜尋';
+        });
+      }
+      _logBle('初始化藍牙流程：權限未完全授權，暫停後續掃描');
+    }
 
     // 監聽手機藍牙開關狀態，並視情況重新觸發掃描
     _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
@@ -213,11 +224,39 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 申請藍牙與定位權限，避免掃描過程被拒
-  Future<void> _requestBluetoothPermissions() async {
-    await Permission.bluetooth.request();
-    await Permission.bluetoothScan.request();
-    await Permission.bluetoothConnect.request();
-    await Permission.locationWhenInUse.request();
+  Future<bool> _requestBluetoothPermissions() async {
+    final permissions = <Permission, String>{
+      Permission.bluetooth: 'BLUETOOTH',
+      Permission.bluetoothScan: 'BLUETOOTH_SCAN',
+      Permission.bluetoothConnect: 'BLUETOOTH_CONNECT',
+      Permission.locationWhenInUse: 'ACCESS_FINE_LOCATION',
+    };
+
+    bool allGranted = true; // 記錄是否全部授權
+
+    for (final entry in permissions.entries) {
+      final permission = entry.key;
+      final label = entry.value;
+      final status = await permission.request();
+
+      // 詳細紀錄授權結果，方便在 console 中比對裝置設定
+      _logBle('權限請求結果：$label -> $status');
+
+      if (!status.isGranted) {
+        allGranted = false;
+
+        if (status.isPermanentlyDenied) {
+          _logBle('權限 $label 被永久拒絕，需引導使用者前往系統設定');
+        }
+      }
+    }
+
+    if (!allGranted) {
+      _logBle('藍牙或定位權限尚未完整授權，將阻擋掃描流程');
+    }
+
+    _permissionsReady = allGranted;
+    return allGranted;
   }
 
   // ---------- 方法區 ----------
@@ -231,6 +270,18 @@ class _RecorderPageState extends State<RecorderPage> {
       });
       _logBle('掃描中止：手機藍牙尚未開啟');
       return;
+    }
+
+    if (!_permissionsReady) {
+      final permissionReady = await _requestBluetoothPermissions();
+      if (!permissionReady) {
+        if (!mounted) return;
+        setState(() {
+          _connectionMessage = '權限不足，請確認已允許藍牙掃描與定位';
+        });
+        _logBle('掃描中止：權限不足');
+        return;
+      }
     }
 
     await _stopScan(resetFoundDevice: true); // 先停止前一次掃描，遵循 Nordic 範例先清除舊狀態
@@ -307,6 +358,18 @@ class _RecorderPageState extends State<RecorderPage> {
         _connectionMessage = '無法開始掃描或找不到裝置：$e';
       });
       _logBle('掃描流程例外：$e', error: e, stackTrace: stackTrace);
+
+      // 針對常見的權限錯誤補充更清楚的提示
+      if (e is PlatformException &&
+          e.code == 'startScan' &&
+          (e.message?.contains('BLUETOOTH_SCAN') ?? false)) {
+        _logBle('掃描流程例外：缺少 BLUETOOTH_SCAN 權限，提醒使用者前往系統設定開啟');
+        if (mounted) {
+          setState(() {
+            _connectionMessage = '系統顯示缺少藍牙掃描權限，請至設定授權後再試';
+          });
+        }
+      }
     } finally {
       await _stopScan();
       if (!mounted) return;
