@@ -13,6 +13,7 @@ import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
+import '../services/imu_data_logger.dart';
 
 /// 錄影專用頁面：專注鏡頭預覽、倒數與音訊波形，與 IMU 配對頁面分離
 class RecordingSessionPage extends StatefulWidget {
@@ -142,6 +143,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
     await _closeAudioPipeline();
 
+    if (ImuDataLogger.instance.hasActiveRound) {
+      await ImuDataLogger.instance.abortActiveRound();
+    }
+
     if (mounted && updateUi) {
       setState(() => isRecording = false);
     } else {
@@ -228,8 +233,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       await initAudioCapture();
       if (_shouldCancelRecording) {
         await _closeAudioPipeline();
+        if (ImuDataLogger.instance.hasActiveRound) {
+          await ImuDataLogger.instance.abortActiveRound();
+        }
         return;
       }
+
+      final baseName = ImuDataLogger.instance.buildBaseFileName(
+        roundIndex: index + 1,
+      );
+      await ImuDataLogger.instance.startRoundLogging(baseName);
 
       await controller!.startVideoRecording();
 
@@ -242,26 +255,30 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           } catch (_) {}
         }
         await _closeAudioPipeline();
+        if (ImuDataLogger.instance.hasActiveRound) {
+          await ImuDataLogger.instance.abortActiveRound();
+        }
         return;
       }
 
       final XFile videoFile = await controller!.stopVideoRecording();
       await _closeAudioPipeline();
 
-      final directory = Directory('/storage/emulated/0/Download');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final newPath = '${directory.path}/run_${index + 1}_$timestamp.mp4';
-      await File(videoFile.path).copy(newPath);
+      final savedVideoPath = await ImuDataLogger.instance.persistVideoFile(
+        sourcePath: videoFile.path,
+        baseName: baseName,
+      );
+      final csvPaths = ImuDataLogger.instance.hasActiveRound
+          ? await ImuDataLogger.instance.finishRoundLogging()
+          : <String, String>{};
 
       final entry = RecordingHistoryEntry(
-        filePath: newPath,
+        filePath: savedVideoPath,
         roundIndex: index + 1,
         recordedAt: DateTime.now(),
         durationSeconds: widget.durationSeconds,
         imuConnected: widget.isImuConnected,
+        imuCsvPaths: csvPaths,
       );
 
       if (mounted) {
@@ -273,8 +290,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         _recordedRuns.insert(0, entry);
       }
 
-      debugPrint('✅ 儲存為 ${entry.fileName}');
+      debugPrint('✅ 儲存影片與感測資料：${entry.fileName}');
     } catch (e) {
+      await ImuDataLogger.instance.abortActiveRound();
       debugPrint('❌ 錄影時出錯：$e');
     }
   }

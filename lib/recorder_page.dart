@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'pages/recording_session_page.dart';
 import 'models/recording_history_entry.dart';
+import 'services/imu_data_logger.dart';
 
 /// 錄影入口頁面：專責處理藍牙 IMU 配對與引導使用者前往錄影畫面
 class RecorderPage extends StatefulWidget {
@@ -159,6 +160,9 @@ class _RecorderPageState extends State<RecorderPage> {
       // 若仍有掃描流程在等待，主動結束避免懸掛 Future
       _activeScanStopper!.complete();
     }
+    if (_connectedDevice != null) {
+      ImuDataLogger.instance.unregisterDevice(_connectedDevice!.remoteId.str);
+    }
     unawaited(_clearImuSession()); // 統一釋放所有藍牙訂閱與特徵引用
     FlutterBluePlus.stopScan();
     super.dispose();
@@ -215,6 +219,10 @@ class _RecorderPageState extends State<RecorderPage> {
       }
       _connectedDevice = device;
       _listenConnectionState(device);
+      ImuDataLogger.instance.registerDevice(
+        device,
+        displayName: _resolveDeviceName(device),
+      );
       await _setupImuServices(services);
       if (!mounted) return;
       setState(() {
@@ -498,19 +506,23 @@ class _RecorderPageState extends State<RecorderPage> {
 
       try {
         await target.requestMtu(247); // 嘗試提升 MTU 以利後續傳輸
-        _logBle('MTU 調整成功，已設定為 247');
-      } catch (error, stackTrace) {
-        // 部分裝置不支援 MTU 調整，忽略錯誤即可
-        _logBle('MTU 調整失敗，裝置可能不支援：$error', error: error, stackTrace: stackTrace);
-      }
+      _logBle('MTU 調整成功，已設定為 247');
+    } catch (error, stackTrace) {
+      // 部分裝置不支援 MTU 調整，忽略錯誤即可
+      _logBle('MTU 調整失敗，裝置可能不支援：$error', error: error, stackTrace: stackTrace);
+    }
 
-      _connectedDevice = target;
-      _listenConnectionState(target);
-      await _setupImuServices(services);
-      if (!mounted) return;
-      setState(() {
-        _connectionMessage = '已連線至 ${_resolveDeviceName(target)}，可開始錄影';
-      });
+    _connectedDevice = target;
+    _listenConnectionState(target);
+    ImuDataLogger.instance.registerDevice(
+      target,
+      displayName: _resolveDeviceName(target),
+    );
+    await _setupImuServices(services);
+    if (!mounted) return;
+    setState(() {
+      _connectionMessage = '已連線至 ${_resolveDeviceName(target)}，可開始錄影';
+    });
       _logBle('成功連線並完成服務初始化，裝置：${_resolveDeviceName(target)}');
     } catch (e, stackTrace) {
       if (!mounted) return;
@@ -645,6 +657,7 @@ class _RecorderPageState extends State<RecorderPage> {
 
       if (state == BluetoothConnectionState.disconnected) {
         await _clearImuSession(resetData: true);
+        ImuDataLogger.instance.unregisterDevice(device.remoteId.str);
         if (!mounted) return;
         setState(() {
           _connectionState = state;
@@ -795,7 +808,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備訂閱按鈕事件通知');
       await _initCharacteristic(
         characteristic: _buttonNotifyCharacteristic!,
-        onData: _handleButtonPacket,
+        onData: (_, value) => _handleButtonPacket(value),
         listenToUpdates: true,
         readInitialValue: false,
       );
@@ -805,7 +818,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取電池電量資訊');
       await _initCharacteristic(
         characteristic: _batteryLevelCharacteristic!,
-        onData: _updateBatteryLevel,
+        onData: (_, value) => _updateBatteryLevel(value),
         listenToUpdates: _batteryLevelCharacteristic!.properties.notify,
       );
     }
@@ -814,7 +827,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取電池電壓資訊');
       await _initCharacteristic(
         characteristic: _batteryVoltageCharacteristic!,
-        onData: _updateBatteryVoltage,
+        onData: (_, value) => _updateBatteryVoltage(value),
         listenToUpdates: _batteryVoltageCharacteristic!.properties.notify,
       );
     }
@@ -823,7 +836,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取充電電流資訊');
       await _initCharacteristic(
         characteristic: _batteryChargeCurrentCharacteristic!,
-        onData: _updateBatteryChargeCurrent,
+        onData: (_, value) => _updateBatteryChargeCurrent(value),
         listenToUpdates: _batteryChargeCurrentCharacteristic!.properties.notify,
       );
     }
@@ -832,7 +845,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取電池溫度資訊');
       await _initCharacteristic(
         characteristic: _batteryTemperatureCharacteristic!,
-        onData: _updateBatteryTemperature,
+        onData: (_, value) => _updateBatteryTemperature(value),
         listenToUpdates: _batteryTemperatureCharacteristic!.properties.notify,
       );
     }
@@ -841,7 +854,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取剩餘電量資訊');
       await _initCharacteristic(
         characteristic: _batteryRemainingCharacteristic!,
-        onData: _updateBatteryRemaining,
+        onData: (_, value) => _updateBatteryRemaining(value),
         listenToUpdates: _batteryRemainingCharacteristic!.properties.notify,
       );
     }
@@ -850,7 +863,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取預估用完時間資訊');
       await _initCharacteristic(
         characteristic: _batteryTimeToEmptyCharacteristic!,
-        onData: _updateBatteryTimeToEmpty,
+        onData: (_, value) => _updateBatteryTimeToEmpty(value),
         listenToUpdates: _batteryTimeToEmptyCharacteristic!.properties.notify,
       );
     }
@@ -859,7 +872,7 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('準備讀取預估充滿時間資訊');
       await _initCharacteristic(
         characteristic: _batteryTimeToFullCharacteristic!,
-        onData: _updateBatteryTimeToFull,
+        onData: (_, value) => _updateBatteryTimeToFull(value),
         listenToUpdates: _batteryTimeToFullCharacteristic!.properties.notify,
       );
     }
@@ -918,7 +931,7 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 統一處理特徵值的通知與讀取邏輯，確保監聽與初始資料都能取得
   Future<void> _initCharacteristic({
     required BluetoothCharacteristic characteristic,
-    required void Function(List<int>) onData,
+    required void Function(String deviceId, List<int>) onData,
     bool listenToUpdates = true,
     bool readInitialValue = true,
   }) async {
@@ -930,8 +943,9 @@ class _RecorderPageState extends State<RecorderPage> {
         // 若裝置暫不支援通知則忽略錯誤
         _logBle('開啟通知失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
       }
+      final deviceId = characteristic.remoteId.str;
       final subscription = characteristic.lastValueStream.listen(
-        onData,
+        (value) => onData(deviceId, value),
         onError: (error) {
           if (!mounted) return;
           setState(() {
@@ -947,7 +961,7 @@ class _RecorderPageState extends State<RecorderPage> {
       try {
         final value = await characteristic.read();
         if (value.isNotEmpty) {
-          onData(value);
+          onData(characteristic.remoteId.str, value);
         }
         _logBle('已讀取初始值：${characteristic.uuid.str}，長度：${value.length}');
       } catch (error, stackTrace) {
@@ -957,12 +971,19 @@ class _RecorderPageState extends State<RecorderPage> {
     }
   }
 
-  /// 解析線性加速度封包，僅取最新一筆資料供 UI 顯示
-  void _handleLinearAccelerationPacket(List<int> value) {
+  /// 解析線性加速度封包，並同步寫入 CSV 與更新最新顯示資料
+  void _handleLinearAccelerationPacket(String deviceId, List<int> value) {
     if (value.length < 16) return;
     Map<String, dynamic>? sample;
     for (int offset = 0; offset + 15 < value.length; offset += 16) {
-      sample = _parseThreeAxisSample(value, offset);
+      final parsed = _parseThreeAxisSample(value, offset);
+      if (parsed == null) continue;
+      sample = parsed;
+      ImuDataLogger.instance.logLinearAcceleration(
+        deviceId,
+        parsed,
+        value.sublist(offset, offset + 16),
+      );
     }
     if (sample == null) return;
     if (!mounted) return;
@@ -971,12 +992,19 @@ class _RecorderPageState extends State<RecorderPage> {
     });
   }
 
-  /// 解析 Game Rotation Vector 封包並儲存最後一次數據
-  void _handleGameRotationVectorPacket(List<int> value) {
+  /// 解析 Game Rotation Vector 封包並同步紀錄原始資料
+  void _handleGameRotationVectorPacket(String deviceId, List<int> value) {
     if (value.length < 16) return;
     Map<String, dynamic>? sample;
     for (int offset = 0; offset + 15 < value.length; offset += 16) {
-      sample = _parseRotationSample(value, offset);
+      final parsed = _parseRotationSample(value, offset);
+      if (parsed == null) continue;
+      sample = parsed;
+      ImuDataLogger.instance.logGameRotationVector(
+        deviceId,
+        parsed,
+        value.sublist(offset, offset + 16),
+      );
     }
     if (sample == null) return;
     if (!mounted) return;

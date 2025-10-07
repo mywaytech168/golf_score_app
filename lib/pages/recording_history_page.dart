@@ -184,6 +184,13 @@ class _HistoryTile extends StatelessWidget {
                     entry.fileName,
                     style: const TextStyle(fontSize: 12, color: Color(0xFF9AA6B2)),
                   ),
+                  if (entry.hasImuCsv) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'IMU CSV：${entry.csvFileNames.join(', ')}',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF4F5D75)),
+                    ),
+                  ],
                 ],
               ),
             ),

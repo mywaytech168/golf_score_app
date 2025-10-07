@@ -158,6 +158,12 @@ String _buildSubtitle(RecordingHistoryEntry entry) {
     ..write(entry.modeLabel)
     ..write('\n')
     ..write(entry.fileName);
+  if (entry.hasImuCsv) {
+    buffer
+      ..write('\n')
+      ..write('IMU CSV：')
+      ..write(entry.csvFileNames.join(', '));
+  }
   return buffer.toString();
 }
 

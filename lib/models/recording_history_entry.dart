@@ -18,12 +18,16 @@ class RecordingHistoryEntry {
   /// 是否在錄影當下有連線 IMU，可用於顯示模式標籤
   final bool imuConnected;
 
+  /// 對應本輪錄影的 IMU 原始資料 CSV 清單（deviceId -> 路徑）
+  final Map<String, String> imuCsvPaths;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
     required this.recordedAt,
     required this.durationSeconds,
     required this.imuConnected,
+    this.imuCsvPaths = const {},
   });
 
   /// 提供統一的顯示標題，例如「第 3 輪錄影」
@@ -37,4 +41,12 @@ class RecordingHistoryEntry {
     final segments = filePath.split(RegExp(r'[\\/]'));
     return segments.isNotEmpty ? segments.last : filePath;
   }
+
+  /// 回傳所有 CSV 檔名，方便列表顯示或除錯
+  List<String> get csvFileNames => imuCsvPaths.values
+      .map((path) => path.split(RegExp(r'[\\/]')).last)
+      .toList();
+
+  /// 是否有對應的感測資料可供下載
+  bool get hasImuCsv => imuCsvPaths.isNotEmpty;
 }
