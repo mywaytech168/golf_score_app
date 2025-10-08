@@ -809,11 +809,16 @@ class _RecorderPageState extends State<RecorderPage> {
 
     if (_gameRotationVectorCharacteristic != null) {
       _logBle('準備訂閱 Game Rotation Vector 通知');
+      final characteristic = _gameRotationVectorCharacteristic!;
       final isListening = await _initCharacteristic(
-        characteristic: _gameRotationVectorCharacteristic!,
+        characteristic: characteristic,
         onData: _handleGameRotationVectorPacket,
+        readInitialValue: false, // 避免裝置禁止讀取時立刻拋出例外
       );
-      _startGameRotationFallbackTimer(isListening);
+      _startGameRotationFallbackTimer(
+        notificationActive: isListening,
+        canReadCharacteristic: characteristic.properties.read,
+      );
     }
 
     if (_buttonNotifyCharacteristic != null) {
@@ -1099,10 +1104,19 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 啟動 Game Rotation Vector 的補償讀取計時器，避免通知失敗時持續顯示等待
-  void _startGameRotationFallbackTimer(bool notificationActive) {
+  void _startGameRotationFallbackTimer({
+    required bool notificationActive,
+    required bool canReadCharacteristic,
+  }) {
     _cancelGameRotationFallbackTimer();
     if (_gameRotationVectorCharacteristic == null) {
       return; // 沒有特徵可讀取時直接離開
+    }
+
+    if (!canReadCharacteristic) {
+      // 裝置僅允許透過通知傳送資料時，留下紀錄並停止補償計時器
+      _logBle('Game Rotation Vector 特徵未提供讀取權限，僅能等待通知資料更新');
+      return;
     }
 
     const interval = Duration(seconds: 3);
@@ -1147,6 +1161,12 @@ class _RecorderPageState extends State<RecorderPage> {
         }
       } catch (error, stackTrace) {
         _logBle('Game Rotation Vector 補償讀取失敗：$error', error: error, stackTrace: stackTrace);
+        // 若裝置明確回報禁止讀取，立即停止補償流程避免持續拋錯
+        if (error is FlutterBluePlusException &&
+            error.errorString.contains('GATT_READ_NOT_PERMITTED')) {
+          _logBle('裝置不允許讀取 Game Rotation Vector，停止補償計時器');
+          timer.cancel();
+        }
       } finally {
         _isGameRotationFallbackReading = false;
       }
