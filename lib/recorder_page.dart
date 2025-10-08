@@ -1162,10 +1162,13 @@ class _RecorderPageState extends State<RecorderPage> {
       } catch (error, stackTrace) {
         _logBle('Game Rotation Vector 補償讀取失敗：$error', error: error, stackTrace: stackTrace);
         // 若裝置明確回報禁止讀取，立即停止補償流程避免持續拋錯
-        if (error is FlutterBluePlusException &&
-            error.errorString.contains('GATT_READ_NOT_PERMITTED')) {
-          _logBle('裝置不允許讀取 Game Rotation Vector，停止補償計時器');
-          timer.cancel();
+        if (error is FlutterBluePlusException) {
+          // 某些平台可能不會回傳錯誤字串，因此先進行空值處理後再比對內容
+          final errorMessage = error.errorString ?? '';
+          if (errorMessage.contains('GATT_READ_NOT_PERMITTED')) {
+            _logBle('裝置不允許讀取 Game Rotation Vector，停止補償計時器');
+            timer.cancel();
+          }
         }
       } finally {
         _isGameRotationFallbackReading = false;
