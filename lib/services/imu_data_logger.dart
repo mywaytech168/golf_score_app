@@ -69,16 +69,21 @@ class ImuDataLogger {
       final info = devices[i];
       final alias = 'dev${i + 1}_${info.shortName}';
       final filePath = p.join(directory.path, '${baseName}_$alias.csv');
-      final sink = File(filePath).openWrite(mode: FileMode.writeOnlyAppend);
+      final file = File(filePath);
+      final existed = await file.exists();
+      final sink = file.openWrite(mode: FileMode.writeOnlyAppend);
 
       // ---------- CSV 檔頭區 ----------
-      // 僅保留線性加速度與四元數的原始數值欄位，依照指定順序輸出供外部程式解析。
-      sink.writeln(
-        // 依需求調整欄位順序：先輸出四元數，再補上線性加速度數值。
-        'rotation_i,rotation_j,rotation_k,rotation_w,linear_x,linear_y,linear_z',
-      );
-      // 第二行補上裝置辨識文字，方便多裝置解析器比對目標名稱。
-      sink.writeln('Device: ${info.displayName}');
+      // 若為首次建立檔案，補上格式宣告行，模擬參考專案中的 saveToCSVFile_V3 行為。
+      if (!existed) {
+        sink.writeln('CODI_RAW_V1');
+      } else {
+        // 續寫時額外加上空行分隔不同錄影輪次的資料。
+        sink.writeln();
+      }
+      // 先寫入裝置名稱方便離線處理鎖定目標裝置，接著依指定順序輸出四元數與線性加速度欄位。
+      sink.writeln('Device:${info.displayName}');
+      sink.writeln('QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
 
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
@@ -208,19 +213,28 @@ class ImuDataLogger {
       return;
     }
     final values = <String>[
-      _stringOrEmpty(rotation?['i']),
-      _stringOrEmpty(rotation?['j']),
-      _stringOrEmpty(rotation?['k']),
-      _stringOrEmpty(rotation?['real']),
-      _stringOrEmpty(linear?['x']),
-      _stringOrEmpty(linear?['y']),
-      _stringOrEmpty(linear?['z']),
+      _formatNumeric(rotation?['i']),
+      _formatNumeric(rotation?['j']),
+      _formatNumeric(rotation?['k']),
+      _formatNumeric(rotation?['real']),
+      _formatNumeric(linear?['x']),
+      _formatNumeric(linear?['y']),
+      _formatNumeric(linear?['z']),
     ];
     log.sink.writeln(values.join(','));
   }
 
   /// 將非空數值轉為字串，避免 null 導致欄位錯位。
-  String _stringOrEmpty(Object? value) => value?.toString() ?? '';
+  String _formatNumeric(Object? value) {
+    if (value == null) {
+      return '';
+    }
+    if (value is num) {
+      return value.toStringAsFixed(6);
+    }
+    final parsed = double.tryParse(value.toString());
+    return parsed?.toStringAsFixed(6) ?? value.toString();
+  }
 }
 
 /// 封裝裝置資訊，保留連線時間供排序使用。
