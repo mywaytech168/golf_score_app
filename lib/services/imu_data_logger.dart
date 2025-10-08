@@ -22,11 +22,16 @@ class ImuDataLogger {
   static const int _maxDevices = 2;
 
   /// 登記成功連線的藍牙裝置，後續啟動錄影時會建立對應 CSV。
-  void registerDevice(BluetoothDevice device, {required String displayName}) {
+  void registerDevice(
+    BluetoothDevice device, {
+    required String displayName,
+    required String slotAlias,
+  }) {
     final deviceId = device.remoteId.str;
     _devices[deviceId] = _ImuDeviceInfo(
       deviceId: deviceId,
       displayName: displayName,
+      slotAlias: slotAlias,
       connectedAt: DateTime.now(),
     );
   }
@@ -67,7 +72,7 @@ class ImuDataLogger {
 
     for (int i = 0; i < devices.length && i < _maxDevices; i++) {
       final info = devices[i];
-      final alias = 'dev${i + 1}_${info.shortName}';
+      final alias = info.slotAlias;
       final filePath = p.join(directory.path, '${baseName}_$alias.csv');
       final file = File(filePath);
       final existed = await file.exists();
@@ -126,7 +131,8 @@ class ImuDataLogger {
       _flushPendingSamples(entry.value, force: true);
       await entry.value.sink.flush();
       await entry.value.sink.close();
-      results[entry.key] = entry.value.filePath;
+      final alias = _devices[entry.key]?.slotAlias ?? entry.key;
+      results[alias] = entry.value.filePath;
     }
     _activeLogs.clear();
     return results;
@@ -241,11 +247,13 @@ class ImuDataLogger {
 class _ImuDeviceInfo {
   final String deviceId;
   final String displayName;
+  final String slotAlias;
   final DateTime connectedAt;
 
   _ImuDeviceInfo({
     required this.deviceId,
     required this.displayName,
+    required this.slotAlias,
     required this.connectedAt,
   });
 

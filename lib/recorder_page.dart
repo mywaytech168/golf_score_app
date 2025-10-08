@@ -30,6 +30,17 @@ class RecorderPage extends StatefulWidget {
   State<RecorderPage> createState() => _RecorderPageState();
 }
 
+/// 定義 IMU 佩戴位置的插槽，方便多裝置管理
+enum _ImuSlotType { rightWrist, chest }
+
+extension _ImuSlotInfo on _ImuSlotType {
+  /// CSV 檔案名稱需使用英文字面固定格式
+  String get csvName => this == _ImuSlotType.rightWrist ? 'RIGHT_WRIST' : 'CHEST';
+
+  /// 顯示於 UI 的中文名稱
+  String get displayLabel => this == _ImuSlotType.rightWrist ? '右手腕 IMU' : '胸前 IMU';
+}
+
 class _RecorderPageState extends State<RecorderPage> {
   void _logBle(String message, {Object? error, StackTrace? stackTrace}) {
     // 集中處理藍牙相關紀錄，方便於 console 追蹤 bug
@@ -45,11 +56,16 @@ class _RecorderPageState extends State<RecorderPage> {
   StreamSubscription<List<ScanResult>>? _scanSubscription; // 藍牙掃描訂閱
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription; // 藍牙狀態監聽
   StreamSubscription<BluetoothConnectionState>? _deviceConnectionSubscription; // 裝置連線狀態監聽
+  StreamSubscription<BluetoothConnectionState>? _secondDeviceConnectionSubscription; // 胸前 IMU 連線狀態監聽
 
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown; // 目前藍牙狀態
   BluetoothDevice? _foundDevice; // 已搜尋到的目標 IMU 裝置
-  BluetoothDevice? _connectedDevice; // 已成功連線的 IMU 裝置
-  BluetoothConnectionState _connectionState = BluetoothConnectionState.disconnected; // IMU 連線狀態
+  BluetoothDevice? _connectedDevice; // 已成功連線的 IMU 裝置（預設視為右手腕）
+  BluetoothConnectionState _connectionState =
+      BluetoothConnectionState.disconnected; // 右手腕 IMU 連線狀態
+  BluetoothDevice? _secondDevice; // 已成功連線的胸前 IMU 裝置
+  BluetoothConnectionState _secondConnectionState =
+      BluetoothConnectionState.disconnected; // 胸前 IMU 連線狀態
 
   bool _isScanning = false; // 是否正在搜尋裝置
   bool _isConnecting = false; // 是否正處於連線流程
@@ -58,7 +74,8 @@ class _RecorderPageState extends State<RecorderPage> {
   late final Map<Permission, String> _runtimeBlePermissions; // 不同平台需申請的權限列表
   int _selectedRounds = 5; // 使用者預設要錄影的次數
   int _recordingDurationSeconds = 15; // 使用者預設每次錄影長度（秒）
-  String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 顯示於 UI 的狀態文字
+  String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 右手腕 IMU 狀態文字
+  String _chestConnectionMessage = '尚未搜尋到胸前 IMU 裝置'; // 胸前 IMU 狀態文字
   int? _lastRssi; // 紀錄訊號強度供顯示
   String? _foundDeviceName; // 掃描到的裝置名稱
   final Map<String, _ImuScanCandidate> _scanCandidates = {}; // 目前掃描到的藍牙裝置列表
@@ -100,9 +117,13 @@ class _RecorderPageState extends State<RecorderPage> {
       Guid('1b18c3ee-013a-4cb1-9923-95dc798de376'); // 自訂裝置名稱特徵值
   final Guid _cccdUuid = Guid('00002902-0000-1000-8000-00805f9b34fb'); // 通知控制描述符 UUID
   final List<StreamSubscription<List<int>>> _notificationSubscriptions =
-      []; // 收集所有感測通知的訂閱以便統一釋放
+      []; // 右手腕感測通知訂閱
+  final List<StreamSubscription<List<int>>> _secondNotificationSubscriptions =
+      []; // 胸前感測通知訂閱
   BluetoothCharacteristic? _linearAccelerationCharacteristic; // 線性加速度特徵引用
   BluetoothCharacteristic? _gameRotationVectorCharacteristic; // Game Rotation Vector 特徵引用
+  BluetoothCharacteristic? _secondLinearAccelerationCharacteristic; // 胸前線性加速度特徵引用
+  BluetoothCharacteristic? _secondGameRotationVectorCharacteristic; // 胸前 Game Rotation Vector 特徵引用
   BluetoothCharacteristic? _buttonNotifyCharacteristic; // 按鈕事件特徵引用
   BluetoothCharacteristic? _motorControlCharacteristic; // 震動馬達控制特徵引用
   BluetoothCharacteristic? _batteryLevelCharacteristic; // 電量特徵引用
@@ -119,13 +140,20 @@ class _RecorderPageState extends State<RecorderPage> {
   BluetoothCharacteristic? _softwareRevisionCharacteristic; // 軟體版本特徵引用
   BluetoothCharacteristic? _manufacturerCharacteristic; // 製造商資訊特徵引用
   BluetoothCharacteristic? _deviceNameCharacteristic; // 自訂裝置名稱特徵引用
-  Map<String, dynamic>? _latestLinearAcceleration; // 最新線性加速度資料
-  Map<String, dynamic>? _latestGameRotationVector; // 最新 Game Rotation Vector 資料
-  Timer? _gameRotationFallbackTimer; // Game Rotation Vector 補償讀取計時器
+  Map<String, dynamic>? _latestLinearAcceleration; // 右手腕線性加速度資料
+  Map<String, dynamic>? _latestGameRotationVector; // 右手腕 Game Rotation Vector 資料
+  Map<String, dynamic>? _secondLatestLinearAcceleration; // 胸前線性加速度資料
+  Map<String, dynamic>? _secondLatestGameRotationVector; // 胸前 Game Rotation Vector 資料
+  Timer? _gameRotationFallbackTimer; // 右手腕 Game Rotation Vector 補償讀取計時器
   bool _isGameRotationFallbackReading = false; // 避免補償讀取重入
-  DateTime? _lastGameRotationUpdate; // 紀錄最近一次接收到 Game Rotation Vector 的時間
-  int? _lastGameRotationSeq; // 追蹤最近一次 Game Rotation Vector 序號
-  int? _lastGameRotationTimestamp; // 追蹤最近一次 Game Rotation Vector 時間戳
+  DateTime? _lastGameRotationUpdate; // 右手腕最近一次 Game Rotation Vector 時間
+  int? _lastGameRotationSeq; // 右手腕 Game Rotation Vector 序號
+  int? _lastGameRotationTimestamp; // 右手腕 Game Rotation Vector 時間戳
+  Timer? _secondGameRotationFallbackTimer; // 胸前 Game Rotation Vector 補償讀取計時器
+  bool _isSecondGameRotationFallbackReading = false; // 胸前補償讀取重入保護
+  DateTime? _secondLastGameRotationUpdate; // 胸前最近一次 Game Rotation Vector 時間
+  int? _secondLastGameRotationSeq; // 胸前 Game Rotation Vector 序號
+  int? _secondLastGameRotationTimestamp; // 胸前 Game Rotation Vector 時間戳
   String _buttonStatusText = '尚未接收到按鈕事件'; // 最近一次按鈕敘述
   int? _buttonClickTimes; // 最近一次按鈕連擊次數
   int? _buttonEventCode; // 最近一次按鈕事件代碼
@@ -164,6 +192,7 @@ class _RecorderPageState extends State<RecorderPage> {
     _scanSubscription?.cancel();
     _adapterStateSubscription?.cancel();
     _deviceConnectionSubscription?.cancel();
+    _secondDeviceConnectionSubscription?.cancel();
     if (_activeScanStopper != null && !_activeScanStopper!.isCompleted) {
       // 若仍有掃描流程在等待，主動結束避免懸掛 Future
       _activeScanStopper!.complete();
@@ -171,7 +200,11 @@ class _RecorderPageState extends State<RecorderPage> {
     if (_connectedDevice != null) {
       ImuDataLogger.instance.unregisterDevice(_connectedDevice!.remoteId.str);
     }
+    if (_secondDevice != null) {
+      ImuDataLogger.instance.unregisterDevice(_secondDevice!.remoteId.str);
+    }
     unawaited(_clearImuSession()); // 統一釋放所有藍牙訂閱與特徵引用
+    unawaited(_clearSecondImuSession()); // 同步釋放第二顆 IMU 的資源
     FlutterBluePlus.stopScan();
     _bleOperationQueue.dispose(); // 中止尚未執行的 BLE 任務，避免頁面離開後仍呼叫底層 API
     super.dispose();
@@ -226,20 +259,40 @@ class _RecorderPageState extends State<RecorderPage> {
         _logBle('啟動時略過裝置：${device.remoteId} 未包含 IMU 服務');
         continue;
       }
-      _connectedDevice = device;
-      _listenConnectionState(device);
-      ImuDataLogger.instance.registerDevice(
-        device,
-        displayName: _resolveDeviceName(device),
-      );
-      await _setupImuServices(services);
-      if (!mounted) return;
-      setState(() {
-        _connectionState = BluetoothConnectionState.connected;
-        _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
-      });
-      _logBle('啟動時即偵測到已連線裝置：${_resolveDeviceName(device)}');
-      return;
+      if (_connectedDevice == null) {
+        _connectedDevice = device;
+        _listenConnectionState(device);
+        ImuDataLogger.instance.registerDevice(
+          device,
+          displayName: _resolveDeviceName(device),
+          slotAlias: _ImuSlotType.rightWrist.csvName,
+        );
+        await _setupPrimaryImuServices(services);
+        if (!mounted) return;
+        setState(() {
+          _connectionState = BluetoothConnectionState.connected;
+          _connectionMessage = '已連線至 ${_resolveDeviceName(device)}';
+        });
+        _logBle('啟動時即偵測到右手腕 IMU：${_resolveDeviceName(device)}');
+        continue;
+      }
+
+      if (_secondDevice == null) {
+        _secondDevice = device;
+        _listenSecondConnectionState(device);
+        ImuDataLogger.instance.registerDevice(
+          device,
+          displayName: _resolveDeviceName(device),
+          slotAlias: _ImuSlotType.chest.csvName,
+        );
+        await _setupSecondImuServices(services);
+        if (!mounted) return;
+        setState(() {
+          _secondConnectionState = BluetoothConnectionState.connected;
+          _chestConnectionMessage = '已連線至 ${_resolveDeviceName(device)}';
+        });
+        _logBle('啟動時即偵測到胸前 IMU：${_resolveDeviceName(device)}');
+      }
     }
 
     if (initialState == BluetoothAdapterState.on) {
@@ -475,28 +528,52 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 嘗試連線到掃描到的 IMU 裝置，並遵循 Nordic BLE Library 建議的手動連線流程
-  Future<void> connectToImu() async {
-    final target = _foundDevice ?? _connectedDevice;
+  Future<void> connectToImu({
+    _ImuSlotType slot = _ImuSlotType.rightWrist,
+    BluetoothDevice? candidate,
+    String? candidateName,
+  }) async {
+    final target = candidate ??
+        (slot == _ImuSlotType.rightWrist
+            ? (_foundDevice ?? _connectedDevice)
+            : _secondDevice);
     if (target == null) {
       await scanForImu();
       return;
     }
 
-    await _stopScan(); // 連線前先停止掃描，避免造成頻寬干擾
+    final displayName = candidateName ?? _resolveDeviceName(target);
+
+    await _stopScan();
 
     if (!mounted) return;
     setState(() {
       _isConnecting = true;
-      _connectionMessage = '正在與 ${_foundDeviceName ?? _resolveDeviceName(target)} 建立連線...';
+      if (slot == _ImuSlotType.rightWrist) {
+        _connectionMessage = '正在與 $displayName 建立連線...';
+      } else {
+        _chestConnectionMessage = '正在與 $displayName 建立連線...';
+      }
     });
-    _logBle('準備連線至裝置：${_foundDeviceName ?? _resolveDeviceName(target)}');
+    _logBle('準備連線至 ${slot.displayLabel}：$displayName');
 
     try {
-      // 先嘗試中斷既有連線，確保流程以乾淨狀態開始
       await target.disconnect();
     } catch (_) {
-      // 若裝置原本未連線會拋錯，忽略即可
       _logBle('預斷線時裝置可能未連線，忽略錯誤');
+    }
+
+    if (slot == _ImuSlotType.rightWrist && _connectedDevice != null) {
+      ImuDataLogger.instance.unregisterDevice(_connectedDevice!.remoteId.str);
+    }
+    if (slot == _ImuSlotType.chest && _secondDevice != null) {
+      ImuDataLogger.instance.unregisterDevice(_secondDevice!.remoteId.str);
+    }
+
+    if (slot == _ImuSlotType.rightWrist) {
+      await _clearImuSession();
+    } else {
+      await _clearSecondImuSession();
     }
 
     try {
@@ -506,7 +583,6 @@ class _RecorderPageState extends State<RecorderPage> {
       );
       _logBle('已送出連線請求，等待裝置回覆');
 
-      // 依 Nordic 流程完成 GATT 初始化：等待真正連線並探索服務
       await target.connectionState.firstWhere(
         (state) => state == BluetoothConnectionState.connected,
       );
@@ -514,31 +590,58 @@ class _RecorderPageState extends State<RecorderPage> {
       final services = await target.discoverServices();
 
       try {
-        await target.requestMtu(247); // 嘗試提升 MTU 以利後續傳輸
-      _logBle('MTU 調整成功，已設定為 247');
-    } catch (error, stackTrace) {
-      // 部分裝置不支援 MTU 調整，忽略錯誤即可
-      _logBle('MTU 調整失敗，裝置可能不支援：$error', error: error, stackTrace: stackTrace);
-    }
+        await target.requestMtu(247);
+        _logBle('MTU 調整成功，已設定為 247');
+      } catch (error, stackTrace) {
+        _logBle('MTU 調整失敗，裝置可能不支援：$error',
+            error: error, stackTrace: stackTrace);
+      }
 
-    _connectedDevice = target;
-    _listenConnectionState(target);
-    ImuDataLogger.instance.registerDevice(
-      target,
-      displayName: _resolveDeviceName(target),
-    );
-    await _setupImuServices(services);
-    if (!mounted) return;
-    setState(() {
-      _connectionMessage = '已連線至 ${_resolveDeviceName(target)}，可開始錄影';
-    });
-      _logBle('成功連線並完成服務初始化，裝置：${_resolveDeviceName(target)}');
+      if (slot == _ImuSlotType.rightWrist) {
+        _connectedDevice = target;
+        _listenConnectionState(target);
+        ImuDataLogger.instance.registerDevice(
+          target,
+          displayName: displayName,
+          slotAlias: slot.csvName,
+        );
+        await _setupPrimaryImuServices(services);
+        if (!mounted) return;
+        setState(() {
+          _connectionMessage = '已連線至 $displayName，右手腕感測資料就緒';
+        });
+      } else {
+        _secondDevice = target;
+        _listenSecondConnectionState(target);
+        ImuDataLogger.instance.registerDevice(
+          target,
+          displayName: displayName,
+          slotAlias: slot.csvName,
+        );
+        await _setupSecondImuServices(services);
+        if (!mounted) return;
+        setState(() {
+          _chestConnectionMessage = '已連線至 $displayName，胸前感測資料就緒';
+        });
+      }
+
+      _logBle('成功連線並完成服務初始化：${slot.displayLabel} -> $displayName');
     } catch (e, stackTrace) {
       if (!mounted) return;
       setState(() {
-        _connectionMessage = '連線流程失敗：$e';
-        _connectedDevice = null;
+        if (slot == _ImuSlotType.rightWrist) {
+          _connectionMessage = '連線流程失敗：$e';
+          _connectedDevice = null;
+        } else {
+          _chestConnectionMessage = '連線流程失敗：$e';
+          _secondDevice = null;
+        }
       });
+      if (slot == _ImuSlotType.rightWrist) {
+        await _clearImuSession(resetData: true);
+      } else {
+        await _clearSecondImuSession(resetData: true);
+      }
       _logBle('連線流程發生例外：$e', error: e, stackTrace: stackTrace);
       await _restartScanWithBackoff();
     } finally {
@@ -586,8 +689,27 @@ class _RecorderPageState extends State<RecorderPage> {
     await _cancelNotificationSubscriptions();
     _cancelGameRotationFallbackTimer();
     _resetCharacteristicReferences();
-    if (resetData && !mounted) {
-      _resetImuDataState();
+    if (resetData) {
+      if (mounted) {
+        setState(_resetImuDataState);
+      } else {
+        _resetImuDataState();
+      }
+    }
+  }
+
+  /// 清除第二顆 IMU 的連線資訊與感測訂閱
+  Future<void> _clearSecondImuSession({bool resetData = false}) async {
+    _logBle('清理第二顆 IMU 連線會話，resetData=$resetData');
+    await _cancelSecondNotificationSubscriptions();
+    _cancelSecondGameRotationFallbackTimer();
+    _resetSecondCharacteristicReferences();
+    if (resetData) {
+      if (mounted) {
+        setState(_resetSecondImuDataState);
+      } else {
+        _resetSecondImuDataState();
+      }
     }
   }
 
@@ -598,6 +720,15 @@ class _RecorderPageState extends State<RecorderPage> {
       await subscription.cancel();
     }
     _notificationSubscriptions.clear();
+  }
+
+  /// 取消胸前 IMU 的所有通知訂閱
+  Future<void> _cancelSecondNotificationSubscriptions() async {
+    _logBle('取消胸前 IMU 通知訂閱，共 ${_secondNotificationSubscriptions.length} 筆');
+    for (final subscription in _secondNotificationSubscriptions) {
+      await subscription.cancel();
+    }
+    _secondNotificationSubscriptions.clear();
   }
 
   /// 將所有特徵引用歸零，避免誤用已經失效的 characteristic 物件
@@ -621,6 +752,12 @@ class _RecorderPageState extends State<RecorderPage> {
     _softwareRevisionCharacteristic = null;
     _manufacturerCharacteristic = null;
     _deviceNameCharacteristic = null;
+  }
+
+  /// 重置胸前 IMU 的特徵引用
+  void _resetSecondCharacteristicReferences() {
+    _secondLinearAccelerationCharacteristic = null;
+    _secondGameRotationVectorCharacteristic = null;
   }
 
   /// 重置所有感測顯示資料，讓 UI 反映目前沒有有效連線的狀態
@@ -650,6 +787,15 @@ class _RecorderPageState extends State<RecorderPage> {
     _manufacturerName = null;
     _customDeviceName = null;
     _isTriggeringMotor = false;
+  }
+
+  /// 重置胸前 IMU 的顯示資料，主要影響 CSV 與除錯資訊
+  void _resetSecondImuDataState() {
+    _secondLatestLinearAcceleration = null;
+    _secondLatestGameRotationVector = null;
+    _secondLastGameRotationUpdate = null;
+    _secondLastGameRotationSeq = null;
+    _secondLastGameRotationTimestamp = null;
   }
 
   /// 監聽裝置連線狀態，若中斷則重新搜尋
@@ -690,8 +836,46 @@ class _RecorderPageState extends State<RecorderPage> {
     });
   }
 
+  /// 監聽胸前 IMU 的連線狀態
+  void _listenSecondConnectionState(BluetoothDevice device) {
+    _secondDeviceConnectionSubscription?.cancel();
+    _secondDeviceConnectionSubscription = device.connectionState.listen((state) async {
+      if (!mounted) return;
+
+      if (state == BluetoothConnectionState.connected) {
+        setState(() {
+          _secondConnectionState = state;
+          _secondDevice = device;
+          _chestConnectionMessage = '已連線至 ${_resolveDeviceName(device)}';
+        });
+        _logBle('胸前裝置持續回報連線狀態：${_resolveDeviceName(device)}');
+        return;
+      }
+
+      if (state == BluetoothConnectionState.disconnected) {
+        await _clearSecondImuSession(resetData: true);
+        ImuDataLogger.instance.unregisterDevice(device.remoteId.str);
+        if (!mounted) return;
+        setState(() {
+          _secondConnectionState = state;
+          _secondDevice = null;
+          _chestConnectionMessage = '胸前裝置已斷線，稍後自動重新搜尋';
+          _resetSecondImuDataState();
+        });
+        _logBle('胸前裝置連線中斷，準備重新掃描：${device.remoteId.str}');
+        _restartScanWithBackoff();
+        return;
+      }
+
+      setState(() {
+        _secondConnectionState = state;
+      });
+      _logBle('胸前裝置回報其他狀態：$state');
+    });
+  }
+
   /// 掃描完成後依據各個服務設定通知與初始值讀取，讓感測資料能即時更新
-  Future<void> _setupImuServices(List<BluetoothService> services) async {
+  Future<void> _setupPrimaryImuServices(List<BluetoothService> services) async {
     await _cancelNotificationSubscriptions();
     _cancelGameRotationFallbackTimer();
     _resetCharacteristicReferences();
@@ -1029,6 +1213,8 @@ class _RecorderPageState extends State<RecorderPage> {
     required void Function(String deviceId, List<int>) onData,
     bool listenToUpdates = true,
     bool readInitialValue = true,
+    List<StreamSubscription<List<int>>>? targetSubscriptions,
+    void Function(String message)? onErrorMessage,
   }) async {
     bool shouldListen =
         listenToUpdates && (characteristic.properties.notify || characteristic.properties.indicate);
@@ -1045,11 +1231,11 @@ class _RecorderPageState extends State<RecorderPage> {
           if (!hasCccd) {
             // ---------- 找不到 CCCD ----------
             // 仍嘗試開啟通知，同時輸出除錯資訊方便排查韌體設定
-            _logBle('裝置未回傳 CCCD，改以直接開啟通知：${characteristic.uuid.str}');
-          }
-        }
+      _logBle('裝置未回傳 CCCD，改以直接開啟通知：${characteristic.uuid.str}');
+      }
+    }
 
-        if (!characteristic.isNotifying) {
+    if (!characteristic.isNotifying) {
           // ---------- 尚未啟用通知，交給重試機制處理 ----------
           shouldListen = await _enableNotificationWithRetry(characteristic);
         } else {
@@ -1070,13 +1256,17 @@ class _RecorderPageState extends State<RecorderPage> {
         (value) => onData(deviceId, value),
         onError: (error) {
           if (!mounted) return;
-          setState(() {
-            _connectionMessage = '讀取 ${characteristic.uuid.str} 時發生錯誤：$error';
-          });
+          if (onErrorMessage != null) {
+            onErrorMessage('讀取 ${characteristic.uuid.str} 時發生錯誤：$error');
+          } else {
+            setState(() {
+              _connectionMessage = '讀取 ${characteristic.uuid.str} 時發生錯誤：$error';
+            });
+          }
           _logBle('特徵通知流錯誤：${characteristic.uuid.str}，錯誤：$error', error: error);
         },
       );
-      _notificationSubscriptions.add(subscription);
+      (targetSubscriptions ?? _notificationSubscriptions).add(subscription);
     }
 
     if (readInitialValue && characteristic.properties.read) {
@@ -1092,6 +1282,92 @@ class _RecorderPageState extends State<RecorderPage> {
       }
     }
     return shouldListen;
+  }
+
+  /// 建立胸前 IMU 的感測特徵訂閱
+  Future<void> _setupSecondImuServices(List<BluetoothService> services) async {
+    await _cancelSecondNotificationSubscriptions();
+    _cancelSecondGameRotationFallbackTimer();
+    _resetSecondCharacteristicReferences();
+    _resetSecondImuDataState();
+
+    _logBle('開始建立胸前 IMU 服務訂閱，共取得 ${services.length} 組服務');
+
+    for (final service in services) {
+      if (service.uuid == _serviceBno086Uuid) {
+        for (final characteristic in service.characteristics) {
+          if (characteristic.uuid == _charLinearAccelerationUuid) {
+            _secondLinearAccelerationCharacteristic = characteristic;
+            _logBle('胸前 IMU 綁定線性加速度特徵：${characteristic.uuid.str}');
+          } else if (characteristic.uuid == _charGameRotationVectorUuid) {
+            _secondGameRotationVectorCharacteristic = characteristic;
+            _logBle('胸前 IMU 綁定 Game Rotation Vector 特徵：${characteristic.uuid.str}');
+          }
+        }
+      }
+    }
+
+    final linearCharacteristic = _secondLinearAccelerationCharacteristic;
+    final rotationCharacteristic = _secondGameRotationVectorCharacteristic;
+
+    if (linearCharacteristic == null || rotationCharacteristic == null) {
+      _logBle('胸前 IMU 缺少線性加速度或旋轉特徵，無法啟用感測記錄');
+      if (mounted) {
+        setState(() {
+          _chestConnectionMessage = '裝置未提供完整的感測特徵，請重新配對';
+        });
+      }
+      return;
+    }
+
+    await _initCharacteristic(
+      characteristic: linearCharacteristic,
+      onData: _handleLinearAccelerationPacket,
+      targetSubscriptions: _secondNotificationSubscriptions,
+      onErrorMessage: (message) {
+        if (!mounted) return;
+        setState(() => _chestConnectionMessage = message);
+      },
+    );
+
+    final isListening = await _initCharacteristic(
+      characteristic: rotationCharacteristic,
+      onData: _handleGameRotationVectorPacket,
+      targetSubscriptions: _secondNotificationSubscriptions,
+      onErrorMessage: (message) {
+        if (!mounted) return;
+        setState(() => _chestConnectionMessage = message);
+      },
+    );
+
+    if (!isListening && rotationCharacteristic.properties.read) {
+      _secondGameRotationFallbackTimer = Timer.periodic(
+        const Duration(seconds: 3),
+        (timer) async {
+          if (_isSecondGameRotationFallbackReading) {
+            return;
+          }
+          _isSecondGameRotationFallbackReading = true;
+          try {
+            final value = await rotationCharacteristic.read();
+            if (value.isNotEmpty) {
+              _handleGameRotationVectorPacket(rotationCharacteristic.remoteId.str, value);
+            }
+          } catch (error) {
+            _logBle('胸前 IMU 補償讀取失敗：$error');
+          } finally {
+            _isSecondGameRotationFallbackReading = false;
+          }
+        },
+      );
+      _logBle('胸前 IMU Game Rotation Vector 以補償讀取模式運作');
+    }
+
+    if (mounted) {
+      setState(() {
+        _chestConnectionMessage = '胸前 IMU 感測資料已就緒';
+      });
+    }
   }
 
   /// 解析線性加速度封包，並同步寫入 CSV 與更新最新顯示資料
@@ -1110,8 +1386,18 @@ class _RecorderPageState extends State<RecorderPage> {
     }
     if (sample == null) return;
     if (!mounted) return;
+    final isPrimary = _isPrimaryDevice(deviceId);
+    final isChest = _isChestDevice(deviceId);
+    if (!isPrimary && !isChest) {
+      return;
+    }
     setState(() {
-      _latestLinearAcceleration = sample;
+      if (isPrimary) {
+        _latestLinearAcceleration = sample;
+      }
+      if (isChest) {
+        _secondLatestLinearAcceleration = sample;
+      }
     });
   }
 
@@ -1123,6 +1409,10 @@ class _RecorderPageState extends State<RecorderPage> {
 
     Map<String, dynamic>? sample;
     int offset = 0;
+
+    final slotLabel = _isPrimaryDevice(deviceId)
+        ? '右手腕'
+        : (_isChestDevice(deviceId) ? '胸前' : '未知');
 
     // 逐步解析通知內容，支援 16 bytes（基本欄位）與 20 bytes（額外 accuracy、reserved）封包
     while (offset < value.length) {
@@ -1139,22 +1429,24 @@ class _RecorderPageState extends State<RecorderPage> {
         break;
       }
 
-      _lastGameRotationUpdate = DateTime.now(); // 紀錄最新更新時間供補償讀取判斷
+      _setLastRotationUpdate(deviceId, DateTime.now());
 
       final seq = parsed['seq'] as int?;
       final timestamp = parsed['timestampUs'] as int?;
+      final lastSeq = _getLastRotationSeq(deviceId);
+      final lastTimestamp = _getLastRotationTimestamp(deviceId);
       final isDuplicate = seq != null &&
           timestamp != null &&
-          _lastGameRotationSeq == seq &&
-          _lastGameRotationTimestamp == timestamp;
+          lastSeq == seq &&
+          lastTimestamp == timestamp;
       if (isDuplicate) {
-        _logBle('Game Rotation Vector 收到重複封包：seq=$seq、timestamp=$timestamp，略過寫入與顯示');
+        _logBle('[$slotLabel] Game Rotation Vector 收到重複封包：seq=$seq、timestamp=$timestamp，略過寫入與顯示');
         offset += chunkSize;
         continue;
       }
 
-      _lastGameRotationSeq = seq;
-      _lastGameRotationTimestamp = timestamp;
+      _setLastRotationSeq(deviceId, seq);
+      _setLastRotationTimestamp(deviceId, timestamp);
 
       sample = parsed;
       ImuDataLogger.instance.logGameRotationVector(
@@ -1170,11 +1462,22 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     _logBle(
-      "Game Rotation Vector 更新：seq=${sample['seq']}、i=${sample['i']}、j=${sample['j']}、k=${sample['k']}、real=${sample['real']}",
+      '[$slotLabel] Game Rotation Vector 更新：seq=${sample['seq']}、i=${sample['i']}、j=${sample['j']}、k=${sample['k']}、real=${sample['real']}',
     );
 
+    final isPrimary = _isPrimaryDevice(deviceId);
+    final isChest = _isChestDevice(deviceId);
+    if (!isPrimary && !isChest) {
+      return;
+    }
+
     setState(() {
-      _latestGameRotationVector = sample;
+      if (isPrimary) {
+        _latestGameRotationVector = sample;
+      }
+      if (isChest) {
+        _secondLatestGameRotationVector = sample;
+      }
     });
   }
 
@@ -1256,6 +1559,13 @@ class _RecorderPageState extends State<RecorderPage> {
     _gameRotationFallbackTimer?.cancel();
     _gameRotationFallbackTimer = null;
     _isGameRotationFallbackReading = false;
+  }
+
+  /// 停止胸前 IMU 的 Game Rotation Vector 補償讀取計時器
+  void _cancelSecondGameRotationFallbackTimer() {
+    _secondGameRotationFallbackTimer?.cancel();
+    _secondGameRotationFallbackTimer = null;
+    _isSecondGameRotationFallbackReading = false;
   }
 
   /// 解析三軸感測資料共同欄位（線性加速度、陀螺儀等格式相同）
@@ -1538,9 +1848,58 @@ class _RecorderPageState extends State<RecorderPage> {
     }
   }
 
-  /// 判斷目前是否已建立 IMU 連線
-  bool get isImuConnected =>
+  /// 判斷目前是否已建立右手腕 IMU 連線
+  bool get isPrimaryImuConnected =>
       _connectedDevice != null && _connectionState == BluetoothConnectionState.connected;
+
+  /// 判斷目前是否已建立胸前 IMU 連線
+  bool get isChestImuConnected =>
+      _secondDevice != null && _secondConnectionState == BluetoothConnectionState.connected;
+
+  /// 只要任一 IMU 已連線即視為可搭配錄影
+  bool get isImuConnected => isPrimaryImuConnected || isChestImuConnected;
+
+  /// 檢查給定裝置識別碼是否對應右手腕 IMU
+  bool _isPrimaryDevice(String deviceId) =>
+      _connectedDevice != null && _connectedDevice!.remoteId.str == deviceId;
+
+  /// 檢查給定裝置識別碼是否對應胸前 IMU
+  bool _isChestDevice(String deviceId) =>
+      _secondDevice != null && _secondDevice!.remoteId.str == deviceId;
+
+  DateTime? _getLastRotationUpdate(String deviceId) =>
+      _isPrimaryDevice(deviceId) ? _lastGameRotationUpdate : (_isChestDevice(deviceId) ? _secondLastGameRotationUpdate : null);
+
+  void _setLastRotationUpdate(String deviceId, DateTime? value) {
+    if (_isPrimaryDevice(deviceId)) {
+      _lastGameRotationUpdate = value;
+    } else if (_isChestDevice(deviceId)) {
+      _secondLastGameRotationUpdate = value;
+    }
+  }
+
+  int? _getLastRotationSeq(String deviceId) =>
+      _isPrimaryDevice(deviceId) ? _lastGameRotationSeq : (_isChestDevice(deviceId) ? _secondLastGameRotationSeq : null);
+
+  void _setLastRotationSeq(String deviceId, int? value) {
+    if (_isPrimaryDevice(deviceId)) {
+      _lastGameRotationSeq = value;
+    } else if (_isChestDevice(deviceId)) {
+      _secondLastGameRotationSeq = value;
+    }
+  }
+
+  int? _getLastRotationTimestamp(String deviceId) => _isPrimaryDevice(deviceId)
+      ? _lastGameRotationTimestamp
+      : (_isChestDevice(deviceId) ? _secondLastGameRotationTimestamp : null);
+
+  void _setLastRotationTimestamp(String deviceId, int? value) {
+    if (_isPrimaryDevice(deviceId)) {
+      _lastGameRotationTimestamp = value;
+    } else if (_isChestDevice(deviceId)) {
+      _secondLastGameRotationTimestamp = value;
+    }
+  }
 
   /// 根據裝置資訊推算顯示名稱
   String _resolveDeviceName(BluetoothDevice device) {
@@ -2047,21 +2406,22 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 建構 IMU 連線卡片，提示使用者完成藍牙配對
   Widget _buildImuConnectionCard() {
     final bool connected = isImuConnected;
+    final bool primaryConnected = isPrimaryImuConnected;
     final bool hasCandidate = _foundDevice != null;
-    final String displayName = connected
+    final String primaryTitle = primaryConnected
         ? _resolveDeviceName(_connectedDevice!)
-        : (_foundDeviceName ?? 'IMU 裝置');
-    final String signalText = _lastRssi != null ? '訊號 ${_lastRssi} dBm' : '訊號偵測中';
-
+        : (_foundDeviceName ?? '右手腕 IMU');
+    final String primarySignal =
+        _lastRssi != null ? '訊號 ${_lastRssi} dBm' : '訊號偵測中';
     final String batteryOverview = _batteryLevelText ?? '電量讀取中';
     final String firmwareOverview =
         (_firmwareRevision?.isNotEmpty == true) ? _firmwareRevision! : '韌體資訊更新中';
 
-    final Color statusColor = connected
-        ? const Color(0xFF1E8E5A)
-        : (_adapterState == BluetoothAdapterState.on
-            ? const Color(0xFF7D8B9A)
-            : const Color(0xFFD9534F));
+    final bool chestConnected = isChestImuConnected;
+    final String chestTitle = chestConnected
+        ? _resolveDeviceName(_secondDevice!)
+        : '胸前 IMU';
+    final String chestDetail = chestConnected ? '資料串流中' : '等待綁定';
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -2100,71 +2460,31 @@ class _RecorderPageState extends State<RecorderPage> {
           const SizedBox(height: 18),
           Row(
             children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF123B70), Color(0xFF1E8E5A)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: const Icon(Icons.sports_golf, color: Colors.white, size: 34),
-              ),
-              const SizedBox(width: 20),
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      displayName,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E1E1E),
-                      ),
+                    _buildImuSlotRow(
+                      slot: _ImuSlotType.rightWrist,
+                      title: primaryTitle,
+                      statusText: _connectionMessage,
+                      detailText: '電量 $batteryOverview · $firmwareOverview · $primarySignal',
+                      connected: primaryConnected,
+                      onConnectPressed: (_isConnecting || (!primaryConnected && !hasCandidate))
+                          ? null
+                          : () => connectToImu(slot: _ImuSlotType.rightWrist),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '電量 $batteryOverview · $firmwareOverview',
-                      style: const TextStyle(fontSize: 13, color: Color(0xFF7D8B9A)),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _connectionMessage,
-                      style: TextStyle(fontSize: 13, color: statusColor, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      signalText,
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF9AA8B6)),
+                    const SizedBox(height: 14),
+                    _buildImuSlotRow(
+                      slot: _ImuSlotType.chest,
+                      title: chestTitle,
+                      statusText: _chestConnectionMessage,
+                      detailText: chestDetail,
+                      connected: chestConnected,
+                      onConnectPressed:
+                          _isConnecting ? null : () => connectToImu(slot: _ImuSlotType.chest),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton(
-                onPressed:
-                    (connected || _isConnecting || !hasCandidate) ? null : connectToImu,
-                style: FilledButton.styleFrom(
-                  backgroundColor: connected ? const Color(0xFF1E8E5A) : const Color(0xFF123B70),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                ),
-                child: _isConnecting
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                      )
-                    : Text(
-                        connected
-                            ? '已連線'
-                            : (hasCandidate ? '配對裝置' : '等待裝置'),
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                      ),
               ),
             ],
           ),
@@ -2226,6 +2546,89 @@ class _RecorderPageState extends State<RecorderPage> {
     );
   }
 
+  Widget _buildImuSlotRow({
+    required _ImuSlotType slot,
+    required String title,
+    required String statusText,
+    required String detailText,
+    required bool connected,
+    required VoidCallback? onConnectPressed,
+  }) {
+    final Color statusColor = connected ? const Color(0xFF1E8E5A) : const Color(0xFF7D8B9A);
+    final IconData icon =
+        slot == _ImuSlotType.rightWrist ? Icons.sports_golf : Icons.accessibility_new;
+    final List<Color> gradientColors = slot == _ImuSlotType.rightWrist
+        ? const [Color(0xFF123B70), Color(0xFF1E8E5A)]
+        : const [Color(0xFF6A1B9A), Color(0xFF26A69A)];
+    final String buttonText = connected
+        ? '重新連線'
+        : (slot == _ImuSlotType.rightWrist ? '配對右手腕' : '配對胸前');
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              colors: gradientColors,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Icon(icon, color: Colors.white, size: 34),
+        ),
+        const SizedBox(width: 20),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1E1E1E),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                statusText,
+                style: TextStyle(fontSize: 13, color: statusColor, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                detailText,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        FilledButton(
+          onPressed: onConnectPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: connected ? const Color(0xFF1E8E5A) : const Color(0xFF123B70),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          ),
+          child: _isConnecting && onConnectPressed == null
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                )
+              : Text(
+                  buttonText,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+        ),
+      ],
+    );
+  }
+
   /// 建構掃描結果列表，列出目前搜尋到的藍牙裝置供使用者挑選
   Widget _buildScanCandidatesSection() {
     if (_scanCandidates.isEmpty) {
@@ -2282,6 +2685,10 @@ class _RecorderPageState extends State<RecorderPage> {
     final Color iconColor = matchesService
         ? const Color(0xFF1E8E5A)
         : const Color(0xFF7D8B9A);
+    final bool isPrimaryAssigned =
+        _connectedDevice?.remoteId == candidate.device.remoteId;
+    final bool isChestAssigned =
+        _secondDevice?.remoteId == candidate.device.remoteId;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2325,28 +2732,35 @@ class _RecorderPageState extends State<RecorderPage> {
             ),
           ),
           const SizedBox(width: 12),
-          FilledButton.tonal(
-            onPressed: _isConnecting ? null : () => _selectScanCandidate(candidate),
-            child: Text(isSelected ? '準備連線' : '選擇'),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FilledButton(
+                onPressed: _isConnecting || isPrimaryAssigned
+                    ? null
+                    : () => connectToImu(
+                          slot: _ImuSlotType.rightWrist,
+                          candidate: candidate.device,
+                          candidateName: candidate.displayName,
+                        ),
+                child: Text(isPrimaryAssigned ? '已綁定右手腕' : '綁定右手腕'),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.tonal(
+                onPressed: _isConnecting || isChestAssigned
+                    ? null
+                    : () => connectToImu(
+                          slot: _ImuSlotType.chest,
+                          candidate: candidate.device,
+                          candidateName: candidate.displayName,
+                        ),
+                child: Text(isChestAssigned ? '已綁定胸前' : '綁定胸前'),
+              ),
+            ],
           ),
         ],
       ),
     );
-  }
-
-  /// 設定使用者選取的藍牙裝置並更新提示文字
-  void _selectScanCandidate(_ImuScanCandidate candidate) {
-    if (_isConnecting) {
-      return; // 連線流程進行中時避免切換目標造成混亂
-    }
-    _logBle('使用者選取裝置：${candidate.displayName} (${candidate.device.remoteId.str})');
-    if (!mounted) return;
-    setState(() {
-      _foundDevice = candidate.device;
-      _foundDeviceName = candidate.displayName;
-      _lastRssi = candidate.rssi;
-      _connectionMessage = '已選擇 ${candidate.displayName}，請按下方按鈕開始配對';
-    });
   }
 
   /// 說明錄影流程的卡片，提醒使用者會切換到新畫面
