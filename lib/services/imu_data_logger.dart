@@ -70,10 +70,10 @@ class ImuDataLogger {
       final filePath = p.join(directory.path, '${baseName}_$alias.csv');
       final sink = File(filePath).openWrite(mode: FileMode.writeOnlyAppend);
       sink.writeln(
-        'device_alias,'
-        'linear_id,linear_seq,linear_status,linear_timestamp_us,linear_x,linear_y,linear_z,'
-        'rotation_id,rotation_seq,rotation_status,rotation_timestamp_us,rotation_i,rotation_j,rotation_k,rotation_real,rotation_accuracy,rotation_reserved,'
-        'raw_linear_hex,raw_rotation_hex',
+        'linear_timestamp_us,'
+        'linear_x,linear_y,linear_z,'
+        'rotation_id,rotation_seq,rotation_status,rotation_timestamp_us,'
+        'rotation_i,rotation_j,rotation_k,rotation_real,rotation_accuracy',
       );
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
@@ -198,47 +198,22 @@ class ImuDataLogger {
 
     final linear = sample.linearSample;
     final rotation = sample.rotationSample;
-    final buffer = StringBuffer()
-      ..write(log.alias)
-      ..write(',')
-      ..write(linear?['id'] ?? '')
-      ..write(',')
-      ..write(linear?['seq'] ?? '')
-      ..write(',')
-      ..write(linear?['status'] ?? '')
-      ..write(',')
-      ..write(linear?['timestampUs'] ?? '')
-      ..write(',')
-      ..write(linear?['x'] ?? '')
-      ..write(',')
-      ..write(linear?['y'] ?? '')
-      ..write(',')
-      ..write(linear?['z'] ?? '')
-      ..write(',')
-      ..write(rotation?['id'] ?? '')
-      ..write(',')
-      ..write(rotation?['seq'] ?? '')
-      ..write(',')
-      ..write(rotation?['status'] ?? '')
-      ..write(',')
-      ..write(rotation?['timestampUs'] ?? '')
-      ..write(',')
-      ..write(rotation?['i'] ?? '')
-      ..write(',')
-      ..write(rotation?['j'] ?? '')
-      ..write(',')
-      ..write(rotation?['k'] ?? '')
-      ..write(',')
-      ..write(rotation?['real'] ?? '')
-      ..write(',')
-      ..write(rotation?['accuracy'] ?? '')
-      ..write(',')
-      ..write(rotation?['reserved'] ?? '')
-      ..write(',')
-      ..write(_formatRawBytes(sample.linearRawBytes ?? const <int>[]))
-      ..write(',')
-      ..write(_formatRawBytes(sample.rotationRawBytes ?? const <int>[]));
-    log.sink.writeln(buffer.toString());
+    final values = <String>[
+      _stringOrEmpty(linear?['timestampUs']),
+      _stringOrEmpty(linear?['x']),
+      _stringOrEmpty(linear?['y']),
+      _stringOrEmpty(linear?['z']),
+      _stringOrEmpty(rotation?['id']),
+      _stringOrEmpty(rotation?['seq']),
+      _stringOrEmpty(rotation?['status']),
+      _stringOrEmpty(rotation?['timestampUs']),
+      _stringOrEmpty(rotation?['i']),
+      _stringOrEmpty(rotation?['j']),
+      _stringOrEmpty(rotation?['k']),
+      _stringOrEmpty(rotation?['real']),
+      _stringOrEmpty(rotation?['accuracy']),
+    ];
+    log.sink.writeln(values.join(','));
   }
 
   /// 定期檢查等待配對的資料，逾時或資料齊全時即寫入。
@@ -274,10 +249,8 @@ class ImuDataLogger {
     log.lastCleanup = now;
   }
 
-  /// 將原始位元組轉為十六進位字串，方便除錯比對。
-  String _formatRawBytes(List<int> bytes) {
-    return bytes.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ');
-  }
+  /// 將非空數值轉為字串，避免 null 導致欄位錯位。
+  String _stringOrEmpty(Object? value) => value?.toString() ?? '';
 }
 
 /// 封裝裝置資訊，保留連線時間供排序使用。
