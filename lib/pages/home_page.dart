@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
@@ -9,6 +10,7 @@ import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
 import '../services/recording_history_storage.dart';
 import 'recording_history_page.dart';
+import 'recording_session_page.dart';
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
@@ -81,88 +83,100 @@ class _HomePageState extends State<HomePage> {
     final durationLabel = '時長 ${entry.durationSeconds} 秒';
     final modeLabel = entry.modeLabel;
 
-    return Container(
-      width: 140,
-      margin: const EdgeInsets.only(right: 16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [baseColor, baseColor.withOpacity(0.7)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 4)),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
-                    begin: Alignment.bottomLeft,
-                    end: Alignment.topRight,
-                  ),
+    return Padding(
+      padding: const EdgeInsets.only(right: 16),
+      child: SizedBox(
+        width: 140,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => _playHistoryEntry(entry),
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                gradient: LinearGradient(
+                  colors: [baseColor, baseColor.withOpacity(0.7)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                child: const Align(
-                  alignment: Alignment.center,
-                  child: Icon(Icons.play_circle_fill, size: 46, color: Colors.white24),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.black.withOpacity(0.55), Colors.transparent],
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 12,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(dateLabel, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                  const SizedBox(height: 4),
-                  Text(
-                    entry.displayTitle,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$modeLabel｜$durationLabel',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.2),
-                  ),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 4)),
                 ],
               ),
-            ),
-            Positioned(
-              top: 10,
-              right: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(12),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
+                            begin: Alignment.bottomLeft,
+                            end: Alignment.topRight,
+                          ),
+                        ),
+                        child: const Align(
+                          alignment: Alignment.center,
+                          child: Icon(Icons.play_circle_fill, size: 46, color: Colors.white24),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.black.withOpacity(0.55), Colors.transparent],
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      bottom: 12,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(dateLabel, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.displayTitle,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '$modeLabel｜$durationLabel',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.2),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.85),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.play_arrow_rounded, size: 18, color: Color(0xFF1E8E5A)),
+                      ),
+                    ),
+                  ],
                 ),
-                child: const Icon(Icons.play_arrow_rounded, size: 18, color: Color(0xFF1E8E5A)),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -221,6 +235,23 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(
         builder: (_) => RecordingHistoryPage(entries: _recordingHistory),
       ),
+    );
+  }
+
+  /// 直接播放單筆歷史影片，並在檔案遺失時給予即時提示
+  Future<void> _playHistoryEntry(RecordingHistoryEntry entry) async {
+    final file = File(entry.filePath); // 建立檔案物件以檢查實際存在狀態
+    if (!await file.exists()) {
+      if (!mounted) return; // 若畫面已卸載則不再顯示訊息
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('找不到影片檔案 ${entry.fileName}，請確認檔案是否仍保留於裝置中。')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: entry.filePath)),
     );
   }
 
