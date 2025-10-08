@@ -181,6 +181,9 @@ class _RecorderPageState extends State<RecorderPage> {
       List<RecordingHistoryEntry>.from(widget.initialHistory); // 累積曾經錄影的檔案資訊
   final _BleOperationQueue _bleOperationQueue =
       _BleOperationQueue(); // 排程 BLE 寫入請求，避免同時寫入造成忙碌錯誤
+  final StreamController<void> _imuButtonController = StreamController<void>.broadcast();
+  // IMU 按鈕事件廣播器，讓錄影頁面可以同步收到硬體按鈕觸發
+  bool _isSessionPageVisible = false; // 是否已顯示錄影頁面，避免重複開啟
 
   // ---------- 生命週期 ----------
   @override
@@ -246,6 +249,7 @@ class _RecorderPageState extends State<RecorderPage> {
     unawaited(_clearSecondImuSession()); // 同步釋放第二顆 IMU 的資源
     FlutterBluePlus.stopScan();
     _bleOperationQueue.dispose(); // 中止尚未執行的 BLE 任務，避免頁面離開後仍呼叫底層 API
+    _imuButtonController.close(); // 關閉按鈕事件廣播，避免記憶體洩漏
     super.dispose();
   }
 
@@ -1780,12 +1784,19 @@ class _RecorderPageState extends State<RecorderPage> {
         _logBle('按鈕事件與前次觸發過於接近，避免重複開啟錄影');
         return;
       }
+      _lastButtonTriggerTime = now; // 記錄此次觸發時間，避免短時間內重複響應
+
+      if (_isSessionPageVisible) {
+        // 若錄影頁面已開啟，直接轉交事件給錄影頁啟動倒數
+        _logBle('錄影頁面已開啟，轉交硬體按鈕觸發倒數錄影');
+        _imuButtonController.add(null);
+        return;
+      }
       if (_isOpeningSession) {
         _logBle('按鈕觸發錄影但畫面尚在開啟中，略過重複事件');
         return;
       }
-      _lastButtonTriggerTime = now;
-      _logBle('偵測到短按事件（code=$eventCode），準備自動開啟錄影畫面');
+      _logBle('偵測到短按事件（code=$eventCode），準備自動開啟錄影畫面並預約自動倒數');
       // 透過硬體按鈕觸發時，直接沿用使用者目前的錄影次數／秒數設定，避免再跳出彈窗
       unawaited(_openRecordingSession(triggeredByImuButton: true));
     }
@@ -2107,17 +2118,25 @@ class _RecorderPageState extends State<RecorderPage> {
     final int rounds = config['rounds'] ?? _selectedRounds;
     final int seconds = config['seconds'] ?? _recordingDurationSeconds;
 
-    final historyFromSession = await Navigator.push<List<RecordingHistoryEntry>>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RecordingSessionPage(
-          cameras: widget.cameras,
-          isImuConnected: isImuConnected,
-          totalRounds: rounds,
-          durationSeconds: seconds,
+    List<RecordingHistoryEntry>? historyFromSession;
+    _isSessionPageVisible = true; // 標記錄影頁面已開啟，後續按鈕事件直接轉交
+    try {
+      historyFromSession = await Navigator.push<List<RecordingHistoryEntry>>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RecordingSessionPage(
+            cameras: widget.cameras,
+            isImuConnected: isImuConnected,
+            totalRounds: rounds,
+            durationSeconds: seconds,
+            autoStartOnReady: triggeredByImuButton,
+            imuButtonStream: _imuButtonController.stream,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _isSessionPageVisible = false; // 不論結果如何都重設狀態
+    }
     if (!mounted) return;
     if (historyFromSession != null && historyFromSession.isNotEmpty) {
       setState(() {

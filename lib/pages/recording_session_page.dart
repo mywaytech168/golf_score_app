@@ -21,6 +21,8 @@ class RecordingSessionPage extends StatefulWidget {
   final bool isImuConnected; // 是否已配對 IMU，決定提示訊息
   final int totalRounds; // 本次預計錄影的輪數
   final int durationSeconds; // 每輪錄影秒數
+  final bool autoStartOnReady; // 由 IMU 按鈕開啟時自動啟動錄影
+  final Stream<void> imuButtonStream; // 右手腕 IMU 按鈕事件來源
 
   const RecordingSessionPage({
     super.key,
@@ -28,6 +30,8 @@ class RecordingSessionPage extends StatefulWidget {
     required this.isImuConnected,
     required this.totalRounds,
     required this.durationSeconds,
+    required this.autoStartOnReady,
+    required this.imuButtonStream,
   });
 
   @override
@@ -54,6 +58,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   static const int _restSecondsBetweenRounds = 10; // 每輪錄影間預設的休息秒數
   final List<RecordingHistoryEntry> _recordedRuns = []; // 累積此次錄影產生的檔案
   bool _hasTriggeredRecording = false; // 記錄使用者是否啟動過錄影，控制按鈕提示
+  StreamSubscription<void>? _imuButtonSubscription; // 監聽 IMU 按鈕觸發錄影
+  bool _pendingAutoStart = false; // 記錄 IMU 事件是否需等待鏡頭初始化後再啟動
 
   // ---------- 生命週期 ----------
   @override
@@ -61,6 +67,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     super.initState();
     initVolumeKeyListener(); // 建立音量鍵快捷鍵
     _prepareSession(); // 非同步初始化鏡頭，等待使用者手動啟動
+    _pendingAutoStart = widget.autoStartOnReady; // 若由 IMU 開啟則在鏡頭就緒後自動啟動
+    // 監聽 IMU 按鈕事件，隨時可從硬體直接觸發錄影
+    _imuButtonSubscription = widget.imuButtonStream.listen((_) {
+      unawaited(_handleImuButtonTrigger());
+    });
   }
 
   @override
@@ -70,6 +81,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     controller?.dispose();
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
+    _imuButtonSubscription?.cancel(); // 解除 IMU 按鈕監聽，避免資源洩漏
     super.dispose();
   }
 
@@ -95,6 +107,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     await controller!.initialize();
     if (!mounted) return;
     setState(() {}); // 更新畫面顯示預覽
+
+    if (_pendingAutoStart) {
+      // 鏡頭就緒後若先前已有硬體按鈕請求，立即啟動倒數錄影
+      _pendingAutoStart = false;
+      unawaited(_handleImuButtonTrigger());
+    }
   }
 
   /// 建立音量鍵監聽器，讓使用者快速啟動錄影
@@ -111,6 +129,28 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         }
       }
     });
+  }
+
+  /// 由 IMU 按鈕觸發錄影，統一檢查鏡頭與倒數狀態
+  Future<void> _handleImuButtonTrigger() async {
+    if (!mounted) {
+      return;
+    }
+    if (controller == null || !controller!.value.isInitialized) {
+      // 鏡頭尚未準備完成，保留旗標待完成初始化後再自動啟動
+      _pendingAutoStart = true;
+      return;
+    }
+    if (_isCountingDown || isRecording) {
+      return; // 已在倒數或錄影中則忽略額外事件
+    }
+
+    _isCountingDown = true; // 鎖定狀態避免連續觸發
+    try {
+      await playCountdownAndStart();
+    } finally {
+      _isCountingDown = false;
+    }
   }
 
   /// 發送取消錄影訊號，讓倒數與錄影流程可以即時中斷
