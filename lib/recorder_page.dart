@@ -121,6 +121,11 @@ class _RecorderPageState extends State<RecorderPage> {
   BluetoothCharacteristic? _deviceNameCharacteristic; // 自訂裝置名稱特徵引用
   Map<String, dynamic>? _latestLinearAcceleration; // 最新線性加速度資料
   Map<String, dynamic>? _latestGameRotationVector; // 最新 Game Rotation Vector 資料
+  Timer? _gameRotationFallbackTimer; // Game Rotation Vector 補償讀取計時器
+  bool _isGameRotationFallbackReading = false; // 避免補償讀取重入
+  DateTime? _lastGameRotationUpdate; // 紀錄最近一次接收到 Game Rotation Vector 的時間
+  int? _lastGameRotationSeq; // 追蹤最近一次 Game Rotation Vector 序號
+  int? _lastGameRotationTimestamp; // 追蹤最近一次 Game Rotation Vector 時間戳
   String _buttonStatusText = '尚未接收到按鈕事件'; // 最近一次按鈕敘述
   int? _buttonClickTimes; // 最近一次按鈕連擊次數
   int? _buttonEventCode; // 最近一次按鈕事件代碼
@@ -576,6 +581,7 @@ class _RecorderPageState extends State<RecorderPage> {
   Future<void> _clearImuSession({bool resetData = false}) async {
     _logBle('清理 IMU 連線會話，resetData=$resetData');
     await _cancelNotificationSubscriptions();
+    _cancelGameRotationFallbackTimer();
     _resetCharacteristicReferences();
     if (resetData && !mounted) {
       _resetImuDataState();
@@ -619,6 +625,9 @@ class _RecorderPageState extends State<RecorderPage> {
     _logBle('重置 IMU 顯示資料，等待重新連線');
     _latestLinearAcceleration = null;
     _latestGameRotationVector = null;
+    _lastGameRotationUpdate = null;
+    _lastGameRotationSeq = null;
+    _lastGameRotationTimestamp = null;
     _buttonStatusText = '尚未接收到按鈕事件';
     _buttonClickTimes = null;
     _buttonEventCode = null;
@@ -681,6 +690,7 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 掃描完成後依據各個服務設定通知與初始值讀取，讓感測資料能即時更新
   Future<void> _setupImuServices(List<BluetoothService> services) async {
     await _cancelNotificationSubscriptions();
+    _cancelGameRotationFallbackTimer();
     _resetCharacteristicReferences();
 
     if (mounted) {
@@ -799,10 +809,11 @@ class _RecorderPageState extends State<RecorderPage> {
 
     if (_gameRotationVectorCharacteristic != null) {
       _logBle('準備訂閱 Game Rotation Vector 通知');
-      await _initCharacteristic(
+      final isListening = await _initCharacteristic(
         characteristic: _gameRotationVectorCharacteristic!,
         onData: _handleGameRotationVectorPacket,
       );
+      _startGameRotationFallbackTimer(isListening);
     }
 
     if (_buttonNotifyCharacteristic != null) {
@@ -930,7 +941,9 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 統一處理特徵值的通知與讀取邏輯，確保監聽與初始資料都能取得
-  Future<void> _initCharacteristic({
+  ///
+  /// 回傳值代表是否成功維持通知監聽（true 表示已建立監聽，false 則僅執行讀取）
+  Future<bool> _initCharacteristic({
     required BluetoothCharacteristic characteristic,
     required void Function(String deviceId, List<int>) onData,
     bool listenToUpdates = true,
@@ -998,6 +1011,7 @@ class _RecorderPageState extends State<RecorderPage> {
         _logBle('初始讀取失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
       }
     }
+    return shouldListen;
   }
 
   /// 解析線性加速度封包，並同步寫入 CSV 與更新最新顯示資料
@@ -1045,6 +1059,23 @@ class _RecorderPageState extends State<RecorderPage> {
         break;
       }
 
+      _lastGameRotationUpdate = DateTime.now(); // 紀錄最新更新時間供補償讀取判斷
+
+      final seq = parsed['seq'] as int?;
+      final timestamp = parsed['timestampUs'] as int?;
+      final isDuplicate = seq != null &&
+          timestamp != null &&
+          _lastGameRotationSeq == seq &&
+          _lastGameRotationTimestamp == timestamp;
+      if (isDuplicate) {
+        _logBle('Game Rotation Vector 收到重複封包：seq=$seq、timestamp=$timestamp，略過寫入與顯示');
+        offset += chunkSize;
+        continue;
+      }
+
+      _lastGameRotationSeq = seq;
+      _lastGameRotationTimestamp = timestamp;
+
       sample = parsed;
       ImuDataLogger.instance.logGameRotationVector(
         deviceId,
@@ -1065,6 +1096,68 @@ class _RecorderPageState extends State<RecorderPage> {
     setState(() {
       _latestGameRotationVector = sample;
     });
+  }
+
+  /// 啟動 Game Rotation Vector 的補償讀取計時器，避免通知失敗時持續顯示等待
+  void _startGameRotationFallbackTimer(bool notificationActive) {
+    _cancelGameRotationFallbackTimer();
+    if (_gameRotationVectorCharacteristic == null) {
+      return; // 沒有特徵可讀取時直接離開
+    }
+
+    const interval = Duration(seconds: 3);
+    _logBle(
+      '啟動 Game Rotation Vector 補償讀取計時器，通知啟動=$notificationActive、間隔=${interval.inSeconds} 秒',
+    );
+
+    _gameRotationFallbackTimer = Timer.periodic(interval, (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final characteristic = _gameRotationVectorCharacteristic;
+      if (characteristic == null) {
+        timer.cancel();
+        return;
+      }
+
+      final lastUpdate = _lastGameRotationUpdate;
+      if (lastUpdate != null && DateTime.now().difference(lastUpdate) < interval) {
+        return; // 最近已有資料更新，無需補償讀取
+      }
+
+      if (!characteristic.properties.read) {
+        _logBle('Game Rotation Vector 特徵不支援讀取，無法執行補償流程');
+        timer.cancel();
+        return;
+      }
+
+      if (_isGameRotationFallbackReading) {
+        return; // 上一次補償讀取尚未完成
+      }
+
+      _isGameRotationFallbackReading = true;
+      try {
+        _logBle('Game Rotation Vector 超過 ${interval.inSeconds} 秒未更新，嘗試補償讀取');
+        final value = await characteristic.read();
+        if (value.isNotEmpty) {
+          _handleGameRotationVectorPacket(characteristic.remoteId.str, value);
+        } else {
+          _logBle('Game Rotation Vector 補償讀取回傳空陣列，等待下次機會');
+        }
+      } catch (error, stackTrace) {
+        _logBle('Game Rotation Vector 補償讀取失敗：$error', error: error, stackTrace: stackTrace);
+      } finally {
+        _isGameRotationFallbackReading = false;
+      }
+    });
+  }
+
+  /// 停止 Game Rotation Vector 補償讀取計時器
+  void _cancelGameRotationFallbackTimer() {
+    _gameRotationFallbackTimer?.cancel();
+    _gameRotationFallbackTimer = null;
+    _isGameRotationFallbackReading = false;
   }
 
   /// 解析三軸感測資料共同欄位（線性加速度、陀螺儀等格式相同）
