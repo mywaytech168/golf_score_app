@@ -974,7 +974,9 @@ class _RecorderPageState extends State<RecorderPage> {
         _logBle('成功啟用通知（第${attempt + 1}次嘗試）：${characteristic.uuid.str}');
         return true;
       } on FlutterBluePlusException catch (error, stackTrace) {
-        final message = error.message?.toLowerCase() ?? '';
+        // ---------- 解析 flutter_blue_plus 例外內容 ----------
+        // errorString 會帶有原生層回傳的描述字串，先轉為小寫方便判斷忙碌或權限類型。
+        final message = (error.errorString ?? '').toLowerCase();
         if (message.contains('busy')) {
           requireLongDelay = true;
           _logBle('偵測到底層回報忙碌，將延後下次重試：${characteristic.uuid.str}');
