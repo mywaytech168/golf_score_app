@@ -74,7 +74,8 @@ class ImuDataLogger {
       // ---------- CSV 檔頭區 ----------
       // 僅保留線性加速度與四元數的原始數值欄位，依照指定順序輸出供外部程式解析。
       sink.writeln(
-        'linear_x,linear_y,linear_z,rotation_i,rotation_j,rotation_k,rotation_w',
+        // 依需求調整欄位順序：先輸出四元數，再補上線性加速度數值。
+        'rotation_i,rotation_j,rotation_k,rotation_w,linear_x,linear_y,linear_z',
       );
       // 第二行補上裝置辨識文字，方便多裝置解析器比對目標名稱。
       sink.writeln('Device: ${info.displayName}');
@@ -184,12 +185,17 @@ class ImuDataLogger {
       _drainSynchronizedSamples(log);
       return;
     }
-    while (log.linearQueue.isNotEmpty || log.rotationQueue.isNotEmpty) {
-      final linear = log.linearQueue.isNotEmpty ? log.linearQueue.removeFirst() : null;
-      final rotation =
-          log.rotationQueue.isNotEmpty ? log.rotationQueue.removeFirst() : null;
+
+    // force=true 時仍只保留最小長度的有效資料，多出的項目直接丟棄避免欄位錯位。
+    while (log.linearQueue.isNotEmpty && log.rotationQueue.isNotEmpty) {
+      final linear = log.linearQueue.removeFirst();
+      final rotation = log.rotationQueue.removeFirst();
       _writeCombinedSample(log, linear, rotation);
     }
+
+    // 任何尚未配對的殘餘資料都直接清除，確保輸出長度一致。
+    log.linearQueue.clear();
+    log.rotationQueue.clear();
   }
 
   /// 寫出單列資料，缺少的欄位以空字串補齊保持欄位順序。
@@ -202,13 +208,13 @@ class ImuDataLogger {
       return;
     }
     final values = <String>[
-      _stringOrEmpty(linear?['x']),
-      _stringOrEmpty(linear?['y']),
-      _stringOrEmpty(linear?['z']),
       _stringOrEmpty(rotation?['i']),
       _stringOrEmpty(rotation?['j']),
       _stringOrEmpty(rotation?['k']),
       _stringOrEmpty(rotation?['real']),
+      _stringOrEmpty(linear?['x']),
+      _stringOrEmpty(linear?['y']),
+      _stringOrEmpty(linear?['z']),
     ];
     log.sink.writeln(values.join(','));
   }
