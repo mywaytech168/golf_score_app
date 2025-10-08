@@ -607,16 +607,21 @@ class _StanceGuidePainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final double centerX = size.width / 2;
-    final double baseY = size.height * 0.75;
+    // 由於使用者希望人形示意圖更加貼近畫面底部，改以底部對齊的方式計算基準高度
+    final double overlayWidth = size.width * 0.7;
+    final double overlayHeight = size.height * 0.6;
+    final double overlayBottom = size.height * 0.92; // 保留 8% 的底部邊界避免被裁切
+    final Rect overlayRect = Rect.fromLTWH(
+      centerX - overlayWidth / 2,
+      overlayBottom - overlayHeight,
+      overlayWidth,
+      overlayHeight,
+    );
+    final double baseY = overlayRect.bottom - size.height * 0.04; // 腳部靠近底部，但仍預留安全距
     final double figureHeight = size.height * 0.35;
     final double headRadius = figureHeight * 0.12;
 
     // ---------- 畫出半透明底框，淡化鏡頭畫面並突顯指引 ----------
-    final Rect overlayRect = Rect.fromCenter(
-      center: Offset(centerX, size.height * 0.5),
-      width: size.width * 0.7,
-      height: size.height * 0.6,
-    );
     canvas.drawRRect(
       RRect.fromRectAndRadius(overlayRect, const Radius.circular(24)),
       fillPaint,
