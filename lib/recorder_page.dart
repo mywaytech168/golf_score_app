@@ -948,6 +948,56 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 統一處理特徵值的通知與讀取邏輯，確保監聽與初始資料都能取得
   ///
   /// 回傳值代表是否成功維持通知監聽（true 表示已建立監聽，false 則僅執行讀取）
+  Future<bool> _enableNotificationWithRetry(
+    BluetoothCharacteristic characteristic,
+  ) async {
+    // ---------- 多次嘗試開啟通知 ----------
+    // 部分裝置剛連線時 CCCD 仍在初始化，直接呼叫 setNotifyValue 會被 GATT 拒絕。
+    // 這裡提供 3 次退避重試機制，確保在韌體就緒後仍能成功啟用通知。
+    const maxAttempts = 3;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        await characteristic.setNotifyValue(true);
+        _logBle('成功啟用通知（第${attempt + 1}次嘗試）：${characteristic.uuid.str}');
+        return true;
+      } on FlutterBluePlusException catch (error, stackTrace) {
+        _logBle(
+          '開啟通知失敗（FlutterBluePlusException，第${attempt + 1}次）：${characteristic.uuid.str} -> $error',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      } on PlatformException catch (error, stackTrace) {
+        _logBle(
+          '開啟通知失敗（PlatformException，第${attempt + 1}次）：${characteristic.uuid.str} -> ${error.code}:${error.message}',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        final lowerMessage = error.message?.toLowerCase() ?? '';
+        if (lowerMessage.contains('gatt') || lowerMessage.contains('not permitted')) {
+          // ---------- GATT 明確拒絕 ----------
+          // 若韌體回報沒有通知權限，持續重試沒有意義，直接跳出等待補償機制。
+          _logBle('偵測到 GATT 拒絕通知，停止重試：${characteristic.uuid.str}');
+          return false;
+        }
+      } catch (error, stackTrace) {
+        _logBle(
+          '開啟通知發生未預期例外（第${attempt + 1}次）：${characteristic.uuid.str} -> $error',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+
+      if (attempt < maxAttempts - 1) {
+        final delay = Duration(milliseconds: 400 * (attempt + 1));
+        _logBle('通知啟用失敗，${delay.inMilliseconds}ms 後重試：${characteristic.uuid.str}');
+        await Future.delayed(delay);
+      }
+    }
+
+    _logBle('多次嘗試仍無法啟用通知，改採僅讀取模式：${characteristic.uuid.str}');
+    return false;
+  }
+
   Future<bool> _initCharacteristic({
     required BluetoothCharacteristic characteristic,
     required void Function(String deviceId, List<int>) onData,
@@ -974,9 +1024,8 @@ class _RecorderPageState extends State<RecorderPage> {
         }
 
         if (!characteristic.isNotifying) {
-          // ---------- 直接請求開啟通知 ----------
-          await characteristic.setNotifyValue(true);
-          _logBle('成功請求開啟通知：${characteristic.uuid.str}');
+          // ---------- 尚未啟用通知，交給重試機制處理 ----------
+          shouldListen = await _enableNotificationWithRetry(characteristic);
         } else {
           // ---------- 避免重複啟用 ----------
           _logBle('通知已開啟，略過重複設定：${characteristic.uuid.str}');
