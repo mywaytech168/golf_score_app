@@ -69,12 +69,18 @@ class ImuDataLogger {
       final alias = 'dev${i + 1}_${info.shortName}';
       final filePath = p.join(directory.path, '${baseName}_$alias.csv');
       final sink = File(filePath).openWrite(mode: FileMode.writeOnlyAppend);
+
+      // ---------- CSV 檔頭區 ----------
+      // 依使用者要求輸出欄位順序，第一行固定為表頭供外部工具跳過。
       sink.writeln(
         'linear_timestamp_us,'
         'linear_x,linear_y,linear_z,'
         'rotation_id,rotation_seq,rotation_status,rotation_timestamp_us,'
         'rotation_i,rotation_j,rotation_k,rotation_real,rotation_accuracy',
       );
+      // 第二行補上裝置辨識文字，方便多裝置解析器比對目標名稱。
+      sink.writeln('Device: ${info.displayName}');
+
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
         filePath: filePath,
