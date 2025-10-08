@@ -147,6 +147,8 @@ class _RecorderPageState extends State<RecorderPage> {
   bool _isTriggeringMotor = false; // 是否正在觸發馬達震動
   late final List<RecordingHistoryEntry> _recordingHistory =
       List<RecordingHistoryEntry>.from(widget.initialHistory); // 累積曾經錄影的檔案資訊
+  final _BleOperationQueue _bleOperationQueue =
+      _BleOperationQueue(); // 排程 BLE 寫入請求，避免同時寫入造成忙碌錯誤
 
   // ---------- 生命週期 ----------
   @override
@@ -171,6 +173,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
     unawaited(_clearImuSession()); // 統一釋放所有藍牙訂閱與特徵引用
     FlutterBluePlus.stopScan();
+    _bleOperationQueue.dispose(); // 中止尚未執行的 BLE 任務，避免頁面離開後仍呼叫底層 API
     super.dispose();
   }
 
@@ -956,11 +959,26 @@ class _RecorderPageState extends State<RecorderPage> {
     // 這裡提供 3 次退避重試機制，確保在韌體就緒後仍能成功啟用通知。
     const maxAttempts = 3;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      var requireLongDelay = false; // 若收到忙碌訊號則增加等待時間
       try {
-        await characteristic.setNotifyValue(true);
+        // ---------- 排入序列化佇列 ----------
+        // Flutter 層同時對多個 CCCD 寫入時，Android 端會回報 BUSY。
+        // 透過佇列確保一次僅發出一個 setNotifyValue 呼叫，降低 writeDescriptor 忙碌機率。
+        await _bleOperationQueue.enqueue(
+          () async {
+            _logBle('排程啟用通知請求（第${attempt + 1}次）：${characteristic.uuid.str}');
+            await characteristic.setNotifyValue(true);
+          },
+          spacing: const Duration(milliseconds: 180), // 預留時間讓韌體處理前一筆 GATT 請求
+        );
         _logBle('成功啟用通知（第${attempt + 1}次嘗試）：${characteristic.uuid.str}');
         return true;
       } on FlutterBluePlusException catch (error, stackTrace) {
+        final message = error.message?.toLowerCase() ?? '';
+        if (message.contains('busy')) {
+          requireLongDelay = true;
+          _logBle('偵測到底層回報忙碌，將延後下次重試：${characteristic.uuid.str}');
+        }
         _logBle(
           '開啟通知失敗（FlutterBluePlusException，第${attempt + 1}次）：${characteristic.uuid.str} -> $error',
           error: error,
@@ -973,7 +991,12 @@ class _RecorderPageState extends State<RecorderPage> {
           stackTrace: stackTrace,
         );
         final lowerMessage = error.message?.toLowerCase() ?? '';
-        if (lowerMessage.contains('gatt') || lowerMessage.contains('not permitted')) {
+        if (lowerMessage.contains('busy')) {
+          requireLongDelay = true;
+          _logBle('GATT 回應忙碌（${characteristic.uuid.str}），延長等待時間後再試');
+        }
+        if (lowerMessage.contains('not permitted') ||
+            lowerMessage.contains('not supported')) {
           // ---------- GATT 明確拒絕 ----------
           // 若韌體回報沒有通知權限，持續重試沒有意義，直接跳出等待補償機制。
           _logBle('偵測到 GATT 拒絕通知，停止重試：${characteristic.uuid.str}');
@@ -988,7 +1011,8 @@ class _RecorderPageState extends State<RecorderPage> {
       }
 
       if (attempt < maxAttempts - 1) {
-        final delay = Duration(milliseconds: 400 * (attempt + 1));
+        final baseDelay = requireLongDelay ? 700 : 400;
+        final delay = Duration(milliseconds: baseDelay * (attempt + 1));
         _logBle('通知啟用失敗，${delay.inMilliseconds}ms 後重試：${characteristic.uuid.str}');
         await Future.delayed(delay);
       }
@@ -2407,6 +2431,84 @@ class _RecorderPageState extends State<RecorderPage> {
       ),
     );
   }
+}
+
+/// 將底層藍牙請求排成序列，避免多個 setNotifyValue 同時進行造成 BUSY 例外
+class _BleOperationQueue {
+  final List<_BleQueuedTask> _queue = <_BleQueuedTask>[]; // 儲存等待執行的任務
+  bool _isRunning = false; // 是否已有任務正在執行
+  bool _isDisposed = false; // 頁面是否已釋放，避免離開後繼續操作藍牙
+
+  /// 將任務加入佇列並依序執行，可設定每筆任務之間的緩衝時間
+  Future<void> enqueue(
+    Future<void> Function() action, {
+    Duration spacing = const Duration(milliseconds: 150),
+  }) {
+    if (_isDisposed) {
+      // 若頁面已銷毀則不再排程，直接回傳已完成的 Future 避免外部 await 卡住
+      return Future.value();
+    }
+
+    final completer = Completer<void>();
+    _queue.add(
+      _BleQueuedTask(
+        run: () async {
+          try {
+            await action();
+            if (!completer.isCompleted) {
+              completer.complete();
+            }
+          } catch (error, stackTrace) {
+            if (!completer.isCompleted) {
+              completer.completeError(error, stackTrace);
+            }
+          }
+        },
+        spacing: spacing,
+      ),
+    );
+    _processQueue();
+    return completer.future;
+  }
+
+  /// 清除所有待執行任務，並阻止後續 enqueue 進入
+  void dispose() {
+    _isDisposed = true;
+    _queue.clear();
+  }
+
+  void _processQueue() {
+    if (_isDisposed || _isRunning || _queue.isEmpty) {
+      return;
+    }
+    _isRunning = true;
+    _runNext();
+  }
+
+  void _runNext() {
+    if (_isDisposed || _queue.isEmpty) {
+      _isRunning = false;
+      return;
+    }
+    final task = _queue.removeAt(0);
+    task.run().whenComplete(() async {
+      if (task.spacing > Duration.zero) {
+        await Future.delayed(task.spacing);
+      }
+      _runNext();
+    });
+  }
+}
+
+/// 描述一筆待處理的 BLE 任務與其間隔設定
+class _BleQueuedTask {
+  final Future<void> Function() run; // 實際執行內容
+  final Duration spacing; // 與下一筆任務的間隔時間
+
+  const _BleQueuedTask({
+    required this.run,
+    required this.spacing,
+  });
 }
 
 /// 代表一次掃描到的藍牙裝置資訊，便於建立列表顯示與更新判斷
