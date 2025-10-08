@@ -49,4 +49,38 @@ class RecordingHistoryEntry {
 
   /// 是否有對應的感測資料可供下載
   bool get hasImuCsv => imuCsvPaths.isNotEmpty;
+
+  /// 將資料轉為 JSON，方便持久化儲存與還原
+  Map<String, dynamic> toJson() {
+    return {
+      'filePath': filePath,
+      'roundIndex': roundIndex,
+      'recordedAt': recordedAt.toIso8601String(),
+      'durationSeconds': durationSeconds,
+      'imuConnected': imuConnected,
+      'imuCsvPaths': imuCsvPaths,
+    };
+  }
+
+  /// 從 JSON 還原歷史紀錄，並對缺漏欄位提供預設值
+  factory RecordingHistoryEntry.fromJson(Map<String, dynamic> json) {
+    final rawCsv = json['imuCsvPaths'];
+    final parsedCsv = <String, String>{};
+    if (rawCsv is Map) {
+      // 將任何型別的鍵值轉為字串，避免類型不一致導致轉換失敗
+      rawCsv.forEach((key, value) {
+        parsedCsv[key.toString()] = value?.toString() ?? '';
+      });
+    }
+
+    return RecordingHistoryEntry(
+      filePath: (json['filePath'] as String?) ?? '',
+      roundIndex: (json['roundIndex'] as int?) ?? 1,
+      recordedAt: DateTime.tryParse(json['recordedAt'] as String? ?? '') ??
+          DateTime.now(),
+      durationSeconds: (json['durationSeconds'] as int?) ?? 0,
+      imuConnected: (json['imuConnected'] as bool?) ?? false,
+      imuCsvPaths: parsedCsv,
+    );
+  }
 }

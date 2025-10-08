@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'pages/recording_session_page.dart';
 import 'models/recording_history_entry.dart';
 import 'services/imu_data_logger.dart';
+import 'services/recording_history_storage.dart';
 
 /// 錄影入口頁面：專責處理藍牙 IMU 配對與引導使用者前往錄影畫面
 class RecorderPage extends StatefulWidget {
@@ -185,9 +186,44 @@ class _RecorderPageState extends State<RecorderPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(_restorePersistedHistory()); // 優先同步既有歷史，避免清單被清空
     _runtimeBlePermissions = _resolveRuntimeBlePermissions(); // 先針對平台建立權限清單
     _permissionsReady = _runtimeBlePermissions.isEmpty; // 若平台無需額外權限則直接視為已備妥
     initBluetooth(); // 啟動藍牙權限申請與自動搜尋流程
+  }
+
+  /// 從本機檔案還原歷史紀錄，確保重整頁面後資料仍存在
+  Future<void> _restorePersistedHistory() async {
+    final stored = await RecordingHistoryStorage.instance.loadHistory();
+    if (!mounted) return;
+
+    if (stored.isEmpty) {
+      return; // 本地沒有紀錄時維持原狀，避免誤清空記憶中的清單
+    }
+
+    final currentPaths = _recordingHistory.map((e) => e.filePath).toList();
+    final storedPaths = stored.map((e) => e.filePath).toList();
+    final isSameLength = currentPaths.length == storedPaths.length;
+    var isSameOrder = isSameLength;
+    if (isSameOrder) {
+      for (var i = 0; i < currentPaths.length; i++) {
+        if (currentPaths[i] != storedPaths[i]) {
+          isSameOrder = false;
+          break;
+        }
+      }
+    }
+
+    if (isSameOrder) {
+      return; // 若內容一致則不重複觸發重繪
+    }
+
+    setState(() {
+      _recordingHistory
+        ..clear()
+        ..addAll(stored);
+    });
+    widget.onHistoryChanged(List<RecordingHistoryEntry>.from(_recordingHistory));
   }
 
   @override
@@ -2076,6 +2112,9 @@ class _RecorderPageState extends State<RecorderPage> {
       widget.onHistoryChanged(
         List<RecordingHistoryEntry>.from(_recordingHistory),
       ); // 即時回傳最新清單給首頁同步顯示
+      unawaited(
+        RecordingHistoryStorage.instance.saveHistory(_recordingHistory),
+      ); // 將結果寫入檔案，避免重啟後遺失
     }
     setState(() => _isOpeningSession = false);
   }

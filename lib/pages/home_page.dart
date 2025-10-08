@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
+import '../services/recording_history_storage.dart';
 import 'recording_history_page.dart';
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
@@ -23,6 +25,13 @@ class _HomePageState extends State<HomePage> {
   // ---------- 狀態管理區 ----------
   int _currentIndex = 2; // 底部導覽預設聚焦在 Quick Start
   final List<RecordingHistoryEntry> _recordingHistory = []; // 首頁內部維護的錄影紀錄
+  bool _isHistoryLoading = true; // 控制歷史載入狀態，避免 UI 閃爍
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitialHistory();
+  }
 
   // ---------- 方法區 ----------
   /// 建立統計資訊卡片，方便重複使用與維持一致風格
@@ -147,6 +156,18 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
+  Future<void> _loadInitialHistory() async {
+    final entries = await RecordingHistoryStorage.instance.loadHistory();
+    if (!mounted) return;
+    setState(() {
+      _recordingHistory
+        ..clear()
+        ..addAll(entries);
+      _isHistoryLoading = false;
+    });
+  }
+
   /// 處理底部導覽點擊，依據不同索引執行對應導覽
   void _onBottomNavTap(int index) {
     if (index == 2) {
@@ -176,7 +197,10 @@ class _HomePageState extends State<HomePage> {
       _recordingHistory
         ..clear()
         ..addAll(entries);
+      _isHistoryLoading = false;
     });
+    // 將最新清單寫入本機，避免下次開啟 App 時資料遺失
+    unawaited(RecordingHistoryStorage.instance.saveHistory(_recordingHistory));
   }
 
   /// 開啟獨立的錄影歷史頁面，讓使用者專注瀏覽過往影片
@@ -190,6 +214,29 @@ class _HomePageState extends State<HomePage> {
 
   /// 建立首頁的錄影歷史快捷卡片，提供統計資訊與導覽按鈕
   Widget _buildHistoryShortcutCard() {
+    if (_isHistoryLoading) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: const [
+            BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 5)),
+          ],
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 12),
+              Text('正在載入錄影歷史...', style: TextStyle(fontSize: 14)),
+            ],
+          ),
+        ),
+      );
+    }
+
     final historyCount = _recordingHistory.length;
     final latestEntry = historyCount > 0 ? _recordingHistory.first : null;
 
