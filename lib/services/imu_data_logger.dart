@@ -71,12 +71,9 @@ class ImuDataLogger {
       final sink = File(filePath).openWrite(mode: FileMode.writeOnlyAppend);
 
       // ---------- CSV 檔頭區 ----------
-      // 依使用者要求輸出欄位順序，第一行固定為表頭供外部工具跳過。
+      // 僅保留線性加速度與四元數的原始數值欄位，依照指定順序輸出供外部程式解析。
       sink.writeln(
-        'linear_timestamp_us,'
-        'linear_x,linear_y,linear_z,'
-        'rotation_id,rotation_seq,rotation_status,rotation_timestamp_us,'
-        'rotation_i,rotation_j,rotation_k,rotation_real,rotation_accuracy',
+        'linear_x,linear_y,linear_z,rotation_i,rotation_j,rotation_k,rotation_w',
       );
       // 第二行補上裝置辨識文字，方便多裝置解析器比對目標名稱。
       sink.writeln('Device: ${info.displayName}');
@@ -205,19 +202,13 @@ class ImuDataLogger {
     final linear = sample.linearSample;
     final rotation = sample.rotationSample;
     final values = <String>[
-      _stringOrEmpty(linear?['timestampUs']),
       _stringOrEmpty(linear?['x']),
       _stringOrEmpty(linear?['y']),
       _stringOrEmpty(linear?['z']),
-      _stringOrEmpty(rotation?['id']),
-      _stringOrEmpty(rotation?['seq']),
-      _stringOrEmpty(rotation?['status']),
-      _stringOrEmpty(rotation?['timestampUs']),
       _stringOrEmpty(rotation?['i']),
       _stringOrEmpty(rotation?['j']),
       _stringOrEmpty(rotation?['k']),
-      _stringOrEmpty(rotation?['real']),
-      _stringOrEmpty(rotation?['accuracy']),
+      _stringOrEmpty(rotation?['real']), // real 對應四元數 w 分量
     ];
     log.sink.writeln(values.join(','));
   }
