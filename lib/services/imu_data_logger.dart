@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -86,48 +87,30 @@ class ImuDataLogger {
     }
   }
 
-  /// 暫存線性加速度封包，與 Game Rotation Vector 配對後寫入同一列。
+  /// 暫存線性加速度封包，待旋轉資料到齊後依序寫入。
   void logLinearAcceleration(
     String deviceId,
     Map<String, dynamic> sample,
-    List<int> rawBytes,
+    List<int> _rawBytes,
   ) {
     final log = _activeLogs[deviceId];
     if (log == null) return;
-    final key = _buildSyncKey(sample);
-    final combined = log.pendingSamples.putIfAbsent(
-      key,
-      () => _CombinedImuSample(),
-    );
-    combined.setLinear(sample, rawBytes);
-    if (combined.isComplete) {
-      _writeCombinedSample(log, combined);
-      log.pendingSamples.remove(key);
-    } else {
-      _purgeStaleSamples(log);
-    }
+    // ---------- 線性加速度入隊 ----------
+    log.linearQueue.add(Map<String, dynamic>.from(sample));
+    _drainSynchronizedSamples(log);
   }
 
-  /// 暫存 Game Rotation Vector 封包資料，等待線性數據同步後寫入。
+  /// 暫存 Game Rotation Vector 封包資料，待線性資料到齊後依序寫入。
   void logGameRotationVector(
     String deviceId,
     Map<String, dynamic> sample,
-    List<int> rawBytes,
+    List<int> _rawBytes,
   ) {
     final log = _activeLogs[deviceId];
     if (log == null) return;
-    final key = _buildSyncKey(sample);
-    final combined = log.pendingSamples.putIfAbsent(
-      key,
-      () => _CombinedImuSample(),
-    );
-    combined.setRotation(sample, rawBytes);
-    if (combined.isComplete) {
-      _writeCombinedSample(log, combined);
-      log.pendingSamples.remove(key);
-    } else {
-      _purgeStaleSamples(log);
-    }
+    // ---------- Game Rotation Vector 入隊 ----------
+    log.rotationQueue.add(Map<String, dynamic>.from(sample));
+    _drainSynchronizedSamples(log);
   }
 
   /// 結束目前錄影輪次，關閉檔案並回傳裝置對應的 CSV 路徑。
@@ -146,7 +129,7 @@ class ImuDataLogger {
   /// 若錄影中途取消，刪除尚未完成的 CSV 以免留下空檔。
   Future<void> abortActiveRound() async {
     for (final entry in _activeLogs.entries) {
-      entry.value.pendingSamples.clear();
+      entry.value.clearQueues();
       await entry.value.sink.close();
       final file = File(entry.value.filePath);
       if (await file.exists()) {
@@ -186,21 +169,38 @@ class ImuDataLogger {
     return target;
   }
 
-  /// 將線性與旋轉封包建立同步鍵，優先以序號與時間戳辨識同筆資料。
-  String _buildSyncKey(Map<String, dynamic> sample) {
-    final seq = sample['seq'];
-    final timestamp = sample['timestampUs'];
-    return '${seq ?? 'ns'}_${timestamp ?? 'nt'}';
+  /// 從隊列中同步線性與旋轉資料，忽略時間戳以先進先出方式合併。
+  void _drainSynchronizedSamples(_ActiveImuLog log) {
+    while (log.linearQueue.isNotEmpty && log.rotationQueue.isNotEmpty) {
+      final linear = log.linearQueue.removeFirst();
+      final rotation = log.rotationQueue.removeFirst();
+      _writeCombinedSample(log, linear, rotation);
+    }
   }
 
-  /// 將等待配對的資料寫入同一列，確保兩種感測數據同步保存。
-  void _writeCombinedSample(_ActiveImuLog log, _CombinedImuSample sample) {
-    if (!sample.hasAnyData) {
-      return; // 無資料可寫入時直接結束
+  /// 在輪次結束或逾時時輸出剩餘資料，force=true 代表即使缺資料也要寫出。
+  void _flushPendingSamples(_ActiveImuLog log, {required bool force}) {
+    if (!force) {
+      _drainSynchronizedSamples(log);
+      return;
     }
+    while (log.linearQueue.isNotEmpty || log.rotationQueue.isNotEmpty) {
+      final linear = log.linearQueue.isNotEmpty ? log.linearQueue.removeFirst() : null;
+      final rotation =
+          log.rotationQueue.isNotEmpty ? log.rotationQueue.removeFirst() : null;
+      _writeCombinedSample(log, linear, rotation);
+    }
+  }
 
-    final linear = sample.linearSample;
-    final rotation = sample.rotationSample;
+  /// 寫出單列資料，缺少的欄位以空字串補齊保持欄位順序。
+  void _writeCombinedSample(
+    _ActiveImuLog log,
+    Map<String, dynamic>? linear,
+    Map<String, dynamic>? rotation,
+  ) {
+    if (linear == null && rotation == null) {
+      return;
+    }
     final values = <String>[
       _stringOrEmpty(linear?['x']),
       _stringOrEmpty(linear?['y']),
@@ -208,42 +208,9 @@ class ImuDataLogger {
       _stringOrEmpty(rotation?['i']),
       _stringOrEmpty(rotation?['j']),
       _stringOrEmpty(rotation?['k']),
-      _stringOrEmpty(rotation?['real']), // real 對應四元數 w 分量
+      _stringOrEmpty(rotation?['real']),
     ];
     log.sink.writeln(values.join(','));
-  }
-
-  /// 定期檢查等待配對的資料，逾時或資料齊全時即寫入。
-  void _purgeStaleSamples(_ActiveImuLog log) {
-    if (log.pendingSamples.isEmpty) {
-      return;
-    }
-    final now = DateTime.now();
-    if (now.difference(log.lastCleanup) < const Duration(milliseconds: 200)) {
-      return; // 控制清理頻率減少效能負擔
-    }
-    _flushPendingSamples(log, force: false);
-  }
-
-  /// 實際執行待寫入樣本的輸出，force 為 true 時即使尚未配對也會寫入。
-  void _flushPendingSamples(_ActiveImuLog log, {required bool force}) {
-    if (log.pendingSamples.isEmpty) {
-      return;
-    }
-    final now = DateTime.now();
-    final threshold = force ? Duration.zero : const Duration(milliseconds: 500);
-    final keysToRemove = <String>[];
-    log.pendingSamples.forEach((key, sample) {
-      final age = now.difference(sample.lastUpdated);
-      if (force || age >= threshold || sample.isComplete) {
-        _writeCombinedSample(log, sample);
-        keysToRemove.add(key);
-      }
-    });
-    for (final key in keysToRemove) {
-      log.pendingSamples.remove(key);
-    }
-    log.lastCleanup = now;
   }
 
   /// 將非空數值轉為字串，避免 null 導致欄位錯位。
@@ -274,8 +241,8 @@ class _ActiveImuLog {
   final String alias; // 方便辨識裝置的簡短代號
   final String filePath; // 對應的 CSV 完整路徑
   final IOSink sink; // 寫入串流
-  final Map<String, _CombinedImuSample> pendingSamples = {}; // 等待配對的感測資料
-  DateTime lastCleanup = DateTime.now(); // 上次執行清理的時間
+  final ListQueue<Map<String, dynamic>> linearQueue = ListQueue(); // 線性加速度 FIFO
+  final ListQueue<Map<String, dynamic>> rotationQueue = ListQueue(); // 旋轉向量 FIFO
 
   _ActiveImuLog({
     required this.alias,
@@ -293,32 +260,10 @@ class _ActiveImuLog {
       }
     }
   }
-}
 
-/// 暫存待配對的 IMU 感測資料，等待線性與旋轉資料齊備再寫入。
-class _CombinedImuSample {
-  Map<String, dynamic>? linearSample;
-  Map<String, dynamic>? rotationSample;
-  List<int>? linearRawBytes;
-  List<int>? rotationRawBytes;
-  DateTime lastUpdated = DateTime.now();
-
-  bool get hasLinear => linearSample != null;
-  bool get hasRotation => rotationSample != null;
-  bool get hasAnyData => hasLinear || hasRotation;
-  bool get isComplete => hasLinear && hasRotation;
-
-  /// 更新線性加速度資料，並同步刷新最後更新時間。
-  void setLinear(Map<String, dynamic> sample, List<int> rawBytes) {
-    linearSample = Map<String, dynamic>.from(sample);
-    linearRawBytes = List<int>.from(rawBytes);
-    lastUpdated = DateTime.now();
-  }
-
-  /// 更新 Game Rotation Vector 資料，並同步刷新最後更新時間。
-  void setRotation(Map<String, dynamic> sample, List<int> rawBytes) {
-    rotationSample = Map<String, dynamic>.from(sample);
-    rotationRawBytes = List<int>.from(rawBytes);
-    lastUpdated = DateTime.now();
+  /// 清空所有佇列，通常用於取消錄影時同步重置狀態。
+  void clearQueues() {
+    linearQueue.clear();
+    rotationQueue.clear();
   }
 }
