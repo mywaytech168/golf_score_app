@@ -124,8 +124,9 @@ class _RecorderPageState extends State<RecorderPage> {
   BluetoothCharacteristic? _gameRotationVectorCharacteristic; // Game Rotation Vector 特徵引用
   BluetoothCharacteristic? _secondLinearAccelerationCharacteristic; // 胸前線性加速度特徵引用
   BluetoothCharacteristic? _secondGameRotationVectorCharacteristic; // 胸前 Game Rotation Vector 特徵引用
-  BluetoothCharacteristic? _buttonNotifyCharacteristic; // 按鈕事件特徵引用
-  BluetoothCharacteristic? _motorControlCharacteristic; // 震動馬達控制特徵引用
+  BluetoothCharacteristic? _buttonNotifyCharacteristic; // 按鈕事件特徵引用（右手腕專用）
+  BluetoothCharacteristic? _motorControlCharacteristic; // 右手腕震動馬達控制特徵
+  BluetoothCharacteristic? _secondMotorControlCharacteristic; // 胸前震動馬達控制特徵
   BluetoothCharacteristic? _batteryLevelCharacteristic; // 電量特徵引用
   BluetoothCharacteristic? _batteryVoltageCharacteristic; // 電壓特徵引用
   BluetoothCharacteristic? _batteryChargeCurrentCharacteristic; // 充電電流特徵引用
@@ -172,7 +173,8 @@ class _RecorderPageState extends State<RecorderPage> {
   String? _softwareRevision; // 軟體版本顯示
   String? _manufacturerName; // 製造商顯示
   String? _customDeviceName; // 自訂裝置名稱顯示
-  bool _isTriggeringMotor = false; // 是否正在觸發馬達震動
+  bool _isTriggeringRightMotor = false; // 右手腕震動是否進行中
+  bool _isTriggeringChestMotor = false; // 胸前震動是否進行中
   late final List<RecordingHistoryEntry> _recordingHistory =
       List<RecordingHistoryEntry>.from(widget.initialHistory); // 累積曾經錄影的檔案資訊
   final _BleOperationQueue _bleOperationQueue =
@@ -758,6 +760,7 @@ class _RecorderPageState extends State<RecorderPage> {
   void _resetSecondCharacteristicReferences() {
     _secondLinearAccelerationCharacteristic = null;
     _secondGameRotationVectorCharacteristic = null;
+    _secondMotorControlCharacteristic = null;
   }
 
   /// 重置所有感測顯示資料，讓 UI 反映目前沒有有效連線的狀態
@@ -786,7 +789,7 @@ class _RecorderPageState extends State<RecorderPage> {
     _softwareRevision = null;
     _manufacturerName = null;
     _customDeviceName = null;
-    _isTriggeringMotor = false;
+    _isTriggeringRightMotor = false;
   }
 
   /// 重置胸前 IMU 的顯示資料，主要影響 CSV 與除錯資訊
@@ -796,6 +799,35 @@ class _RecorderPageState extends State<RecorderPage> {
     _secondLastGameRotationUpdate = null;
     _secondLastGameRotationSeq = null;
     _secondLastGameRotationTimestamp = null;
+    _isTriggeringChestMotor = false;
+  }
+
+  /// 依插槽取得對應的馬達控制特徵，方便共用判斷邏輯
+  BluetoothCharacteristic? _motorCharacteristicForSlot(_ImuSlotType slot) =>
+      slot == _ImuSlotType.rightWrist ? _motorControlCharacteristic : _secondMotorControlCharacteristic;
+
+  /// 檢查指定插槽是否仍在執行震動任務，避免重複送出寫入
+  bool _isMotorBusyForSlot(_ImuSlotType slot) =>
+      slot == _ImuSlotType.rightWrist ? _isTriggeringRightMotor : _isTriggeringChestMotor;
+
+  /// 更新震動狀態並同步考量元件是否仍掛載，確保不會在 dispose 後 setState
+  void _setMotorBusyForSlot(_ImuSlotType slot, bool value) {
+    if (!mounted) {
+      if (slot == _ImuSlotType.rightWrist) {
+        _isTriggeringRightMotor = value;
+      } else {
+        _isTriggeringChestMotor = value;
+      }
+      return;
+    }
+
+    setState(() {
+      if (slot == _ImuSlotType.rightWrist) {
+        _isTriggeringRightMotor = value;
+      } else {
+        _isTriggeringChestMotor = value;
+      }
+    });
   }
 
   /// 監聽裝置連線狀態，若中斷則重新搜尋
@@ -1304,6 +1336,13 @@ class _RecorderPageState extends State<RecorderPage> {
             _logBle('胸前 IMU 綁定 Game Rotation Vector 特徵：${characteristic.uuid.str}');
           }
         }
+      } else if (service.uuid == _serviceMotorUuid) {
+        for (final characteristic in service.characteristics) {
+          if (characteristic.uuid == _charMotorToggleUuid) {
+            _secondMotorControlCharacteristic = characteristic;
+            _logBle('胸前 IMU 綁定馬達控制特徵：${characteristic.uuid.str}');
+          }
+        }
       }
     }
 
@@ -1688,6 +1727,16 @@ class _RecorderPageState extends State<RecorderPage> {
         _buttonStatusText = description;
       }
     });
+
+    // ---------- 以右手腕短按啟動錄影 ----------
+    if (eventCode == 0x01 && mounted) {
+      if (_isOpeningSession) {
+        _logBle('按鈕觸發錄影但畫面尚在開啟中，略過重複事件');
+      } else {
+        _logBle('偵測到短按開始事件，準備自動開啟錄影畫面');
+        unawaited(_openRecordingSession());
+      }
+    }
   }
 
   /// 將按鈕事件代碼轉成中文說明
@@ -1830,41 +1879,45 @@ class _RecorderPageState extends State<RecorderPage> {
     return utf8.decode(trimmed, allowMalformed: true);
   }
 
-  /// 透過寫入馬達特徵值觸發短暫震動，驗證馬達控制能力
-  Future<void> _triggerMotorPulse() async {
-    final characteristic = _motorControlCharacteristic;
+  /// 依插槽觸發短暫震動，方便使用者確認手上設備的位置
+  Future<void> _triggerMotorPulseForSlot(_ImuSlotType slot) async {
+    final characteristic = _motorCharacteristicForSlot(slot);
     if (characteristic == null) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('尚未取得馬達控制特徵，請確認裝置已連線。')),
+        SnackBar(content: Text('${slot.displayLabel} 尚未取得震動控制特徵，請確認裝置已連線。')),
       );
       return;
     }
-    if (_isTriggeringMotor) {
-      return; // 避免重複觸發造成裝置阻塞
-    }
-    setState(() => _isTriggeringMotor = true);
 
-    final supportsWriteWithResponse = characteristic.properties.write;
-    final supportsWriteWithoutResponse = characteristic.properties.writeWithoutResponse;
-    final useWithoutResponse = !supportsWriteWithResponse && supportsWriteWithoutResponse;
+    if (_isMotorBusyForSlot(slot)) {
+      _logBle('${slot.displayLabel} 震動命令仍在執行中，略過重複請求');
+      return;
+    }
+    _setMotorBusyForSlot(slot, true);
+
+    final bool supportsWriteWithResponse = characteristic.properties.write;
+    final bool supportsWriteWithoutResponse = characteristic.properties.writeWithoutResponse;
+    final bool useWithoutResponse = !supportsWriteWithResponse && supportsWriteWithoutResponse;
 
     try {
-      await characteristic.write([1], withoutResponse: useWithoutResponse);
-      await Future.delayed(const Duration(milliseconds: 600));
-      await characteristic.write([0], withoutResponse: useWithoutResponse);
-    } catch (e) {
+      await _bleOperationQueue.enqueue(() async {
+        await characteristic.write([1], withoutResponse: useWithoutResponse);
+        await Future.delayed(const Duration(milliseconds: 500));
+        await characteristic.write([0], withoutResponse: useWithoutResponse);
+      }, spacing: const Duration(milliseconds: 320));
+    } catch (error, stackTrace) {
+      _logBle('震動命令失敗：${characteristic.uuid.str}，原因：$error',
+          error: error, stackTrace: stackTrace);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('啟動震動失敗：$e')),
+          SnackBar(content: Text('${slot.displayLabel} 震動失敗：$error')),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isTriggeringMotor = false);
-      } else {
-        _isTriggeringMotor = false;
-      }
+      _setMotorBusyForSlot(slot, false);
     }
   }
 
@@ -2415,30 +2468,73 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 震動馬達測試按鈕，協助確認馬達控制是否可用
   Widget _buildMotorControlSection() {
-    final bool motorAvailable = _motorControlCharacteristic != null;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const Icon(Icons.vibration, color: Color(0xFF123B70)),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Text(
-            '點擊可觸發裝置震動，確認提醒功能是否正常運作。',
-            style: TextStyle(fontSize: 13, color: Color(0xFF465A71)),
+    final bool primaryAvailable = _motorControlCharacteristic != null;
+    final bool chestAvailable = _secondMotorControlCharacteristic != null;
+
+    if (!primaryAvailable && !chestAvailable) {
+      return Row(
+        children: const [
+          Icon(Icons.vibration, color: Color(0xFF123B70)),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '尚未取得震動控制特徵，可重新連線後再嘗試震動識別。',
+              style: TextStyle(fontSize: 13, color: Color(0xFF465A71)),
+            ),
           ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.vibration, color: Color(0xFF123B70)),
+            SizedBox(width: 8),
+            Text(
+              '震動測試',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF123B70),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        FilledButton.tonal(
-          onPressed: motorAvailable && !_isTriggeringMotor ? _triggerMotorPulse : null,
-          child: _isTriggeringMotor
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('震動測試'),
+        const SizedBox(height: 8),
+        const Text(
+          '點擊下方按鈕可讓指定 IMU 短暫震動，協助辨識目前手持的裝置。',
+          style: TextStyle(fontSize: 13, color: Color(0xFF465A71)),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            if (primaryAvailable) _buildMotorTestButton(_ImuSlotType.rightWrist),
+            if (chestAvailable) _buildMotorTestButton(_ImuSlotType.chest),
+          ],
         ),
       ],
+    );
+  }
+
+  /// 個別插槽專屬的震動按鈕
+  Widget _buildMotorTestButton(_ImuSlotType slot) {
+    final bool busy = _isMotorBusyForSlot(slot);
+    final String label = slot == _ImuSlotType.rightWrist ? '右手腕震動' : '胸前震動';
+    return FilledButton.tonalIcon(
+      onPressed: busy ? null : () => _triggerMotorPulseForSlot(slot),
+      icon: const Icon(Icons.vibration),
+      label: busy
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Text(label),
     );
   }
 
@@ -2682,6 +2778,8 @@ class _RecorderPageState extends State<RecorderPage> {
     final String buttonText = connected
         ? '重新連線'
         : (slot == _ImuSlotType.rightWrist ? '配對右手腕' : '配對胸前');
+    final bool motorAvailable = _motorCharacteristicForSlot(slot) != null;
+    final bool motorBusy = _isMotorBusyForSlot(slot);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2726,23 +2824,39 @@ class _RecorderPageState extends State<RecorderPage> {
           ),
         ),
         const SizedBox(width: 12),
-        FilledButton(
-          onPressed: onConnectPressed,
-          style: FilledButton.styleFrom(
-            backgroundColor: connected ? const Color(0xFF1E8E5A) : const Color(0xFF123B70),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          ),
-          child: _isConnecting && onConnectPressed == null
-              ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                )
-              : Text(
-                  buttonText,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            FilledButton(
+              onPressed: onConnectPressed,
+              style: FilledButton.styleFrom(
+                backgroundColor: connected ? const Color(0xFF1E8E5A) : const Color(0xFF123B70),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              child: _isConnecting && onConnectPressed == null
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                    )
+                  : Text(
+                      buttonText,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+            ),
+            if (motorAvailable) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: motorBusy ? null : () => _triggerMotorPulseForSlot(slot),
+                icon: const Icon(Icons.vibration, size: 18),
+                label: Text(motorBusy ? '震動中…' : '震動識別'),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF123B70),
                 ),
+              ),
+            ],
+          ],
         ),
       ],
     );
