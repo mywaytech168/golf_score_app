@@ -2139,9 +2139,10 @@ class _RecorderPageState extends State<RecorderPage> {
     }
     if (!mounted) return;
     if (historyFromSession != null && historyFromSession.isNotEmpty) {
+      final sessionEntries = historyFromSession!; // 先快取導航結果，避免在閉包內失去非空推斷
       setState(() {
         final existingPaths = _recordingHistory.map((e) => e.filePath).toSet();
-        for (final entry in historyFromSession) {
+        for (final entry in sessionEntries) {
           if (!existingPaths.contains(entry.filePath)) {
             _recordingHistory.insert(0, entry);
           }
