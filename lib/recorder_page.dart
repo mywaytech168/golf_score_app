@@ -1786,7 +1786,8 @@ class _RecorderPageState extends State<RecorderPage> {
       }
       _lastButtonTriggerTime = now;
       _logBle('偵測到短按事件（code=$eventCode），準備自動開啟錄影畫面');
-      unawaited(_openRecordingSession());
+      // 透過硬體按鈕觸發時，直接沿用使用者目前的錄影次數／秒數設定，避免再跳出彈窗
+      unawaited(_openRecordingSession(triggeredByImuButton: true));
     }
   }
 
@@ -2062,7 +2063,7 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 切換至錄影專用頁面，讓錄影與配對流程分離
-  Future<void> _openRecordingSession() async {
+  Future<void> _openRecordingSession({bool triggeredByImuButton = false}) async {
     if (_isOpeningSession) return; // 避免重複點擊快速開啟多個頁面
 
     if (widget.cameras.isEmpty) {
@@ -2075,18 +2076,36 @@ class _RecorderPageState extends State<RecorderPage> {
 
     setState(() => _isOpeningSession = true);
 
-    // 進入錄影前先彈出設定視窗，讓使用者選擇要錄影的次數與長度
-    final config = await _showRecordingConfigDialog();
-    if (config == null) {
-      if (!mounted) return;
-      setState(() => _isOpeningSession = false);
-      return; // 使用者取消設定則不進入錄影畫面
+    Map<String, int>? config;
+    if (triggeredByImuButton) {
+      // ---------- 硬體按鈕自動啟動 ----------
+      // 直接沿用目前頁面記錄的設定值，避免在揮桿時還要操作彈窗
+      config = {
+        'rounds': _selectedRounds,
+        'seconds': _recordingDurationSeconds,
+      };
+    } else {
+      // ---------- 手動點擊按鈕 ----------
+      // 進入錄影前先彈出設定視窗，讓使用者選擇要錄影的次數與長度
+      config = await _showRecordingConfigDialog();
+      if (config == null) {
+        if (!mounted) return;
+        setState(() => _isOpeningSession = false);
+        return; // 使用者取消設定則不進入錄影畫面
+      }
+
+      setState(() {
+        _selectedRounds = config!['rounds']!;
+        _recordingDurationSeconds = config['seconds']!;
+      });
     }
 
-    setState(() {
-      _selectedRounds = config['rounds']!;
-      _recordingDurationSeconds = config['seconds']!;
-    });
+    config ??= {
+      'rounds': _selectedRounds,
+      'seconds': _recordingDurationSeconds,
+    };
+    final int rounds = config['rounds'] ?? _selectedRounds;
+    final int seconds = config['seconds'] ?? _recordingDurationSeconds;
 
     final historyFromSession = await Navigator.push<List<RecordingHistoryEntry>>(
       context,
@@ -2094,8 +2113,8 @@ class _RecorderPageState extends State<RecorderPage> {
         builder: (_) => RecordingSessionPage(
           cameras: widget.cameras,
           isImuConnected: isImuConnected,
-          totalRounds: _selectedRounds,
-          durationSeconds: _recordingDurationSeconds,
+          totalRounds: rounds,
+          durationSeconds: seconds,
         ),
       ),
     );
@@ -3117,7 +3136,8 @@ class _RecorderPageState extends State<RecorderPage> {
               ),
               const SizedBox(height: 10),
               FilledButton(
-                onPressed: _isOpeningSession ? null : _openRecordingSession,
+                onPressed:
+                    _isOpeningSession ? null : () => _openRecordingSession(),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 18),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
