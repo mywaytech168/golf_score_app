@@ -70,15 +70,24 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 建立影片縮圖方塊，模擬設計稿中的 Video Library
-  Widget _buildVideoTile(_VideoCardData data) {
+  /// 建立影片縮圖方塊，將最新錄影資訊轉換為設計稿風格
+  Widget _buildVideoTile({
+    required RecordingHistoryEntry entry,
+    required Color baseColor,
+  }) {
+    // ---------- 字串組裝區 ----------
+    final recordedAt = entry.recordedAt;
+    final dateLabel = '${recordedAt.month.toString().padLeft(2, '0')}/${recordedAt.day.toString().padLeft(2, '0')}';
+    final durationLabel = '時長 ${entry.durationSeconds} 秒';
+    final modeLabel = entry.modeLabel;
+
     return Container(
       width: 140,
       margin: const EdgeInsets.only(right: 16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
-          colors: [data.baseColor, data.baseColor.withOpacity(0.7)],
+          colors: [baseColor, baseColor.withOpacity(0.7)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -94,7 +103,7 @@ class _HomePageState extends State<HomePage> {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [data.baseColor.withOpacity(0.95), data.baseColor.withOpacity(0.55)],
+                    colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
                     begin: Alignment.bottomLeft,
                     end: Alignment.topRight,
                   ),
@@ -123,10 +132,10 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(data.dateLabel, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  Text(dateLabel, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                   const SizedBox(height: 4),
                   Text(
-                    data.speedLabel,
+                    entry.displayTitle,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -134,7 +143,10 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(data.stabilityLabel, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  Text(
+                    '$modeLabel｜$durationLabel',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.2),
+                  ),
                 ],
               ),
             ),
@@ -308,27 +320,20 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    // ---------- 假資料區 ----------
-    final videoList = [
-      _VideoCardData(
-        dateLabel: 'Apr 8',
-        speedLabel: '96 MPH',
-        stabilityLabel: '穩定度 81%',
-        baseColor: const Color(0xFF123B70),
-      ),
-      _VideoCardData(
-        dateLabel: 'Apr 3',
-        speedLabel: '94 MPH',
-        stabilityLabel: '穩定度 79%',
-        baseColor: const Color(0xFF0A5E5A),
-      ),
-      _VideoCardData(
-        dateLabel: 'Mar 28',
-        speedLabel: '92 MPH',
-        stabilityLabel: '穩定度 75%',
-        baseColor: const Color(0xFF4C2A9A),
-      ),
+    // ---------- 假資料區（調整為歷史資料產生卡片） ----------
+    // 先以時間由新到舊排序，確保影片庫最左側即為最新成果
+    final sortedHistory = List<RecordingHistoryEntry>.from(_recordingHistory)
+      ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+    // 影片庫僅展示前六筆，避免水平列表超出視覺焦點
+    final displayedHistory = sortedHistory.take(6).toList(growable: false);
+    // 依序套用固定配色，讓卡片易於辨識錄影批次
+    const palette = <Color>[
+      Color(0xFF123B70),
+      Color(0xFF0A5E5A),
+      Color(0xFF4C2A9A),
+      Color(0xFF1E8E5A),
+      Color(0xFF2E8EFF),
+      Color(0xFF8E4AF4),
     ];
 
     return Scaffold(
@@ -441,16 +446,52 @@ class _HomePageState extends State<HomePage> {
               },
             ),
             const SizedBox(height: 24),
-            _SectionHeader(title: 'Video Library', actionLabel: 'See all', onTap: () {}),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 190,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: videoList.length,
-                itemBuilder: (context, index) => _buildVideoTile(videoList[index]),
-              ),
+            _SectionHeader(
+              title: 'Video Library',
+              actionLabel: 'See all',
+              onTap: () => _onBottomNavTap(3),
             ),
+            const SizedBox(height: 12),
+            if (_isHistoryLoading)
+              SizedBox(
+                height: 190,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 12),
+                      Text('正在整理影片庫...', style: TextStyle(fontSize: 14)),
+                    ],
+                  ),
+                ),
+              )
+            else if (displayedHistory.isEmpty)
+              Container(
+                height: 190,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
+                  ],
+                ),
+                child: const Text('尚未有錄影影片，完成錄影後會自動收錄最新紀錄。'),
+              )
+            else
+              SizedBox(
+                height: 190,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: displayedHistory.length,
+                  itemBuilder: (context, index) {
+                    final entry = displayedHistory[index];
+                    final color = palette[index % palette.length];
+                    return _buildVideoTile(entry: entry, baseColor: color);
+                  },
+                ),
+              ),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(20),
@@ -635,21 +676,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-}
-
-/// Video Library 中的假資料模型
-class _VideoCardData {
-  final String dateLabel;
-  final String speedLabel;
-  final String stabilityLabel;
-  final Color baseColor;
-
-  const _VideoCardData({
-    required this.dateLabel,
-    required this.speedLabel,
-    required this.stabilityLabel,
-    required this.baseColor,
-  });
 }
 
 /// 雷達圖繪製器，呈現五個指標的相對表現
