@@ -417,62 +417,56 @@ class _HomePageState extends State<HomePage> {
           children: [
             LayoutBuilder(
               builder: (context, constraints) {
-                final isWide = constraints.maxWidth > 650;
-                if (isWide) {
+                // 始終維持同列呈現，窄螢幕改用橫向滑動避免卡片被擠壓
+                final cards = <Widget>[
+                  _buildStatCard(
+                    title: 'Last 8 Months',
+                    value: '124',
+                    subTitle: 'Total Swings',
+                    highlightColor: const Color(0xFF1E8E5A),
+                  ),
+                  _buildStatCard(
+                    title: 'Average Speed',
+                    value: '89.5 MPH',
+                    subTitle: 'Stability 80%',
+                    highlightColor: const Color(0xFF2E8EFF),
+                  ),
+                  _buildStatCard(
+                    title: 'Sweet Spot',
+                    value: '80 %',
+                    subTitle: '命中率',
+                    highlightColor: const Color(0xFF8E4AF4),
+                  ),
+                ];
+
+                if (constraints.maxWidth > 650) {
                   return Row(
                     children: [
-                      Expanded(
-                        child: _buildStatCard(
-                          title: 'Last 8 Months',
-                          value: '124',
-                          subTitle: 'Total Swings',
-                          highlightColor: const Color(0xFF1E8E5A),
+                      for (var i = 0; i < cards.length; i++)
+                        Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(right: i == cards.length - 1 ? 0 : 16),
+                            child: cards[i],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildStatCard(
-                          title: 'Average Speed',
-                          value: '89.5 MPH',
-                          subTitle: 'Stability 80%',
-                          highlightColor: const Color(0xFF2E8EFF),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildStatCard(
-                          title: 'Sweet Spot',
-                          value: '80 %',
-                          subTitle: '命中率',
-                          highlightColor: const Color(0xFF8E4AF4),
-                        ),
-                      ),
                     ],
                   );
                 }
-                return Column(
-                  children: [
-                    _buildStatCard(
-                      title: 'Last 8 Months',
-                      value: '124',
-                      subTitle: 'Total Swings',
-                      highlightColor: const Color(0xFF1E8E5A),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildStatCard(
-                      title: 'Average Speed',
-                      value: '89.5 MPH',
-                      subTitle: 'Stability 80%',
-                      highlightColor: const Color(0xFF2E8EFF),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildStatCard(
-                      title: 'Sweet Spot',
-                      value: '80 %',
-                      subTitle: '命中率',
-                      highlightColor: const Color(0xFF8E4AF4),
-                    ),
-                  ],
+
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < cards.length; i++)
+                        Padding(
+                          padding: EdgeInsets.only(right: i == cards.length - 1 ? 0 : 12),
+                          child: SizedBox(
+                            width: math.min(240, constraints.maxWidth - 40),
+                            child: cards[i],
+                          ),
+                        ),
+                    ],
+                  ),
                 );
               },
             ),
