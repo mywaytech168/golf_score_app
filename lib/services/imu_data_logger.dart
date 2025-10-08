@@ -222,7 +222,7 @@ class ImuDataLogger {
       _formatNumeric(rotation?['i']),
       _formatNumeric(rotation?['j']),
       _formatNumeric(rotation?['k']),
-      _formatNumeric(rotation?['real']),
+      _formatNumeric(rotation?['real'] ?? rotation?['w']),
       _formatNumeric(linear?['x']),
       _formatNumeric(linear?['y']),
       _formatNumeric(linear?['z']),

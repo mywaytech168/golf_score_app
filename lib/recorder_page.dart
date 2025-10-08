@@ -1462,7 +1462,7 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     _logBle(
-      '[$slotLabel] Game Rotation Vector 更新：seq=${sample['seq']}、i=${sample['i']}、j=${sample['j']}、k=${sample['k']}、real=${sample['real']}',
+      '[$slotLabel] Game Rotation Vector 更新：seq=${sample['seq']}、i=${_formatNumericLabel(sample['i'] as num?, digits: 4)}、j=${_formatNumericLabel(sample['j'] as num?, digits: 4)}、k=${_formatNumericLabel(sample['k'] as num?, digits: 4)}、w=${_formatNumericLabel(sample['real'] as num?, digits: 4)}',
     );
 
     final isPrimary = _isPrimaryDevice(deviceId);
@@ -1571,12 +1571,18 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 解析三軸感測資料共同欄位（線性加速度、陀螺儀等格式相同）
   Map<String, dynamic>? _parseThreeAxisSample(List<int> data, int offset) {
     final timestamp = _readUint32At(data, offset + 4);
-    final x = _readInt16At(data, offset + 8);
-    final y = _readInt16At(data, offset + 10);
-    final z = _readInt16At(data, offset + 12);
-    if (timestamp == null || x == null || y == null || z == null) {
+    final rawX = _readInt16At(data, offset + 8);
+    final rawY = _readInt16At(data, offset + 10);
+    final rawZ = _readInt16At(data, offset + 12);
+    if (timestamp == null || rawX == null || rawY == null || rawZ == null) {
       return null;
     }
+
+    const double scale = 0.001; // ---------- 依照規格轉換為公尺每秒平方 ----------
+    final double x = rawX * scale;
+    final double y = rawY * scale;
+    final double z = rawZ * scale;
+
     return {
       'id': data[offset],
       'seq': data[offset + 1],
@@ -1585,6 +1591,9 @@ class _RecorderPageState extends State<RecorderPage> {
       'x': x,
       'y': y,
       'z': z,
+      'rawX': rawX,
+      'rawY': rawY,
+      'rawZ': rawZ,
     };
   }
 
@@ -1599,13 +1608,19 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     final timestamp = _readUint32At(data, offset + 4);
-    final i = _readInt16At(data, offset + 8);
-    final j = _readInt16At(data, offset + 10);
-    final k = _readInt16At(data, offset + 12);
-    final real = _readInt16At(data, offset + 14);
-    if (timestamp == null || i == null || j == null || k == null || real == null) {
+    final rawI = _readInt16At(data, offset + 8);
+    final rawJ = _readInt16At(data, offset + 10);
+    final rawK = _readInt16At(data, offset + 12);
+    final rawReal = _readInt16At(data, offset + 14);
+    if (timestamp == null || rawI == null || rawJ == null || rawK == null || rawReal == null) {
       return null;
     }
+
+    const double qpScaling = 1.0 / 16384.0; // ---------- Q14 固定小數點轉浮點 ----------
+    final double i = rawI * qpScaling;
+    final double j = rawJ * qpScaling;
+    final double k = rawK * qpScaling;
+    final double real = rawReal * qpScaling;
 
     // accuracy 與 reserved 僅存在於較新的韌體（20 bytes 封包），舊版則保持 null
     int? accuracy;
@@ -1626,6 +1641,11 @@ class _RecorderPageState extends State<RecorderPage> {
       'j': j,
       'k': k,
       'real': real,
+      'w': real,
+      'rawI': rawI,
+      'rawJ': rawJ,
+      'rawK': rawK,
+      'rawReal': rawReal,
       'accuracy': accuracy,
       'reserved': reserved,
       'packetLength': length,
@@ -2343,10 +2363,10 @@ class _RecorderPageState extends State<RecorderPage> {
     if (sample == null) {
       return '等待裝置傳送資料';
     }
-    final x = sample['x'];
-    final y = sample['y'];
-    final z = sample['z'];
-    return 'X: $x · Y: $y · Z: $z (raw)';
+    final x = sample['x'] as num?;
+    final y = sample['y'] as num?;
+    final z = sample['z'] as num?;
+    return 'X: ${_formatNumericLabel(x)} · Y: ${_formatNumericLabel(y)} · Z: ${_formatNumericLabel(z)} (g)';
   }
 
   /// 顯示線性加速度額外資訊（序號、狀態、時間）
@@ -2365,11 +2385,11 @@ class _RecorderPageState extends State<RecorderPage> {
     if (sample == null) {
       return '等待裝置傳送資料';
     }
-    final i = sample['i'];
-    final j = sample['j'];
-    final k = sample['k'];
-    final real = sample['real'];
-    return 'i: $i · j: $j · k: $k · real: $real';
+    final i = sample['i'] as num?;
+    final j = sample['j'] as num?;
+    final k = sample['k'] as num?;
+    final real = sample['real'] as num?;
+    return 'i: ${_formatNumericLabel(i, digits: 4)} · j: ${_formatNumericLabel(j, digits: 4)} · k: ${_formatNumericLabel(k, digits: 4)} · w: ${_formatNumericLabel(real, digits: 4)}';
   }
 
   /// 顯示四元數額外資訊
@@ -2394,6 +2414,14 @@ class _RecorderPageState extends State<RecorderPage> {
       buffer.add('封包 ${packetLength} bytes');
     }
     return buffer.join(' · ');
+  }
+
+  /// 將數值統一格式化，避免 UI 出現過長的小數或 null 字樣
+  String _formatNumericLabel(num? value, {int digits = 3}) {
+    if (value == null) {
+      return '--';
+    }
+    return value.toStringAsFixed(digits);
   }
 
   /// 將時間格式化為 HH:mm:ss 字串
