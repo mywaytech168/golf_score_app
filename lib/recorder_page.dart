@@ -159,6 +159,7 @@ class _RecorderPageState extends State<RecorderPage> {
   int? _buttonClickTimes; // 最近一次按鈕連擊次數
   int? _buttonEventCode; // 最近一次按鈕事件代碼
   DateTime? _lastButtonEventTime; // 最近一次按鈕事件時間
+  DateTime? _lastButtonTriggerTime; // 最近一次透過按鈕自動開啟錄影的時間
   String? _batteryLevelText; // 電量百分比顯示
   String? _batteryVoltageText; // 電壓顯示
   String? _batteryChargeCurrentText; // 充電電流顯示
@@ -1729,13 +1730,27 @@ class _RecorderPageState extends State<RecorderPage> {
     });
 
     // ---------- 以右手腕短按啟動錄影 ----------
-    if (eventCode == 0x01 && mounted) {
+    if (!mounted) {
+      return;
+    }
+
+    // ---------- 針對短按開始或結束觸發錄影 ----------
+    final bool isShortPressEvent = eventCode == 0x01 || eventCode == 0x02;
+    if (isShortPressEvent && clickTimes <= 1) {
+      final now = DateTime.now();
+      final shouldTrigger = _lastButtonTriggerTime == null ||
+          now.difference(_lastButtonTriggerTime!).inMilliseconds > 800;
+      if (!shouldTrigger) {
+        _logBle('按鈕事件與前次觸發過於接近，避免重複開啟錄影');
+        return;
+      }
       if (_isOpeningSession) {
         _logBle('按鈕觸發錄影但畫面尚在開啟中，略過重複事件');
-      } else {
-        _logBle('偵測到短按開始事件，準備自動開啟錄影畫面');
-        unawaited(_openRecordingSession());
+        return;
       }
+      _lastButtonTriggerTime = now;
+      _logBle('偵測到短按事件（code=$eventCode），準備自動開啟錄影畫面');
+      unawaited(_openRecordingSession());
     }
   }
 
