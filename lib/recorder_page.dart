@@ -2228,12 +2228,11 @@ class _RecorderPageState extends State<RecorderPage> {
     );
   }
 
-  /// 感測資料區塊，整合按鈕、線性加速度與旋轉向量狀態
+  /// 感測資料區塊，整合兩顆 IMU 的最新狀態
   Widget _buildSensorDataSection() {
-    final linearSummary = _formatLinearAccelerationSummary(_latestLinearAcceleration);
-    final linearMeta = _formatThreeAxisMeta(_latestLinearAcceleration);
-    final rotationSummary = _formatRotationSummary(_latestGameRotationVector);
-    final rotationMeta = _formatRotationMeta(_latestGameRotationVector);
+    final List<Widget> groups = [];
+
+    // ---------- 右手腕 IMU ----------
     final List<String> buttonDetails = [];
     if (_buttonClickTimes != null && _buttonClickTimes! > 0) {
       buttonDetails.add('連擊 ${_buttonClickTimes!} 次');
@@ -2244,7 +2243,42 @@ class _RecorderPageState extends State<RecorderPage> {
     if (_lastButtonEventTime != null) {
       buttonDetails.add('最近 ${_formatTimeOfDay(_lastButtonEventTime!)}');
     }
-    final buttonSubtitle = buttonDetails.isEmpty ? null : buttonDetails.join(' · ');
+    final String primaryTitle = _connectedDevice != null
+        ? _resolveDeviceName(_connectedDevice!)
+        : '右手腕 IMU';
+    groups.add(
+      _buildSensorDataGroup(
+        title: primaryTitle,
+        headerIcon: Icons.sports_golf,
+        buttonStatus: _buttonStatusText,
+        buttonSubtitle: buttonDetails.isEmpty ? null : buttonDetails.join(' · '),
+        linearSummary: _formatLinearAccelerationSummary(_latestLinearAcceleration),
+        linearMeta: _formatThreeAxisMeta(_latestLinearAcceleration),
+        rotationSummary: _formatRotationSummary(_latestGameRotationVector),
+        rotationMeta: _formatRotationMeta(_latestGameRotationVector),
+      ),
+    );
+
+    // ---------- 胸前 IMU ----------
+    final bool hasChestData =
+        _secondLatestLinearAcceleration != null || _secondLatestGameRotationVector != null || isChestImuConnected;
+    if (hasChestData) {
+      final String chestTitle =
+          _secondDevice != null ? _resolveDeviceName(_secondDevice!) : '胸前 IMU';
+      groups.add(const SizedBox(height: 14));
+      groups.add(
+        _buildSensorDataGroup(
+          title: chestTitle,
+          headerIcon: Icons.accessibility_new,
+          buttonStatus: null,
+          buttonSubtitle: null,
+          linearSummary: _formatLinearAccelerationSummary(_secondLatestLinearAcceleration),
+          linearMeta: _formatThreeAxisMeta(_secondLatestLinearAcceleration),
+          rotationSummary: _formatRotationSummary(_secondLatestGameRotationVector),
+          rotationMeta: _formatRotationMeta(_secondLatestGameRotationVector),
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2258,12 +2292,62 @@ class _RecorderPageState extends State<RecorderPage> {
           ),
         ),
         const SizedBox(height: 8),
-        _buildInfoRow(Icons.smart_button, '按鈕事件', _buttonStatusText, subtitle: buttonSubtitle),
-        const SizedBox(height: 10),
-        _buildInfoRow(Icons.trending_up, '線性加速度', linearSummary, subtitle: linearMeta),
-        const SizedBox(height: 10),
-        _buildInfoRow(Icons.threed_rotation, 'Game Rotation Vector', rotationSummary, subtitle: rotationMeta),
+        ...groups,
       ],
+    );
+  }
+
+  /// 個別 IMU 的感測摘要卡片，統一顯示按鈕、加速度與旋轉資訊
+  Widget _buildSensorDataGroup({
+    required String title,
+    required IconData headerIcon,
+    required String linearSummary,
+    required String rotationSummary,
+    String? linearMeta,
+    String? rotationMeta,
+    String? buttonStatus,
+    String? buttonSubtitle,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8FB),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE1E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(headerIcon, color: const Color(0xFF123B70)),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF123B70),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (buttonStatus != null) ...[
+            _buildInfoRow(Icons.smart_button, '按鈕事件', buttonStatus, subtitle: buttonSubtitle),
+            const SizedBox(height: 10),
+          ],
+          _buildInfoRow(Icons.trending_up, '線性加速度', linearSummary, subtitle: linearMeta),
+          const SizedBox(height: 10),
+          _buildInfoRow(
+            Icons.threed_rotation,
+            'Game Rotation Vector',
+            rotationSummary,
+            subtitle: rotationMeta,
+          ),
+        ],
+      ),
     );
   }
 
@@ -2433,7 +2517,6 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 建構 IMU 連線卡片，提示使用者完成藍牙配對
   Widget _buildImuConnectionCard() {
-    final bool connected = isImuConnected;
     final bool primaryConnected = isPrimaryImuConnected;
     final bool hasCandidate = _foundDevice != null;
     final String primaryTitle = primaryConnected
@@ -2450,6 +2533,23 @@ class _RecorderPageState extends State<RecorderPage> {
         ? _resolveDeviceName(_secondDevice!)
         : '胸前 IMU';
     final String chestDetail = chestConnected ? '資料串流中' : '等待綁定';
+    final bool anyConnected = primaryConnected || chestConnected;
+    final bool allSlotsConnected = primaryConnected && chestConnected;
+    final bool showScanSection = !allSlotsConnected;
+
+    // 根據目前配對狀態決定提示文字與顏色，協助使用者理解下一步
+    final String readinessText;
+    final Color readinessColor;
+    if (allSlotsConnected) {
+      readinessText = '兩顆 IMU 已完成配對，可立即開始錄影流程。';
+      readinessColor = const Color(0xFF1E8E5A);
+    } else if (anyConnected) {
+      readinessText = '已連線至少一顆 IMU，仍可透過重新搜尋綁定另一顆裝置。';
+      readinessColor = const Color(0xFF123B70);
+    } else {
+      readinessText = '未連線 IMU 亦可錄影，建議配對以取得揮桿數據。';
+      readinessColor = const Color(0xFF7D8B9A);
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -2535,29 +2635,20 @@ class _RecorderPageState extends State<RecorderPage> {
                 ),
               ),
               const SizedBox(width: 12),
-              if (!connected)
-                Expanded(
-                  child: Text(
-                    '未連線 IMU 亦可錄影，建議配對以取得揮桿數據。',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
-                    textAlign: TextAlign.right,
-                  ),
-                )
-              else
-                const Expanded(
-                  child: Text(
-                    '裝置已就緒，可以開始錄影流程。',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF1E8E5A)),
-                    textAlign: TextAlign.right,
-                  ),
+              Expanded(
+                child: Text(
+                  readinessText,
+                  style: TextStyle(fontSize: 12, color: readinessColor),
+                  textAlign: TextAlign.right,
                 ),
+              ),
             ],
           ),
-          if (!connected) ...[
+          if (showScanSection) ...[
             const SizedBox(height: 20),
             _buildScanCandidatesSection(),
           ],
-          if (connected) ...[
+          if (anyConnected) ...[
             const SizedBox(height: 20),
             const Divider(),
             const SizedBox(height: 16),
