@@ -10,10 +10,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
 import '../services/imu_data_logger.dart';
+
+// ---------- 分享頻道設定 ----------
+const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
+
+// ---------- 分享目標列舉 ----------
+enum _ShareTarget { instagram, facebook, line }
 
 /// 錄影專用頁面：專注鏡頭預覽、倒數與音訊波形，與 IMU 配對頁面分離
 class RecordingSessionPage extends StatefulWidget {
@@ -746,6 +753,75 @@ class VideoPlayerPage extends StatefulWidget {
 
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   late VideoPlayerController _videoController;
+  static const String _shareMessage = '分享我的 TekSwing 揮桿影片'; // 分享時的預設文案
+
+  // ---------- 分享相關方法區 ----------
+  Future<void> _shareToTarget(_ShareTarget target) async {
+    // 事前確認檔案是否存在，避免分享流程出現例外
+    final file = File(widget.videoPath);
+    if (!await file.exists()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('找不到影片檔案，無法分享。')),
+        );
+      }
+      return;
+    }
+
+    // 依目標應用程式取得對應的封裝名稱
+    final packageName = switch (target) {
+      _ShareTarget.instagram => 'com.instagram.android',
+      _ShareTarget.facebook => 'com.facebook.katana',
+      _ShareTarget.line => 'jp.naver.line.android',
+    };
+
+    bool sharedByPackage = false; // 紀錄是否已成功透過指定應用分享
+    if (Platform.isAndroid) {
+      try {
+        final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
+          'packageName': packageName,
+          'filePath': widget.videoPath,
+          'mimeType': 'video/*',
+          'text': _shareMessage,
+        });
+        sharedByPackage = result ?? false;
+      } on PlatformException catch (error) {
+        debugPrint('[Share] Android 指定分享失敗：$error');
+      }
+    }
+
+    if (!sharedByPackage) {
+      if (mounted && Platform.isAndroid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未找到指定社群 App，已改用系統分享選單。')),
+        );
+      }
+      await Share.shareXFiles([
+        XFile(widget.videoPath),
+      ], text: _shareMessage);
+    }
+  }
+
+  Widget _buildShareButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required _ShareTarget target,
+  }) {
+    // 建立統一樣式的分享按鈕，維持排版一致
+    return Expanded(
+      child: ElevatedButton.icon(
+        onPressed: () => _shareToTarget(target),
+        icon: Icon(icon),
+        label: Text(label),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -767,13 +843,61 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('影片播放')),
-      body: Center(
-        child: _videoController.value.isInitialized
-            ? AspectRatio(
-                aspectRatio: _videoController.value.aspectRatio,
-                child: VideoPlayer(_videoController),
-              )
-            : const CircularProgressIndicator(),
+      body: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: _videoController.value.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: _videoController.value.aspectRatio,
+                      child: VideoPlayer(_videoController),
+                    )
+                  : const CircularProgressIndicator(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  '分享影片',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _buildShareButton(
+                      icon: Icons.photo_camera,
+                      label: 'Instagram',
+                      color: const Color(0xFFC13584),
+                      target: _ShareTarget.instagram,
+                    ),
+                    const SizedBox(width: 12),
+                    _buildShareButton(
+                      icon: Icons.facebook,
+                      label: 'Facebook',
+                      color: const Color(0xFF1877F2),
+                      target: _ShareTarget.facebook,
+                    ),
+                    const SizedBox(width: 12),
+                    _buildShareButton(
+                      icon: Icons.chat,
+                      label: 'LINE',
+                      color: const Color(0xFF00C300),
+                      target: _ShareTarget.line,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '若無對應應用程式，將自動改用系統分享選單。',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {

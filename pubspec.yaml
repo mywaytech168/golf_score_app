@@ -37,6 +37,7 @@ dependencies:
   video_player: ^2.7.0
   flutter_blue_plus: ^1.32.5
   path_provider: ^2.1.1
+  share_plus: ^7.2.1
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3
