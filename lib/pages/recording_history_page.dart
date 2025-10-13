@@ -73,50 +73,56 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   /// 顯示輸入框調整秒數並更新記錄
   Future<void> _editEntryDuration(RecordingHistoryEntry entry) async {
     final controller = TextEditingController(text: entry.durationSeconds.toString());
+    final formKey = GlobalKey<FormState>();
     final newDuration = await showDialog<int>(
       context: context,
       builder: (dialogContext) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('調整影片時長'),
-              content: TextField(
-                controller: controller,
-                keyboardType: TextInputType.number,
-                // 僅允許輸入數字，避免填入非整數字元造成解析錯誤
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: InputDecoration(
-                  labelText: '秒數',
-                  helperText: '輸入影片實際秒數（正整數）',
-                  errorText: errorText,
-                ),
+        return AlertDialog(
+          title: const Text('調整影片時長'),
+          content: Form(
+            key: formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: TextFormField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: '秒數',
+                helperText: '輸入影片實際秒數（正整數）',
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final parsed = int.tryParse(controller.text);
-                    if (parsed == null || parsed <= 0) {
-                      setState(() => errorText = '請輸入大於 0 的秒數');
-                      return;
-                    }
-                    Navigator.of(dialogContext).pop(parsed);
-                  },
-                  child: const Text('儲存'),
-                ),
-              ],
-            );
-          },
+              validator: (value) {
+                final trimmed = value?.trim() ?? '';
+                final parsed = int.tryParse(trimmed);
+                if (parsed == null || parsed <= 0) {
+                  return '請輸入大於 0 的秒數';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final isValid = formKey.currentState?.validate() ?? false;
+                if (!isValid) {
+                  return;
+                }
+                final parsed = int.parse(controller.text.trim());
+                Navigator.of(dialogContext).pop(parsed);
+              },
+              child: const Text('儲存'),
+            ),
+          ],
         );
       },
     );
     controller.dispose();
 
-    if (newDuration == null) {
+    if (!mounted || newDuration == null) {
       return;
     }
 
@@ -124,6 +130,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
     if (index == -1) {
       return;
+    }
+
+    if (_entries[index].durationSeconds == newDuration) {
+      return; // 秒數未變更時略過更新
     }
 
     setState(() {
@@ -144,50 +154,58 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         ? entry.customName!.trim()
         : entry.displayTitle;
     final controller = TextEditingController(text: initialText);
+    final formKey = GlobalKey<FormState>();
     final newName = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('重新命名影片'),
-              content: TextField(
-                controller: controller,
-                maxLength: 40,
-                decoration: InputDecoration(
-                  labelText: '影片名稱',
-                  helperText: '可留空以恢復預設名稱',
-                  errorText: errorText,
-                ),
+        return AlertDialog(
+          title: const Text('重新命名影片'),
+          content: Form(
+            key: formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: TextFormField(
+              controller: controller,
+              maxLength: 40,
+              decoration: const InputDecoration(
+                labelText: '影片名稱',
+                helperText: '可留空以恢復預設名稱',
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final trimmed = controller.text.trim();
-                    if (trimmed.length > 40) {
-                      setState(() => errorText = '名稱需在 40 字以內');
-                      return;
-                    }
-                    Navigator.of(dialogContext).pop(trimmed);
-                  },
-                  child: const Text('儲存'),
-                ),
-              ],
-            );
-          },
+              validator: (value) {
+                final trimmed = value?.trim() ?? '';
+                if (trimmed.length > 40) {
+                  return '名稱需在 40 字以內';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final isValid = formKey.currentState?.validate() ?? false;
+                if (!isValid) {
+                  return;
+                }
+                Navigator.of(dialogContext).pop(controller.text.trim());
+              },
+              child: const Text('儲存'),
+            ),
+          ],
         );
       },
     );
     controller.dispose();
 
-    if (newName == null) {
+    if (!mounted || newName == null) {
       return;
     }
+
+    final normalizedName = newName.trim();
+    final storedName = normalizedName.isEmpty ? '' : normalizedName;
 
     final index = _entries.indexWhere((item) =>
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
@@ -195,7 +213,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return;
     }
 
-    final storedName = newName.isEmpty ? '' : newName;
+    final originalName = (_entries[index].customName ?? '').trim();
+    if (storedName == originalName) {
+      return; // 名稱未變更時不更新檔案
+    }
+
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
 
     setState(() {
