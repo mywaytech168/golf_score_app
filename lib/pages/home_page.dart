@@ -31,6 +31,9 @@ class _HomePageState extends State<HomePage> {
   bool _isHistoryLoading = true; // 控制歷史載入狀態，避免 UI 閃爍
   int _practiceCount = 0; // 累積練習次數
   double? _averageSpeedMph; // 估算出的平均揮桿速度（MPH）
+  double? _bestSpeedMph; // 歷史紀錄中的最佳揮桿速度
+  double? _consistencyScore; // 揮桿穩定度（0-1）
+  double? _impactClarity; // 擊球清脆度（0-1）
   double? _sweetSpotPercentage; // 甜蜜點命中率百分比
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
 
@@ -187,6 +190,23 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 將儀表板數值轉換為雷達圖比例，便於統一控制上限
+  List<double> _buildRadarValues() {
+    final averageSpeedScore = _averageSpeedMph != null
+        ? (_averageSpeedMph! / 120).clamp(0.0, 1.0)
+        : 0.0;
+    final bestSpeedScore = _bestSpeedMph != null
+        ? (_bestSpeedMph! / 130).clamp(0.0, 1.0)
+        : averageSpeedScore;
+    final stabilityScore = (_consistencyScore ?? 0).clamp(0.0, 1.0);
+    final clarityScore = (_impactClarity ??
+            (_sweetSpotPercentage != null ? _sweetSpotPercentage! / 100 : 0))
+        .clamp(0.0, 1.0);
+    final volumeScore = (_practiceCount / 12).clamp(0.0, 1.0);
+
+    return [averageSpeedScore, stabilityScore, clarityScore, bestSpeedScore, volumeScore];
+  }
+
   /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
   Future<void> _loadInitialHistory() async {
     final entries = await RecordingHistoryStorage.instance.loadHistory();
@@ -247,6 +267,9 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _isMetricCalculating = false;
         _averageSpeedMph = null;
+        _bestSpeedMph = null;
+        _consistencyScore = null;
+        _impactClarity = null;
         _sweetSpotPercentage = null;
       });
       return;
@@ -262,6 +285,9 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _isMetricCalculating = false;
         _averageSpeedMph = metrics.averageSpeedMph;
+        _bestSpeedMph = metrics.bestSpeedMph;
+        _consistencyScore = metrics.consistencyScore;
+        _impactClarity = metrics.averageImpactClarity;
         _sweetSpotPercentage = metrics.sweetSpotPercentage;
       });
     } catch (e) {
@@ -269,6 +295,9 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _isMetricCalculating = false;
         _averageSpeedMph = null;
+        _bestSpeedMph = null;
+        _consistencyScore = null;
+        _impactClarity = null;
         _sweetSpotPercentage = null;
       });
     }
@@ -411,6 +440,23 @@ class _HomePageState extends State<HomePage> {
       Color(0xFF2E8EFF),
       Color(0xFF8E4AF4),
     ];
+    // ---------- Analytics 動態字串區 ----------
+    final analyticsStatusLabel = _isMetricCalculating ? '分析中...' : '尚無資料';
+    final analyticsAvgSpeedText = _averageSpeedMph != null
+        ? '${_averageSpeedMph!.toStringAsFixed(1)} MPH'
+        : analyticsStatusLabel;
+    final analyticsBestSpeedText = _bestSpeedMph != null
+        ? '${_bestSpeedMph!.toStringAsFixed(1)} MPH'
+        : analyticsStatusLabel;
+    final analyticsStabilityText = _consistencyScore != null
+        ? '${(_consistencyScore!.clamp(0, 1) * 100).toStringAsFixed(0)} %'
+        : analyticsStatusLabel;
+    final analyticsSweetText = _sweetSpotPercentage != null
+        ? '${_sweetSpotPercentage!.clamp(0, 100).toStringAsFixed(0)} %'
+        : analyticsStatusLabel;
+    final analyticsClarityText = _impactClarity != null
+        ? '${(_impactClarity!.clamp(0, 1) * 100).toStringAsFixed(0)} %'
+        : analyticsStatusLabel;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
@@ -606,26 +652,59 @@ class _HomePageState extends State<HomePage> {
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text('Avg Speed', style: TextStyle(color: Color(0xFF7D8B9A))),
-                            SizedBox(height: 6),
+                          children: [
+                            const Text('Avg Speed', style: TextStyle(color: Color(0xFF7D8B9A))),
+                            const SizedBox(height: 6),
                             Text(
-                              '89.5 MPH',
-                              style: TextStyle(
+                              analyticsAvgSpeedText,
+                              style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFF1E8E5A),
                               ),
                             ),
-                            SizedBox(height: 12),
-                            Text('Stability', style: TextStyle(color: Color(0xFF7D8B9A))),
-                            SizedBox(height: 6),
+                            const SizedBox(height: 12),
+                            const Text('Best Speed', style: TextStyle(color: Color(0xFF7D8B9A))),
+                            const SizedBox(height: 6),
                             Text(
-                              '80 %',
-                              style: TextStyle(
+                              analyticsBestSpeedText,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1E8E5A),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text('Stability', style: TextStyle(color: Color(0xFF7D8B9A))),
+                            const SizedBox(height: 6),
+                            Text(
+                              analyticsStabilityText,
+                              style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFF2E8EFF),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text('Sweet Spot', style: TextStyle(color: Color(0xFF7D8B9A))),
+                            const SizedBox(height: 6),
+                            Text(
+                              analyticsSweetText,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF8E4AF4),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text('Impact Clarity', style: TextStyle(color: Color(0xFF7D8B9A))),
+                            const SizedBox(height: 6),
+                            Text(
+                              analyticsClarityText,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFFDA4E5D),
                               ),
                             ),
                           ],
@@ -635,7 +714,7 @@ class _HomePageState extends State<HomePage> {
                         height: 140,
                         width: 140,
                         child: CustomPaint(
-                          painter: _RadarChartPainter(values: const [0.9, 0.75, 0.85, 0.7, 0.95]),
+                          painter: _RadarChartPainter(values: _buildRadarValues()),
                         ),
                       ),
                     ],
@@ -779,10 +858,13 @@ class _MetricsCalculator {
 
   /// 從歷史紀錄中解析出平均揮桿速度與甜蜜點命中率
   static Future<_MetricsResult> compute(List<RecordingHistoryEntry> entries) async {
-    double aggregatedSpeed = 0;
-    int speedSamples = 0;
-    int sweetSpotHits = 0;
-    int analyzedSwings = 0;
+    double aggregatedSpeed = 0; // 累加每次揮桿的預估速度
+    double aggregatedConsistency = 0; // 累加穩定度比例
+    double aggregatedImpact = 0; // 累加擊球清脆度
+    int speedSamples = 0; // 統計擁有速度資訊的樣本數
+    int sweetSpotHits = 0; // 紀錄甜蜜點命中的次數
+    int analyzedSwings = 0; // 有成功解析的揮桿筆數
+    double? bestSpeedMph; // 歷史最佳速度
 
     for (final entry in entries) {
       final csvPath = _selectCsvPath(entry);
@@ -799,7 +881,12 @@ class _MetricsCalculator {
       if (snapshot.estimatedSpeedMph != null) {
         aggregatedSpeed += snapshot.estimatedSpeedMph!;
         speedSamples++;
+        bestSpeedMph = bestSpeedMph == null
+            ? snapshot.estimatedSpeedMph
+            : math.max(bestSpeedMph!, snapshot.estimatedSpeedMph!);
       }
+      aggregatedConsistency += snapshot.consistencyScore;
+      aggregatedImpact += snapshot.impactClarity;
       if (snapshot.impactClarity >= _sweetSpotThreshold) {
         sweetSpotHits++;
       }
@@ -807,9 +894,18 @@ class _MetricsCalculator {
 
     final averageSpeed = speedSamples > 0 ? aggregatedSpeed / speedSamples : null;
     final sweetSpotPercentage = analyzedSwings > 0 ? sweetSpotHits / analyzedSwings * 100 : null;
+    final consistencyScore = analyzedSwings > 0
+        ? math.min(math.max(aggregatedConsistency / analyzedSwings, 0.0), 1.0)
+        : null;
+    final averageImpact = analyzedSwings > 0
+        ? math.min(math.max(aggregatedImpact / analyzedSwings, 0.0), 1.0)
+        : null;
 
     return _MetricsResult(
       averageSpeedMph: averageSpeed,
+      bestSpeedMph: bestSpeedMph,
+      consistencyScore: consistencyScore,
+      averageImpactClarity: averageImpact,
       sweetSpotPercentage: sweetSpotPercentage,
     );
   }
@@ -883,10 +979,12 @@ class _MetricsCalculator {
     final estimatedSpeedMps = (avgMagnitude * 0.45) + (maxMagnitude * 0.25);
     final estimatedSpeedMph = estimatedSpeedMps * 2.23694;
     final impactClarity = impactSamples / totalSamples;
+    final consistency = maxMagnitude > 0 ? (avgMagnitude / maxMagnitude).clamp(0.0, 1.0) : 0.0;
 
     return _SwingSnapshot(
       estimatedSpeedMph: estimatedSpeedMph.isFinite ? estimatedSpeedMph : null,
       impactClarity: impactClarity.clamp(0.0, 1.0),
+      consistencyScore: consistency,
     );
   }
 }
@@ -894,10 +992,16 @@ class _MetricsCalculator {
 /// 儀表板計算回傳的彙整結果
 class _MetricsResult {
   final double? averageSpeedMph;
+  final double? bestSpeedMph;
+  final double? consistencyScore;
+  final double? averageImpactClarity;
   final double? sweetSpotPercentage;
 
   const _MetricsResult({
     required this.averageSpeedMph,
+    required this.bestSpeedMph,
+    required this.consistencyScore,
+    required this.averageImpactClarity,
     required this.sweetSpotPercentage,
   });
 }
@@ -906,10 +1010,12 @@ class _MetricsResult {
 class _SwingSnapshot {
   final double? estimatedSpeedMph; // 估算出的揮桿速度
   final double impactClarity; // 高加速度樣本占比，代表擊球清脆度
+  final double consistencyScore; // 平均與峰值的比例，代表穩定度
 
   const _SwingSnapshot({
     required this.estimatedSpeedMph,
     required this.impactClarity,
+    required this.consistencyScore,
   });
 }
 
