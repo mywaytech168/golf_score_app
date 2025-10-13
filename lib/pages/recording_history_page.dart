@@ -84,7 +84,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
               content: TextField(
                 controller: controller,
                 keyboardType: TextInputType.number,
-                inputFormatters: const [FilteringTextInputFormatter.digitsOnly],
+                // 僅允許輸入數字，避免填入非整數字元造成解析錯誤
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: InputDecoration(
                   labelText: '秒數',
                   helperText: '輸入影片實際秒數（正整數）',
