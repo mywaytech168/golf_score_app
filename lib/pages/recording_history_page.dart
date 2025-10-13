@@ -9,7 +9,7 @@ import '../services/recording_history_storage.dart';
 import 'recording_session_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { editDuration, delete }
+enum _HistoryMenuAction { rename, editDuration, delete }
 
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
@@ -138,6 +138,81 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     );
   }
 
+  /// 提供重新命名功能，讓使用者快速辨識影片
+  Future<void> _renameEntry(RecordingHistoryEntry entry) async {
+    final initialText = entry.customName != null && entry.customName!.trim().isNotEmpty
+        ? entry.customName!.trim()
+        : entry.displayTitle;
+    final controller = TextEditingController(text: initialText);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        String? errorText;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('重新命名影片'),
+              content: TextField(
+                controller: controller,
+                maxLength: 40,
+                decoration: InputDecoration(
+                  labelText: '影片名稱',
+                  helperText: '可留空以恢復預設名稱',
+                  errorText: errorText,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final trimmed = controller.text.trim();
+                    if (trimmed.length > 40) {
+                      setState(() => errorText = '名稱需在 40 字以內');
+                      return;
+                    }
+                    Navigator.of(dialogContext).pop(trimmed);
+                  },
+                  child: const Text('儲存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    controller.dispose();
+
+    if (newName == null) {
+      return;
+    }
+
+    final index = _entries.indexWhere((item) =>
+        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
+    if (index == -1) {
+      return;
+    }
+
+    final storedName = newName.isEmpty ? '' : newName;
+    final defaultTitle = entry.copyWith(customName: '').displayTitle;
+
+    setState(() {
+      _entries[index] = _entries[index].copyWith(customName: storedName);
+    });
+
+    await RecordingHistoryStorage.instance.saveHistory(_entries);
+
+    if (!mounted) return;
+    final snackMessage = storedName.isEmpty
+        ? '已恢復影片名稱為 $defaultTitle'
+        : '已將影片命名為 $storedName';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(snackMessage)),
+    );
+  }
+
   /// 刪除影片檔與對應 CSV
   Future<void> _removeEntryFiles(RecordingHistoryEntry entry) async {
     try {
@@ -237,6 +312,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     entry: entry,
                     formattedTime: _formatTimestamp(entry.recordedAt),
                     onTap: () => _playEntry(entry),
+                    onRename: () => _renameEntry(entry),
                     onEditDuration: () => _editEntryDuration(entry),
                     onDelete: () => _deleteEntry(entry),
                   );
@@ -281,6 +357,7 @@ class _HistoryTile extends StatelessWidget {
   final RecordingHistoryEntry entry; // 對應的錄影資料
   final String formattedTime; // 已轉換好的顯示時間
   final VoidCallback onTap; // 點擊後的播放行為
+  final VoidCallback onRename; // 重新命名影片
   final VoidCallback onEditDuration; // 調整影片時長
   final VoidCallback onDelete; // 刪除影片紀錄
 
@@ -288,6 +365,7 @@ class _HistoryTile extends StatelessWidget {
     required this.entry,
     required this.formattedTime,
     required this.onTap,
+    required this.onRename,
     required this.onEditDuration,
     required this.onDelete,
   });
@@ -359,6 +437,9 @@ class _HistoryTile extends StatelessWidget {
               icon: const Icon(Icons.more_vert, color: Color(0xFF123B70)),
               onSelected: (action) {
                 switch (action) {
+                  case _HistoryMenuAction.rename:
+                    onRename();
+                    break;
                   case _HistoryMenuAction.editDuration:
                     onEditDuration();
                     break;
@@ -368,6 +449,10 @@ class _HistoryTile extends StatelessWidget {
                 }
               },
               itemBuilder: (context) => const [
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.rename,
+                  child: Text('重新命名'),
+                ),
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.editDuration,
                   child: Text('調整時長'),

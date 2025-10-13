@@ -15,7 +15,7 @@ import 'recording_history_page.dart';
 import 'recording_session_page.dart';
 
 /// 錄影卡片支援的操作種類
-enum _HistoryAction { editDuration, delete }
+enum _HistoryAction { rename, editDuration, delete }
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
@@ -299,6 +299,9 @@ class _HomePageState extends State<HomePage> {
                         color: Colors.white,
                         onSelected: (action) {
                           switch (action) {
+                            case _HistoryAction.rename:
+                              _renameHistoryEntry(entry);
+                              break;
                             case _HistoryAction.editDuration:
                               _editHistoryDuration(entry);
                               break;
@@ -308,6 +311,10 @@ class _HomePageState extends State<HomePage> {
                           }
                         },
                         itemBuilder: (context) => [
+                          const PopupMenuItem<_HistoryAction>(
+                            value: _HistoryAction.rename,
+                            child: Text('重新命名'),
+                          ),
                           const PopupMenuItem<_HistoryAction>(
                             value: _HistoryAction.editDuration,
                             child: Text('調整時長'),
@@ -403,6 +410,79 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已刪除 ${entry.fileName}')), // 告知刪除完成
+    );
+  }
+
+  /// 顯示輸入框讓使用者重新命名影片
+  Future<void> _renameHistoryEntry(RecordingHistoryEntry entry) async {
+    final initialText = entry.customName != null && entry.customName!.trim().isNotEmpty
+        ? entry.customName!.trim()
+        : entry.displayTitle;
+    final controller = TextEditingController(text: initialText);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        String? errorText;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('重新命名影片'),
+              content: TextField(
+                controller: controller,
+                maxLength: 40,
+                decoration: InputDecoration(
+                  labelText: '影片名稱',
+                  helperText: '可留空以恢復預設名稱',
+                  errorText: errorText,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final trimmed = controller.text.trim();
+                    if (trimmed.length > 40) {
+                      setState(() => errorText = '名稱需在 40 字以內');
+                      return;
+                    }
+                    Navigator.of(dialogContext).pop(trimmed);
+                  },
+                  child: const Text('儲存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    controller.dispose();
+
+    if (newName == null) {
+      return;
+    }
+
+    final updatedEntries = List<RecordingHistoryEntry>.from(_recordingHistory);
+    final targetIndex = updatedEntries.indexWhere((item) =>
+        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
+    if (targetIndex == -1) {
+      return;
+    }
+
+    final storedName = newName.isEmpty ? '' : newName;
+    final defaultTitle = entry.copyWith(customName: '').displayTitle;
+    updatedEntries[targetIndex] =
+        updatedEntries[targetIndex].copyWith(customName: storedName);
+    _handleHistoryUpdated(updatedEntries);
+
+    if (!mounted) return;
+    final snackMessage = storedName.isEmpty
+        ? '已恢復影片名稱為 $defaultTitle'
+        : '已將影片命名為 $storedName';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(snackMessage)),
     );
   }
 

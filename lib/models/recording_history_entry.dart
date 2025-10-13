@@ -18,6 +18,9 @@ class RecordingHistoryEntry {
   /// 是否在錄影當下有連線 IMU，可用於顯示模式標籤
   final bool imuConnected;
 
+  /// 允許使用者自訂的影片名稱，空字串視為未命名
+  final String? customName;
+
   /// 對應本輪錄影的 IMU 原始資料 CSV 清單（deviceId -> 路徑）
   final Map<String, String> imuCsvPaths;
 
@@ -27,6 +30,7 @@ class RecordingHistoryEntry {
     required this.recordedAt,
     required this.durationSeconds,
     required this.imuConnected,
+    this.customName,
     this.imuCsvPaths = const {},
   });
 
@@ -37,6 +41,7 @@ class RecordingHistoryEntry {
     DateTime? recordedAt,
     int? durationSeconds,
     bool? imuConnected,
+    String? customName,
     Map<String, String>? imuCsvPaths,
   }) {
     return RecordingHistoryEntry(
@@ -45,12 +50,19 @@ class RecordingHistoryEntry {
       recordedAt: recordedAt ?? this.recordedAt,
       durationSeconds: durationSeconds ?? this.durationSeconds,
       imuConnected: imuConnected ?? this.imuConnected,
+      customName: customName ?? this.customName,
       imuCsvPaths: imuCsvPaths ?? this.imuCsvPaths,
     );
   }
 
   /// 提供統一的顯示標題，例如「第 3 輪錄影」
-  String get displayTitle => '第\u0020${roundIndex}\u0020輪錄影';
+  String get displayTitle {
+    final name = customName?.trim();
+    if (name != null && name.isNotEmpty) {
+      return name;
+    }
+    return '第\u0020${roundIndex}\u0020輪錄影';
+  }
 
   /// 依據是否連線 IMU 回傳中文標籤，顯示當時的錄影模式
   String get modeLabel => imuConnected ? '含 IMU 資料' : '純錄影';
@@ -77,6 +89,7 @@ class RecordingHistoryEntry {
       'recordedAt': recordedAt.toIso8601String(),
       'durationSeconds': durationSeconds,
       'imuConnected': imuConnected,
+      'customName': customName,
       'imuCsvPaths': imuCsvPaths,
     };
   }
@@ -99,6 +112,7 @@ class RecordingHistoryEntry {
           DateTime.now(),
       durationSeconds: (json['durationSeconds'] as int?) ?? 0,
       imuConnected: (json['imuConnected'] as bool?) ?? false,
+      customName: (json['customName'] as String?) ?? '',
       imuCsvPaths: parsedCsv,
     );
   }
