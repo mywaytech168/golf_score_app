@@ -122,8 +122,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
     controller = selection.controller;
     if (kDebugMode) {
-      // 藉由除錯訊息確認實際採用的解析度與幀率
-      debugPrint('Camera initialized with preset ${selection.preset}, size=${selection.previewSize}, fps=${selection.previewFps}');
+      // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）
+      debugPrint(
+        'Camera initialized with preset ${selection.preset}, size=${selection.previewSize ?? '未知'}',
+      );
     }
     if (!mounted) return;
     setState(() {}); // 更新畫面顯示預覽
@@ -159,13 +161,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         await testController.initialize();
 
         // 嘗試讀取預覽資訊，若特定平台未提供則以 null 代表未知
-        double? previewFps;
         Size? previewSize;
-        try {
-          previewFps = testController.value.previewFrameRate;
-        } catch (_) {
-          previewFps = null;
-        }
         try {
           previewSize = testController.value.previewSize;
         } catch (_) {
@@ -175,7 +171,6 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         return _CameraSelectionResult(
           controller: testController,
           preset: preset,
-          previewFps: previewFps,
           previewSize: previewSize,
         );
       } catch (_) {
@@ -633,18 +628,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   }
 }
 
-/// 封裝鏡頭初始化後的結果，方便保存解析度與幀率資訊
+/// 封裝鏡頭初始化後的結果，保留可用的解析度資訊
 class _CameraSelectionResult {
   const _CameraSelectionResult({
     required this.controller,
     required this.preset,
-    required this.previewFps,
     required this.previewSize,
   });
 
   final CameraController controller; // 已初始化可直接使用的鏡頭控制器
   final ResolutionPreset preset; // 成功套用的解析度列舉值
-  final double? previewFps; // 實際預覽幀率，無法取得時為 null
   final Size? previewSize; // 實際解析度尺寸，無法取得時為 null
 }
 
