@@ -36,11 +36,129 @@ class _HomePageState extends State<HomePage> {
   double? _impactClarity; // 擊球清脆度（0-1）
   double? _sweetSpotPercentage; // 甜蜜點命中率百分比
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
+  _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
+  _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
 
   @override
   void initState() {
     super.initState();
     _loadInitialHistory();
+  }
+
+  /// 將時間轉換為比較區塊顯示的日期文字（例：05/21）
+  String _formatComparisonDate(DateTime dateTime) {
+    return '${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')}';
+  }
+
+  /// 建立比較區塊，呈現最新與上一筆揮桿的差異
+  Widget _buildComparisonCard() {
+    final before = _comparisonBefore;
+    final after = _comparisonAfter;
+    final analyzing = _isMetricCalculating;
+
+    // ---------- 內部小工具：負責產生顯示文字 ----------
+    String buildSpeedLabel(_ComparisonSnapshot? snapshot) {
+      if (analyzing) return '分析中...';
+      if (snapshot?.speedMph != null) {
+        return '${snapshot!.speedMph!.toStringAsFixed(1)} MPH';
+      }
+      return snapshot == null ? '--' : '無速度資訊';
+    }
+
+    String buildSubtitle(_ComparisonSnapshot? snapshot) {
+      if (analyzing) return '資料整理中';
+      if (snapshot == null) {
+        return '完成更多錄影即可生成比較';
+      }
+      final dateLabel = _formatComparisonDate(snapshot.entry.recordedAt);
+      final impactLabel = '${(snapshot.impactClarity * 100).clamp(0, 100).toStringAsFixed(0)}%';
+      return '$dateLabel  •  $impactLabel';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader(
+            title: 'Comparison',
+            actionLabel: '查看歷史',
+            onTap: _openRecordingHistoryPage,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Before', style: TextStyle(color: Color(0xFF7D8B9A))),
+                    const SizedBox(height: 6),
+                    Text(
+                      buildSpeedLabel(before),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFDA4E5D),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      buildSubtitle(before),
+                      style: const TextStyle(color: Color(0xFF7D8B9A)),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                height: 80,
+                width: 1,
+                color: const Color(0xFFE4E8F0),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('After', style: TextStyle(color: Color(0xFF7D8B9A))),
+                    const SizedBox(height: 6),
+                    Text(
+                      buildSpeedLabel(after),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E8E5A),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      buildSubtitle(after),
+                      style: const TextStyle(color: Color(0xFF7D8B9A)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () => _onBottomNavTap(2),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E8E5A),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: const Text('立即開始錄影'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ---------- 方法區 ----------
@@ -271,6 +389,8 @@ class _HomePageState extends State<HomePage> {
         _consistencyScore = null;
         _impactClarity = null;
         _sweetSpotPercentage = null;
+        _comparisonBefore = null;
+        _comparisonAfter = null;
       });
       return;
     }
@@ -289,6 +409,8 @@ class _HomePageState extends State<HomePage> {
         _consistencyScore = metrics.consistencyScore;
         _impactClarity = metrics.averageImpactClarity;
         _sweetSpotPercentage = metrics.sweetSpotPercentage;
+        _comparisonBefore = metrics.comparisonBefore;
+        _comparisonAfter = metrics.comparisonAfter;
       });
     } catch (e) {
       if (!mounted) return;
@@ -299,6 +421,8 @@ class _HomePageState extends State<HomePage> {
         _consistencyScore = null;
         _impactClarity = null;
         _sweetSpotPercentage = null;
+        _comparisonBefore = null;
+        _comparisonAfter = null;
       });
     }
   }
@@ -723,80 +847,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _SectionHeader(title: 'Comparison', actionLabel: '查看歷史', onTap: () {}),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text('Before', style: TextStyle(color: Color(0xFF7D8B9A))),
-                            SizedBox(height: 6),
-                            Text(
-                              '86.3 MPH',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFFDA4E5D),
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text('Feb 14  •  60%', style: TextStyle(color: Color(0xFF7D8B9A))),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        height: 80,
-                        width: 1,
-                        color: const Color(0xFFE4E8F0),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: const [
-                            Text('After', style: TextStyle(color: Color(0xFF7D8B9A))),
-                            SizedBox(height: 6),
-                            Text(
-                              '90.1 MPH',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E8E5A),
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text('Apr 8  •  82%', style: TextStyle(color: Color(0xFF7D8B9A))),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => _onBottomNavTap(2),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E8E5A),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: const Text('立即開始錄影'),
-                  ),
-                ],
-              ),
-            ),
+            _buildComparisonCard(),
             const SizedBox(height: 32),
             _buildHistoryShortcutCard(),
             const SizedBox(height: 32),
@@ -865,14 +916,17 @@ class _MetricsCalculator {
     int sweetSpotHits = 0; // 紀錄甜蜜點命中的次數
     int analyzedSwings = 0; // 有成功解析的揮桿筆數
     double? bestSpeedMph; // 歷史最佳速度
+    final entrySnapshots = <_EntrySnapshot>[]; // 紀錄每筆歷史對應的分析結果
 
     for (final entry in entries) {
       final csvPath = _selectCsvPath(entry);
       if (csvPath == null) {
+        entrySnapshots.add(_EntrySnapshot(entry: entry, snapshot: null));
         continue; // 沒有 IMU 檔案無法推算速度
       }
 
       final snapshot = await _analyzeCsv(csvPath);
+      entrySnapshots.add(_EntrySnapshot(entry: entry, snapshot: snapshot));
       if (snapshot == null) {
         continue;
       }
@@ -901,12 +955,39 @@ class _MetricsCalculator {
         ? math.min(math.max(aggregatedImpact / analyzedSwings, 0.0), 1.0)
         : null;
 
+    // ---------- 轉換為比較所需資料：取最新與上一筆成功解析的紀錄 ----------
+    final comparable = entrySnapshots
+        .where((item) => item.snapshot != null)
+        .toList()
+      ..sort((a, b) => b.entry.recordedAt.compareTo(a.entry.recordedAt));
+
+    _ComparisonSnapshot? comparisonAfter;
+    _ComparisonSnapshot? comparisonBefore;
+    if (comparable.isNotEmpty) {
+      final latest = comparable.first;
+      comparisonAfter = _ComparisonSnapshot(
+        entry: latest.entry,
+        speedMph: latest.snapshot!.estimatedSpeedMph,
+        impactClarity: latest.snapshot!.impactClarity,
+      );
+      if (comparable.length > 1) {
+        final previous = comparable[1];
+        comparisonBefore = _ComparisonSnapshot(
+          entry: previous.entry,
+          speedMph: previous.snapshot!.estimatedSpeedMph,
+          impactClarity: previous.snapshot!.impactClarity,
+        );
+      }
+    }
+
     return _MetricsResult(
       averageSpeedMph: averageSpeed,
       bestSpeedMph: bestSpeedMph,
       consistencyScore: consistencyScore,
       averageImpactClarity: averageImpact,
       sweetSpotPercentage: sweetSpotPercentage,
+      comparisonBefore: comparisonBefore,
+      comparisonAfter: comparisonAfter,
     );
   }
 
@@ -996,6 +1077,8 @@ class _MetricsResult {
   final double? consistencyScore;
   final double? averageImpactClarity;
   final double? sweetSpotPercentage;
+  final _ComparisonSnapshot? comparisonBefore;
+  final _ComparisonSnapshot? comparisonAfter;
 
   const _MetricsResult({
     required this.averageSpeedMph,
@@ -1003,6 +1086,8 @@ class _MetricsResult {
     required this.consistencyScore,
     required this.averageImpactClarity,
     required this.sweetSpotPercentage,
+    required this.comparisonBefore,
+    required this.comparisonAfter,
   });
 }
 
@@ -1016,6 +1101,27 @@ class _SwingSnapshot {
     required this.estimatedSpeedMph,
     required this.impactClarity,
     required this.consistencyScore,
+  });
+}
+
+/// 將錄影紀錄與分析結果綁定，供比較與彙整使用
+class _EntrySnapshot {
+  final RecordingHistoryEntry entry; // 原始錄影資訊
+  final _SwingSnapshot? snapshot; // 解析後的感測數據
+
+  const _EntrySnapshot({required this.entry, required this.snapshot});
+}
+
+/// 比較區塊顯示的資料結構
+class _ComparisonSnapshot {
+  final RecordingHistoryEntry entry; // 對應的錄影紀錄
+  final double? speedMph; // 預估揮桿速度
+  final double impactClarity; // 擊球清脆度比例
+
+  const _ComparisonSnapshot({
+    required this.entry,
+    required this.speedMph,
+    required this.impactClarity,
   });
 }
 
