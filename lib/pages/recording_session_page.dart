@@ -75,6 +75,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   void initState() {
     super.initState();
     initVolumeKeyListener(); // 建立音量鍵快捷鍵
+    // 鎖定裝置方向為直向，以維持預覽與錄影皆為直式畫面
+    SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
+      DeviceOrientation.portraitUp,
+    ]);
     _prepareSession(); // 非同步初始化鏡頭，等待使用者手動啟動
     _pendingAutoStart = widget.autoStartOnReady; // 若由 IMU 開啟則在鏡頭就緒後自動啟動
     // 監聽 IMU 按鈕事件，隨時可從硬體直接觸發錄影
@@ -91,6 +95,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
     _imuButtonSubscription?.cancel(); // 解除 IMU 按鈕監聽，避免資源洩漏
+    // 還原應用允許的方向，避免離開錄影頁後仍被鎖定
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
   }
 
@@ -125,6 +131,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _previewAspectRatio = selection.previewSize != null
         ? selection.previewSize!.width / selection.previewSize!.height
         : controller!.value.aspectRatio;
+    // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉
+    try {
+      await controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('lockCaptureOrientation 失敗：$error\n$stackTrace');
+      }
+    }
     if (kDebugMode) {
       // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）
       debugPrint(
