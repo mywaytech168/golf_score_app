@@ -2,9 +2,14 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
+import '../services/recording_history_storage.dart';
 import 'recording_session_page.dart';
+
+/// 列表操作選項
+enum _HistoryMenuAction { editDuration, delete }
 
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
@@ -19,6 +24,142 @@ class RecordingHistoryPage extends StatefulWidget {
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
+
+  /// 返回上一頁並帶出更新後的清單
+  void _finishWithResult() {
+    Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_entries));
+  }
+
+  /// 移除指定紀錄並同步刪除實體檔案
+  Future<void> _deleteEntry(RecordingHistoryEntry entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('刪除影片'),
+          content: Text('確定要刪除「${entry.displayTitle}」嗎？影片與 CSV 將會一併移除。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('刪除'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    setState(() {
+      _entries.removeWhere((item) =>
+          item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
+    });
+
+    await _removeEntryFiles(entry);
+    await RecordingHistoryStorage.instance.saveHistory(_entries);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已刪除 ${entry.fileName}')),
+    );
+  }
+
+  /// 顯示輸入框調整秒數並更新記錄
+  Future<void> _editEntryDuration(RecordingHistoryEntry entry) async {
+    final controller = TextEditingController(text: entry.durationSeconds.toString());
+    final newDuration = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) {
+        String? errorText;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('調整影片時長'),
+              content: TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                inputFormatters: const [FilteringTextInputFormatter.digitsOnly],
+                decoration: InputDecoration(
+                  labelText: '秒數',
+                  helperText: '輸入影片實際秒數（正整數）',
+                  errorText: errorText,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final parsed = int.tryParse(controller.text);
+                    if (parsed == null || parsed <= 0) {
+                      setState(() => errorText = '請輸入大於 0 的秒數');
+                      return;
+                    }
+                    Navigator.of(dialogContext).pop(parsed);
+                  },
+                  child: const Text('儲存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    controller.dispose();
+
+    if (newDuration == null) {
+      return;
+    }
+
+    final index = _entries.indexWhere((item) =>
+        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
+    if (index == -1) {
+      return;
+    }
+
+    setState(() {
+      _entries[index] = _entries[index].copyWith(durationSeconds: newDuration);
+    });
+
+    await RecordingHistoryStorage.instance.saveHistory(_entries);
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已更新 ${entry.displayTitle} 為 $newDuration 秒')),
+    );
+  }
+
+  /// 刪除影片檔與對應 CSV
+  Future<void> _removeEntryFiles(RecordingHistoryEntry entry) async {
+    try {
+      final videoFile = File(entry.filePath);
+      if (await videoFile.exists()) {
+        await videoFile.delete();
+      }
+    } catch (_) {
+      // 失敗時忽略，避免打斷流程
+    }
+
+    for (final path in entry.imuCsvPaths.values) {
+      if (path.isEmpty) continue;
+      try {
+        final csvFile = File(path);
+        if (await csvFile.exists()) {
+          await csvFile.delete();
+        }
+      } catch (_) {
+        // 單筆刪除失敗不影響整體
+      }
+    }
+  }
 
   // ---------- 方法區 ----------
   /// 將時間轉換為易讀字串，方便列表展示
@@ -65,32 +206,44 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('錄影歷史'),
-        actions: [
-          IconButton(
-            onPressed: _pickExternalVideo,
-            tooltip: '開啟其他影片',
-            icon: const Icon(Icons.folder_open_rounded),
+    return WillPopScope(
+      onWillPop: () async {
+        _finishWithResult();
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('錄影歷史'),
+          leading: IconButton(
+            onPressed: _finishWithResult,
+            icon: const Icon(Icons.arrow_back),
           ),
-        ],
-      ),
-      body: _entries.isEmpty
-          ? const _EmptyHistoryView()
-          : ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              itemBuilder: (context, index) {
-                final entry = _entries[index];
-                return _HistoryTile(
-                  entry: entry,
-                  formattedTime: _formatTimestamp(entry.recordedAt),
-                  onTap: () => _playEntry(entry),
-                );
-              },
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemCount: _entries.length,
+          actions: [
+            IconButton(
+              onPressed: _pickExternalVideo,
+              tooltip: '開啟其他影片',
+              icon: const Icon(Icons.folder_open_rounded),
             ),
+          ],
+        ),
+        body: _entries.isEmpty
+            ? const _EmptyHistoryView()
+            : ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                itemBuilder: (context, index) {
+                  final entry = _entries[index];
+                  return _HistoryTile(
+                    entry: entry,
+                    formattedTime: _formatTimestamp(entry.recordedAt),
+                    onTap: () => _playEntry(entry),
+                    onEditDuration: () => _editEntryDuration(entry),
+                    onDelete: () => _deleteEntry(entry),
+                  );
+                },
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemCount: _entries.length,
+              ),
+      ),
     );
   }
 }
@@ -127,11 +280,15 @@ class _HistoryTile extends StatelessWidget {
   final RecordingHistoryEntry entry; // 對應的錄影資料
   final String formattedTime; // 已轉換好的顯示時間
   final VoidCallback onTap; // 點擊後的播放行為
+  final VoidCallback onEditDuration; // 調整影片時長
+  final VoidCallback onDelete; // 刪除影片紀錄
 
   const _HistoryTile({
     required this.entry,
     required this.formattedTime,
     required this.onTap,
+    required this.onEditDuration,
+    required this.onDelete,
   });
 
   @override
@@ -195,6 +352,31 @@ class _HistoryTile extends StatelessWidget {
               ),
             ),
             const Icon(Icons.play_arrow_rounded, color: Color(0xFF1E8E5A), size: 32),
+            const SizedBox(width: 4),
+            PopupMenuButton<_HistoryMenuAction>(
+              tooltip: '更多操作',
+              icon: const Icon(Icons.more_vert, color: Color(0xFF123B70)),
+              onSelected: (action) {
+                switch (action) {
+                  case _HistoryMenuAction.editDuration:
+                    onEditDuration();
+                    break;
+                  case _HistoryMenuAction.delete:
+                    onDelete();
+                    break;
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.editDuration,
+                  child: Text('調整時長'),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.delete,
+                  child: Text('刪除影片'),
+                ),
+              ],
+            ),
           ],
         ),
       ),

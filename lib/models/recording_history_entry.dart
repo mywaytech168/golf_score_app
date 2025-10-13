@@ -30,6 +30,25 @@ class RecordingHistoryEntry {
     this.imuCsvPaths = const {},
   });
 
+  /// 建立更新後的新實例，方便調整時長或其他欄位
+  RecordingHistoryEntry copyWith({
+    String? filePath,
+    int? roundIndex,
+    DateTime? recordedAt,
+    int? durationSeconds,
+    bool? imuConnected,
+    Map<String, String>? imuCsvPaths,
+  }) {
+    return RecordingHistoryEntry(
+      filePath: filePath ?? this.filePath,
+      roundIndex: roundIndex ?? this.roundIndex,
+      recordedAt: recordedAt ?? this.recordedAt,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      imuConnected: imuConnected ?? this.imuConnected,
+      imuCsvPaths: imuCsvPaths ?? this.imuCsvPaths,
+    );
+  }
+
   /// 提供統一的顯示標題，例如「第 3 輪錄影」
   String get displayTitle => '第\u0020${roundIndex}\u0020輪錄影';
 
