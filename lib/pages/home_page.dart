@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -28,6 +29,10 @@ class _HomePageState extends State<HomePage> {
   int _currentIndex = 2; // 底部導覽預設聚焦在 Quick Start
   final List<RecordingHistoryEntry> _recordingHistory = []; // 首頁內部維護的錄影紀錄
   bool _isHistoryLoading = true; // 控制歷史載入狀態，避免 UI 閃爍
+  int _practiceCount = 0; // 累積練習次數
+  double? _averageSpeedMph; // 估算出的平均揮桿速度（MPH）
+  double? _sweetSpotPercentage; // 甜蜜點命中率百分比
+  bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
 
   @override
   void initState() {
@@ -191,7 +196,9 @@ class _HomePageState extends State<HomePage> {
         ..clear()
         ..addAll(entries);
       _isHistoryLoading = false;
+      _practiceCount = entries.length;
     });
+    unawaited(_refreshDashboardMetrics());
   }
 
   /// 處理底部導覽點擊，依據不同索引執行對應導覽
@@ -224,9 +231,47 @@ class _HomePageState extends State<HomePage> {
         ..clear()
         ..addAll(entries);
       _isHistoryLoading = false;
+      _practiceCount = entries.length;
+      _isMetricCalculating = true;
     });
     // 將最新清單寫入本機，避免下次開啟 App 時資料遺失
     unawaited(RecordingHistoryStorage.instance.saveHistory(_recordingHistory));
+    unawaited(_refreshDashboardMetrics());
+  }
+
+  /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察
+  Future<void> _refreshDashboardMetrics() async {
+    final snapshot = List<RecordingHistoryEntry>.from(_recordingHistory);
+    if (snapshot.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isMetricCalculating = false;
+        _averageSpeedMph = null;
+        _sweetSpotPercentage = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isMetricCalculating = true;
+    });
+
+    try {
+      final metrics = await _MetricsCalculator.compute(snapshot);
+      if (!mounted) return;
+      setState(() {
+        _isMetricCalculating = false;
+        _averageSpeedMph = metrics.averageSpeedMph;
+        _sweetSpotPercentage = metrics.sweetSpotPercentage;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isMetricCalculating = false;
+        _averageSpeedMph = null;
+        _sweetSpotPercentage = null;
+      });
+    }
   }
 
   /// 開啟獨立的錄影歷史頁面，讓使用者專注瀏覽過往影片
@@ -418,23 +463,47 @@ class _HomePageState extends State<HomePage> {
             LayoutBuilder(
               builder: (context, constraints) {
                 // 始終維持同列呈現，窄螢幕改用橫向滑動避免卡片被擠壓
+                final practiceSubtitle = _practiceCount > 0
+                    ? '累積完成 $_practiceCount 次錄影'
+                    : '完成錄影後即可累積練習次數';
+                final speedValue = _isMetricCalculating
+                    ? '分析中...'
+                    : _averageSpeedMph != null
+                        ? '${_averageSpeedMph!.toStringAsFixed(1)} MPH'
+                        : '尚無資料';
+                final speedSubtitle = _isMetricCalculating
+                    ? '正在解析 IMU 感測紀錄'
+                    : _averageSpeedMph != null
+                        ? '依據含 IMU 的錄影推算揮桿速度'
+                        : '連線 IMU 錄影後即可取得數據';
+                final sweetValue = _isMetricCalculating
+                    ? '分析中...'
+                    : _sweetSpotPercentage != null
+                        ? '${_sweetSpotPercentage!.clamp(0, 100).toStringAsFixed(0)} %'
+                        : '尚無資料';
+                final sweetSubtitle = _isMetricCalculating
+                    ? '比對音訊與震動判斷清脆度'
+                    : _sweetSpotPercentage != null
+                        ? '最近錄影的擊球甜蜜點命中率'
+                        : '有 IMU 與麥克風資料後顯示';
+
                 final cards = <Widget>[
                   _buildStatCard(
-                    title: 'Last 8 Months',
-                    value: '124',
-                    subTitle: 'Total Swings',
+                    title: '練習次數',
+                    value: '$_practiceCount 次',
+                    subTitle: practiceSubtitle,
                     highlightColor: const Color(0xFF1E8E5A),
                   ),
                   _buildStatCard(
-                    title: 'Average Speed',
-                    value: '89.5 MPH',
-                    subTitle: 'Stability 80%',
+                    title: '平均速度',
+                    value: speedValue,
+                    subTitle: speedSubtitle,
                     highlightColor: const Color(0xFF2E8EFF),
                   ),
                   _buildStatCard(
-                    title: 'Sweet Spot',
-                    value: '80 %',
-                    subTitle: '命中率',
+                    title: '甜蜜點命中',
+                    value: sweetValue,
+                    subTitle: sweetSubtitle,
                     highlightColor: const Color(0xFF8E4AF4),
                   ),
                 ];
@@ -701,6 +770,147 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+/// 儀表板指標計算工具：讀取 IMU CSV 並轉換為速度與甜蜜點統計
+class _MetricsCalculator {
+  static const double _impactThreshold = 12.0; // 判定擊球瞬間的加速度門檻
+  static const double _sweetSpotThreshold = 0.18; // 認定為甜蜜點的命中比例
+
+  /// 從歷史紀錄中解析出平均揮桿速度與甜蜜點命中率
+  static Future<_MetricsResult> compute(List<RecordingHistoryEntry> entries) async {
+    double aggregatedSpeed = 0;
+    int speedSamples = 0;
+    int sweetSpotHits = 0;
+    int analyzedSwings = 0;
+
+    for (final entry in entries) {
+      final csvPath = _selectCsvPath(entry);
+      if (csvPath == null) {
+        continue; // 沒有 IMU 檔案無法推算速度
+      }
+
+      final snapshot = await _analyzeCsv(csvPath);
+      if (snapshot == null) {
+        continue;
+      }
+
+      analyzedSwings++;
+      if (snapshot.estimatedSpeedMph != null) {
+        aggregatedSpeed += snapshot.estimatedSpeedMph!;
+        speedSamples++;
+      }
+      if (snapshot.impactClarity >= _sweetSpotThreshold) {
+        sweetSpotHits++;
+      }
+    }
+
+    final averageSpeed = speedSamples > 0 ? aggregatedSpeed / speedSamples : null;
+    final sweetSpotPercentage = analyzedSwings > 0 ? sweetSpotHits / analyzedSwings * 100 : null;
+
+    return _MetricsResult(
+      averageSpeedMph: averageSpeed,
+      sweetSpotPercentage: sweetSpotPercentage,
+    );
+  }
+
+  /// 優先使用手腕裝置，其次胸前裝置，最後取第一個可用 CSV
+  static String? _selectCsvPath(RecordingHistoryEntry entry) {
+    if (entry.imuCsvPaths.isEmpty) {
+      return null;
+    }
+    if (entry.imuCsvPaths['RIGHT_WRIST'] != null && entry.imuCsvPaths['RIGHT_WRIST']!.isNotEmpty) {
+      return entry.imuCsvPaths['RIGHT_WRIST'];
+    }
+    if (entry.imuCsvPaths['CHEST'] != null && entry.imuCsvPaths['CHEST']!.isNotEmpty) {
+      return entry.imuCsvPaths['CHEST'];
+    }
+    final fallback = entry.imuCsvPaths.values.firstWhere(
+      (path) => path.isNotEmpty,
+      orElse: () => '',
+    );
+    return fallback.isNotEmpty ? fallback : null;
+  }
+
+  /// 解析單支 CSV：同時估算平均加速度、峰值與擊球清脆度
+  static Future<_SwingSnapshot?> _analyzeCsv(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      return null;
+    }
+
+    final stream = file.openRead().transform(utf8.decoder).transform(const LineSplitter());
+    double sumMagnitude = 0;
+    double maxMagnitude = 0;
+    int totalSamples = 0;
+    int impactSamples = 0;
+
+    await for (final rawLine in stream) {
+      final line = rawLine.trim();
+      if (line.isEmpty || line.startsWith('CODI_') || line.startsWith('Device:') || line.startsWith('Quat')) {
+        continue; // 跳過表頭與段落資訊
+      }
+
+      final parts = line.split(',');
+      if (parts.length < 7) {
+        continue; // 欄位不足時不納入計算
+      }
+
+      final ax = double.tryParse(parts[4]) ?? 0;
+      final ay = double.tryParse(parts[5]) ?? 0;
+      final az = double.tryParse(parts[6]) ?? 0;
+      final magnitude = math.sqrt(ax * ax + ay * ay + az * az);
+      if (!magnitude.isFinite) {
+        continue;
+      }
+
+      sumMagnitude += magnitude;
+      if (magnitude > maxMagnitude) {
+        maxMagnitude = magnitude;
+      }
+      if (magnitude >= _impactThreshold) {
+        impactSamples++;
+      }
+      totalSamples++;
+    }
+
+    if (totalSamples == 0) {
+      return null;
+    }
+
+    final avgMagnitude = sumMagnitude / totalSamples;
+    // 透過經驗係數估算揮桿速度：峰值代表爆發力、平均值代表穩定性
+    final estimatedSpeedMps = (avgMagnitude * 0.45) + (maxMagnitude * 0.25);
+    final estimatedSpeedMph = estimatedSpeedMps * 2.23694;
+    final impactClarity = impactSamples / totalSamples;
+
+    return _SwingSnapshot(
+      estimatedSpeedMph: estimatedSpeedMph.isFinite ? estimatedSpeedMph : null,
+      impactClarity: impactClarity.clamp(0.0, 1.0),
+    );
+  }
+}
+
+/// 儀表板計算回傳的彙整結果
+class _MetricsResult {
+  final double? averageSpeedMph;
+  final double? sweetSpotPercentage;
+
+  const _MetricsResult({
+    required this.averageSpeedMph,
+    required this.sweetSpotPercentage,
+  });
+}
+
+/// 解析單支 CSV 後的即時統計
+class _SwingSnapshot {
+  final double? estimatedSpeedMph; // 估算出的揮桿速度
+  final double impactClarity; // 高加速度樣本占比，代表擊球清脆度
+
+  const _SwingSnapshot({
+    required this.estimatedSpeedMph,
+    required this.impactClarity,
+  });
 }
 
 /// 雷達圖繪製器，呈現五個指標的相對表現
