@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:assets_audio_player/assets_audio_player.dart';
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_audio_capture/flutter_audio_capture.dart';
@@ -107,11 +108,23 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       return;
     }
 
-    controller = CameraController(
-      widget.cameras.first,
-      ResolutionPreset.medium,
-    );
-    await controller!.initialize();
+    // 依序測試從最高到較低的解析度，找到裝置可支援的最佳錄影規格
+    final _CameraSelectionResult? selection =
+        await _createBestCameraController(widget.cameras.first);
+
+    if (selection == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('無法初始化鏡頭，請稍後再試。')),
+      );
+      return;
+    }
+
+    controller = selection.controller;
+    if (kDebugMode) {
+      // 藉由除錯訊息確認實際採用的解析度與幀率
+      debugPrint('Camera initialized with preset ${selection.preset}, size=${selection.previewSize}, fps=${selection.previewFps}');
+    }
     if (!mounted) return;
     setState(() {}); // 更新畫面顯示預覽
 
@@ -120,6 +133,57 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       _pendingAutoStart = false;
       unawaited(_handleImuButtonTrigger());
     }
+  }
+
+  /// 針對指定鏡頭，嘗試使用最高可支援的解析度與幀率進行初始化
+  Future<_CameraSelectionResult?> _createBestCameraController(
+      CameraDescription description) async {
+    // 解析度優先順序：依照套件提供的列舉，由高至低逐一嘗試
+    const List<ResolutionPreset> presetPriority = <ResolutionPreset>[
+      ResolutionPreset.max,
+      ResolutionPreset.ultraHigh,
+      ResolutionPreset.veryHigh,
+      ResolutionPreset.high,
+      ResolutionPreset.medium,
+      ResolutionPreset.low,
+    ];
+
+    for (final ResolutionPreset preset in presetPriority) {
+      final CameraController testController = CameraController(
+        description,
+        preset,
+        enableAudio: true,
+      );
+
+      try {
+        await testController.initialize();
+
+        // 嘗試讀取預覽資訊，若特定平台未提供則以 null 代表未知
+        double? previewFps;
+        Size? previewSize;
+        try {
+          previewFps = testController.value.previewFrameRate;
+        } catch (_) {
+          previewFps = null;
+        }
+        try {
+          previewSize = testController.value.previewSize;
+        } catch (_) {
+          previewSize = null;
+        }
+
+        return _CameraSelectionResult(
+          controller: testController,
+          preset: preset,
+          previewFps: previewFps,
+          previewSize: previewSize,
+        );
+      } catch (_) {
+        await testController.dispose();
+      }
+    }
+
+    return null;
   }
 
   /// 建立音量鍵監聽器，讓使用者快速啟動錄影
@@ -567,6 +631,21 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       ),
     );
   }
+}
+
+/// 封裝鏡頭初始化後的結果，方便保存解析度與幀率資訊
+class _CameraSelectionResult {
+  const _CameraSelectionResult({
+    required this.controller,
+    required this.preset,
+    required this.previewFps,
+    required this.previewSize,
+  });
+
+  final CameraController controller; // 已初始化可直接使用的鏡頭控制器
+  final ResolutionPreset preset; // 成功套用的解析度列舉值
+  final double? previewFps; // 實際預覽幀率，無法取得時為 null
+  final Size? previewSize; // 實際解析度尺寸，無法取得時為 null
 }
 
 /// 用於顯示波形的 Widget，接收累積資料並觸發重繪
