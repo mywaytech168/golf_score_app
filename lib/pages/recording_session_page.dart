@@ -49,6 +49,7 @@ class RecordingSessionPage extends StatefulWidget {
 class _RecordingSessionPageState extends State<RecordingSessionPage> {
   // ---------- 狀態變數區 ----------
   CameraController? controller; // 控制鏡頭操作
+  double? _previewAspectRatio; // 記錄初始化時的預覽比例，避免錄影時變動
   bool isRecording = false; // 標記是否正在錄影
   List<double> waveform = []; // 即時波形資料
   List<double> waveformAccumulated = []; // 累積波形資料供繪圖使用
@@ -121,6 +122,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     controller = selection.controller;
+    _previewAspectRatio = selection.previewSize != null
+        ? selection.previewSize!.width / selection.previewSize!.height
+        : controller!.value.aspectRatio;
     if (kDebugMode) {
       // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）
       debugPrint(
@@ -179,6 +183,25 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     return null;
+  }
+
+  /// 建立固定比例的預覽畫面，避免錄影時鏡頭切換解析度導致畫面跳動
+  Widget _buildStablePreview() {
+    if (controller == null || !controller!.value.isInitialized) {
+      return const SizedBox.shrink();
+    }
+
+    final double aspectRatio =
+        _previewAspectRatio ?? controller!.value.aspectRatio;
+
+    return Center(
+      child: AspectRatio(
+        aspectRatio: aspectRatio,
+        child: ClipRect(
+          child: controller!.buildPreview(),
+        ),
+      ),
+    );
   }
 
   /// 建立音量鍵監聽器，讓使用者快速啟動錄影
@@ -567,7 +590,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                       Expanded(
                         child: Stack(
                           children: [
-                            CameraPreview(controller!),
+                            _buildStablePreview(),
                             const Positioned.fill(
                               child: StanceGuideOverlay(),
                             ),
