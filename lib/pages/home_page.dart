@@ -420,7 +420,8 @@ class _HomePageState extends State<HomePage> {
               content: TextField(
                 controller: controller,
                 keyboardType: TextInputType.number,
-                inputFormatters: const [FilteringTextInputFormatter.digitsOnly],
+                // 使用數字限制輸入，避免出現非整數內容
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: InputDecoration(
                   labelText: '秒數',
                   helperText: '輸入影片實際秒數（正整數）',
