@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -152,7 +154,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     debugPrint('[歷史頁] 更新索引 $index 的時長為 $newDuration 秒，準備儲存');
     if (mounted) {
       debugPrint('[歷史頁] 調整秒數後重繪列表');
-      setState(() {}); // 重新觸發列表繪製
+      _requestRebuild(); // 透過排程避免在 Dialog 收合時直接 setState
     }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -244,7 +246,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     debugPrint('[歷史頁] 更新索引 $index 的名稱為 "$storedName"，準備儲存');
     if (mounted) {
       debugPrint('[歷史頁] 重新命名後刷新列表');
-      setState(() {}); // 重新整理列表顯示
+      _requestRebuild(); // 延後一幀更新，避免觸發建構期間的 setState 例外
     }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -256,6 +258,29 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(snackMessage)),
     );
+  }
+
+  /// 封裝安全的重繪流程，避免在對話框或排程回呼中直接呼叫 setState
+  void _requestRebuild() {
+    if (!mounted) {
+      return; // 若頁面已卸載則不做任何事
+    }
+
+    void execute() {
+      if (!mounted) {
+        return; // 再次確認頁面仍存在
+      }
+      setState(() {});
+    }
+
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
+      // 使用微任務排程可避開當前的建構流程
+      scheduleMicrotask(execute);
+    } else {
+      // 若仍位於 build / layout / paint 階段，改於下一幀更新
+      WidgetsBinding.instance.addPostFrameCallback((_) => execute());
+    }
   }
 
   /// 刪除影片檔與對應 CSV
