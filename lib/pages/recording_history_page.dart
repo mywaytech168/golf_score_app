@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
@@ -29,21 +30,27 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   /// 透過排程安全地觸發 setState，避免在錯誤的生命週期呼叫導致框架警告
   void _setStateSafely(VoidCallback callback) {
     if (!mounted) {
+      debugPrint('[歷史頁] _setStateSafely 略過：頁面已卸載');
       return; // 若頁面已卸載則不需要更新
     }
 
     void apply() {
       if (!mounted) {
+        debugPrint('[歷史頁] _setStateSafely apply 取消：頁面已卸載');
         return;
       }
+      debugPrint('[歷史頁] _setStateSafely apply 執行 setState');
       setState(callback);
     }
 
     final phase = SchedulerBinding.instance.schedulerPhase;
+    debugPrint('[歷史頁] _setStateSafely 當前 SchedulerPhase=$phase');
     if (phase == SchedulerPhase.persistentCallbacks ||
         phase == SchedulerPhase.postFrameCallbacks) {
+      debugPrint('[歷史頁] _setStateSafely 延後一幀執行');
       WidgetsBinding.instance.addPostFrameCallback((_) => apply());
     } else {
+      debugPrint('[歷史頁] _setStateSafely 立即執行');
       apply();
     }
   }
@@ -99,6 +106,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 顯示輸入框調整秒數並更新記錄
   Future<void> _editEntryDuration(RecordingHistoryEntry entry) async {
+    debugPrint('[歷史頁] 準備調整影片時長：${entry.fileName} 當前秒數=${entry.durationSeconds}');
     final controller = TextEditingController(text: entry.durationSeconds.toString());
     final formKey = GlobalKey<FormState>();
     final newDuration = await showDialog<int>(
@@ -150,20 +158,24 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     controller.dispose();
 
     if (!mounted || newDuration == null) {
+      debugPrint('[歷史頁] 調整時長流程取消或頁面已卸載');
       return;
     }
 
     final index = _entries.indexWhere((item) =>
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
     if (index == -1) {
+      debugPrint('[歷史頁] 找不到對應紀錄，無法更新時長');
       return;
     }
 
     if (_entries[index].durationSeconds == newDuration) {
+      debugPrint('[歷史頁] 秒數未變更（$newDuration 秒），略過更新');
       return; // 秒數未變更時略過更新
     }
 
     _entries[index] = _entries[index].copyWith(durationSeconds: newDuration);
+    debugPrint('[歷史頁] 更新索引 $index 的時長為 $newDuration 秒，準備儲存');
     _setStateSafely(() {}); // 重新觸發列表繪製
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -179,6 +191,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     final initialText = entry.customName != null && entry.customName!.trim().isNotEmpty
         ? entry.customName!.trim()
         : entry.displayTitle;
+    debugPrint('[歷史頁] 準備重新命名影片：${entry.fileName} 初始名稱=$initialText');
     final controller = TextEditingController(text: initialText);
     final formKey = GlobalKey<FormState>();
     final newName = await showDialog<String>(
@@ -227,26 +240,31 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     controller.dispose();
 
     if (!mounted || newName == null) {
+      debugPrint('[歷史頁] 重新命名流程取消或頁面已卸載');
       return;
     }
 
     final normalizedName = newName.trim();
     final storedName = normalizedName.isEmpty ? '' : normalizedName;
+    debugPrint('[歷史頁] 重新命名輸入：stored="$storedName"');
 
     final index = _entries.indexWhere((item) =>
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
     if (index == -1) {
+      debugPrint('[歷史頁] 找不到對應紀錄，無法重新命名');
       return;
     }
 
     final originalName = (_entries[index].customName ?? '').trim();
     if (storedName == originalName) {
+      debugPrint('[歷史頁] 名稱未變更，略過更新');
       return; // 名稱未變更時不更新檔案
     }
 
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
 
     _entries[index] = _entries[index].copyWith(customName: storedName);
+    debugPrint('[歷史頁] 更新索引 $index 的名稱為 "$storedName"，準備儲存');
     _setStateSafely(() {}); // 重新整理列表顯示
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);

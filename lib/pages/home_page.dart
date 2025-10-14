@@ -421,6 +421,7 @@ class _HomePageState extends State<HomePage> {
         : entry.displayTitle;
     final controller = TextEditingController(text: initialText);
     final formKey = GlobalKey<FormState>();
+    debugPrint('[首頁歷史] 準備重新命名影片：${entry.fileName}'); // 紀錄流程起點
     final newName = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
@@ -467,13 +468,16 @@ class _HomePageState extends State<HomePage> {
     controller.dispose();
 
     if (!mounted || newName == null) {
+      debugPrint('[首頁歷史] 重新命名流程取消或頁面已卸載');
       return;
     }
 
     final normalizedName = newName.trim();
     final storedName = normalizedName.isEmpty ? '' : normalizedName;
     final originalName = (entry.customName ?? '').trim();
+    debugPrint('[首頁歷史] 重新命名輸入：stored="$storedName" original="$originalName"');
     if (storedName == originalName) {
+      debugPrint('[首頁歷史] 名稱未變更，終止重新命名流程');
       return; // 未變更名稱時不進行後續流程
     }
 
@@ -481,12 +485,14 @@ class _HomePageState extends State<HomePage> {
     final targetIndex = updatedEntries.indexWhere((item) =>
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
     if (targetIndex == -1) {
+      debugPrint('[首頁歷史] 找不到對應紀錄，無法重新命名');
       return;
     }
 
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
     updatedEntries[targetIndex] =
         updatedEntries[targetIndex].copyWith(customName: storedName);
+    debugPrint('[首頁歷史] 套用重新命名至索引 $targetIndex，準備寫回狀態');
     _scheduleHistoryUpdate(updatedEntries);
 
     if (!mounted) return;
@@ -500,6 +506,7 @@ class _HomePageState extends State<HomePage> {
 
   /// 顯示秒數輸入框，更新影片時長資訊
   Future<void> _editHistoryDuration(RecordingHistoryEntry entry) async {
+    debugPrint('[首頁歷史] 準備調整影片時長：${entry.fileName} 當前秒數=${entry.durationSeconds}');
     final controller = TextEditingController(text: entry.durationSeconds.toString());
     final formKey = GlobalKey<FormState>();
     final newDuration = await showDialog<int>(
@@ -551,10 +558,12 @@ class _HomePageState extends State<HomePage> {
     controller.dispose();
 
     if (!mounted || newDuration == null) {
+      debugPrint('[首頁歷史] 調整時長流程取消或頁面已卸載');
       return; // 使用者取消或未輸入
     }
 
     if (newDuration == entry.durationSeconds) {
+      debugPrint('[首頁歷史] 秒數未變更（$newDuration 秒），略過更新');
       return; // 秒數未變更時不進行後續處理
     }
 
@@ -562,11 +571,13 @@ class _HomePageState extends State<HomePage> {
     final targetIndex = updatedEntries.indexWhere((item) =>
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
     if (targetIndex == -1) {
+      debugPrint('[首頁歷史] 找不到對應紀錄，無法更新時長');
       return; // 未找到對應項目
     }
 
     updatedEntries[targetIndex] =
         updatedEntries[targetIndex].copyWith(durationSeconds: newDuration);
+    debugPrint('[首頁歷史] 更新索引 $targetIndex 的時長為 $newDuration 秒，準備寫回狀態');
     _scheduleHistoryUpdate(updatedEntries);
 
     if (!mounted) return;
@@ -633,6 +644,7 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) {
         return;
       }
+      debugPrint('[首頁歷史] applyUpdate 觸發，資料筆數=${entries.length}');
       setState(() {
         _recordingHistory
           ..clear()
@@ -645,26 +657,33 @@ class _HomePageState extends State<HomePage> {
       unawaited(
         RecordingHistoryStorage.instance.saveHistory(_recordingHistory),
       );
+      debugPrint('[首頁歷史] 已寫回狀態並觸發儲存與統計重算');
       unawaited(_refreshDashboardMetrics());
     }
 
     final phase = SchedulerBinding.instance.schedulerPhase;
+    debugPrint('[首頁歷史] _handleHistoryUpdated 當前 SchedulerPhase=$phase');
     if (phase == SchedulerPhase.persistentCallbacks ||
         phase == SchedulerPhase.postFrameCallbacks) {
       // 若正處於 frame callback 期間，延後到下一幀再套用狀態，避免彈窗關閉瞬間觸發框架警告
+      debugPrint('[首頁歷史] 當前處於 frame callback，延後一幀執行 applyUpdate');
       WidgetsBinding.instance.addPostFrameCallback((_) => applyUpdate());
     } else {
+      debugPrint('[首頁歷史] 直接執行 applyUpdate');
       applyUpdate();
     }
   }
 
   /// 由對話框等場景回傳資料時，延後一幀再套用，避免關閉彈窗瞬間觸發狀態異常
   void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
+    debugPrint('[首頁歷史] _scheduleHistoryUpdate 取得 ${entries.length} 筆紀錄待寫入');
     if (!mounted) {
+      debugPrint('[首頁歷史] 頁面已卸載，取消排程更新');
       return; // 若頁面已被銷毀則不再進行任何狀態更新
     }
 
     final snapshot = List<RecordingHistoryEntry>.from(entries);
+    debugPrint('[首頁歷史] 排程更新快照長度：${snapshot.length}');
     _handleHistoryUpdated(snapshot);
   }
 
