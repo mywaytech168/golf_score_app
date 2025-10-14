@@ -128,9 +128,18 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     controller = selection.controller;
-    _previewAspectRatio = selection.previewSize != null
-        ? selection.previewSize!.width / selection.previewSize!.height
-        : controller!.value.aspectRatio;
+    // 針對大多數手機相機，感光元件以橫向為主，因此在直向預覽時需要將寬高互換。
+    // 透過感測器角度判斷是否應交換寬高，再計算適用於直式畫面的長寬比。
+    final bool shouldSwapSide =
+        controller!.description.sensorOrientation % 180 != 0;
+    if (selection.previewSize != null) {
+      _previewAspectRatio = shouldSwapSide
+          ? selection.previewSize!.height / selection.previewSize!.width
+          : selection.previewSize!.width / selection.previewSize!.height;
+    } else {
+      final double rawAspect = controller!.value.aspectRatio;
+      _previewAspectRatio = shouldSwapSide ? (1 / rawAspect) : rawAspect;
+    }
     // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉
     try {
       await controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
@@ -212,7 +221,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       child: AspectRatio(
         aspectRatio: aspectRatio,
         child: ClipRect(
-          child: controller!.buildPreview(),
+          child: CameraPreview(
+            controller!,
+            child: const SizedBox.shrink(), // 仍可於未來覆寫疊層
+          ),
         ),
       ),
     );
