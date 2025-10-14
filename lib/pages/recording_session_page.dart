@@ -49,6 +49,7 @@ class RecordingSessionPage extends StatefulWidget {
 class _RecordingSessionPageState extends State<RecordingSessionPage> {
   // ---------- 狀態變數區 ----------
   CameraController? controller; // 控制鏡頭操作
+  CameraDescription? _activeCamera; // 紀錄當前使用的鏡頭，確保預覽與錄影一致
   double? _previewAspectRatio; // 記錄初始化時的預覽比例，避免錄影時變動
   bool isRecording = false; // 標記是否正在錄影
   List<double> waveform = []; // 即時波形資料
@@ -116,8 +117,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     // 依序測試從最高到較低的解析度，找到裝置可支援的最佳錄影規格
+    // 先挑選最適合錄影的鏡頭，預設選擇後鏡頭，若無則退回清單第一顆
+    _activeCamera = _selectPreferredCamera(widget.cameras);
+
     final _CameraSelectionResult? selection =
-        await _createBestCameraController(widget.cameras.first);
+        await _createBestCameraController(_activeCamera!);
 
     if (selection == null) {
       if (!mounted) return;
@@ -151,7 +155,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (kDebugMode) {
       // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）
       debugPrint(
-        'Camera initialized with preset ${selection.preset}, size=${selection.previewSize ?? '未知'}',
+        'Camera initialized with preset ${selection.preset}, size=${selection.previewSize ?? '未知'}, description=${controller!.description.name}',
       );
     }
     if (!mounted) return;
@@ -187,6 +191,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       try {
         await testController.initialize();
 
+        // 在初始化後立即準備錄影管線，避免真正開始錄影時觸發重新配置導致鏡頭切換
+        try {
+          await testController.prepareForVideoRecording();
+        } catch (error, stackTrace) {
+          // 部分平台可能尚未實作此 API，失敗時僅輸出除錯資訊不阻斷流程
+          if (kDebugMode) {
+            debugPrint('prepareForVideoRecording 失敗：$error\n$stackTrace');
+          }
+        }
+
         // 嘗試讀取預覽資訊，若特定平台未提供則以 null 代表未知
         Size? previewSize;
         try {
@@ -206,6 +220,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     return null;
+  }
+
+  /// 根據鏡頭清單挑選最適合錄影的鏡頭：優先後鏡頭，其次回退第一顆
+  CameraDescription _selectPreferredCamera(List<CameraDescription> cameras) {
+    // ---------- 邏輯說明 ----------
+    // 1. 大多數揮桿錄影希望使用後鏡頭，因此優先尋找後鏡頭。
+    // 2. 若裝置沒有後鏡頭（例如部分平板），則退回清單中的第一顆以確保功能可用。
+    return cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.back,
+      orElse: () => cameras.first,
+    );
   }
 
   /// 建立固定比例的預覽畫面，避免錄影時鏡頭切換解析度導致畫面跳動
