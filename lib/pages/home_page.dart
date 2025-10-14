@@ -42,6 +42,8 @@ class _HomePageState extends State<HomePage> {
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
+  List<RecordingHistoryEntry>? _pendingHistorySnapshot; // 暫存等待套用的歷史紀錄
+  bool _historyUpdateScheduled = false; // 控制是否已註冊影格回呼
 
   @override
   void initState() {
@@ -661,7 +663,7 @@ class _HomePageState extends State<HomePage> {
     _scheduleHistoryUpdate(entries);
   }
 
-  /// 排程於微任務更新錄影紀錄，避免在彈窗收合或建構期間直接呼叫 setState
+  /// 排程於下一幀更新錄影紀錄，避免在彈窗收合或建構期間直接呼叫 setState
   void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
     debugPrint('[首頁歷史] _scheduleHistoryUpdate 收到 ${entries.length} 筆紀錄');
     if (!mounted) {
@@ -669,8 +671,31 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final snapshot = List<RecordingHistoryEntry>.from(entries);
-    Future.microtask(() {
+    _pendingHistorySnapshot = List<RecordingHistoryEntry>.from(entries);
+    if (_historyUpdateScheduled) {
+      debugPrint('[首頁歷史] _scheduleHistoryUpdate 已排程，僅更新暫存資料');
+      return;
+    }
+
+    _historyUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        debugPrint('[首頁歷史] 影格回呼觸發時頁面已卸載，清除暫存');
+        _historyUpdateScheduled = false;
+        _pendingHistorySnapshot = null;
+        return;
+      }
+
+      final snapshot = _pendingHistorySnapshot;
+      _historyUpdateScheduled = false;
+      _pendingHistorySnapshot = null;
+
+      if (snapshot == null) {
+        debugPrint('[首頁歷史] 影格回呼觸發但沒有暫存資料，結束流程');
+        return;
+      }
+
+      debugPrint('[首頁歷史] 影格回呼套用 ${snapshot.length} 筆歷史資料');
       _applyHistoryState(snapshot);
     });
   }
