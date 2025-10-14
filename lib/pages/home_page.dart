@@ -7,6 +7,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
@@ -623,32 +624,48 @@ class _HomePageState extends State<HomePage> {
 
   /// 接收錄影頁回傳的歷史紀錄，統一更新首頁資料來源
   void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
-    setState(() {
-      _recordingHistory
-        ..clear()
-        ..addAll(entries);
-      _isHistoryLoading = false;
-      _practiceCount = entries.length;
-      _isMetricCalculating = true;
-    });
-    // 將最新清單寫入本機，避免下次開啟 App 時資料遺失
-    unawaited(RecordingHistoryStorage.instance.saveHistory(_recordingHistory));
-    unawaited(_refreshDashboardMetrics());
+    if (!mounted) {
+      return; // 畫面卸載時直接忽略，避免觸發 setState 例外
+    }
+
+    // ---------- 內部工具：依當前排程階段決定何時套用狀態 ----------
+    void applyUpdate() {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _recordingHistory
+          ..clear()
+          ..addAll(entries);
+        _isHistoryLoading = false;
+        _practiceCount = entries.length;
+        _isMetricCalculating = true;
+      });
+      // 寫入本機檔案並重新計算儀表板，確保首頁數據最新
+      unawaited(
+        RecordingHistoryStorage.instance.saveHistory(_recordingHistory),
+      );
+      unawaited(_refreshDashboardMetrics());
+    }
+
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.postFrameCallbacks) {
+      // 若正處於 frame callback 期間，延後到下一幀再套用狀態，避免彈窗關閉瞬間觸發框架警告
+      WidgetsBinding.instance.addPostFrameCallback((_) => applyUpdate());
+    } else {
+      applyUpdate();
+    }
   }
 
   /// 由對話框等場景回傳資料時，延後一幀再套用，避免關閉彈窗瞬間觸發狀態異常
   void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
     if (!mounted) {
-      return; // 畫面已卸載時直接忽略
+      return; // 若頁面已被銷毀則不再進行任何狀態更新
     }
 
-    final snapshot = List<RecordingHistoryEntry>.unmodifiable(entries);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return; // 再次確認畫面仍存在
-      }
-      _handleHistoryUpdated(List<RecordingHistoryEntry>.from(snapshot));
-    });
+    final snapshot = List<RecordingHistoryEntry>.from(entries);
+    _handleHistoryUpdated(snapshot);
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察

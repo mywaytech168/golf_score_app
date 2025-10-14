@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
@@ -24,6 +25,28 @@ class RecordingHistoryPage extends StatefulWidget {
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
+
+  /// 透過排程安全地觸發 setState，避免在錯誤的生命週期呼叫導致框架警告
+  void _setStateSafely(VoidCallback callback) {
+    if (!mounted) {
+      return; // 若頁面已卸載則不需要更新
+    }
+
+    void apply() {
+      if (!mounted) {
+        return;
+      }
+      setState(callback);
+    }
+
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.postFrameCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => apply());
+    } else {
+      apply();
+    }
+  }
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -56,10 +79,14 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return;
     }
 
-    setState(() {
-      _entries.removeWhere((item) =>
-          item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
-    });
+    final index = _entries.indexWhere((item) =>
+        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
+    if (index == -1) {
+      return; // 找不到對應項目時直接結束
+    }
+
+    _entries.removeAt(index); // 先調整資料來源
+    _setStateSafely(() {}); // 通知畫面重新渲染
 
     await _removeEntryFiles(entry);
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -136,9 +163,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 秒數未變更時略過更新
     }
 
-    setState(() {
-      _entries[index] = _entries[index].copyWith(durationSeconds: newDuration);
-    });
+    _entries[index] = _entries[index].copyWith(durationSeconds: newDuration);
+    _setStateSafely(() {}); // 重新觸發列表繪製
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
 
@@ -220,9 +246,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
 
-    setState(() {
-      _entries[index] = _entries[index].copyWith(customName: storedName);
-    });
+    _entries[index] = _entries[index].copyWith(customName: storedName);
+    _setStateSafely(() {}); // 重新整理列表顯示
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
 
