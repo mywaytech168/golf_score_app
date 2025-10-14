@@ -404,7 +404,7 @@ class _HomePageState extends State<HomePage> {
       return; // 未找到對應項目
     }
 
-    _handleHistoryUpdated(updatedEntries);
+    _scheduleHistoryUpdate(updatedEntries);
     unawaited(_deleteEntryFiles(entry));
 
     if (!mounted) return;
@@ -486,7 +486,7 @@ class _HomePageState extends State<HomePage> {
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
     updatedEntries[targetIndex] =
         updatedEntries[targetIndex].copyWith(customName: storedName);
-    _handleHistoryUpdated(updatedEntries);
+    _scheduleHistoryUpdate(updatedEntries);
 
     if (!mounted) return;
     final snackMessage = storedName.isEmpty
@@ -566,7 +566,7 @@ class _HomePageState extends State<HomePage> {
 
     updatedEntries[targetIndex] =
         updatedEntries[targetIndex].copyWith(durationSeconds: newDuration);
-    _handleHistoryUpdated(updatedEntries);
+    _scheduleHistoryUpdate(updatedEntries);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -634,6 +634,21 @@ class _HomePageState extends State<HomePage> {
     // 將最新清單寫入本機，避免下次開啟 App 時資料遺失
     unawaited(RecordingHistoryStorage.instance.saveHistory(_recordingHistory));
     unawaited(_refreshDashboardMetrics());
+  }
+
+  /// 由對話框等場景回傳資料時，延後一幀再套用，避免關閉彈窗瞬間觸發狀態異常
+  void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
+    if (!mounted) {
+      return; // 畫面已卸載時直接忽略
+    }
+
+    final snapshot = List<RecordingHistoryEntry>.unmodifiable(entries);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return; // 再次確認畫面仍存在
+      }
+      _handleHistoryUpdated(List<RecordingHistoryEntry>.from(snapshot));
+    });
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察
