@@ -7,7 +7,6 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
@@ -633,58 +632,47 @@ class _HomePageState extends State<HomePage> {
     setState(() => _currentIndex = index);
   }
 
-  /// 接收錄影頁回傳的歷史紀錄，統一更新首頁資料來源
-  void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
+  /// 將更新後的錄影紀錄套用到首頁狀態並觸發儲存與統計重算
+  void _applyHistoryState(List<RecordingHistoryEntry> entries) {
     if (!mounted) {
-      return; // 畫面卸載時直接忽略，避免觸發 setState 例外
+      debugPrint('[首頁歷史] _applyHistoryState 略過：頁面已卸載');
+      return;
     }
 
-    // ---------- 內部工具：依當前排程階段決定何時套用狀態 ----------
-    void applyUpdate() {
-      if (!mounted) {
-        return;
-      }
-      debugPrint('[首頁歷史] applyUpdate 觸發，資料筆數=${entries.length}');
-      setState(() {
-        _recordingHistory
-          ..clear()
-          ..addAll(entries);
-        _isHistoryLoading = false;
-        _practiceCount = entries.length;
-        _isMetricCalculating = true;
-      });
-      // 寫入本機檔案並重新計算儀表板，確保首頁數據最新
-      unawaited(
-        RecordingHistoryStorage.instance.saveHistory(_recordingHistory),
-      );
-      debugPrint('[首頁歷史] 已寫回狀態並觸發儲存與統計重算');
-      unawaited(_refreshDashboardMetrics());
-    }
+    debugPrint('[首頁歷史] _applyHistoryState 套用 ${entries.length} 筆資料');
+    setState(() {
+      _recordingHistory
+        ..clear()
+        ..addAll(entries);
+      _isHistoryLoading = false;
+      _practiceCount = entries.length;
+      _isMetricCalculating = true;
+    });
 
-    final phase = SchedulerBinding.instance.schedulerPhase;
-    debugPrint('[首頁歷史] _handleHistoryUpdated 當前 SchedulerPhase=$phase');
-    if (phase == SchedulerPhase.persistentCallbacks ||
-        phase == SchedulerPhase.postFrameCallbacks) {
-      // 若正處於 frame callback 期間，延後到下一幀再套用狀態，避免彈窗關閉瞬間觸發框架警告
-      debugPrint('[首頁歷史] 當前處於 frame callback，延後一幀執行 applyUpdate');
-      WidgetsBinding.instance.addPostFrameCallback((_) => applyUpdate());
-    } else {
-      debugPrint('[首頁歷史] 直接執行 applyUpdate');
-      applyUpdate();
-    }
+    // 寫入最新狀態並重新計算儀表板數據
+    unawaited(RecordingHistoryStorage.instance.saveHistory(
+      List<RecordingHistoryEntry>.from(_recordingHistory),
+    ));
+    unawaited(_refreshDashboardMetrics());
   }
 
-  /// 由對話框等場景回傳資料時，延後一幀再套用，避免關閉彈窗瞬間觸發狀態異常
+  /// 接收錄影頁回傳的歷史紀錄，統一排程更新首頁資料來源
+  void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
+    _scheduleHistoryUpdate(entries);
+  }
+
+  /// 排程於微任務更新錄影紀錄，避免在彈窗收合或建構期間直接呼叫 setState
   void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
-    debugPrint('[首頁歷史] _scheduleHistoryUpdate 取得 ${entries.length} 筆紀錄待寫入');
+    debugPrint('[首頁歷史] _scheduleHistoryUpdate 收到 ${entries.length} 筆紀錄');
     if (!mounted) {
-      debugPrint('[首頁歷史] 頁面已卸載，取消排程更新');
-      return; // 若頁面已被銷毀則不再進行任何狀態更新
+      debugPrint('[首頁歷史] _scheduleHistoryUpdate 略過：頁面已卸載');
+      return;
     }
 
     final snapshot = List<RecordingHistoryEntry>.from(entries);
-    debugPrint('[首頁歷史] 排程更新快照長度：${snapshot.length}');
-    _handleHistoryUpdated(snapshot);
+    Future.microtask(() {
+      _applyHistoryState(snapshot);
+    });
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察

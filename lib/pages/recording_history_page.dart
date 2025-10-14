@@ -4,7 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
@@ -26,34 +25,6 @@ class RecordingHistoryPage extends StatefulWidget {
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
-
-  /// 透過排程安全地觸發 setState，避免在錯誤的生命週期呼叫導致框架警告
-  void _setStateSafely(VoidCallback callback) {
-    if (!mounted) {
-      debugPrint('[歷史頁] _setStateSafely 略過：頁面已卸載');
-      return; // 若頁面已卸載則不需要更新
-    }
-
-    void apply() {
-      if (!mounted) {
-        debugPrint('[歷史頁] _setStateSafely apply 取消：頁面已卸載');
-        return;
-      }
-      debugPrint('[歷史頁] _setStateSafely apply 執行 setState');
-      setState(callback);
-    }
-
-    final phase = SchedulerBinding.instance.schedulerPhase;
-    debugPrint('[歷史頁] _setStateSafely 當前 SchedulerPhase=$phase');
-    if (phase == SchedulerPhase.persistentCallbacks ||
-        phase == SchedulerPhase.postFrameCallbacks) {
-      debugPrint('[歷史頁] _setStateSafely 延後一幀執行');
-      WidgetsBinding.instance.addPostFrameCallback((_) => apply());
-    } else {
-      debugPrint('[歷史頁] _setStateSafely 立即執行');
-      apply();
-    }
-  }
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -93,7 +64,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     }
 
     _entries.removeAt(index); // 先調整資料來源
-    _setStateSafely(() {}); // 通知畫面重新渲染
+    if (mounted) {
+      debugPrint('[歷史頁] 刪除後立即刷新列表，剩餘 ${_entries.length} 筆');
+      setState(() {}); // 通知畫面重新渲染
+    }
 
     await _removeEntryFiles(entry);
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -176,7 +150,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     _entries[index] = _entries[index].copyWith(durationSeconds: newDuration);
     debugPrint('[歷史頁] 更新索引 $index 的時長為 $newDuration 秒，準備儲存');
-    _setStateSafely(() {}); // 重新觸發列表繪製
+    if (mounted) {
+      debugPrint('[歷史頁] 調整秒數後重繪列表');
+      setState(() {}); // 重新觸發列表繪製
+    }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
 
@@ -265,7 +242,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     _entries[index] = _entries[index].copyWith(customName: storedName);
     debugPrint('[歷史頁] 更新索引 $index 的名稱為 "$storedName"，準備儲存');
-    _setStateSafely(() {}); // 重新整理列表顯示
+    if (mounted) {
+      debugPrint('[歷史頁] 重新命名後刷新列表');
+      setState(() {}); // 重新整理列表顯示
+    }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
 
