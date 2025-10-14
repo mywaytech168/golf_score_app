@@ -70,6 +70,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   bool _hasTriggeredRecording = false; // 記錄使用者是否啟動過錄影，控制按鈕提示
   StreamSubscription<void>? _imuButtonSubscription; // 監聽 IMU 按鈕觸發錄影
   bool _pendingAutoStart = false; // 記錄 IMU 事件是否需等待鏡頭初始化後再啟動
+  final _SessionProgress _sessionProgress = _SessionProgress(); // 集中管理倒數秒數與剩餘輪次
 
   // ---------- 生命週期 ----------
   @override
@@ -80,6 +81,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
       DeviceOrientation.portraitUp,
     ]);
+    _sessionProgress.resetForNewSession(widget.totalRounds); // 初始化狀態列顯示預設剩餘次數
     _prepareSession(); // 非同步初始化鏡頭，等待使用者手動啟動
     _pendingAutoStart = widget.autoStartOnReady; // 若由 IMU 開啟則在鏡頭就緒後自動啟動
     // 監聽 IMU 按鈕事件，隨時可從硬體直接觸發錄影
@@ -96,6 +98,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
     _imuButtonSubscription?.cancel(); // 解除 IMU 按鈕監聽，避免資源洩漏
+    _sessionProgress.dispose(); // 停止狀態列的計時器，避免離開頁面後仍持續觸發 setState
     // 還原應用允許的方向，避免離開錄影頁後仍被鎖定
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
@@ -299,6 +302,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
       _cancelCompleter!.complete();
     }
+    _sessionProgress.resetToIdle(setStateCallback: mounted ? setState : null); // 取消時立即重置倒數資訊
   }
 
   /// 主動停止鏡頭錄影與音訊擷取，確保返回上一頁後不再持續錄製
@@ -391,23 +395,39 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   /// 播放倒數音效並等待音檔結束或取消
   Future<void> _playCountdown() async {
+    const int countdownSeconds = 3; // 倒數音效長度（秒）
+    const int bufferSeconds = 3; // 倒數後的緩衝時間
+    final int totalSeconds = countdownSeconds + bufferSeconds;
+
+    _sessionProgress.startCountdown(
+      seconds: totalSeconds,
+      setStateCallback: mounted ? setState : null,
+    );
+
     await _audioPlayer.open(
       Audio('assets/sounds/1.mp3'),
       autoStart: true,
       showNotification: false,
     );
+
+    final Future<void> countdownFuture = _waitForDuration(totalSeconds);
+    final Future<void> audioFuture = _audioPlayer.playlistFinished.first;
+
     await Future.any([
-      _audioPlayer.playlistFinished.first,
+      Future.wait([countdownFuture, audioFuture]),
       if (_cancelCompleter != null) _cancelCompleter!.future,
     ]);
+
+    _sessionProgress.finishCountdown(setStateCallback: mounted ? setState : null);
   }
 
   /// 進行一次錄影流程（倒數 -> 錄影 -> 儲存）
-  Future<void> _recordOnce(int index) async {
+  Future<bool> _recordOnce(int index) async {
     if (_shouldCancelRecording) {
-      return; // 若已收到取消訊號則直接跳出，避免繼續操作鏡頭
+      return false; // 若已收到取消訊號則直接跳出，避免繼續操作鏡頭
     }
 
+    bool recordedSuccessfully = false; // 標記本輪是否完整完成，供外層計算剩餘次數
     try {
       waveformAccumulated.clear();
       await initAudioCapture();
@@ -416,7 +436,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         if (ImuDataLogger.instance.hasActiveRound) {
           await ImuDataLogger.instance.abortActiveRound();
         }
-        return;
+        return false;
       }
 
       final baseName = ImuDataLogger.instance.buildBaseFileName(
@@ -425,6 +445,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       await ImuDataLogger.instance.startRoundLogging(baseName);
 
       await controller!.startVideoRecording();
+
+      _sessionProgress.startRecording(
+        seconds: widget.durationSeconds,
+        setStateCallback: mounted ? setState : null,
+      );
 
       await _waitForDuration(widget.durationSeconds);
 
@@ -438,7 +463,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         if (ImuDataLogger.instance.hasActiveRound) {
           await ImuDataLogger.instance.abortActiveRound();
         }
-        return;
+        return false;
       }
 
       final XFile videoFile = await controller!.stopVideoRecording();
@@ -471,10 +496,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
 
       debugPrint('✅ 儲存影片與感測資料：${entry.fileName}');
+      recordedSuccessfully = true;
     } catch (e) {
       await ImuDataLogger.instance.abortActiveRound();
       debugPrint('❌ 錄影時出錯：$e');
     }
+
+    return recordedSuccessfully;
   }
 
   /// 依使用者設定自動執行多輪倒數與錄影，中間保留休息時間
@@ -498,10 +526,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       setState(() {
         isRecording = true;
         _hasTriggeredRecording = true; // 使用者已主動啟動錄影
+        _sessionProgress.resetForNewSession(widget.totalRounds); // 新一輪錄影重新計算剩餘次數
       });
     } else {
       isRecording = true;
       _hasTriggeredRecording = true;
+      _sessionProgress.resetForNewSession(widget.totalRounds);
     }
 
     _shouldCancelRecording = false;
@@ -511,22 +541,28 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       for (int i = 0; i < widget.totalRounds; i++) {
         if (_shouldCancelRecording) break;
 
+        _sessionProgress.markCurrentRound(i + 1, setStateCallback: mounted ? setState : null);
         await _playCountdown();
         if (_shouldCancelRecording) break;
 
-        await _waitForDuration(3); // 倒數結束後保留緩衝時間
+        final bool recorded = await _recordOnce(i);
+        if (recorded) {
+          _sessionProgress.completeCurrentRound(setStateCallback: mounted ? setState : null);
+        }
         if (_shouldCancelRecording) break;
 
-        await _recordOnce(i);
-        if (_shouldCancelRecording) break;
-
-        if (i < widget.totalRounds - 1) {
+        if (recorded && i < widget.totalRounds - 1) {
+          _sessionProgress.startRest(
+            seconds: _restSecondsBetweenRounds,
+            setStateCallback: mounted ? setState : null,
+          );
           await _waitForDuration(_restSecondsBetweenRounds);
         }
       }
     } finally {
       _cancelCompleter = null;
       _shouldCancelRecording = false;
+      _sessionProgress.resetToIdle(setStateCallback: mounted ? setState : null);
       if (mounted) {
         setState(() => isRecording = false);
       } else {
@@ -633,6 +669,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                   style: TextStyle(color: Color(0xFF1E8E5A), fontSize: 13),
                 ),
               ),
+            _SessionStatusBar(
+              totalRounds: widget.totalRounds,
+              remainingRounds: _sessionProgress.calculateRemainingRounds(),
+              activePhase: _sessionProgress.activePhase,
+              secondsLeft: _sessionProgress.secondsLeft,
+            ),
             Expanded(
               child: Stack(
                 children: [
@@ -693,6 +735,306 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 錄影流程的各種階段，以便統一更新狀態列與倒數資訊
+enum _SessionPhase { idle, countdown, recording, rest }
+
+/// 專責管理倒數秒數、剩餘輪次與計時器的協助類別
+class _SessionProgress {
+  int _totalRounds = 0; // 本次預計錄影的總輪數
+  int _completedRounds = 0; // 已成功完成的輪數
+  int _currentRound = 0; // 目前正在處理的輪數（含倒數或錄影中）
+
+  _SessionPhase activePhase = _SessionPhase.idle; // 當前階段
+  int secondsLeft = 0; // 當前階段剩餘秒數
+
+  Timer? _timer; // 控制倒數的計時器
+
+  /// 初始化新的錄影任務，重置剩餘輪數與倒數資訊
+  void resetForNewSession(int totalRounds) {
+    _cancelTimer();
+    _totalRounds = totalRounds;
+    _completedRounds = 0;
+    _currentRound = 0;
+    activePhase = _SessionPhase.idle;
+    secondsLeft = 0;
+  }
+
+  /// 紀錄目前準備進行的輪次，讓剩餘次數即刻反映
+  void markCurrentRound(int roundIndex, {void Function(VoidCallback fn)? setStateCallback}) {
+    void update(VoidCallback fn) {
+      if (setStateCallback != null) {
+        setStateCallback!(fn);
+      } else {
+        fn();
+      }
+    }
+
+    update(() {
+      _currentRound = roundIndex;
+      if (activePhase == _SessionPhase.idle) {
+        activePhase = _SessionPhase.countdown;
+        secondsLeft = 0;
+      }
+    });
+  }
+
+  /// 啟動倒數計時（含倒數音效與緩衝時間）
+  void startCountdown({required int seconds, void Function(VoidCallback fn)? setStateCallback}) {
+    _startPhaseTimer(
+      phase: _SessionPhase.countdown,
+      seconds: seconds,
+      setStateCallback: setStateCallback,
+    );
+  }
+
+  /// 完成倒數後重置資訊，避免停留在倒數狀態
+  void finishCountdown({void Function(VoidCallback fn)? setStateCallback}) {
+    if (activePhase != _SessionPhase.countdown) {
+      return;
+    }
+    _cancelTimer();
+
+    void update(VoidCallback fn) {
+      if (setStateCallback != null) {
+        setStateCallback!(fn);
+      } else {
+        fn();
+      }
+    }
+
+    update(() {
+      secondsLeft = 0;
+      activePhase = _SessionPhase.idle;
+    });
+  }
+
+  /// 開始正式錄影時計算剩餘秒數
+  void startRecording({required int seconds, void Function(VoidCallback fn)? setStateCallback}) {
+    _startPhaseTimer(
+      phase: _SessionPhase.recording,
+      seconds: seconds,
+      setStateCallback: setStateCallback,
+    );
+  }
+
+  /// 輪次完成後更新已完成數量
+  void completeCurrentRound({void Function(VoidCallback fn)? setStateCallback}) {
+    void update(VoidCallback fn) {
+      if (setStateCallback != null) {
+        setStateCallback!(fn);
+      } else {
+        fn();
+      }
+    }
+
+    update(() {
+      if (_currentRound > _completedRounds) {
+        _completedRounds = _currentRound;
+      }
+      activePhase = _SessionPhase.idle;
+      secondsLeft = 0;
+    });
+  }
+
+  /// 啟動兩輪錄影間的休息倒數
+  void startRest({required int seconds, void Function(VoidCallback fn)? setStateCallback}) {
+    _startPhaseTimer(
+      phase: _SessionPhase.rest,
+      seconds: seconds,
+      setStateCallback: setStateCallback,
+    );
+  }
+
+  /// 手動重置狀態列，常用於取消錄影或流程結束
+  void resetToIdle({void Function(VoidCallback fn)? setStateCallback}) {
+    _cancelTimer();
+
+    void update(VoidCallback fn) {
+      if (setStateCallback != null) {
+        setStateCallback!(fn);
+      } else {
+        fn();
+      }
+    }
+
+    update(() {
+      activePhase = _SessionPhase.idle;
+      secondsLeft = 0;
+      _currentRound = 0;
+    });
+  }
+
+  /// 釋放計時器資源，避免離開頁面後仍持續觸發
+  void dispose() {
+    _cancelTimer();
+  }
+
+  /// 計算剩餘尚未完成的錄影次數
+  int calculateRemainingRounds() {
+    final bool roundInProgress =
+        activePhase == _SessionPhase.countdown || activePhase == _SessionPhase.recording;
+    final int consumed = _completedRounds + (roundInProgress ? 1 : 0);
+    final int remaining = _totalRounds - consumed;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  void _startPhaseTimer({
+    required _SessionPhase phase,
+    required int seconds,
+    void Function(VoidCallback fn)? setStateCallback,
+  }) {
+    _cancelTimer();
+
+    void update(VoidCallback fn) {
+      if (setStateCallback != null) {
+        setStateCallback!(fn);
+      } else {
+        fn();
+      }
+    }
+
+    update(() {
+      activePhase = phase;
+      secondsLeft = seconds;
+    });
+
+    if (seconds <= 0) {
+      if (phase != _SessionPhase.recording) {
+        update(() {
+          activePhase = _SessionPhase.idle;
+        });
+      }
+      return;
+    }
+
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final int remaining = seconds - timer.tick;
+      update(() {
+        secondsLeft = remaining > 0 ? remaining : 0;
+        if (secondsLeft == 0 && phase != _SessionPhase.recording) {
+          activePhase = _SessionPhase.idle;
+        }
+      });
+
+      if (remaining <= 0) {
+        timer.cancel();
+        _timer = null;
+      }
+    });
+  }
+
+  void _cancelTimer() {
+    _timer?.cancel();
+    _timer = null;
+  }
+}
+
+/// 錄影狀態列：呈現剩餘次數、倒數秒數與休息時間
+class _SessionStatusBar extends StatelessWidget {
+  final int totalRounds;
+  final int remainingRounds;
+  final _SessionPhase activePhase;
+  final int secondsLeft;
+
+  const _SessionStatusBar({
+    required this.totalRounds,
+    required this.remainingRounds,
+    required this.activePhase,
+    required this.secondsLeft,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle labelStyle = TextStyle(
+      color: const Color(0xFF123B70).withOpacity(0.7),
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+    );
+
+    final bool showingCountdown =
+        activePhase == _SessionPhase.countdown || activePhase == _SessionPhase.recording;
+    final bool showingRest = activePhase == _SessionPhase.rest;
+
+    final String countdownText = showingCountdown ? '${secondsLeft.toString()} 秒' : '--';
+    final String restText = showingRest ? '${secondsLeft.toString()} 秒' : '--';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      color: const Color(0xFFE1EBF7),
+      child: Row(
+        children: [
+          _SessionStatusTile(
+            label: '剩餘錄影',
+            value: '$remainingRounds / $totalRounds 次',
+            labelStyle: labelStyle,
+          ),
+          const SizedBox(width: 12),
+          _SessionStatusTile(
+            label: '倒數時間',
+            value: countdownText,
+            labelStyle: labelStyle,
+          ),
+          const SizedBox(width: 12),
+          _SessionStatusTile(
+            label: '休息時間',
+            value: restText,
+            labelStyle: labelStyle,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 狀態列的小卡片樣式，保持排版一致
+class _SessionStatusTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final TextStyle labelStyle;
+
+  const _SessionStatusTile({
+    required this.label,
+    required this.value,
+    required this.labelStyle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: labelStyle),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF123B70),
               ),
             ),
           ],
