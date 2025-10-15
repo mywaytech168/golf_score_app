@@ -6,7 +6,6 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -751,53 +750,31 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final snapshot = List<RecordingHistoryEntry>.from(entries);
-
-    void apply(List<RecordingHistoryEntry> data) {
-      if (!mounted) {
-        debugPrint('[首頁歷史] 排程回呼觸發時頁面已卸載，略過更新');
-        _historyUpdateScheduled = false;
-        return;
-      }
-      debugPrint('[首頁歷史] 排程回呼套用 ${data.length} 筆歷史資料');
-      _historyUpdateScheduled = false;
-      _applyHistoryState(data);
-    }
+    _pendingHistorySnapshot = List<RecordingHistoryEntry>.from(entries);
 
     if (_historyUpdateScheduled) {
-      debugPrint('[首頁歷史] 已有更新排程，直接覆蓋快照等待下一幀');
-      // 這裡不重複註冊回呼，只更新即將套用的資料
-      _pendingHistorySnapshot = snapshot;
-      return;
+      debugPrint('[首頁歷史] 已有更新排程，覆寫等待套用的快照');
+      return; // 已排隊時僅更新快照，避免重複註冊回呼
     }
 
     _historyUpdateScheduled = true;
-    _pendingHistorySnapshot = snapshot;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _historyUpdateScheduled = false;
+      final pending = _pendingHistorySnapshot;
+      _pendingHistorySnapshot = null;
 
-    final phase = SchedulerBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
-      // 當前執行緒處於閒置狀態，改用微任務避免打斷目前的建構流程
-      scheduleMicrotask(() {
-        final pending = _pendingHistorySnapshot;
-        _pendingHistorySnapshot = null;
-        if (pending == null) {
-          _historyUpdateScheduled = false;
-          return;
-        }
-        apply(pending);
-      });
-    } else {
-      // 若仍在 build / layout / paint 中，改於下一幀統一更新
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final pending = _pendingHistorySnapshot;
-        _pendingHistorySnapshot = null;
-        if (pending == null) {
-          _historyUpdateScheduled = false;
-          return;
-        }
-        apply(pending);
-      });
-    }
+      if (!mounted) {
+        debugPrint('[首頁歷史] 下一幀回呼觸發時頁面已卸載，略過更新');
+        return;
+      }
+      if (pending == null) {
+        debugPrint('[首頁歷史] 下一幀回呼沒有待處理的歷史資料');
+        return;
+      }
+
+      debugPrint('[首頁歷史] 下一幀套用 ${pending.length} 筆歷史資料');
+      _applyHistoryState(pending);
+    });
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察

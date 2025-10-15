@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -27,6 +26,7 @@ class RecordingHistoryPage extends StatefulWidget {
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
+  bool _rebuildScheduled = false; // 控制是否已排程於下一幀刷新畫面
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -266,21 +266,21 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 若頁面已卸載則不做任何事
     }
 
-    void execute() {
-      if (!mounted) {
-        return; // 再次確認頁面仍存在
-      }
-      setState(() {});
+    if (_rebuildScheduled) {
+      debugPrint('[歷史頁] 已排程重繪，略過重複請求');
+      return; // 若已有排程則等待既有的回呼執行
     }
 
-    final phase = SchedulerBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle || phase == SchedulerPhase.postFrameCallbacks) {
-      // 使用微任務排程可避開當前的建構流程
-      scheduleMicrotask(execute);
-    } else {
-      // 若仍位於 build / layout / paint 階段，改於下一幀更新
-      WidgetsBinding.instance.addPostFrameCallback((_) => execute());
-    }
+    _rebuildScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rebuildScheduled = false;
+      if (!mounted) {
+        debugPrint('[歷史頁] 下一幀執行時頁面已卸載，取消重繪');
+        return;
+      }
+      debugPrint('[歷史頁] 執行排程重繪');
+      setState(() {});
+    });
   }
 
   /// 刪除影片檔與對應 CSV
