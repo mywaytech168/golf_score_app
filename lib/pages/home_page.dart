@@ -43,8 +43,6 @@ class _HomePageState extends State<HomePage> {
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
-  List<RecordingHistoryEntry>? _queuedHistory; // 暫存待套用的歷史紀錄
-  bool _historyUpdateScheduled = false; // 控制是否已有排程等待執行
 
   @override
   void initState() {
@@ -469,7 +467,7 @@ class _HomePageState extends State<HomePage> {
       return; // 未找到對應項目
     }
 
-    _scheduleHistoryUpdate(updatedEntries);
+    await _applyHistoryState(updatedEntries);
     unawaited(_deleteEntryFiles(entry));
 
     if (!mounted) return;
@@ -556,8 +554,8 @@ class _HomePageState extends State<HomePage> {
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
     updatedEntries[targetIndex] =
         updatedEntries[targetIndex].copyWith(customName: storedName);
-    debugPrint('[首頁歷史] 套用重新命名至索引 $targetIndex，準備寫回狀態');
-    _scheduleHistoryUpdate(updatedEntries);
+    debugPrint('[首頁歷史] 套用重新命名至索引 $targetIndex，準備立即寫回狀態');
+    await _applyHistoryState(updatedEntries);
 
     if (!mounted) return;
     final snackMessage = storedName.isEmpty
@@ -641,8 +639,8 @@ class _HomePageState extends State<HomePage> {
 
     updatedEntries[targetIndex] =
         updatedEntries[targetIndex].copyWith(durationSeconds: newDuration);
-    debugPrint('[首頁歷史] 更新索引 $targetIndex 的時長為 $newDuration 秒，準備寫回狀態');
-    _scheduleHistoryUpdate(updatedEntries);
+    debugPrint('[首頁歷史] 更新索引 $targetIndex 的時長為 $newDuration 秒，準備立即寫回狀態');
+    await _applyHistoryState(updatedEntries);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -738,50 +736,15 @@ class _HomePageState extends State<HomePage> {
     await _refreshDashboardMetrics();
   }
 
-  /// 接收錄影頁回傳的歷史紀錄，統一排程更新首頁資料來源
+  /// 接收錄影頁回傳的歷史紀錄，統一整理後套用到首頁狀態
   void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
     unawaited(_prepareHistoryUpdate(entries));
   }
 
-  /// 先確保縮圖完整再排程更新，避免畫面顯示灰階背景
+  /// 先確保縮圖完整再寫回狀態，避免畫面顯示灰階背景
   Future<void> _prepareHistoryUpdate(List<RecordingHistoryEntry> entries) async {
     final regenerated = await _ensureThumbnails(entries);
-    _scheduleHistoryUpdate(regenerated ?? entries);
-  }
-
-  /// 排程於安全時機更新錄影紀錄，並以佇列方式確保更新順序
-  void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
-    if (!mounted) {
-      debugPrint('[首頁歷史] _scheduleHistoryUpdate 略過：頁面已卸載');
-      return;
-    }
-
-    _queuedHistory = List<RecordingHistoryEntry>.from(entries);
-    debugPrint('[首頁歷史] _scheduleHistoryUpdate 佇列 ${_queuedHistory!.length} 筆紀錄');
-
-    if (_historyUpdateScheduled) {
-      debugPrint('[首頁歷史] 已有排程等待執行，覆寫最新資料後返回');
-      return;
-    }
-
-    _historyUpdateScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _historyUpdateScheduled = false;
-      if (!mounted) {
-        debugPrint('[首頁歷史] 排程執行時頁面已卸載，清除暫存資料');
-        _queuedHistory = null;
-        return;
-      }
-
-      final snapshot = _queuedHistory;
-      _queuedHistory = null;
-      if (snapshot == null) {
-        debugPrint('[首頁歷史] 找不到待套用的紀錄，結束排程');
-        return;
-      }
-
-      unawaited(_applyHistoryState(snapshot));
-    });
+    await _applyHistoryState(regenerated ?? entries);
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察
