@@ -44,9 +44,7 @@ class _HomePageState extends State<HomePage> {
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
-  // 為了避免在 Dialog 收合或 PopupMenu 結束時立即觸發 setState，透過排程控制寫入時機
-  bool _historyUpdateScheduled = false; // 紀錄是否已安排下一幀更新
-  List<RecordingHistoryEntry>? _pendingHistorySnapshot; // 暫存等待套用的歷史資料
+  Future<void> _historyUpdateTask = Future.value(); // 串接歷史更新的非同步佇列
 
   @override
   void initState() {
@@ -712,10 +710,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 將更新後的錄影紀錄套用到首頁狀態並觸發儲存與統計重算
-  void _applyHistoryState(List<RecordingHistoryEntry> entries) {
+  Future<void> _applyHistoryState(List<RecordingHistoryEntry> entries) async {
     if (!mounted) {
       debugPrint('[首頁歷史] _applyHistoryState 略過：頁面已卸載');
       return;
+    }
+
+    final scheduler = SchedulerBinding.instance;
+    // 若目前正處於建構或繪製流程，等待當前影格完成後再更新狀態，避免觸發 build scope 相關錯誤。
+    if (scheduler.schedulerPhase != SchedulerPhase.idle) {
+      debugPrint('[首頁歷史] 等待影格結束後再套用歷史資料');
+      await scheduler.endOfFrame;
+      if (!mounted) {
+        debugPrint('[首頁歷史] 影格完成時頁面已卸載，取消更新');
+        return;
+      }
     }
 
     debugPrint('[首頁歷史] _applyHistoryState 套用 ${entries.length} 筆資料');
@@ -729,10 +738,10 @@ class _HomePageState extends State<HomePage> {
     });
 
     // 寫入最新狀態並重新計算儀表板數據
-    unawaited(RecordingHistoryStorage.instance.saveHistory(
+    await RecordingHistoryStorage.instance.saveHistory(
       List<RecordingHistoryEntry>.from(_recordingHistory),
-    ));
-    unawaited(_refreshDashboardMetrics());
+    );
+    await _refreshDashboardMetrics();
   }
 
   /// 接收錄影頁回傳的歷史紀錄，統一排程更新首頁資料來源
@@ -746,41 +755,17 @@ class _HomePageState extends State<HomePage> {
     _scheduleHistoryUpdate(regenerated ?? entries);
   }
 
-  /// 排程於安全時機更新錄影紀錄，避免在彈窗收合或建構期間直接呼叫 setState
+  /// 排程於安全時機更新錄影紀錄，並以佇列方式確保更新順序
   void _scheduleHistoryUpdate(List<RecordingHistoryEntry> entries) {
-    debugPrint('[首頁歷史] _scheduleHistoryUpdate 收到 ${entries.length} 筆紀錄');
     if (!mounted) {
       debugPrint('[首頁歷史] _scheduleHistoryUpdate 略過：頁面已卸載');
       return;
     }
 
-    final scheduler = SchedulerBinding.instance;
-    _pendingHistorySnapshot = List<RecordingHistoryEntry>.from(entries);
+    final snapshot = List<RecordingHistoryEntry>.from(entries);
+    debugPrint('[首頁歷史] _scheduleHistoryUpdate 佇列 ${snapshot.length} 筆紀錄');
 
-    // ---------- 統一於下一幀更新，確保不與彈窗動畫或建構流程衝突 ----------
-    if (_historyUpdateScheduled) {
-      debugPrint('[首頁歷史] 已有更新排程，覆寫等待套用的快照');
-      return; // 已排隊時僅更新快照，避免重複註冊回呼
-    }
-
-    _historyUpdateScheduled = true;
-    scheduler.addPostFrameCallback((_) {
-      _historyUpdateScheduled = false;
-      final pending = _pendingHistorySnapshot;
-      _pendingHistorySnapshot = null;
-
-      if (!mounted) {
-        debugPrint('[首頁歷史] 下一幀回呼觸發時頁面已卸載，略過更新');
-        return;
-      }
-      if (pending == null) {
-        debugPrint('[首頁歷史] 下一幀回呼沒有待處理的歷史資料');
-        return;
-      }
-
-      debugPrint('[首頁歷史] 下一幀套用 ${pending.length} 筆歷史資料');
-      _applyHistoryState(pending);
-    });
+    _historyUpdateTask = _historyUpdateTask.then((_) => _applyHistoryState(snapshot));
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察
@@ -1431,6 +1416,7 @@ class _MetricsCalculator {
     int totalSamples = 0;
     int impactSamples = 0;
 
+    var lineCounter = 0; // 記錄讀取行數，定期讓出主執行緒避免阻塞
     await for (final rawLine in stream) {
       final line = rawLine.trim();
       if (line.isEmpty || line.startsWith('CODI_') || line.startsWith('Device:') || line.startsWith('Quat')) {
@@ -1458,6 +1444,12 @@ class _MetricsCalculator {
         impactSamples++;
       }
       totalSamples++;
+
+      // 每處理一定筆數後暫停一個事件循環，避免大量 CSV 造成 UI 卡住。
+      lineCounter++;
+      if (lineCounter % 400 == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
     }
 
     if (totalSamples == 0) {

@@ -27,8 +27,7 @@ class RecordingHistoryPage extends StatefulWidget {
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
-  bool _rebuildScheduled = false; // 控制是否已排程於下一幀刷新畫面
-  bool _hasPendingRebuild = false; // 標記是否仍有待更新的畫面內容
+  Future<void> _pendingUiTask = Future.value(); // 佇列化重繪請求，避免與對話框動畫衝突
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -156,7 +155,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     debugPrint('[歷史頁] 更新索引 $index 的時長為 $newDuration 秒，準備儲存');
     if (mounted) {
       debugPrint('[歷史頁] 調整秒數後重繪列表');
-      _requestRebuild(); // 透過排程避免在 Dialog 收合時直接 setState
+      _scheduleRebuild(); // 透過佇列化的排程避免與對話框動畫衝突
     }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -248,7 +247,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     debugPrint('[歷史頁] 更新索引 $index 的名稱為 "$storedName"，準備儲存');
     if (mounted) {
       debugPrint('[歷史頁] 重新命名後刷新列表');
-      _requestRebuild(); // 延後一幀更新，避免觸發建構期間的 setState 例外
+      _scheduleRebuild(); // 延後到安全時機再更新畫面
     }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -263,33 +262,27 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   }
 
   /// 封裝安全的重繪流程，避免在對話框或排程回呼中直接呼叫 setState
-  void _requestRebuild() {
+  void _scheduleRebuild() {
     if (!mounted) {
       return; // 若頁面已卸載則不做任何事
     }
 
-    final scheduler = SchedulerBinding.instance;
-    if (_rebuildScheduled) {
-      debugPrint('[歷史頁] 已排程重繪，略過重複請求');
-      return; // 若已有排程則等待既有的回呼執行
-    }
-
-    _hasPendingRebuild = true; // 標記仍有資料需要更新，供回呼判斷
-    _rebuildScheduled = true;
-    scheduler.addPostFrameCallback((_) {
-      _rebuildScheduled = false;
+    final snapshotTask = _pendingUiTask.then((_) async {
+      final scheduler = SchedulerBinding.instance;
+      if (scheduler.schedulerPhase != SchedulerPhase.idle) {
+        debugPrint('[歷史頁] 等待影格結束再刷新列表');
+        await scheduler.endOfFrame;
+      }
       if (!mounted) {
-        debugPrint('[歷史頁] 下一幀執行時頁面已卸載，取消重繪');
+        debugPrint('[歷史頁] 排程執行時頁面已卸載，取消重繪');
         return;
       }
-      if (!_hasPendingRebuild) {
-        debugPrint('[歷史頁] 沒有待處理的畫面更新，略過');
-        return;
-      }
-      _hasPendingRebuild = false;
+
       debugPrint('[歷史頁] 執行排程重繪');
       setState(() {});
     });
+
+    _pendingUiTask = snapshotTask;
   }
 
   /// 刪除影片檔與對應 CSV
