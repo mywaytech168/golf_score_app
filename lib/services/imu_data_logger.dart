@@ -23,6 +23,9 @@ class ImuDataLogger {
   /// 最多允許同時寫入的裝置數量（依需求限制為 2 台）。
   static const int _maxDevices = 2;
 
+  /// 控制縮圖產生的序列化佇列，避免同時啟動多個 MediaMetadataRetriever。
+  Future<void> _thumbnailQueue = Future<void>.value();
+
   /// 登記成功連線的藍牙裝置，後續啟動錄影時會建立對應 CSV。
   void registerDevice(
     BluetoothDevice device, {
@@ -171,29 +174,46 @@ class ImuDataLogger {
     String videoPath, {
     String? baseName,
   }) async {
-    try {
-      final directory = await _ensureStorageDirectory();
-      final resolvedBaseName = baseName ?? p.basenameWithoutExtension(videoPath);
-      final thumbnailPath = p.join(directory.path, '${resolvedBaseName}_thumb.jpg');
-      final file = File(thumbnailPath);
+    // ---------- 縮圖任務排程說明 ----------
+    // 1. Android 在短時間內連續呼叫 MediaMetadataRetriever 可能導致 ImageReader 堆疊滿載。
+    // 2. 透過佇列確保縮圖任務一次只執行一筆，並在任務間加入短暫延遲，避免持續噴出
+    //    「Unable to acquire a buffer item」的警告訊息。
+    final completer = Completer<String?>();
+    _thumbnailQueue = _thumbnailQueue.then((_) async {
+      try {
+        // 在真正啟動截圖前稍候片刻，讓上一段錄影釋放相機緩衝區。
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        final directory = await _ensureStorageDirectory();
+        final resolvedBaseName =
+            baseName ?? p.basenameWithoutExtension(videoPath);
+        final thumbnailPath =
+            p.join(directory.path, '${resolvedBaseName}_thumb.jpg');
+        final file = File(thumbnailPath);
 
-      if (await file.exists() && await file.length() > 0) {
-        return thumbnailPath;
+        if (await file.exists() && await file.length() > 0) {
+          completer.complete(thumbnailPath);
+          return;
+        }
+
+        final generatedPath = await VideoThumbnail.thumbnailFile(
+          video: videoPath,
+          thumbnailPath: thumbnailPath,
+          imageFormat: ImageFormat.JPEG,
+          maxWidth: 480,
+          quality: 75,
+        );
+
+        completer.complete(generatedPath);
+      } catch (error) {
+        debugPrint('⚠️ 產生影片縮圖失敗：$error');
+        completer.complete(null);
       }
 
-      final generatedPath = await VideoThumbnail.thumbnailFile(
-        video: videoPath,
-        thumbnailPath: thumbnailPath,
-        imageFormat: ImageFormat.JPEG,
-        maxWidth: 480,
-        quality: 75,
-      );
+      // 任務間預留 80ms 緩衝時間，讓底層 ImageReader 釋放緩衝區
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+    });
 
-      return generatedPath;
-    } catch (error) {
-      debugPrint('⚠️ 產生影片縮圖失敗：$error');
-      return null;
-    }
+    return completer.future;
   }
 
   /// 判斷目前是否仍有尚未完成的 CSV 寫入流程。
