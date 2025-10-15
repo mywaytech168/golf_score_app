@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert'; // 匯入文字編碼與換行工具，解析 CSV 時需要用到
 import 'dart:io';
 import 'dart:math' as math;
 
