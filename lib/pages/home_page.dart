@@ -320,17 +320,20 @@ class _HomePageState extends State<HomePage> {
                         icon: const Icon(Icons.more_vert, color: Colors.white70),
                         color: Colors.white,
                         onSelected: (action) {
-                          switch (action) {
-                            case _HistoryAction.rename:
-                              _renameHistoryEntry(entry);
-                              break;
-                            case _HistoryAction.editDuration:
-                              _editHistoryDuration(entry);
-                              break;
-                            case _HistoryAction.delete:
-                              _deleteHistoryEntry(entry);
-                              break;
-                          }
+                          // 使用 microtask 確保 PopupMenu 關閉動畫完成後再執行，避免與框架建構流程衝突
+                          Future<void>.microtask(() {
+                            switch (action) {
+                              case _HistoryAction.rename:
+                                _renameHistoryEntry(entry);
+                                break;
+                              case _HistoryAction.editDuration:
+                                _editHistoryDuration(entry);
+                                break;
+                              case _HistoryAction.delete:
+                                _deleteHistoryEntry(entry);
+                                break;
+                            }
+                          });
                         },
                         itemBuilder: (context) => [
                           const PopupMenuItem<_HistoryAction>(

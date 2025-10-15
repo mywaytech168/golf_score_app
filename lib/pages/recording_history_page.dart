@@ -518,17 +518,20 @@ class _HistoryTile extends StatelessWidget {
               tooltip: '更多操作',
               icon: const Icon(Icons.more_vert, color: Color(0xFF123B70)),
               onSelected: (action) {
-                switch (action) {
-                  case _HistoryMenuAction.rename:
-                    onRename();
-                    break;
-                  case _HistoryMenuAction.editDuration:
-                    onEditDuration();
-                    break;
-                  case _HistoryMenuAction.delete:
-                    onDelete();
-                    break;
-                }
+                // 透過 microtask 讓 PopupMenu 完整關閉後再執行，降低建構期間 setState 衝突機率
+                Future<void>.microtask(() {
+                  switch (action) {
+                    case _HistoryMenuAction.rename:
+                      onRename();
+                      break;
+                    case _HistoryMenuAction.editDuration:
+                      onEditDuration();
+                      break;
+                    case _HistoryMenuAction.delete:
+                      onDelete();
+                      break;
+                  }
+                });
               },
               itemBuilder: (context) => const [
                 PopupMenuItem<_HistoryMenuAction>(
