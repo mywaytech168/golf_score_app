@@ -378,7 +378,7 @@ class _HomePageState extends State<HomePage> {
   /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
   Future<void> _loadInitialHistory() async {
     final entries = await RecordingHistoryStorage.instance.loadHistory();
-    final regenerated = await _ensureThumbnails(entries);
+    final regenerated = await _cleanInvalidThumbnails(entries);
     final finalEntries = regenerated ?? entries;
 
     if (!mounted) return;
@@ -397,8 +397,8 @@ class _HomePageState extends State<HomePage> {
     unawaited(_refreshDashboardMetrics());
   }
 
-  /// 確保每筆紀錄皆擁有縮圖，必要時重新產生並回傳更新後的清單
-  Future<List<RecordingHistoryEntry>?> _ensureThumbnails(
+  /// 檢查縮圖檔案是否存在，若遺失則將欄位清空避免顯示破圖
+  Future<List<RecordingHistoryEntry>?> _cleanInvalidThumbnails(
     List<RecordingHistoryEntry> entries,
   ) async {
     if (entries.isEmpty) {
@@ -415,9 +415,10 @@ class _HomePageState extends State<HomePage> {
           !(await File(thumbnailPath).exists());
 
       if (needsGenerate) {
-        thumbnailPath = await ImuDataLogger.instance.ensureThumbnailForVideo(
-          entry.filePath,
-        );
+        // ---------- 縮圖清理說明 ----------
+        // 舊版紀錄可能沒有縮圖檔案，或檔案被手動刪除。此時直接清空欄位
+        // 讓 UI 顯示預設樣式，避免再度啟動會造成緩衝區警告的擷取流程。
+        thumbnailPath = null;
       }
 
       if (thumbnailPath != entry.thumbnailPath) {
@@ -743,7 +744,7 @@ class _HomePageState extends State<HomePage> {
 
   /// 先確保縮圖完整再寫回狀態，避免畫面顯示灰階背景
   Future<void> _prepareHistoryUpdate(List<RecordingHistoryEntry> entries) async {
-    final regenerated = await _ensureThumbnails(entries);
+    final regenerated = await _cleanInvalidThumbnails(entries);
     await _applyHistoryState(regenerated ?? entries);
   }
 

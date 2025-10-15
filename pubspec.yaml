@@ -38,7 +38,6 @@ dependencies:
   flutter_blue_plus: ^1.32.5
   path_provider: ^2.1.1
   share_plus: ^7.2.1
-  video_thumbnail: ^0.5.3
   wakelock_plus: ^1.2.7
  
   assets_audio_player:

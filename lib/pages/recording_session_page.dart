@@ -478,9 +478,20 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         sourcePath: videoFile.path,
         baseName: baseName,
       );
-      // 立即回傳檔案路徑並非同步產生縮圖，避免在相機尚未釋放緩衝區時造成 ImageReader 警告。
-      final thumbnailFuture = ImuDataLogger.instance
-          .ensureThumbnailForVideo(savedVideoPath, baseName: baseName);
+
+      String? savedThumbnailPath;
+      try {
+        // ---------- 拍攝縮圖 ----------
+        // 使用 takePicture 直接捕捉預覽畫面，避免再次開啟 MediaMetadataRetriever。
+        final stillImage = await controller!.takePicture();
+        savedThumbnailPath = await ImuDataLogger.instance
+            .persistThumbnailFromPicture(
+          sourcePath: stillImage.path,
+          baseName: baseName,
+        );
+      } catch (error) {
+        debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
+      }
       final csvPaths = ImuDataLogger.instance.hasActiveRound
           ? await ImuDataLogger.instance.finishRoundLogging()
           : <String, String>{};
@@ -492,7 +503,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         durationSeconds: widget.durationSeconds,
         imuConnected: widget.isImuConnected,
         imuCsvPaths: csvPaths,
-        thumbnailPath: null,
+        thumbnailPath: savedThumbnailPath,
       );
 
       if (mounted) {
@@ -503,28 +514,6 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       } else {
         _recordedRuns.insert(0, entry);
       }
-
-      // 待縮圖產出後補寫回清單，確保底部列表後續開啟即可看到預覽。
-      unawaited(thumbnailFuture.then((path) {
-        if (path == null) {
-          return;
-        }
-        final targetIndex = _recordedRuns.indexWhere(
-          (item) => item.filePath == savedVideoPath,
-        );
-        if (targetIndex == -1) {
-          return;
-        }
-        if (mounted) {
-          setState(() {
-            _recordedRuns[targetIndex] =
-                _recordedRuns[targetIndex].copyWith(thumbnailPath: path);
-          });
-        } else {
-          _recordedRuns[targetIndex] =
-              _recordedRuns[targetIndex].copyWith(thumbnailPath: path);
-        }
-      }));
 
       debugPrint('✅ 儲存影片與感測資料：${entry.fileName}');
       recordedSuccessfully = true;

@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:video_thumbnail/video_thumbnail.dart';
 
 /// IMU 原始資料紀錄器：集中管理多裝置的 CSV 寫入流程，確保影片與感測資料對應。
 class ImuDataLogger {
@@ -22,9 +21,6 @@ class ImuDataLogger {
 
   /// 最多允許同時寫入的裝置數量（依需求限制為 2 台）。
   static const int _maxDevices = 2;
-
-  /// 控制縮圖產生的序列化佇列，避免同時啟動多個 MediaMetadataRetriever。
-  Future<void> _thumbnailQueue = Future<void>.value();
 
   /// 登記成功連線的藍牙裝置，後續啟動錄影時會建立對應 CSV。
   void registerDevice(
@@ -169,51 +165,27 @@ class ImuDataLogger {
     return targetFile.path;
   }
 
-  /// 確保指定影片存在縮圖，若缺少則產生一張 JPEG 圖片供首頁顯示。
-  Future<String?> ensureThumbnailForVideo(
-    String videoPath, {
-    String? baseName,
+  /// 將以 `CameraController.takePicture` 取得的靜態圖複製到專屬資料夾。
+  ///
+  /// 以前改用從影片擷取影格的方式時，Android 會持續出現
+  /// `Unable to acquire a buffer item` 警告。改用拍照取得縮圖後，
+  /// 就能避免 MediaMetadataRetriever 與錄影流程互搶緩衝區。
+  Future<String?> persistThumbnailFromPicture({
+    required String sourcePath,
+    required String baseName,
   }) async {
-    // ---------- 縮圖任務排程說明 ----------
-    // 1. Android 在短時間內連續呼叫 MediaMetadataRetriever 可能導致 ImageReader 堆疊滿載。
-    // 2. 透過佇列確保縮圖任務一次只執行一筆，並在任務間加入短暫延遲，避免持續噴出
-    //    「Unable to acquire a buffer item」的警告訊息。
-    final completer = Completer<String?>();
-    _thumbnailQueue = _thumbnailQueue.then((_) async {
-      try {
-        // 在真正啟動截圖前稍候片刻，讓上一段錄影釋放相機緩衝區。
-        await Future<void>.delayed(const Duration(milliseconds: 120));
-        final directory = await _ensureStorageDirectory();
-        final resolvedBaseName =
-            baseName ?? p.basenameWithoutExtension(videoPath);
-        final thumbnailPath =
-            p.join(directory.path, '${resolvedBaseName}_thumb.jpg');
-        final file = File(thumbnailPath);
+    final sourceFile = File(sourcePath);
+    if (!await sourceFile.exists()) {
+      debugPrint('⚠️ 找不到暫存縮圖檔案：$sourcePath');
+      return null;
+    }
 
-        if (await file.exists() && await file.length() > 0) {
-          completer.complete(thumbnailPath);
-          return;
-        }
+    final directory = await _ensureStorageDirectory();
+    final targetPath = p.join(directory.path, '${baseName}_thumb.jpg');
+    final targetFile = File(targetPath);
 
-        final generatedPath = await VideoThumbnail.thumbnailFile(
-          video: videoPath,
-          thumbnailPath: thumbnailPath,
-          imageFormat: ImageFormat.JPEG,
-          maxWidth: 480,
-          quality: 75,
-        );
-
-        completer.complete(generatedPath);
-      } catch (error) {
-        debugPrint('⚠️ 產生影片縮圖失敗：$error');
-        completer.complete(null);
-      }
-
-      // 任務間預留 80ms 緩衝時間，讓底層 ImageReader 釋放緩衝區
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-    });
-
-    return completer.future;
+    await sourceFile.copy(targetFile.path);
+    return targetFile.path;
   }
 
   /// 判斷目前是否仍有尚未完成的 CSV 寫入流程。
