@@ -27,6 +27,17 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
+// ---------- 依賴解析區 ----------
+// 與主專案一致鎖定 Kotlin 標準函式庫版本，避免編譯時因 2.2.0 metadata 與編譯器版本不符
+configurations.all { config ->
+    config.resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.startsWith('kotlin-')) {
+            details.useVersion(kotlin_version)
+            details.because('鎖定 Kotlin 標準函式庫版本，避免 Binary version 2.2.0 錯誤')
+        }
+    }
+}
+
 android {
     namespace 'com.github.florent37.assets_audio_player'
     // ---------- 編譯設定 ----------
