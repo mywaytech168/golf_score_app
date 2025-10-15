@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -27,7 +26,7 @@ class RecordingHistoryPage extends StatefulWidget {
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
-  Future<void> _pendingUiTask = Future.value(); // 佇列化重繪請求，避免與對話框動畫衝突
+  bool _rebuildScheduled = false; // 避免重複排程 setState 造成框架錯誤
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -267,12 +266,14 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 若頁面已卸載則不做任何事
     }
 
-    final snapshotTask = _pendingUiTask.then((_) async {
-      final scheduler = SchedulerBinding.instance;
-      if (scheduler.schedulerPhase != SchedulerPhase.idle) {
-        debugPrint('[歷史頁] 等待影格結束再刷新列表');
-        await scheduler.endOfFrame;
-      }
+    if (_rebuildScheduled) {
+      debugPrint('[歷史頁] 已有重繪排程，略過此次請求');
+      return;
+    }
+
+    _rebuildScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rebuildScheduled = false;
       if (!mounted) {
         debugPrint('[歷史頁] 排程執行時頁面已卸載，取消重繪');
         return;
@@ -281,8 +282,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       debugPrint('[歷史頁] 執行排程重繪');
       setState(() {});
     });
-
-    _pendingUiTask = snapshotTask;
   }
 
   /// 刪除影片檔與對應 CSV

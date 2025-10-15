@@ -6,7 +6,6 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -44,7 +43,8 @@ class _HomePageState extends State<HomePage> {
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
-  Future<void> _historyUpdateTask = Future.value(); // 串接歷史更新的非同步佇列
+  List<RecordingHistoryEntry>? _queuedHistory; // 暫存待套用的歷史紀錄
+  bool _historyUpdateScheduled = false; // 控制是否已有排程等待執行
 
   @override
   void initState() {
@@ -716,17 +716,6 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final scheduler = SchedulerBinding.instance;
-    // 若目前正處於建構或繪製流程，等待當前影格完成後再更新狀態，避免觸發 build scope 相關錯誤。
-    if (scheduler.schedulerPhase != SchedulerPhase.idle) {
-      debugPrint('[首頁歷史] 等待影格結束後再套用歷史資料');
-      await scheduler.endOfFrame;
-      if (!mounted) {
-        debugPrint('[首頁歷史] 影格完成時頁面已卸載，取消更新');
-        return;
-      }
-    }
-
     debugPrint('[首頁歷史] _applyHistoryState 套用 ${entries.length} 筆資料');
     setState(() {
       _recordingHistory
@@ -737,10 +726,15 @@ class _HomePageState extends State<HomePage> {
       _isMetricCalculating = true;
     });
 
-    // 寫入最新狀態並重新計算儀表板數據
     await RecordingHistoryStorage.instance.saveHistory(
       List<RecordingHistoryEntry>.from(_recordingHistory),
     );
+
+    if (!mounted) {
+      debugPrint('[首頁歷史] 儲存完成時頁面已卸載，停止後續流程');
+      return;
+    }
+
     await _refreshDashboardMetrics();
   }
 
@@ -762,10 +756,32 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final snapshot = List<RecordingHistoryEntry>.from(entries);
-    debugPrint('[首頁歷史] _scheduleHistoryUpdate 佇列 ${snapshot.length} 筆紀錄');
+    _queuedHistory = List<RecordingHistoryEntry>.from(entries);
+    debugPrint('[首頁歷史] _scheduleHistoryUpdate 佇列 ${_queuedHistory!.length} 筆紀錄');
 
-    _historyUpdateTask = _historyUpdateTask.then((_) => _applyHistoryState(snapshot));
+    if (_historyUpdateScheduled) {
+      debugPrint('[首頁歷史] 已有排程等待執行，覆寫最新資料後返回');
+      return;
+    }
+
+    _historyUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _historyUpdateScheduled = false;
+      if (!mounted) {
+        debugPrint('[首頁歷史] 排程執行時頁面已卸載，清除暫存資料');
+        _queuedHistory = null;
+        return;
+      }
+
+      final snapshot = _queuedHistory;
+      _queuedHistory = null;
+      if (snapshot == null) {
+        debugPrint('[首頁歷史] 找不到待套用的紀錄，結束排程');
+        return;
+      }
+
+      unawaited(_applyHistoryState(snapshot));
+    });
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察

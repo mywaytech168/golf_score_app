@@ -4,14 +4,34 @@ import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
 
 Future<void> main() async {
-  // 先初始化 Flutter 綁定，確保後續相機與路徑等原生功能可正常呼叫
+  // 先初始化 Flutter 綁定，避免在呼叫可用鏡頭前發生錯誤
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+
+  List<CameraDescription> cameras = const <CameraDescription>[];
+  String? cameraError;
+
+  try {
+    cameras = await availableCameras();
+  } catch (error) {
+    cameraError = '無法初始化相機：$error';
+  }
+
+  runApp(MyApp(
+    initialCameras: cameras,
+    initialCameraError: cameraError,
+  ));
 }
 
-/// 應用程式入口：改為 StatefulWidget 以確保相機初始化錯誤時可回報訊息
+/// 應用程式入口：維持 StatefulWidget 以便在相機初始化失敗時允許重新嘗試
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  final List<CameraDescription> initialCameras; // 啟動階段取得的鏡頭清單
+  final String? initialCameraError; // 啟動時的錯誤訊息
+
+  const MyApp({
+    super.key,
+    required this.initialCameras,
+    this.initialCameraError,
+  });
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -19,30 +39,37 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   // ---------- 狀態管理區 ----------
-  List<CameraDescription>? _cameras; // 成功初始化後的相機清單
-  String? _cameraError; // 初始化失敗時的錯誤訊息
+  late List<CameraDescription> _cameras; // 最新的鏡頭清單
+  String? _cameraError; // 最近一次的錯誤資訊
+  bool _isLoading = false; // 控制是否顯示載入指示
 
   @override
   void initState() {
     super.initState();
-    _loadCameras();
+    _cameras = widget.initialCameras;
+    _cameraError = widget.initialCameraError;
   }
 
   // ---------- 方法區 ----------
-  /// 非同步載入相機清單，並妥善處理可能的例外狀況
-  Future<void> _loadCameras() async {
+  /// 重新嘗試載入鏡頭，於使用者按下重新整理時呼叫
+  Future<void> _reloadCameras() async {
+    setState(() {
+      _isLoading = true;
+      _cameraError = null;
+    });
+
     try {
       final cameras = await availableCameras();
-      if (!mounted) return; // 避免 Widget 已卸載時仍嘗試更新 UI
+      if (!mounted) return;
       setState(() {
         _cameras = cameras;
-        _cameraError = null;
+        _isLoading = false;
       });
     } catch (error) {
-      // 記錄錯誤訊息以便顯示於畫面，避免直接崩潰
       if (!mounted) return;
       setState(() {
         _cameraError = '無法初始化相機：$error';
+        _isLoading = false;
       });
     }
   }
@@ -60,10 +87,15 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  /// 依據目前狀態決定要顯示登入頁、載入指示或錯誤提示
+  /// 依照載入狀態顯示登入頁、錯誤提示或載入指示
   Widget _buildHome() {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     if (_cameraError != null) {
-      // 顯示錯誤畫面並提供重新嘗試按鈕，讓使用者可手動重試
       return Scaffold(
         body: Center(
           child: Padding(
@@ -78,7 +110,7 @@ class _MyAppState extends State<MyApp> {
                 ),
                 const SizedBox(height: 16),
                 FilledButton(
-                  onPressed: _loadCameras,
+                  onPressed: _reloadCameras,
                   child: const Text('重新嘗試'),
                 ),
               ],
@@ -88,16 +120,6 @@ class _MyAppState extends State<MyApp> {
       );
     }
 
-    final cameras = _cameras;
-    if (cameras == null) {
-      // 相機仍在初始化時顯示簡單的載入指示，避免黑畫面
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    return LoginPage(cameras: cameras);
+    return LoginPage(cameras: _cameras);
   }
 }
