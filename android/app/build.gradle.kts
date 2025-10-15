@@ -1,6 +1,8 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    // ---------- 套用 Kotlin 外掛 ----------
+    // 改用完整外掛識別名稱，確保沿用 settings.gradle.kts 中宣告的 2.0.21 版本
+    id("org.jetbrains.kotlin.android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
