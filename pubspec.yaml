@@ -39,6 +39,7 @@ dependencies:
   path_provider: ^2.1.1
   share_plus: ^7.2.1
   video_thumbnail: ^0.5.3
+  wakelock_plus: ^1.2.7
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3

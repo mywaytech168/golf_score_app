@@ -12,6 +12,7 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
@@ -76,6 +77,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   @override
   void initState() {
     super.initState();
+    // 進入錄影頁後立即鎖定螢幕常亮，避免長時間錄製時裝置自動休眠
+    unawaited(WakelockPlus.enable());
     initVolumeKeyListener(); // 建立音量鍵快捷鍵
     // 鎖定裝置方向為直向，以維持預覽與錄影皆為直式畫面
     SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
@@ -101,6 +104,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _sessionProgress.dispose(); // 停止狀態列的計時器，避免離開頁面後仍持續觸發 setState
     // 還原應用允許的方向，避免離開錄影頁後仍被鎖定
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    // 離開頁面時恢復系統預設的螢幕休眠行為
+    unawaited(WakelockPlus.disable());
     super.dispose();
   }
 
