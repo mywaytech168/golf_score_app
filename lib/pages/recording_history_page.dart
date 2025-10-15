@@ -28,6 +28,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
   bool _rebuildScheduled = false; // 控制是否已排程於下一幀刷新畫面
+  bool _hasPendingRebuild = false; // 標記是否仍有待更新的畫面內容
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -268,17 +269,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     }
 
     final scheduler = SchedulerBinding.instance;
-    if (scheduler.schedulerPhase == SchedulerPhase.idle) {
-      debugPrint('[歷史頁] 立即重繪列表');
-      setState(() {});
-      return;
-    }
-
     if (_rebuildScheduled) {
       debugPrint('[歷史頁] 已排程重繪，略過重複請求');
       return; // 若已有排程則等待既有的回呼執行
     }
 
+    _hasPendingRebuild = true; // 標記仍有資料需要更新，供回呼判斷
     _rebuildScheduled = true;
     scheduler.addPostFrameCallback((_) {
       _rebuildScheduled = false;
@@ -286,6 +282,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         debugPrint('[歷史頁] 下一幀執行時頁面已卸載，取消重繪');
         return;
       }
+      if (!_hasPendingRebuild) {
+        debugPrint('[歷史頁] 沒有待處理的畫面更新，略過');
+        return;
+      }
+      _hasPendingRebuild = false;
       debugPrint('[歷史頁] 執行排程重繪');
       setState(() {});
     });

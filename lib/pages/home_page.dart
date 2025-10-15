@@ -757,17 +757,7 @@ class _HomePageState extends State<HomePage> {
     final scheduler = SchedulerBinding.instance;
     _pendingHistorySnapshot = List<RecordingHistoryEntry>.from(entries);
 
-    // ---------- 若目前為 idle 階段即可立即套用，避免排隊產生錯誤 ----------
-    if (scheduler.schedulerPhase == SchedulerPhase.idle) {
-      final pending = _pendingHistorySnapshot;
-      _pendingHistorySnapshot = null;
-      if (pending != null) {
-        debugPrint('[首頁歷史] 立即套用 ${pending.length} 筆歷史資料');
-        _applyHistoryState(pending);
-      }
-      return;
-    }
-
+    // ---------- 統一於下一幀更新，確保不與彈窗動畫或建構流程衝突 ----------
     if (_historyUpdateScheduled) {
       debugPrint('[首頁歷史] 已有更新排程，覆寫等待套用的快照');
       return; // 已排隊時僅更新快照，避免重複註冊回呼
