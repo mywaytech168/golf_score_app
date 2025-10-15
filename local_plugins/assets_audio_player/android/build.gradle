@@ -3,9 +3,9 @@ version '1.0-SNAPSHOT'
 
 buildscript {
     // ---------- Kotlin 與 AGP 版本設定 ----------
-    // 升級至 2.0.21 以支援 share_plus 等依賴所需的 Kotlin 2.x 標準函式庫
+    // 升級至 2.2.0 以支援 share_plus 等依賴所需的最新 Kotlin 2.2.x 標準函式庫
     // 同步調整 AGP 至 8.7.0，與主專案保持一致以避免編譯器版本衝突
-    ext.kotlin_version = '2.0.21'
+    ext.kotlin_version = '2.2.0'
     repositories {
         google()
         mavenCentral()
@@ -28,7 +28,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 // ---------- 依賴解析區 ----------
-// 與主專案一致鎖定 Kotlin 標準函式庫版本，避免編譯時因 2.2.0 metadata 與編譯器版本不符
+// 與主專案一致鎖定 Kotlin 標準函式庫版本，避免編譯時發生 metadata 與編譯器版本不符
 configurations.all { config ->
     config.resolutionStrategy.eachDependency { details ->
         if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.startsWith('kotlin-')) {
