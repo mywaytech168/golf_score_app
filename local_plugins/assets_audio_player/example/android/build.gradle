@@ -1,7 +1,7 @@
 buildscript {
     // ---------- Kotlin 與 AGP 版本同步 ----------
-    // 範例專案沿用主專案的 2.2.0 / 8.7.0，避免在開發時遇到編譯器不相容
-    ext.kotlin_version = '2.2.0'
+    // 範例專案沿用主專案的 Kotlin 2.0.21 / AGP 8.7.0，避免在開發時遇到編譯器不相容
+    ext.kotlin_version = '2.0.21'
     repositories {
         google()
         mavenCentral()
