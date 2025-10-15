@@ -320,8 +320,8 @@ class _HomePageState extends State<HomePage> {
                         icon: const Icon(Icons.more_vert, color: Colors.white70),
                         color: Colors.white,
                         onSelected: (action) {
-                          // 使用 microtask 確保 PopupMenu 關閉動畫完成後再執行，避免與框架建構流程衝突
-                          Future<void>.microtask(() {
+                          // 使用 addPostFrameCallback 讓操作在下一幀進行，確保 PopupMenu 已完整關閉
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
                             switch (action) {
                               case _HistoryAction.rename:
                                 _renameHistoryEntry(entry);

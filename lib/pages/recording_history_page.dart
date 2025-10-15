@@ -518,8 +518,8 @@ class _HistoryTile extends StatelessWidget {
               tooltip: '更多操作',
               icon: const Icon(Icons.more_vert, color: Color(0xFF123B70)),
               onSelected: (action) {
-                // 透過 microtask 讓 PopupMenu 完整關閉後再執行，降低建構期間 setState 衝突機率
-                Future<void>.microtask(() {
+                // 透過 addPostFrameCallback 於下一幀處理操作，避免 PopupMenu 關閉動畫期間觸發 setState
+                WidgetsBinding.instance.addPostFrameCallback((_) {
                   switch (action) {
                     case _HistoryMenuAction.rename:
                       onRename();
