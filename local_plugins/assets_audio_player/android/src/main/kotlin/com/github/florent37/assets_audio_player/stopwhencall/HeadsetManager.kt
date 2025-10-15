@@ -88,14 +88,16 @@ class HeadsetManager(private val context: Context) {
 
 
     fun Context.hasPermissionBluetooth() : Boolean {
-        try {
+        return try {
             val packageInfo = this.packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
-            return  packageInfo.requestedPermissions.contains("android.permission.BLUETOOTH")
+            // ---------- 權限檢查 ----------
+            // requestedPermissions 可能為 null，使用安全呼叫避免拋出 NullPointerException
+            packageInfo.requestedPermissions?.contains("android.permission.BLUETOOTH") == true
         } catch (t: Throwable) {
-
+            // ---------- 例外處理 ----------
+            // 無法取得套件資訊時視同未宣告藍牙權限
+            false
         }
-
-        return false
     }
 
 }
