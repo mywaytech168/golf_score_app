@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -11,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
+import '../services/imu_data_logger.dart';
 import '../services/recording_history_storage.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
@@ -216,6 +216,8 @@ class _HomePageState extends State<HomePage> {
     final dateLabel = '${recordedAt.month.toString().padLeft(2, '0')}/${recordedAt.day.toString().padLeft(2, '0')}';
     final durationLabel = '時長 ${entry.durationSeconds} 秒';
     final modeLabel = entry.modeLabel;
+    final thumbnailPath = entry.thumbnailPath;
+    final hasThumbnail = thumbnailPath != null && thumbnailPath.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.only(right: 16),
@@ -244,28 +246,44 @@ class _HomePageState extends State<HomePage> {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
-                            begin: Alignment.bottomLeft,
-                            end: Alignment.topRight,
-                          ),
-                        ),
-                        child: const Align(
-                          alignment: Alignment.center,
-                          child: Icon(Icons.play_circle_fill, size: 46, color: Colors.white24),
-                        ),
-                      ),
+                      child: hasThumbnail
+                          ? Image.file(
+                              File(thumbnailPath),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) {
+                                return DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
+                                      begin: Alignment.bottomLeft,
+                                      end: Alignment.topRight,
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
+                                  begin: Alignment.bottomLeft,
+                                  end: Alignment.topRight,
+                                ),
+                              ),
+                            ),
                     ),
                     Positioned.fill(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [Colors.black.withOpacity(0.55), Colors.transparent],
+                            colors: [Colors.black.withOpacity(0.65), Colors.transparent],
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                           ),
+                        ),
+                        child: const Align(
+                          alignment: Alignment.center,
+                          child: Icon(Icons.play_circle_fill, size: 46, color: Colors.white24),
                         ),
                       ),
                     ),
@@ -360,15 +378,56 @@ class _HomePageState extends State<HomePage> {
   /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
   Future<void> _loadInitialHistory() async {
     final entries = await RecordingHistoryStorage.instance.loadHistory();
+    final regenerated = await _ensureThumbnails(entries);
+    final finalEntries = regenerated ?? entries;
+
     if (!mounted) return;
     setState(() {
       _recordingHistory
         ..clear()
-        ..addAll(entries);
+        ..addAll(finalEntries);
       _isHistoryLoading = false;
-      _practiceCount = entries.length;
+      _practiceCount = finalEntries.length;
     });
+
+    if (regenerated != null) {
+      unawaited(RecordingHistoryStorage.instance.saveHistory(finalEntries));
+    }
+
     unawaited(_refreshDashboardMetrics());
+  }
+
+  /// 確保每筆紀錄皆擁有縮圖，必要時重新產生並回傳更新後的清單
+  Future<List<RecordingHistoryEntry>?> _ensureThumbnails(
+    List<RecordingHistoryEntry> entries,
+  ) async {
+    if (entries.isEmpty) {
+      return null; // 無資料時直接返回
+    }
+
+    final updated = <RecordingHistoryEntry>[];
+    var hasChanges = false;
+
+    for (final entry in entries) {
+      var thumbnailPath = entry.thumbnailPath;
+      final needsGenerate = thumbnailPath == null ||
+          thumbnailPath.isEmpty ||
+          !(await File(thumbnailPath).exists());
+
+      if (needsGenerate) {
+        thumbnailPath = await ImuDataLogger.instance.ensureThumbnailForVideo(
+          entry.filePath,
+        );
+      }
+
+      if (thumbnailPath != entry.thumbnailPath) {
+        hasChanges = true;
+      }
+
+      updated.add(entry.copyWith(thumbnailPath: thumbnailPath));
+    }
+
+    return hasChanges ? updated : null;
   }
 
   /// 刪除指定的歷史紀錄，並詢問是否同步移除實體檔案
@@ -600,6 +659,18 @@ class _HomePageState extends State<HomePage> {
       // 保持靜默，避免 IO 例外影響主流程
     }
 
+    final thumbnailPath = entry.thumbnailPath;
+    if (thumbnailPath != null && thumbnailPath.isNotEmpty) {
+      try {
+        final thumbFile = File(thumbnailPath);
+        if (await thumbFile.exists()) {
+          await thumbFile.delete();
+        }
+      } catch (_) {
+        // 縮圖刪除失敗時同樣忽略
+      }
+    }
+
     for (final path in entry.imuCsvPaths.values) {
       if (path.isEmpty) continue;
       try {
@@ -662,7 +733,13 @@ class _HomePageState extends State<HomePage> {
 
   /// 接收錄影頁回傳的歷史紀錄，統一排程更新首頁資料來源
   void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
-    _scheduleHistoryUpdate(entries);
+    unawaited(_prepareHistoryUpdate(entries));
+  }
+
+  /// 先確保縮圖完整再排程更新，避免畫面顯示灰階背景
+  Future<void> _prepareHistoryUpdate(List<RecordingHistoryEntry> entries) async {
+    final regenerated = await _ensureThumbnails(entries);
+    _scheduleHistoryUpdate(regenerated ?? entries);
   }
 
   /// 排程於安全時機更新錄影紀錄，避免在彈窗收合或建構期間直接呼叫 setState

@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
 /// IMU 原始資料紀錄器：集中管理多裝置的 CSV 寫入流程，確保影片與感測資料對應。
 class ImuDataLogger {
@@ -162,6 +164,36 @@ class ImuDataLogger {
     final targetFile = File(targetPath);
     await sourceFile.copy(targetFile.path);
     return targetFile.path;
+  }
+
+  /// 確保指定影片存在縮圖，若缺少則產生一張 JPEG 圖片供首頁顯示。
+  Future<String?> ensureThumbnailForVideo(
+    String videoPath, {
+    String? baseName,
+  }) async {
+    try {
+      final directory = await _ensureStorageDirectory();
+      final resolvedBaseName = baseName ?? p.basenameWithoutExtension(videoPath);
+      final thumbnailPath = p.join(directory.path, '${resolvedBaseName}_thumb.jpg');
+      final file = File(thumbnailPath);
+
+      if (await file.exists() && await file.length() > 0) {
+        return thumbnailPath;
+      }
+
+      final generatedPath = await VideoThumbnail.thumbnailFile(
+        video: videoPath,
+        thumbnailPath: thumbnailPath,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 480,
+        quality: 75,
+      );
+
+      return generatedPath;
+    } catch (error) {
+      debugPrint('⚠️ 產生影片縮圖失敗：$error');
+      return null;
+    }
   }
 
   /// 判斷目前是否仍有尚未完成的 CSV 寫入流程。

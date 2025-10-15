@@ -24,6 +24,9 @@ class RecordingHistoryEntry {
   /// 對應本輪錄影的 IMU 原始資料 CSV 清單（deviceId -> 路徑）
   final Map<String, String> imuCsvPaths;
 
+  /// 影片縮圖的完整路徑，供首頁與歷史頁顯示預覽畫面
+  final String? thumbnailPath;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -32,6 +35,7 @@ class RecordingHistoryEntry {
     required this.imuConnected,
     this.customName,
     this.imuCsvPaths = const {},
+    this.thumbnailPath,
   });
 
   /// 建立更新後的新實例，方便調整時長或其他欄位
@@ -43,6 +47,7 @@ class RecordingHistoryEntry {
     bool? imuConnected,
     String? customName,
     Map<String, String>? imuCsvPaths,
+    String? thumbnailPath,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -52,6 +57,7 @@ class RecordingHistoryEntry {
       imuConnected: imuConnected ?? this.imuConnected,
       customName: customName ?? this.customName,
       imuCsvPaths: imuCsvPaths ?? this.imuCsvPaths,
+      thumbnailPath: thumbnailPath ?? this.thumbnailPath,
     );
   }
 
@@ -91,6 +97,7 @@ class RecordingHistoryEntry {
       'imuConnected': imuConnected,
       'customName': customName,
       'imuCsvPaths': imuCsvPaths,
+      'thumbnailPath': thumbnailPath,
     };
   }
 
@@ -105,6 +112,8 @@ class RecordingHistoryEntry {
       });
     }
 
+    final rawThumbnail = (json['thumbnailPath'] as String?)?.trim();
+
     return RecordingHistoryEntry(
       filePath: (json['filePath'] as String?) ?? '',
       roundIndex: (json['roundIndex'] as int?) ?? 1,
@@ -114,6 +123,8 @@ class RecordingHistoryEntry {
       imuConnected: (json['imuConnected'] as bool?) ?? false,
       customName: (json['customName'] as String?) ?? '',
       imuCsvPaths: parsedCsv,
+      thumbnailPath:
+          rawThumbnail == null || rawThumbnail.isEmpty ? null : rawThumbnail,
     );
   }
 }

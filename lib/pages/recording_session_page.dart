@@ -473,6 +473,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         sourcePath: videoFile.path,
         baseName: baseName,
       );
+      final thumbnailPath = await ImuDataLogger.instance
+          .ensureThumbnailForVideo(savedVideoPath, baseName: baseName);
       final csvPaths = ImuDataLogger.instance.hasActiveRound
           ? await ImuDataLogger.instance.finishRoundLogging()
           : <String, String>{};
@@ -484,6 +486,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         durationSeconds: widget.durationSeconds,
         imuConnected: widget.isImuConnected,
         imuCsvPaths: csvPaths,
+        thumbnailPath: thumbnailPath,
       );
 
       if (mounted) {

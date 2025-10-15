@@ -294,6 +294,18 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       // 失敗時忽略，避免打斷流程
     }
 
+    final thumbnailPath = entry.thumbnailPath;
+    if (thumbnailPath != null && thumbnailPath.isNotEmpty) {
+      try {
+        final thumbFile = File(thumbnailPath);
+        if (await thumbFile.exists()) {
+          await thumbFile.delete();
+        }
+      } catch (_) {
+        // 縮圖刪除失敗無須打斷主流程
+      }
+    }
+
     for (final path in entry.imuCsvPaths.values) {
       if (path.isEmpty) continue;
       try {
