@@ -83,7 +83,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   /// 顯示輸入框調整秒數並更新記錄
   Future<void> _editEntryDuration(RecordingHistoryEntry entry) async {
     debugPrint('[歷史頁] 準備調整影片時長：${entry.fileName} 當前秒數=${entry.durationSeconds}');
-    final controller = TextEditingController(text: entry.durationSeconds.toString());
+    String tempValue = entry.durationSeconds.toString(); // 暫存輸入內容，避免控制器重複使用
     final formKey = GlobalKey<FormState>();
     final newDuration = await showDialog<int>(
       context: context,
@@ -94,13 +94,14 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             key: formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: TextFormField(
-              controller: controller,
+              initialValue: tempValue,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(
                 labelText: '秒數',
                 helperText: '輸入影片實際秒數（正整數）',
               ),
+              onChanged: (value) => tempValue = value,
               validator: (value) {
                 final trimmed = value?.trim() ?? '';
                 final parsed = int.tryParse(trimmed);
@@ -122,7 +123,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                 if (!isValid) {
                   return;
                 }
-                final parsed = int.parse(controller.text.trim());
+                final parsed = int.parse(tempValue.trim());
                 Navigator.of(dialogContext).pop(parsed);
               },
               child: const Text('儲存'),
@@ -131,7 +132,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         );
       },
     );
-    controller.dispose();
 
     if (!mounted || newDuration == null) {
       debugPrint('[歷史頁] 調整時長流程取消或頁面已卸載');
@@ -171,7 +171,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         ? entry.customName!.trim()
         : entry.displayTitle;
     debugPrint('[歷史頁] 準備重新命名影片：${entry.fileName} 初始名稱=$initialText');
-    final controller = TextEditingController(text: initialText);
+    String tempName = initialText; // 暫存輸入內容，避免控制器釋放後仍被引用
     final formKey = GlobalKey<FormState>();
     final newName = await showDialog<String>(
       context: context,
@@ -182,12 +182,13 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             key: formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: TextFormField(
-              controller: controller,
+              initialValue: initialText,
               maxLength: 40,
               decoration: const InputDecoration(
                 labelText: '影片名稱',
                 helperText: '可留空以恢復預設名稱',
               ),
+              onChanged: (value) => tempName = value,
               validator: (value) {
                 final trimmed = value?.trim() ?? '';
                 if (trimmed.length > 40) {
@@ -208,7 +209,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                 if (!isValid) {
                   return;
                 }
-                Navigator.of(dialogContext).pop(controller.text.trim());
+                Navigator.of(dialogContext).pop(tempName.trim());
               },
               child: const Text('儲存'),
             ),
@@ -216,7 +217,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         );
       },
     );
-    controller.dispose();
 
     if (!mounted || newName == null) {
       debugPrint('[歷史頁] 重新命名流程取消或頁面已卸載');

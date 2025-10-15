@@ -484,7 +484,7 @@ class _HomePageState extends State<HomePage> {
     final initialText = entry.customName != null && entry.customName!.trim().isNotEmpty
         ? entry.customName!.trim()
         : entry.displayTitle;
-    final controller = TextEditingController(text: initialText);
+    String tempName = initialText; // 暫存輸入內容，避免 TextEditingController 釋放問題
     final formKey = GlobalKey<FormState>();
     debugPrint('[首頁歷史] 準備重新命名影片：${entry.fileName}'); // 紀錄流程起點
     final newName = await showDialog<String>(
@@ -496,12 +496,13 @@ class _HomePageState extends State<HomePage> {
             key: formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: TextFormField(
-              controller: controller,
+              initialValue: initialText,
               maxLength: 40,
               decoration: const InputDecoration(
                 labelText: '影片名稱',
                 helperText: '可留空以恢復預設名稱',
               ),
+              onChanged: (value) => tempName = value,
               validator: (value) {
                 final trimmed = value?.trim() ?? '';
                 if (trimmed.length > 40) {
@@ -522,7 +523,7 @@ class _HomePageState extends State<HomePage> {
                 if (!isValid) {
                   return; // 驗證失敗時不關閉視窗
                 }
-                Navigator.of(dialogContext).pop(controller.text.trim());
+                Navigator.of(dialogContext).pop(tempName.trim());
               },
               child: const Text('儲存'),
             ),
@@ -530,7 +531,6 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
-    controller.dispose();
 
     if (!mounted || newName == null) {
       debugPrint('[首頁歷史] 重新命名流程取消或頁面已卸載');
@@ -572,7 +572,7 @@ class _HomePageState extends State<HomePage> {
   /// 顯示秒數輸入框，更新影片時長資訊
   Future<void> _editHistoryDuration(RecordingHistoryEntry entry) async {
     debugPrint('[首頁歷史] 準備調整影片時長：${entry.fileName} 當前秒數=${entry.durationSeconds}');
-    final controller = TextEditingController(text: entry.durationSeconds.toString());
+    String tempValue = entry.durationSeconds.toString(); // 以字串暫存輸入內容
     final formKey = GlobalKey<FormState>();
     final newDuration = await showDialog<int>(
       context: context,
@@ -583,13 +583,14 @@ class _HomePageState extends State<HomePage> {
             key: formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: TextFormField(
-              controller: controller,
+              initialValue: tempValue,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(
                 labelText: '秒數',
                 helperText: '輸入影片實際秒數（正整數）',
               ),
+              onChanged: (value) => tempValue = value,
               validator: (value) {
                 final trimmed = value?.trim() ?? '';
                 final parsed = int.tryParse(trimmed);
@@ -611,7 +612,7 @@ class _HomePageState extends State<HomePage> {
                 if (!isValid) {
                   return; // 驗證失敗時不關閉視窗
                 }
-                final parsed = int.parse(controller.text.trim());
+                final parsed = int.parse(tempValue.trim());
                 Navigator.of(dialogContext).pop(parsed);
               },
               child: const Text('儲存'),
@@ -620,7 +621,6 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
-    controller.dispose();
 
     if (!mounted || newDuration == null) {
       debugPrint('[首頁歷史] 調整時長流程取消或頁面已卸載');
