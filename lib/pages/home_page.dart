@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -753,7 +754,19 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    final scheduler = SchedulerBinding.instance;
     _pendingHistorySnapshot = List<RecordingHistoryEntry>.from(entries);
+
+    // ---------- 若目前為 idle 階段即可立即套用，避免排隊產生錯誤 ----------
+    if (scheduler.schedulerPhase == SchedulerPhase.idle) {
+      final pending = _pendingHistorySnapshot;
+      _pendingHistorySnapshot = null;
+      if (pending != null) {
+        debugPrint('[首頁歷史] 立即套用 ${pending.length} 筆歷史資料');
+        _applyHistoryState(pending);
+      }
+      return;
+    }
 
     if (_historyUpdateScheduled) {
       debugPrint('[首頁歷史] 已有更新排程，覆寫等待套用的快照');
@@ -761,7 +774,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     _historyUpdateScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    scheduler.addPostFrameCallback((_) {
       _historyUpdateScheduled = false;
       final pending = _pendingHistorySnapshot;
       _pendingHistorySnapshot = null;

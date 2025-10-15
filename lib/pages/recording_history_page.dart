@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
@@ -266,13 +267,20 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 若頁面已卸載則不做任何事
     }
 
+    final scheduler = SchedulerBinding.instance;
+    if (scheduler.schedulerPhase == SchedulerPhase.idle) {
+      debugPrint('[歷史頁] 立即重繪列表');
+      setState(() {});
+      return;
+    }
+
     if (_rebuildScheduled) {
       debugPrint('[歷史頁] 已排程重繪，略過重複請求');
       return; // 若已有排程則等待既有的回呼執行
     }
 
     _rebuildScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    scheduler.addPostFrameCallback((_) {
       _rebuildScheduled = false;
       if (!mounted) {
         debugPrint('[歷史頁] 下一幀執行時頁面已卸載，取消重繪');
