@@ -41,9 +41,16 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
+        <key>CADisableMinimumFrameDurationOnPhone</key>
+        <true/>
+        <key>UIApplicationSupportsIndirectInputEvents</key>
+        <true/>
+        <!-- 宣告藍牙與定位用途說明，確保 iOS 顯示授權提示與設定頁項目 -->
+        <key>NSBluetoothAlwaysUsageDescription</key>
+        <string>需要藍牙權限以搜尋並連線 IMU 感測裝置。</string>
+        <key>NSBluetoothPeripheralUsageDescription</key>
+        <string>需要藍牙權限以維持與 IMU 的穩定連線與資料交換。</string>
+        <key>NSLocationWhenInUseUsageDescription</key>
+        <string>需要定位權限以偵測附近的藍牙 IMU 設備並完成配對。</string>
 </dict>
 </plist>

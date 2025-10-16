@@ -35,6 +35,9 @@ dependencies:
   permission_handler: ^12.0.1
   file_picker: ^10.2.0
   video_player: ^2.7.0
+  flutter_blue_plus: ^1.32.5
+  path_provider: ^2.1.1
+  share_plus: ^7.2.1
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3
@@ -65,6 +68,9 @@ dependency_overrides:
     path: flutter_ignore_plugin/file_picker_linux
   file_picker_windows:
     path: flutter_ignore_plugin/file_picker_windows
+  # ---------- 指定舊版 package_info_plus ----------
+  # share_plus 目前引入 9.x 版且需要 Kotlin 2.2，為避免與專案降版衝突，強制改用 8.0.2 仍可提供版本資訊功能
+  package_info_plus: 8.0.2
 
 
 # The following section is specific to Flutter packages.
