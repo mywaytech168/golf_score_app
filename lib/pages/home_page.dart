@@ -14,6 +14,7 @@ import '../services/imu_data_logger.dart';
 import '../services/recording_history_storage.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
+import 'profile_edit_page.dart';
 
 /// 錄影卡片支援的操作種類
 enum _HistoryAction { rename, editDuration, delete }
@@ -43,6 +44,7 @@ class _HomePageState extends State<HomePage> {
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
+  String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
 
   @override
   void initState() {
@@ -200,6 +202,31 @@ class _HomePageState extends State<HomePage> {
           Text(subTitle, style: const TextStyle(fontSize: 13, color: Color(0xFF1E1E1E))),
         ],
       ),
+    );
+  }
+
+  /// 開啟個人資訊編輯頁，並在儲存後更新首頁顯示資訊
+  Future<void> _openProfileEditPage() async {
+    final result = await Navigator.of(context).push<ProfileEditResult>(
+      MaterialPageRoute(
+        builder: (_) => ProfileEditPage(
+          initialDisplayName: _displayName,
+          initialEmail: widget.userEmail,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) {
+      return; // 使用者取消或頁面已卸載時不處理回傳資料
+    }
+
+    setState(() {
+      _displayName = result.displayName; // 將最新暱稱同步到標題列
+    });
+
+    // 顯示提示訊息，告知使用者更新已生效
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('個人資訊已更新')),
     );
   }
 
@@ -979,7 +1006,7 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'TekSwing',
+                  _displayName,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF0B2A2E),
@@ -994,7 +1021,24 @@ class _HomePageState extends State<HomePage> {
             const Spacer(),
             IconButton(
               onPressed: () {},
+              tooltip: '通知中心',
               icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0B2A2E)),
+            ),
+            const SizedBox(width: 12),
+            InkWell(
+              onTap: _openProfileEditPage,
+              borderRadius: BorderRadius.circular(22),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE6F4EA),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: const Color(0xFF1E8E5A)),
+                ),
+                alignment: Alignment.center,
+                child: const Icon(Icons.person_outline, color: Color(0xFF1E8E5A)),
+              ),
             ),
           ],
         ),
