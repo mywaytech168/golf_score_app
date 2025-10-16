@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 /// 個人資訊編輯結果模型，用於回傳最新填寫內容
@@ -6,12 +9,16 @@ class ProfileEditResult {
   final String email; // 電子郵件
   final String phone; // 聯絡電話
   final String handicap; // 差點資訊
+  final String? avatarPath; // 頭像圖檔位置，若為空代表維持原狀
+  final bool removeAvatar; // 是否清除頭像，true 時回到預設圖示
 
   ProfileEditResult({
     required this.displayName,
     required this.email,
     required this.phone,
     required this.handicap,
+    required this.avatarPath,
+    required this.removeAvatar,
   });
 }
 
@@ -19,11 +26,13 @@ class ProfileEditResult {
 class ProfileEditPage extends StatefulWidget {
   final String initialDisplayName; // 初始暱稱，用於預先填入表單
   final String initialEmail; // 初始電子郵件，與登入信箱同步
+  final String? initialAvatarPath; // 初始頭像位置，方便重複編輯時保留
 
   const ProfileEditPage({
     super.key,
     required this.initialDisplayName,
     required this.initialEmail,
+    this.initialAvatarPath,
   });
 
   @override
@@ -36,6 +45,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   late final TextEditingController _emailController; // 電子郵件輸入控制器
   final TextEditingController _phoneController = TextEditingController(); // 聯絡電話控制器
   final TextEditingController _handicapController = TextEditingController(); // 差點控制器
+  String? _avatarPath; // 當前選擇的頭像檔案路徑
+  bool _removeAvatar = false; // 記錄是否使用者要求清除頭像
 
   @override
   void initState() {
@@ -44,6 +55,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
     // 將外部傳入的資料填入控制器，確保使用者進入頁面時即看到目前設定
     _displayNameController = TextEditingController(text: widget.initialDisplayName);
     _emailController = TextEditingController(text: widget.initialEmail);
+    _avatarPath = widget.initialAvatarPath; // 將先前設定的頭像同步到表單狀態
   }
 
   @override
@@ -69,10 +81,93 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       email: _emailController.text.trim(),
       phone: _phoneController.text.trim(),
       handicap: _handicapController.text.trim(),
+      avatarPath: _avatarPath,
+      removeAvatar: _removeAvatar,
     );
 
     // 回到上一頁同時夾帶資料，供首頁更新顯示或後續擴充 API 使用
     Navigator.of(context).pop(result);
+  }
+
+  /// 觸發檔案選擇，讓使用者可以挑選或更換頭像照片
+  Future<void> _handlePickAvatar() async {
+    // 使用 file_picker 支援多平台圖片挑選，並限制為單張圖片
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+      withData: false,
+    );
+
+    if (result == null || result.files.isEmpty) {
+      return; // 使用者取消選擇時不更新狀態
+    }
+
+    final pickedPath = result.files.single.path;
+    if (pickedPath == null) {
+      return; // 某些平台僅提供雲端路徑時需額外處理，暫時忽略
+    }
+
+    setState(() {
+      _avatarPath = pickedPath; // 儲存最新頭像位置，供預覽與回傳
+      _removeAvatar = false; // 只要挑選新圖片即視為使用者不想清除
+    });
+  }
+
+  /// 清除目前的頭像設定，恢復為預設圖示
+  void _handleRemoveAvatar() {
+    setState(() {
+      _avatarPath = null; // 將狀態設為空即可在首頁顯示預設圖示
+      _removeAvatar = true; // 標記清除狀態，方便上一頁調整顯示
+    });
+  }
+
+  /// 建立頭像預覽區塊，包含目前圖片、覆蓋提示與操作按鈕
+  Widget _buildAvatarSection() {
+    final hasAvatar = _avatarPath != null && File(_avatarPath!).existsSync();
+
+    return Column(
+      children: [
+        Stack(
+          alignment: Alignment.bottomRight,
+          children: [
+            Container(
+              width: 108,
+              height: 108,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE6F4EA),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: const Color(0xFF1E8E5A), width: 2),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: hasAvatar
+                  ? Image.file(
+                      File(_avatarPath!),
+                      fit: BoxFit.cover,
+                    )
+                  : const Icon(Icons.person, size: 56, color: Color(0xFF1E8E5A)),
+            ),
+            Positioned(
+              bottom: 6,
+              right: 6,
+              child: FloatingActionButton.small(
+                heroTag: 'avatarPicker',
+                onPressed: _handlePickAvatar,
+                backgroundColor: const Color(0xFF1E8E5A),
+                child: const Icon(Icons.edit, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const Text('設定個人頭像讓教練更容易識別', style: TextStyle(color: Color(0xFF6E7B87))),
+        if (hasAvatar)
+          TextButton.icon(
+            onPressed: _handleRemoveAvatar,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('移除頭像'),
+          ),
+      ],
+    );
   }
 
   @override
@@ -88,6 +183,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
+              _buildAvatarSection(),
+              const SizedBox(height: 24),
               const Text(
                 '調整個人資訊以獲得更精準的揮桿分析，完成後記得儲存。',
                 style: TextStyle(color: Color(0xFF6E7B87)),

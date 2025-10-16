@@ -45,6 +45,7 @@ class _HomePageState extends State<HomePage> {
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
   String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
+  String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
 
   @override
   void initState() {
@@ -212,6 +213,7 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => ProfileEditPage(
           initialDisplayName: _displayName,
           initialEmail: widget.userEmail,
+          initialAvatarPath: _avatarPath,
         ),
       ),
     );
@@ -222,6 +224,11 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       _displayName = result.displayName; // 將最新暱稱同步到標題列
+      if (result.removeAvatar) {
+        _avatarPath = null; // 使用者明確清除頭像時改回預設
+      } else if (result.avatarPath != null) {
+        _avatarPath = result.avatarPath; // 若挑選新圖則直接覆蓋
+      }
     });
 
     // 顯示提示訊息，告知使用者更新已生效
@@ -1036,8 +1043,22 @@ class _HomePageState extends State<HomePage> {
                   borderRadius: BorderRadius.circular(22),
                   border: Border.all(color: const Color(0xFF1E8E5A)),
                 ),
+                clipBehavior: Clip.antiAlias,
                 alignment: Alignment.center,
-                child: const Icon(Icons.person_outline, color: Color(0xFF1E8E5A)),
+                child: Builder(
+                  builder: (context) {
+                    if (_avatarPath != null) {
+                      final avatarFile = File(_avatarPath!);
+                      if (avatarFile.existsSync()) {
+                        return Image.file(
+                          avatarFile,
+                          fit: BoxFit.cover,
+                        );
+                      }
+                    }
+                    return const Icon(Icons.person_outline, color: Color(0xFF1E8E5A));
+                  },
+                ),
               ),
             ),
           ],
