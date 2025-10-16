@@ -2,8 +2,11 @@ import 'dart:io'; // 判斷平台以動態決定權限清單
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 捕捉平台層級錯誤以便顯示友善訊息
+import 'package:google_sign_in/google_sign_in.dart'; // 引入 Google 登入套件以支援第三方登入
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
 import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
+import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // 引入 Apple ID 登入套件以支援蘋果生態圈
 
 import 'home_page.dart';
 
@@ -30,6 +33,8 @@ class _LoginPageState extends State<LoginPage> {
   bool _hasRequestedInitialPermissions = false; // 避免重複觸發首次權限請求
   late final Map<Permission, String> _blePermissions; // 依照平台動態產生的權限顯示名稱
   Map<Permission, PermissionStatus> _permissionStatuses = {}; // 儲存各項權限授權狀態
+  bool _isGoogleSigningIn = false; // 控制 Google 登入的載入狀態以避免重複觸發
+  bool _isAppleSigningIn = false; // 控制 Apple ID 登入的載入狀態以避免重複觸發
 
   @override
   void initState() {
@@ -90,14 +95,7 @@ class _LoginPageState extends State<LoginPage> {
     await _persistRememberedCredentials(); // 根據記住我設定保存或清除登入資訊
 
     // 權限與驗證皆通過後才導向首頁並帶入鏡頭資訊
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => HomePage(
-          userEmail: _emailController.text,
-          cameras: widget.cameras,
-        ),
-      ),
-    );
+    await _navigateToHome(_emailController.text); // 透過共用方法導向首頁並帶入信箱
   }
 
   /// 載入記住我狀態與帳號密碼，協助使用者快速登入
@@ -134,6 +132,126 @@ class _LoginPageState extends State<LoginPage> {
     await prefs.setBool(_rememberMeKey, false);
     await prefs.remove(_rememberedEmailKey);
     await prefs.remove(_rememberedPasswordKey);
+  }
+
+  /// 以 Google 登入 TekSwing，整合第三方帳戶並統一權限流程
+  Future<void> _handleGoogleLogin() async {
+    if (_isGoogleSigningIn) {
+      return; // 若已有請求進行中則略過避免重複觸發
+    }
+
+    setState(() {
+      _isGoogleSigningIn = true;
+    });
+
+    try {
+      final googleSignIn = GoogleSignIn(scopes: const ['email']); // 只需取得信箱資訊即可識別使用者
+      final account = await googleSignIn.signIn();
+
+      if (account == null) {
+        _showLoginResultSnackBar('已取消 Google 登入流程');
+        return;
+      }
+
+      final permissionsGranted = await _ensureBlePermissions(); // 社群登入仍需裝置權限才能使用核心功能
+      if (!mounted || !permissionsGranted) {
+        return;
+      }
+
+      await _navigateToHome(account.email);
+      _showLoginResultSnackBar('Google 登入成功，歡迎回來！');
+    } on PlatformException catch (error) {
+      _showLoginResultSnackBar('Google 登入失敗：${error.message ?? '請稍後再試'}', isError: true);
+    } catch (_) {
+      _showLoginResultSnackBar('Google 登入失敗，請稍後再試。', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGoogleSigningIn = false;
+        });
+      }
+    }
+  }
+
+  /// 以 Apple ID 登入 TekSwing，支援蘋果裝置快速登入體驗
+  Future<void> _handleAppleLogin() async {
+    if (_isAppleSigningIn) {
+      return; // 當前已有請求進行中則不重複觸發
+    }
+
+    if (!Platform.isIOS && !Platform.isMacOS) {
+      _showLoginResultSnackBar('Apple ID 登入僅支援 iOS 或 macOS 裝置。', isError: true);
+      return;
+    }
+
+    setState(() {
+      _isAppleSigningIn = true;
+    });
+
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+
+      final email = credential.email ?? '${credential.userIdentifier ?? 'apple_user'}@appleid.apple.com';
+
+      final permissionsGranted = await _ensureBlePermissions();
+      if (!mounted || !permissionsGranted) {
+        return;
+      }
+
+      await _navigateToHome(email);
+      _showLoginResultSnackBar('Apple ID 登入成功，歡迎回來！');
+    } on SignInWithAppleAuthorizationException catch (error) {
+      if (error.code == AuthorizationErrorCode.canceled) {
+        _showLoginResultSnackBar('已取消 Apple ID 登入流程');
+        return;
+      }
+      _showLoginResultSnackBar('Apple ID 登入失敗：${error.message}', isError: true);
+    } on PlatformException catch (error) {
+      _showLoginResultSnackBar('Apple ID 登入失敗：${error.message ?? '請稍後再試'}', isError: true);
+    } catch (_) {
+      _showLoginResultSnackBar('Apple ID 登入失敗，請稍後再試。', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAppleSigningIn = false;
+        });
+      }
+    }
+  }
+
+  /// 顯示登入結果的提示訊息，讓使用者瞭解目前狀態
+  void _showLoginResultSnackBar(String message, {bool isError = false}) {
+    if (!mounted) {
+      return; // 當前頁面已卸載就不顯示提示
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.redAccent : const Color(0xFF1E8E5A),
+      ),
+    );
+  }
+
+  /// 共用的導向首頁流程，集中管理導航邏輯
+  Future<void> _navigateToHome(String email) async {
+    if (!mounted) {
+      return; // 確認組件仍存在以避免 Navigator 錯誤
+    }
+
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => HomePage(
+          userEmail: email,
+          cameras: widget.cameras,
+        ),
+      ),
+    );
   }
 
   /// 使用者切換記住我選項時立即同步本地儲存，避免殘留敏感資訊
@@ -429,7 +547,96 @@ class _LoginPageState extends State<LoginPage> {
                               child: const Text('登入 TekSwing'),
                             ),
                           ),
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: Divider(color: Color(0xFFE0E0E0)),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                child: Text(
+                                  '或使用社群帳號快速登入',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: const Color(0xFF5F6368),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const Expanded(
+                                child: Divider(color: Color(0xFFE0E0E0)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              onPressed: _isGoogleSigningIn ? null : _handleGoogleLogin,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                foregroundColor: const Color(0xFFDB4437),
+                                side: const BorderSide(color: Color(0xFFDB4437)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_isGoogleSigningIn)
+                                    const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Color(0xFFDB4437),
+                                      ),
+                                    )
+                                  else
+                                    const Icon(Icons.g_mobiledata, size: 28),
+                                  const SizedBox(width: 8),
+                                  Text(_isGoogleSigningIn ? 'Google 登入中...' : '使用 Google 登入'),
+                                ],
+                              ),
+                            ),
+                          ),
                           const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _isAppleSigningIn ? null : _handleAppleLogin,
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                backgroundColor: Colors.black,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_isAppleSigningIn)
+                                    const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  else
+                                    const Icon(Icons.apple, size: 24),
+                                  const SizedBox(width: 8),
+                                  Text(_isAppleSigningIn ? 'Apple 登入中...' : '使用 Apple ID 登入'),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton(

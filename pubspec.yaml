@@ -39,6 +39,8 @@ dependencies:
   path_provider: ^2.1.1
   share_plus: ^7.2.1
   shared_preferences: ^2.3.2
+  google_sign_in: ^6.2.1
+  sign_in_with_apple: ^5.0.0
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3
