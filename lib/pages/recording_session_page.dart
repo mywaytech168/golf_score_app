@@ -12,6 +12,9 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
@@ -32,6 +35,7 @@ class RecordingSessionPage extends StatefulWidget {
   final int durationSeconds; // 每輪錄影秒數
   final bool autoStartOnReady; // 由 IMU 按鈕開啟時自動啟動錄影
   final Stream<void> imuButtonStream; // 右手腕 IMU 按鈕事件來源
+  final String? userAvatarPath; // 首頁帶入的個人頭像路徑，供分享影片時疊加
 
   const RecordingSessionPage({
     super.key,
@@ -41,6 +45,7 @@ class RecordingSessionPage extends StatefulWidget {
     required this.durationSeconds,
     required this.autoStartOnReady,
     required this.imuButtonStream,
+    this.userAvatarPath,
   });
 
   @override
@@ -639,7 +644,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (!mounted) return;
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: filePath)),
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+          videoPath: filePath,
+          avatarPath: widget.userAvatarPath,
+        ),
+      ),
     );
   }
 
@@ -1281,7 +1291,13 @@ class _StanceGuidePainter extends CustomPainter {
 /// 影片播放頁面，提供錄製檔案的立即檢視
 class VideoPlayerPage extends StatefulWidget {
   final String videoPath; // 影片檔案路徑
-  const VideoPlayerPage({super.key, required this.videoPath});
+  final String? avatarPath; // 首頁傳遞的個人頭像，用於決定是否可疊加
+
+  const VideoPlayerPage({
+    super.key,
+    required this.videoPath,
+    this.avatarPath,
+  });
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -1290,51 +1306,72 @@ class VideoPlayerPage extends StatefulWidget {
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   late VideoPlayerController _videoController;
   static const String _shareMessage = '分享我的 TekSwing 揮桿影片'; // 分享時的預設文案
+  final TextEditingController _captionController = TextEditingController(); // 影片下方說明輸入
+  final List<String> _generatedTempFiles = []; // 記錄 ffmpeg 產出的暫存檔，頁面結束時統一清理
+  bool _attachAvatar = false; // 是否要在分享影片中加入個人頭像
+  bool _isProcessingShare = false; // 控制分享期間按鈕狀態，避免重複觸發
+  late final bool _avatarSelectable; // 記錄頭像檔案是否存在，可供開關判斷
 
   // ---------- 分享相關方法區 ----------
   Future<void> _shareToTarget(_ShareTarget target) async {
-    // 事前確認檔案是否存在，避免分享流程出現例外
-    final file = File(widget.videoPath);
-    if (!await file.exists()) {
+    if (_isProcessingShare) {
+      return; // 已經在產製分享檔案，避免同時觸發造成流程衝突
+    }
+
+    setState(() => _isProcessingShare = true);
+
+    try {
+      // 事前確認檔案是否存在，避免分享流程出現例外
+      final file = File(widget.videoPath);
+      if (!await file.exists()) {
+        _showSnack('找不到影片檔案，無法分享。');
+        return;
+      }
+
+      // 若使用者選擇加入頭像或文字，先透過 ffmpeg 生成新的覆蓋影片
+      final sharePath = await _prepareShareFile();
+      if (sharePath == null) {
+        return; // ffmpeg 失敗或條件不足時直接中止
+      }
+
+      // 依目標應用程式取得對應的封裝名稱
+      final packageName = switch (target) {
+        _ShareTarget.instagram => 'com.instagram.android',
+        _ShareTarget.facebook => 'com.facebook.katana',
+        _ShareTarget.line => 'jp.naver.line.android',
+      };
+
+      bool sharedByPackage = false; // 紀錄是否已成功透過指定應用分享
+      if (Platform.isAndroid) {
+        try {
+          final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
+            'packageName': packageName,
+            'filePath': sharePath,
+            'mimeType': 'video/*',
+            'text': _shareMessage,
+          });
+          sharedByPackage = result ?? false;
+        } on PlatformException catch (error) {
+          debugPrint('[Share] Android 指定分享失敗：$error');
+        }
+      }
+
+      if (!sharedByPackage) {
+        if (mounted && Platform.isAndroid) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未找到指定社群 App，已改用系統分享選單。')),
+          );
+        }
+        await Share.shareXFiles([
+          XFile(sharePath),
+        ], text: _shareMessage);
+      }
+    } finally {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('找不到影片檔案，無法分享。')),
-        );
+        setState(() => _isProcessingShare = false);
+      } else {
+        _isProcessingShare = false;
       }
-      return;
-    }
-
-    // 依目標應用程式取得對應的封裝名稱
-    final packageName = switch (target) {
-      _ShareTarget.instagram => 'com.instagram.android',
-      _ShareTarget.facebook => 'com.facebook.katana',
-      _ShareTarget.line => 'jp.naver.line.android',
-    };
-
-    bool sharedByPackage = false; // 紀錄是否已成功透過指定應用分享
-    if (Platform.isAndroid) {
-      try {
-        final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
-          'packageName': packageName,
-          'filePath': widget.videoPath,
-          'mimeType': 'video/*',
-          'text': _shareMessage,
-        });
-        sharedByPackage = result ?? false;
-      } on PlatformException catch (error) {
-        debugPrint('[Share] Android 指定分享失敗：$error');
-      }
-    }
-
-    if (!sharedByPackage) {
-      if (mounted && Platform.isAndroid) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未找到指定社群 App，已改用系統分享選單。')),
-        );
-      }
-      await Share.shareXFiles([
-        XFile(widget.videoPath),
-      ], text: _shareMessage);
     }
   }
 
@@ -1347,7 +1384,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     // 建立統一樣式的分享按鈕，維持排版一致
     return Expanded(
       child: ElevatedButton.icon(
-        onPressed: () => _shareToTarget(target),
+        onPressed: _isProcessingShare ? null : () => _shareToTarget(target),
         icon: Icon(icon),
         label: Text(label),
         style: ElevatedButton.styleFrom(
@@ -1362,6 +1399,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   @override
   void initState() {
     super.initState();
+    _avatarSelectable = widget.avatarPath != null &&
+        widget.avatarPath!.isNotEmpty &&
+        File(widget.avatarPath!).existsSync(); // 預先判斷頭像是否存在，供 UI 判斷
     _videoController = VideoPlayerController.file(File(widget.videoPath))
       ..initialize().then((_) {
         setState(() {});
@@ -1372,7 +1412,154 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   @override
   void dispose() {
     _videoController.dispose();
+    _captionController.dispose();
+    _cleanupTempFiles();
     super.dispose();
+  }
+
+  /// 統一顯示 Snackbar，確保訊息風格一致
+  void _showSnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 嘗試清除 ffmpeg 產製的暫存檔，避免長時間累積佔用空間
+  void _cleanupTempFiles() {
+    for (final path in _generatedTempFiles) {
+      try {
+        final file = File(path);
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      } catch (_) {
+        // 若刪除失敗可忽略，暫存資料夾會由系統定期清理
+      }
+    }
+    _generatedTempFiles.clear();
+  }
+
+  /// 依平台尋找可用字型，供 ffmpeg 繪製文字使用
+  String? _resolveFontFile() {
+    const candidates = [
+      '/system/fonts/NotoSansCJK-Regular.ttc',
+      '/system/fonts/NotoSans-Regular.ttf',
+      '/system/fonts/Roboto-Regular.ttf',
+      '/system/fonts/DroidSansFallback.ttf',
+      '/System/Library/Fonts/PingFang.ttc',
+      '/System/Library/Fonts/Helvetica.ttc',
+    ];
+    for (final path in candidates) {
+      final file = File(path);
+      if (file.existsSync()) {
+        return path;
+      }
+    }
+    return null;
+  }
+
+  /// 針對 drawtext 過濾器進行必要跳脫，避免特殊符號導致 ffmpeg 命令失敗
+  String _escapeDrawText(String input) {
+    return input
+        .replaceAll('\\', r'\\')
+        .replaceAll("'", r"\'")
+        .replaceAll(':', r'\:')
+        .replaceAll('%', r'\%');
+  }
+
+  /// 若使用者開啟頭像或文字選項，利用 ffmpeg 產生覆蓋後的分享檔案
+  Future<String?> _prepareShareFile() async {
+    final bool wantsAvatar = _attachAvatar;
+    final String trimmedCaption = _captionController.text.trim();
+    final bool wantsCaption = trimmedCaption.isNotEmpty;
+
+    if (!wantsAvatar && !wantsCaption) {
+      return widget.videoPath; // 無額外需求時直接沿用原始影片
+    }
+
+    File? avatarFile;
+    if (wantsAvatar) {
+      if (!_avatarSelectable || widget.avatarPath == null) {
+        _showSnack('尚未設定個人頭像，請先到個資頁上傳照片。');
+        return null;
+      }
+      avatarFile = File(widget.avatarPath!);
+      if (!avatarFile.existsSync()) {
+        _showSnack('找不到個人頭像檔案，請重新選擇。');
+        return null;
+      }
+    }
+
+    String? fontFile;
+    if (wantsCaption) {
+      fontFile = _resolveFontFile();
+      if (fontFile == null) {
+        _showSnack('裝置未提供可用字型，無法繪製文字，請取消下方文字後再試。');
+        return null;
+      }
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final outputPath = '${tempDir.path}/share_${DateTime.now().millisecondsSinceEpoch}.mp4';
+
+    final List<String> filterSegments = [];
+    String currentLabel = '[0:v]';
+
+    if (wantsAvatar && avatarFile != null) {
+      const int avatarSize = 220; // 固定頭像尺寸，確保在手機螢幕上清楚呈現
+      filterSegments.add(
+        "[1:v]scale=${avatarSize}:${avatarSize},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2),(min(W,H)/2)^2),255,0)'[avatar]",
+      );
+      filterSegments.add(
+        '$currentLabel[avatar]overlay=W-w-32:32[vavatar]',
+      );
+      currentLabel = '[vavatar]';
+    }
+
+    if (wantsCaption && fontFile != null) {
+      final escaped = _escapeDrawText(trimmedCaption);
+      filterSegments.add(
+        "$currentLabel drawtext=fontfile='${fontFile}':text='${escaped}':fontcolor=white:fontsize=36:box=1:boxcolor=0x00000088:boxborderw=16:x=(w-text_w)/2:y=h-text_h-60[vtext]",
+      );
+      currentLabel = '[vtext]';
+    }
+
+    final String filterComplex = filterSegments.join(';');
+
+    final arguments = <String>[
+      '-y',
+      '-i',
+      widget.videoPath,
+      if (wantsAvatar && avatarFile != null) ...['-i', avatarFile.path],
+      '-filter_complex',
+      filterComplex,
+      '-map',
+      currentLabel,
+      '-map',
+      '0:a?',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '20',
+      '-c:a',
+      'copy',
+      outputPath,
+    ];
+
+    final session = await FFmpegKit.executeWithArguments(arguments);
+    final returnCode = await session.getReturnCode();
+    if (!ReturnCode.isSuccess(returnCode)) {
+      final failLog = await session.getAllLogsAsString();
+      debugPrint('[Share] ffmpeg 失敗：$returnCode\n$failLog');
+      _showSnack('處理影片時發生錯誤，請稍後再試。');
+      return null;
+    }
+
+    _generatedTempFiles.add(outputPath);
+    return outputPath;
   }
 
   @override
@@ -1400,6 +1587,36 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   '分享影片',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
+                const SizedBox(height: 12),
+                SwitchListTile.adaptive(
+                  value: _attachAvatar,
+                  onChanged: !_avatarSelectable
+                      ? null
+                      : (value) {
+                          setState(() => _attachAvatar = value);
+                        },
+                  title: const Text('右上角加入我的個人頭像'),
+                  subtitle: Text(
+                    !_avatarSelectable
+                        ? '尚未設定個人頭像，請先到個人資訊頁上傳照片。'
+                        : '開啟後會以圓形頭像覆蓋在影片右上角。',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  activeColor: const Color(0xFF1E8E5A),
+                ),
+                TextField(
+                  controller: _captionController,
+                  maxLength: 50,
+                  decoration: const InputDecoration(
+                    labelText: '影片下方文字',
+                    hintText: '輸入要顯示在影片底部的描述（可留空）',
+                    counterText: '',
+                  ),
+                ),
+                if (_isProcessingShare) ...[
+                  const SizedBox(height: 8),
+                  const LinearProgressIndicator(),
+                ],
                 const SizedBox(height: 12),
                 Row(
                   children: [

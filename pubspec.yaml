@@ -40,6 +40,7 @@ dependencies:
   share_plus: ^7.2.1
   shared_preferences: ^2.3.2
   google_sign_in: ^6.2.1
+  ffmpeg_kit_flutter_full_gpl: ^6.0.3
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3

@@ -728,6 +728,7 @@ class _HomePageState extends State<HomePage> {
             cameras: widget.cameras,
             initialHistory: _recordingHistory,
             onHistoryChanged: _handleHistoryUpdated,
+            userAvatarPath: _avatarPath,
           ),
         ),
       );
@@ -836,7 +837,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openRecordingHistoryPage() async {
     final result = await Navigator.of(context).push<List<RecordingHistoryEntry>>(
       MaterialPageRoute(
-        builder: (_) => RecordingHistoryPage(entries: _recordingHistory),
+        builder: (_) => RecordingHistoryPage(
+          entries: _recordingHistory,
+          userAvatarPath: _avatarPath,
+        ),
       ),
     );
     if (result != null) {
@@ -857,7 +861,12 @@ class _HomePageState extends State<HomePage> {
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: entry.filePath)),
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+          videoPath: entry.filePath,
+          avatarPath: _avatarPath,
+        ),
+      ),
     );
   }
 
