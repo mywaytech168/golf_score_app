@@ -1,4 +1,5 @@
 import com.android.build.gradle.LibraryExtension
+import org.gradle.api.Project
 import org.gradle.api.file.Directory
 
 allprojects {
@@ -23,7 +24,7 @@ subprojects {
 // ---------- 子模組命名空間修正 ----------
 // 為避免第三方套件未設 namespace 造成 AGP 8 編譯失敗，在此補上必要設定
 subprojects {
-    afterEvaluate { subproject ->
+    afterEvaluate { subproject: Project ->
         // 僅針對 sign_in_with_apple 套件補齊 namespace，避免影響其他模組
         if (subproject.name == "sign_in_with_apple") {
             val androidExtension = subproject.extensions.findByName("android") as? LibraryExtension
