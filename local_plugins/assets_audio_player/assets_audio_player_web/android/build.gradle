@@ -2,14 +2,16 @@ group 'com.github.florent37.assets_audio_player_web'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.8.22'
+    // ---------- Kotlin 與 AGP 版本設定 ----------
+    // 使用與主專案相同的 Kotlin 2.0.21 / AGP 8.7.0 組合，避免編譯器版本不一致
+    ext.kotlin_version = '2.0.21'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.3.1'
+        classpath 'com.android.tools.build:gradle:8.7.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -24,7 +26,9 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 android {
-    compileSdkVersion 34
+    // ---------- 編譯設定 ----------
+    // 提升 compileSdk 至 36 與應用同步，確保匯入 Element 素材時不會產生 API 差異
+    compileSdkVersion 36
 
     //if (project.android.hasProperty("namespace")) {
         namespace 'com.github.florent37.assets_audio_player_web'
@@ -36,7 +40,8 @@ android {
     defaultConfig {
         minSdkVersion 16
     }
-    lintOptions {
+    lint {
+        // 停用舊版套件常見的 package 名稱警告
         disable 'InvalidPackage'
     }
     compileOptions {

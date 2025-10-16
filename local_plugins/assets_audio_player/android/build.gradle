@@ -2,14 +2,17 @@ group 'com.github.florent37.assets_audio_player'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.8.22'
+    // ---------- Kotlin 與 AGP 版本設定 ----------
+    // 為與主專案同步回退至 Kotlin 2.0.21，確保相依套件不會因 metadata 版本差異而失敗
+    // 仍維持 AGP 8.7.0 以符合 Flutter 建置需求
+    ext.kotlin_version = '2.0.21'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.3.1'
+        classpath 'com.android.tools.build:gradle:8.7.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -24,9 +27,22 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
+// ---------- 依賴解析區 ----------
+// 與主專案一致鎖定 Kotlin 標準函式庫版本，避免編譯時發生 metadata 與編譯器版本不符
+configurations.all { config ->
+    config.resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.startsWith('kotlin-')) {
+            details.useVersion(kotlin_version)
+            details.because('鎖定 Kotlin 標準函式庫版本，避免 Binary version 差異造成編譯錯誤')
+        }
+    }
+}
+
 android {
     namespace 'com.github.florent37.assets_audio_player'
-    compileSdkVersion 31
+    // ---------- 編譯設定 ----------
+    // 提升 compileSdk 至 36，與主應用程式保持一致以避免 API 相容性問題
+    compileSdkVersion 36
 
     if (project.android.hasProperty("namespace")) {
         namespace 'com.github.florent37.assets_audio_player'
@@ -39,11 +55,15 @@ android {
         multiDexEnabled true
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
-    lintOptions {
+    lint {
+        // 停用舊版打包警告，避免阻斷編譯流程
         disable 'InvalidPackage'
     }
     packagingOptions {
-        exclude "DebugProbesKt.bin"
+        resources {
+            // 排除 Kotlin 偵錯探針檔案，減少不必要的資源衝突
+            excludes += "DebugProbesKt.bin"
+        }
     }
     compileOptions {
         // 統一 Java 編譯目標版本為 11
