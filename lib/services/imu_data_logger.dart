@@ -185,6 +185,14 @@ class ImuDataLogger {
     final targetFile = File(targetPath);
 
     await sourceFile.copy(targetFile.path);
+
+    // 確保暫存拍照檔案在複製後即刻刪除，釋放儲存與避免下次讀取到舊檔案。
+    try {
+      await sourceFile.delete();
+    } catch (error) {
+      debugPrint('⚠️ 刪除暫存縮圖檔案失敗：$error');
+    }
+
     return targetFile.path;
   }
 

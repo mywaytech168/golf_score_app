@@ -482,6 +482,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       String? savedThumbnailPath;
       try {
         // ---------- 拍攝縮圖 ----------
+        // 先暫停預覽以釋放預覽緩衝區，避免持續出現 ImageReader 無法取得緩衝的警告。
+        bool needResume = false;
+        if (!controller!.value.isPreviewPaused) {
+          try {
+            await controller!.pausePreview();
+            needResume = true;
+          } catch (pauseError) {
+            debugPrint('⚠️ 暫停預覽時發生錯誤：$pauseError');
+          }
+        }
+
         // 使用 takePicture 直接捕捉預覽畫面，避免再次開啟 MediaMetadataRetriever。
         final stillImage = await controller!.takePicture();
         savedThumbnailPath = await ImuDataLogger.instance
@@ -489,8 +500,25 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           sourcePath: stillImage.path,
           baseName: baseName,
         );
+
+        // 拍照結束後恢復預覽，確保畫面持續更新。
+        if (needResume && controller!.value.isPreviewPaused) {
+          try {
+            await controller!.resumePreview();
+          } catch (resumeError) {
+            debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
+          }
+        }
       } catch (error) {
         debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
+        // 若拍照失敗，嘗試確保預覽恢復以免畫面停住。
+        if (controller != null && controller!.value.isPreviewPaused) {
+          try {
+            await controller!.resumePreview();
+          } catch (resumeError) {
+            debugPrint('⚠️ 拍照失敗後恢復預覽再度失敗：$resumeError');
+          }
+        }
       }
       final csvPaths = ImuDataLogger.instance.hasActiveRound
           ? await ImuDataLogger.instance.finishRoundLogging()
