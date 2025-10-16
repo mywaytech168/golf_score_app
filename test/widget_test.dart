@@ -1,34 +1,29 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// 基本的 Flutter Widget 測試，確認應用入口可以正常建立 UI。
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:golf_score_app/main.dart';
-
-import 'package:camera/camera.dart';
+import 'package:golf_score_app/pages/login_page.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('應用啟動後顯示登入頁', (WidgetTester tester) async {
+    // ---------- 測試前置 ----------
+    // 建立空的鏡頭清單，模擬測試環境沒有實體相機。
+    const List<CameraDescription> fakeCameras = <CameraDescription>[];
 
-    final List<CameraDescription> fakeCameras = [];
-    await tester.pumpWidget( MyApp(cameras: fakeCameras));
-    expect(find.byType(MyApp), findsOneWidget);
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // ---------- 測試步驟 ----------
+    await tester.pumpWidget(
+      const MyApp(
+        initialCameras: fakeCameras,
+        initialCameraError: null,
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // ---------- 驗證結果 ----------
+    expect(find.byType(MaterialApp), findsOneWidget);
+    expect(find.byType(LoginPage), findsOneWidget);
   });
 }
