@@ -469,17 +469,7 @@ class _HistoryTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF123B70),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                entry.roundIndex.toString(),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-            ),
+            _HistoryPreview(thumbnailPath: entry.thumbnailPath, roundIndex: entry.roundIndex),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -552,6 +542,66 @@ class _HistoryTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 縮圖元件：顯示影片預覽或替代圖示，並標示錄影輪次
+class _HistoryPreview extends StatelessWidget {
+  final String? thumbnailPath; // 影片縮圖路徑
+  final int roundIndex; // 對應的錄影輪次
+
+  const _HistoryPreview({
+    required this.thumbnailPath,
+    required this.roundIndex,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final filePath = thumbnailPath?.trim() ?? '';
+    final hasThumbnail = filePath.isNotEmpty && File(filePath).existsSync();
+
+    // 若有縮圖則顯示圖片，否則提供預設背景與圖示
+    final Widget content = hasThumbnail
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.file(
+              File(filePath),
+              width: 112,
+              height: 72,
+              fit: BoxFit.cover,
+            ),
+          )
+        : Container(
+            width: 112,
+            height: 72,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE5EBF5),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.videocam_outlined, color: Color(0xFF123B70), size: 32),
+          );
+
+    return Stack(
+      alignment: Alignment.bottomLeft,
+      children: [
+        content,
+        Positioned(
+          left: 8,
+          bottom: 8,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '第 $roundIndex 輪',
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
