@@ -1,6 +1,6 @@
 import com.android.build.gradle.LibraryExtension
-import org.gradle.api.Project
 import org.gradle.api.file.Directory
+import org.gradle.kotlin.dsl.configure
 
 allprojects {
     repositories {
@@ -24,15 +24,19 @@ subprojects {
 // ---------- 子模組命名空間修正 ----------
 // 為避免第三方套件未設 namespace 造成 AGP 8 編譯失敗，在此補上必要設定
 subprojects {
-    // 使用 Action 包裝 afterEvaluate，避免 Kotlin DSL 與 Groovy 間型別推斷不一致
-    afterEvaluate(org.gradle.api.Action { subproject ->
-        // 僅針對 sign_in_with_apple 套件補齊 namespace，避免影響其他模組
-        if (subproject.name == "sign_in_with_apple") {
-            val androidExtension = subproject.extensions.findByName("android") as? LibraryExtension
-            // 需確認為 LibraryExtension 後才能設定 namespace，確保型別安全
-            androidExtension?.namespace = "com.aboutyou.dart_packages.sign_in_with_apple"
+    // 僅針對 sign_in_with_apple 套件處理 namespace，避免誤動其他模組
+    if (name == "sign_in_with_apple") {
+        // ---------- 生命週期 ----------
+        // 透過 plugins.withId 確保在 Android Library Plugin 載入後才設定 namespace，防止存取尚未初始化的擴充
+        plugins.withId("com.android.library") {
+            // ---------- 方法區 ----------
+            // 使用 extensions.configure 取得 LibraryExtension，設定 namespace 以符合 AGP 8 要求
+            extensions.configure<LibraryExtension>("android") {
+                // 這裡直接設定套件的 namespace，確保 build.gradle 與 AndroidManifest 保持一致
+                namespace = "com.aboutyou.dart_packages.sign_in_with_apple"
+            }
         }
-    })
+    }
 }
 
 tasks.register<Delete>("clean") {
