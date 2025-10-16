@@ -6,7 +6,6 @@ import 'package:flutter/services.dart'; // 捕捉平台層級錯誤以便顯示�
 import 'package:google_sign_in/google_sign_in.dart'; // 引入 Google 登入套件以支援第三方登入
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
 import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
-import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // 引入 Apple ID 登入套件以支援蘋果生態圈
 
 import 'home_page.dart';
 
@@ -34,8 +33,6 @@ class _LoginPageState extends State<LoginPage> {
   late final Map<Permission, String> _blePermissions; // 依照平台動態產生的權限顯示名稱
   Map<Permission, PermissionStatus> _permissionStatuses = {}; // 儲存各項權限授權狀態
   bool _isGoogleSigningIn = false; // 控制 Google 登入的載入狀態以避免重複觸發
-  bool _isAppleSigningIn = false; // 控制 Apple ID 登入的載入狀態以避免重複觸發
-  bool _appleSignInSupported = false; // 記錄當前裝置是否支援 Apple ID 登入
 
   @override
   void initState() {
@@ -46,7 +43,6 @@ class _LoginPageState extends State<LoginPage> {
         permission: PermissionStatus.denied, // 初始化為未授權，確保提示卡片顯示狀態
     };
     _loadRememberedCredentials(); // 讀取記住我設定，若有資料則自動填入帳號密碼
-    _checkAppleSignInAvailability(); // 確認當前平台是否支援 Apple ID 登入，避免不必要的按鈕顯示
     // 於元件建立後立即排程權限請求，確保第一次進入登入頁面就彈出系統授權視窗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerInitialPermissionRequest();
@@ -136,32 +132,6 @@ class _LoginPageState extends State<LoginPage> {
     await prefs.remove(_rememberedPasswordKey);
   }
 
-  /// 確認目前平台是否支援 Apple ID 登入並儲存結果，以便調整 UI 與流程
-  Future<void> _checkAppleSignInAvailability() async {
-    if (!Platform.isIOS && !Platform.isMacOS) {
-      return; // 非蘋果平台直接略過檢查，維持預設的 false
-    }
-
-    try {
-      final isAvailable = await SignInWithApple.isAvailable();
-      if (!mounted) {
-        return; // 組件已卸載就不更新狀態
-      }
-
-      setState(() {
-        _appleSignInSupported = isAvailable;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _appleSignInSupported = false; // 捕捉到錯誤時一律視為不支援以避免流程崩潰
-      });
-    }
-  }
-
   /// 以 Google 登入 TekSwing，整合第三方帳戶並統一權限流程
   Future<void> _handleGoogleLogin() async {
     if (_isGoogleSigningIn) {
@@ -196,62 +166,6 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         setState(() {
           _isGoogleSigningIn = false;
-        });
-      }
-    }
-  }
-
-  /// 以 Apple ID 登入 TekSwing，支援蘋果裝置快速登入體驗
-  Future<void> _handleAppleLogin() async {
-    if (_isAppleSigningIn) {
-      return; // 當前已有請求進行中則不重複觸發
-    }
-
-    if (!Platform.isIOS && !Platform.isMacOS) {
-      _showLoginResultSnackBar('Apple ID 登入僅支援 iOS 或 macOS 裝置。', isError: true);
-      return;
-    }
-
-    if (!_appleSignInSupported) {
-      _showLoginResultSnackBar('目前裝置尚未啟用 Apple ID 登入，請確認系統設定。', isError: true);
-      return;
-    }
-
-    setState(() {
-      _isAppleSigningIn = true;
-    });
-
-    try {
-      final credential = await SignInWithApple.getAppleIDCredential(
-        scopes: const [
-          AppleIDAuthorizationScopes.email,
-          AppleIDAuthorizationScopes.fullName,
-        ],
-      );
-
-      final email = credential.email ?? '${credential.userIdentifier ?? 'apple_user'}@appleid.apple.com';
-
-      final permissionsGranted = await _ensureBlePermissions();
-      if (!mounted || !permissionsGranted) {
-        return;
-      }
-
-      await _navigateToHome(email);
-      _showLoginResultSnackBar('Apple ID 登入成功，歡迎回來！');
-    } on SignInWithAppleAuthorizationException catch (error) {
-      if (error.code == AuthorizationErrorCode.canceled) {
-        _showLoginResultSnackBar('已取消 Apple ID 登入流程');
-        return;
-      }
-      _showLoginResultSnackBar('Apple ID 登入失敗：${error.message}', isError: true);
-    } on PlatformException catch (error) {
-      _showLoginResultSnackBar('Apple ID 登入失敗：${error.message ?? '請稍後再試'}', isError: true);
-    } catch (_) {
-      _showLoginResultSnackBar('Apple ID 登入失敗，請稍後再試。', isError: true);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAppleSigningIn = false;
         });
       }
     }
@@ -602,6 +516,7 @@ class _LoginPageState extends State<LoginPage> {
                             ],
                           ),
                           const SizedBox(height: 18),
+                          // 僅保留 Google 登入按鈕，避免受未支援的 Apple 登入流程影響
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton(
@@ -635,42 +550,6 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                           ),
-                          if (_appleSignInSupported) ...[
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: _isAppleSigningIn ? null : _handleAppleLogin,
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  backgroundColor: Colors.black,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_isAppleSigningIn)
-                                      const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    else
-                                      const Icon(Icons.apple, size: 24),
-                                    const SizedBox(width: 8),
-                                    Text(_isAppleSigningIn ? 'Apple 登入中...' : '使用 Apple ID 登入'),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
                           const SizedBox(height: 18),
                           SizedBox(
                             width: double.infinity,

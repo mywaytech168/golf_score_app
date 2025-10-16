@@ -40,7 +40,6 @@ dependencies:
   share_plus: ^7.2.1
   shared_preferences: ^2.3.2
   google_sign_in: ^6.2.1
-  sign_in_with_apple: ^4.3.0 # 5.x 版在現有 Android Kotlin 組態下無法編譯，降版以維持跨平台建置
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3
