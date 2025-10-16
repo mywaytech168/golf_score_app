@@ -3,6 +3,7 @@ import 'dart:io'; // 判斷平台以動態決定權限清單
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
+import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
 
 import 'home_page.dart';
 
@@ -17,11 +18,14 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  static const String _rememberMeKey = 'login.remember_me'; // 記錄是否勾選記住我
+  static const String _rememberedEmailKey = 'login.remembered_email'; // 記錄記住我的電子郵件
+  static const String _rememberedPasswordKey = 'login.remembered_password'; // 記錄記住我的密碼
   // ---------- 狀態管理區 ----------
   final TextEditingController _emailController = TextEditingController(); // 紀錄信箱輸入內容
   final TextEditingController _passwordController = TextEditingController(); // 紀錄密碼輸入內容
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>(); // 表單驗證用 key
-  bool _rememberMe = true; // 記住使用者選項
+  bool _rememberMe = false; // 記住使用者選項，預設為關閉避免未授權情況儲存資料
   bool _isObscure = true; // 控制密碼顯示與否
   bool _hasRequestedInitialPermissions = false; // 避免重複觸發首次權限請求
   late final Map<Permission, String> _blePermissions; // 依照平台動態產生的權限顯示名稱
@@ -35,6 +39,7 @@ class _LoginPageState extends State<LoginPage> {
       for (final permission in _blePermissions.keys)
         permission: PermissionStatus.denied, // 初始化為未授權，確保提示卡片顯示狀態
     };
+    _loadRememberedCredentials(); // 讀取記住我設定，若有資料則自動填入帳號密碼
     // 於元件建立後立即排程權限請求，確保第一次進入登入頁面就彈出系統授權視窗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerInitialPermissionRequest();
@@ -82,6 +87,8 @@ class _LoginPageState extends State<LoginPage> {
       return; // 權限未完整授權時暫停導向首頁
     }
 
+    await _persistRememberedCredentials(); // 根據記住我設定保存或清除登入資訊
+
     // 權限與驗證皆通過後才導向首頁並帶入鏡頭資訊
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -91,6 +98,59 @@ class _LoginPageState extends State<LoginPage> {
         ),
       ),
     );
+  }
+
+  /// 載入記住我狀態與帳號密碼，協助使用者快速登入
+  Future<void> _loadRememberedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedRememberMe = prefs.getBool(_rememberMeKey) ?? false;
+    final savedEmail = savedRememberMe ? prefs.getString(_rememberedEmailKey) ?? '' : '';
+    final savedPassword = savedRememberMe ? prefs.getString(_rememberedPasswordKey) ?? '' : '';
+
+    if (!mounted) {
+      return; // 若頁面已卸載就不更新狀態
+    }
+
+    setState(() {
+      _rememberMe = savedRememberMe;
+      if (savedRememberMe) {
+        _emailController.text = savedEmail;
+        _passwordController.text = savedPassword;
+      }
+    });
+  }
+
+  /// 根據目前記住我選擇結果保存或清除本地帳號資訊
+  Future<void> _persistRememberedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (_rememberMe) {
+      await prefs.setBool(_rememberMeKey, true);
+      await prefs.setString(_rememberedEmailKey, _emailController.text);
+      await prefs.setString(_rememberedPasswordKey, _passwordController.text);
+      return;
+    }
+
+    await prefs.setBool(_rememberMeKey, false);
+    await prefs.remove(_rememberedEmailKey);
+    await prefs.remove(_rememberedPasswordKey);
+  }
+
+  /// 使用者切換記住我選項時立即同步本地儲存，避免殘留敏感資訊
+  Future<void> _onRememberMeChanged(bool value) async {
+    setState(() {
+      _rememberMe = value;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    if (value) {
+      await prefs.setBool(_rememberMeKey, true);
+      return;
+    }
+
+    await prefs.setBool(_rememberMeKey, false);
+    await prefs.remove(_rememberedEmailKey);
+    await prefs.remove(_rememberedPasswordKey);
   }
 
   /// 於首次登入時請求藍牙／定位權限，並在拒絕時顯示操作提示
@@ -341,7 +401,10 @@ class _LoginPageState extends State<LoginPage> {
                             children: [
                               Checkbox(
                                 value: _rememberMe,
-                                onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                                onChanged: (value) {
+                                  final shouldRemember = value ?? false;
+                                  _onRememberMeChanged(shouldRemember); // 同步記住我設定並處理本地儲存
+                                },
                               ),
                               const Text('記住我'),
                               const Spacer(),
