@@ -1575,7 +1575,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       currentLabel = '[vtext]';
     }
 
+    // 每次執行濾鏡組合後統一轉為 yuv420p，避免手機播放器無法解析 4:4:4 畫面
+    filterSegments.add('$currentLabel format=yuv420p[vout]');
     final String filterComplex = filterSegments.join(';');
+    currentLabel = '[vout]';
 
     final arguments = <String>[
       '-y',
@@ -1594,8 +1597,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       'veryfast',
       '-crf',
       '20',
+      '-movflags',
+      '+faststart', // 讓播放器能邊下載邊播放，減少等待時間
       '-c:a',
       'copy',
+      '-pix_fmt',
+      'yuv420p', // 再次宣告像素格式，確保輸出結果不會掉回到其他色彩空間
       outputPath,
     ];
 
