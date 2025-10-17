@@ -194,7 +194,12 @@ class VideoOverlayProcessor(private val context: Context) {
     }
 
     private fun createCircularAvatar(path: String, targetSize: Int): Bitmap? {
-        val original = BitmapFactory.decodeFile(path) ?: return null
+        // 嘗試以取樣方式載入圖片，避免超高解析度頭像造成記憶體不足
+        val original = try {
+            decodeSampledBitmap(path, targetSize * 2)
+        } catch (oom: OutOfMemoryError) {
+            null
+        } ?: return null
         val size = min(original.width, original.height)
         val offsetX = (original.width - size) / 2
         val offsetY = (original.height - size) / 2
@@ -230,6 +235,31 @@ class VideoOverlayProcessor(private val context: Context) {
             borderPaint
         )
         return output
+    }
+
+    private fun decodeSampledBitmap(path: String, targetSize: Int): Bitmap? {
+        val boundOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, boundOptions)
+
+        val originalWidth = boundOptions.outWidth
+        val originalHeight = boundOptions.outHeight
+        if (originalWidth <= 0 || originalHeight <= 0) {
+            return null
+        }
+
+        // 動態計算取樣倍數，確保讀入尺寸不會遠大於需求
+        val minSide = min(originalWidth, originalHeight).coerceAtLeast(1)
+        var sampleSize = 1
+        while ((minSide / sampleSize) > targetSize.coerceAtLeast(1) * 2) {
+            sampleSize *= 2
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+
+        return BitmapFactory.decodeFile(path, decodeOptions)
     }
 
     private fun createCaptionBitmap(text: String, videoWidth: Int): Bitmap? {
