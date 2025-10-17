@@ -8,6 +8,7 @@ import android.os.Build
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.util.Log
 import androidx.annotation.WorkerThread
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -33,6 +34,10 @@ class VideoOverlayProcessor(private val context: Context) {
      * - 若未勾選任何覆蓋選項則直接複製來源檔案。
      * - 原生層使用 CountDownLatch 等待轉檔完成，並於錯誤時拋出例外讓 Flutter 顯示提示。
      */
+    companion object {
+        private const val TAG = "VideoOverlayProcessor"
+    }
+
     @WorkerThread
     fun process(
         inputPath: String,
@@ -45,9 +50,16 @@ class VideoOverlayProcessor(private val context: Context) {
         val inputFile = File(inputPath)
         require(inputFile.exists()) { "來源影片不存在" }
 
+        // ---------- 記錄輸入參數 ----------
+        Log.i(
+            TAG,
+            "開始覆蓋影片，來源=${inputFile.absolutePath}，輸出=$outputPath，頭像=$attachAvatar，字幕=$attachCaption"
+        )
+
         // 無需覆蓋時僅複製原檔，避免耗費額外時間與系統資源。
         if (!attachAvatar && (!attachCaption || captionText.isBlank())) {
             inputFile.copyTo(File(outputPath), overwrite = true)
+            Log.d(TAG, "未勾選覆蓋選項，直接複製原始影片。")
             return outputPath
         }
 
@@ -55,11 +67,13 @@ class VideoOverlayProcessor(private val context: Context) {
         if (videoWidth <= 0 || videoHeight <= 0) {
             throw IllegalStateException("無法判斷影片尺寸")
         }
+        Log.d(TAG, "解析影片尺寸完成：${videoWidth}x$videoHeight。")
 
         val overlays = mutableListOf<TextureOverlay>()
         val retainedBitmaps = mutableListOf<Bitmap>() // 保留位圖引用，避免在轉檔期間被回收
 
         if (attachAvatar && !avatarPath.isNullOrEmpty()) {
+            Log.d(TAG, "準備建立頭像覆蓋，來源=$avatarPath。")
             createCircularAvatar(avatarPath, 220)?.let { avatarBitmap ->
                 val marginPx = 32
                 val anchorX = 1f - (marginPx * 2f / videoWidth)
@@ -74,10 +88,12 @@ class VideoOverlayProcessor(private val context: Context) {
                     .build()
                 overlays.add(BitmapOverlay.createStaticBitmapOverlay(avatarBitmap, overlaySettings))
                 retainedBitmaps.add(avatarBitmap)
+                Log.d(TAG, "頭像覆蓋建立完成，實際尺寸=${avatarBitmap.width}x${avatarBitmap.height}。")
             }
         }
 
         if (attachCaption && captionText.isNotBlank()) {
+            Log.d(TAG, "準備建立字幕覆蓋，內容長度=${captionText.length}。")
             createCaptionBitmap(captionText.trim(), videoWidth)?.let { captionBitmap ->
                 val marginPx = 48
                 val anchorY = -1f + (marginPx * 2f / videoHeight)
@@ -91,11 +107,13 @@ class VideoOverlayProcessor(private val context: Context) {
                     .build()
                 overlays.add(BitmapOverlay.createStaticBitmapOverlay(captionBitmap, overlaySettings))
                 retainedBitmaps.add(captionBitmap)
+                Log.d(TAG, "字幕覆蓋建立完成，實際尺寸=${captionBitmap.width}x${captionBitmap.height}。")
             }
         }
 
         if (overlays.isEmpty()) {
             inputFile.copyTo(File(outputPath), overwrite = true)
+            Log.w(TAG, "未成功建立任何覆蓋，回退為原檔複製。")
             return outputPath
         }
 
@@ -104,6 +122,7 @@ class VideoOverlayProcessor(private val context: Context) {
         if (outputFile.exists()) {
             outputFile.delete()
         }
+        Log.d(TAG, "輸出目錄確認完成，開始執行 Transformer。")
 
         val latch = CountDownLatch(1)
         var error: Exception? = null
@@ -119,6 +138,7 @@ class VideoOverlayProcessor(private val context: Context) {
             .setVideoEffects(listOf(OverlayEffect(overlays)))
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    Log.i(TAG, "Transformer 完成匯出，耗時=${exportResult.durationMs}ms。")
                     latch.countDown()
                 }
 
@@ -127,6 +147,7 @@ class VideoOverlayProcessor(private val context: Context) {
                     exportResult: ExportResult,
                     exportException: ExportException
                 ) {
+                    Log.e(TAG, "Transformer 匯出失敗：${exportException.message}", exportException)
                     error = exportException
                     latch.countDown()
                 }
@@ -135,6 +156,7 @@ class VideoOverlayProcessor(private val context: Context) {
         // Transformer 建立在方法作用域內，轉檔完成後即失去引用，交由 GC 自行回收底層資源
 
         try {
+            Log.d(TAG, "開始執行轉檔流程。")
             transformer.startTransformation(
                 MediaItem.fromUri(Uri.fromFile(inputFile)),
                 outputPath
@@ -146,26 +168,32 @@ class VideoOverlayProcessor(private val context: Context) {
                 // 若等待期間被中斷，保留例外並恢復執行緒中斷狀態
                 Thread.currentThread().interrupt()
                 error = interrupted
+                Log.e(TAG, "等待轉檔結果時被中斷：${interrupted.message}", interrupted)
             }
         } catch (startException: Exception) {
             // Transformer 啟動階段若丟出例外，直接記錄供後續統一拋出
             error = startException
+            Log.e(TAG, "轉檔流程啟動失敗：${startException.message}", startException)
         }
 
         retainedBitmaps.forEach { it.recycle() }
+        Log.d(TAG, "釋放覆蓋位圖資源完成。")
 
         error?.let {
             outputFile.delete()
+            Log.e(TAG, "轉檔流程最終失敗，輸出檔案已清除。", it)
             throw it
         }
 
         if (!outputFile.exists()) {
+            Log.e(TAG, "轉檔完成後找不到輸出檔案。")
             throw IllegalStateException("轉檔完成後未找到輸出檔案")
         }
 
         // 確認檔案實際有內容，若轉檔中途失敗會產生 0 byte 檔案
         if (outputFile.length() <= 0) {
             outputFile.delete()
+            Log.e(TAG, "輸出檔案大小為 0，判定轉檔失敗。")
             throw IllegalStateException("輸出檔案大小為 0，判定轉檔失敗")
         }
 
@@ -173,8 +201,11 @@ class VideoOverlayProcessor(private val context: Context) {
         val (outWidth, outHeight) = resolveVideoSize(outputPath)
         if (outWidth <= 0 || outHeight <= 0) {
             outputFile.delete()
+            Log.e(TAG, "輸出影片格式異常，寬=$outWidth，高=$outHeight。")
             throw IllegalStateException("輸出影片格式異常，播放器無法識別")
         }
+
+        Log.i(TAG, "覆蓋流程完成，輸出=${outputFile.absolutePath}，尺寸=${outWidth}x$outHeight。")
 
         return outputPath
     }
@@ -187,6 +218,7 @@ class VideoOverlayProcessor(private val context: Context) {
                 ?.toIntOrNull() ?: 0
             val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
                 ?.toIntOrNull() ?: 0
+            Log.v(TAG, "解析影片尺寸：path=$path，width=$width，height=$height。")
             width to height
         } finally {
             retriever.release()
@@ -198,8 +230,10 @@ class VideoOverlayProcessor(private val context: Context) {
         val original = try {
             decodeSampledBitmap(path, targetSize * 2)
         } catch (oom: OutOfMemoryError) {
+            Log.e(TAG, "載入頭像發生 OOM：$path", oom)
             null
         } ?: return null
+        Log.d(TAG, "頭像原始尺寸=${original.width}x${original.height}。")
         val size = min(original.width, original.height)
         val offsetX = (original.width - size) / 2
         val offsetY = (original.height - size) / 2
@@ -234,6 +268,7 @@ class VideoOverlayProcessor(private val context: Context) {
             targetSize / 2f - borderPaint.strokeWidth / 2f,
             borderPaint
         )
+        Log.d(TAG, "頭像圓形化完成，目標尺寸=$targetSize。")
         return output
     }
 
@@ -244,6 +279,7 @@ class VideoOverlayProcessor(private val context: Context) {
         val originalWidth = boundOptions.outWidth
         val originalHeight = boundOptions.outHeight
         if (originalWidth <= 0 || originalHeight <= 0) {
+            Log.w(TAG, "頭像檔案無法解析尺寸：$path")
             return null
         }
 
@@ -253,13 +289,21 @@ class VideoOverlayProcessor(private val context: Context) {
         while ((minSide / sampleSize) > targetSize.coerceAtLeast(1) * 2) {
             sampleSize *= 2
         }
+        Log.d(
+            TAG,
+            "頭像解碼設定：原始=${originalWidth}x${originalHeight}，target=$targetSize，sampleSize=$sampleSize。"
+        )
 
         val decodeOptions = BitmapFactory.Options().apply {
             inSampleSize = sampleSize
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
 
-        return BitmapFactory.decodeFile(path, decodeOptions)
+        val bitmap = BitmapFactory.decodeFile(path, decodeOptions)
+        if (bitmap == null) {
+            Log.w(TAG, "頭像解碼結果為空：$path")
+        }
+        return bitmap
     }
 
     private fun createCaptionBitmap(text: String, videoWidth: Int): Bitmap? {
@@ -276,6 +320,7 @@ class VideoOverlayProcessor(private val context: Context) {
         val verticalPadding = (12 * density).toInt()
         val bitmapWidth = staticLayout.width + horizontalPadding * 2
         val bitmapHeight = staticLayout.height + verticalPadding * 2
+        Log.d(TAG, "字幕位圖資訊：maxWidth=$maxWidth，實際尺寸=${bitmapWidth}x$bitmapHeight。")
 
         val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -291,6 +336,7 @@ class VideoOverlayProcessor(private val context: Context) {
         )
         canvas.translate(horizontalPadding.toFloat(), verticalPadding.toFloat())
         staticLayout.draw(canvas)
+        Log.d(TAG, "字幕位圖建立完成。")
         return bitmap
     }
 

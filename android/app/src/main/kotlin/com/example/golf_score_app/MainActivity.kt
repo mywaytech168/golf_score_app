@@ -3,6 +3,7 @@ package com.example.golf_score_app
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.core.content.FileProvider
@@ -18,6 +19,7 @@ class MainActivity: FlutterActivity() {
     private val KEEP_SCREEN_CHANNEL = "keep_screen_on_channel"
     private val VIDEO_OVERLAY_CHANNEL = "video_overlay_channel"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
+    private val logTag = "MainActivity"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -114,6 +116,11 @@ class MainActivity: FlutterActivity() {
                         return@setMethodCallHandler
                     }
 
+                    Log.i(
+                        logTag,
+                        "收到影片覆蓋請求，input=$inputPath，output=$outputPath，頭像=$attachAvatar，字幕=$attachCaption"
+                    )
+
                     overlayExecutor.execute {
                         try {
                             val processor = VideoOverlayProcessor(applicationContext)
@@ -125,8 +132,10 @@ class MainActivity: FlutterActivity() {
                                 attachCaption = attachCaption,
                                 captionText = caption
                             )
+                            Log.i(logTag, "覆蓋流程成功，回傳路徑=$finalPath")
                             runOnUiThread { result.success(finalPath) }
                         } catch (error: Exception) {
+                            Log.e(logTag, "覆蓋流程失敗：${error.message}", error)
                             runOnUiThread {
                                 result.error("overlay_failed", error.message, null)
                             }
