@@ -40,7 +40,8 @@ dependencies:
   share_plus: ^7.2.1
   shared_preferences: ^2.3.2
   google_sign_in: ^6.2.1
-  ffmpeg_kit_flutter_full_gpl: ^6.0.3
+  ffmpeg_kit_flutter: ^6.0.3 # 核心 Dart API，由分享覆蓋流程呼叫 FFmpegKit 指令
+  ffmpeg_kit_flutter_full_gpl: ^6.0.3 # 提供完整編解碼原生庫，支援套疊頭像與文字需求
  
   assets_audio_player:
     path: local_plugins/assets_audio_player  # 使用本地修改版以支援 Dart 3

@@ -12,8 +12,8 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
+import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart'; // 透過官方 API 下指令，避免直接操作平台通道
+import 'package:ffmpeg_kit_flutter/return_code.dart'; // 提供回傳碼判斷工具，利於辨識處理是否成功
 import 'package:path_provider/path_provider.dart';
 
 import '../models/recording_history_entry.dart';
