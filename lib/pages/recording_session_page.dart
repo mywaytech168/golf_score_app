@@ -1304,13 +1304,21 @@ class VideoPlayerPage extends StatefulWidget {
 }
 
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
-  late VideoPlayerController _videoController;
+  VideoPlayerController? _videoController; // 影片控制器，初始化成功後才會建立
   static const String _shareMessage = '分享我的 TekSwing 揮桿影片'; // 分享時的預設文案
   final TextEditingController _captionController = TextEditingController(); // 影片下方說明輸入
   final List<String> _generatedTempFiles = []; // 記錄 ffmpeg 產出的暫存檔，頁面結束時統一清理
   bool _attachAvatar = false; // 是否要在分享影片中加入個人頭像
   bool _isProcessingShare = false; // 控制分享期間按鈕狀態，避免重複觸發
   late final bool _avatarSelectable; // 記錄頭像檔案是否存在，可供開關判斷
+  bool _isVideoLoading = true; // 控制是否顯示讀取中轉圈
+  String? _videoLoadError; // 若載入失敗記錄錯誤訊息，提供使用者提示與重試
+
+  bool get _canControlVideo {
+    // 畫面僅在影片初始化完成後才允許操作播放/暫停，避免觸發例外
+    final controller = _videoController;
+    return controller != null && controller.value.isInitialized;
+  }
 
   // ---------- 分享相關方法區 ----------
   Future<void> _shareToTarget(_ShareTarget target) async {
@@ -1402,19 +1410,61 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _avatarSelectable = widget.avatarPath != null &&
         widget.avatarPath!.isNotEmpty &&
         File(widget.avatarPath!).existsSync(); // 預先判斷頭像是否存在，供 UI 判斷
-    _videoController = VideoPlayerController.file(File(widget.videoPath))
-      ..initialize().then((_) {
-        setState(() {});
-        _videoController.play();
-      });
+    unawaited(_initializeVideo()); // 進入頁面即嘗試初始化播放器
   }
 
   @override
   void dispose() {
-    _videoController.dispose();
+    _videoController?.dispose();
     _captionController.dispose();
     _cleanupTempFiles();
     super.dispose();
+  }
+
+  /// 初始化影片播放器，補上錯誤處理與重試機制
+  Future<void> _initializeVideo() async {
+    setState(() {
+      _isVideoLoading = true;
+      _videoLoadError = null;
+    });
+
+    final file = File(widget.videoPath);
+    if (!await file.exists()) {
+      setState(() {
+        _isVideoLoading = false;
+        _videoLoadError = '找不到錄影檔案，請返回上一頁重新錄製。';
+      });
+      return;
+    }
+
+    // 若重新整理需先釋放舊控制器，避免資源外洩
+    await _videoController?.dispose();
+
+    final controller = VideoPlayerController.file(file);
+    try {
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _videoController = controller;
+        _isVideoLoading = false;
+      });
+      controller.play();
+    } catch (error, stackTrace) {
+      debugPrint('[VideoPlayer] 初始化失敗：$error');
+      debugPrintStack(stackTrace: stackTrace);
+      await controller.dispose();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _videoController = null;
+        _isVideoLoading = false;
+        _videoLoadError = '無法載入影片，請稍後再試。';
+      });
+    }
   }
 
   /// 統一顯示 Snackbar，確保訊息風格一致
@@ -1570,12 +1620,31 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         children: [
           Expanded(
             child: Center(
-              child: _videoController.value.isInitialized
-                  ? AspectRatio(
-                      aspectRatio: _videoController.value.aspectRatio,
-                      child: VideoPlayer(_videoController),
-                    )
-                  : const CircularProgressIndicator(),
+              child: _isVideoLoading
+                  ? const CircularProgressIndicator()
+                  : _videoLoadError != null
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+                            const SizedBox(height: 12),
+                            Text(
+                              _videoLoadError!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _initializeVideo,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('重新嘗試載入'),
+                            ),
+                          ],
+                        )
+                      : AspectRatio(
+                          aspectRatio: _videoController!.value.aspectRatio,
+                          child: VideoPlayer(_videoController!),
+                        ),
             ),
           ),
           Padding(
@@ -1653,14 +1722,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() {
-            _videoController.value.isPlaying
-                ? _videoController.pause()
-                : _videoController.play();
-          });
-        },
-        child: Icon(_videoController.value.isPlaying ? Icons.pause : Icons.play_arrow),
+        onPressed: _canControlVideo
+            ? () {
+                setState(() {
+                  final controller = _videoController!;
+                  controller.value.isPlaying ? controller.pause() : controller.play();
+                });
+              }
+            : null,
+        child: Icon(
+          _canControlVideo && _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+        ),
       ),
     );
   }
