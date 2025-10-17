@@ -58,3 +58,11 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // ---------- 影片覆蓋處理所需的 Media3 元件 ----------
+    implementation("androidx.media3:media3-transformer:1.3.1")
+    implementation("androidx.media3:media3-effect:1.3.1")
+    implementation("androidx.media3:media3-extractor:1.3.1")
+    implementation("androidx.media3:media3-common:1.3.1")
+}

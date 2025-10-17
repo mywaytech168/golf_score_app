@@ -12,14 +12,12 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit.dart'; // 改用 min-gpl 變體提供的 API，避免額外依賴缺少的核心套件
-import 'package:ffmpeg_kit_flutter_min_gpl/return_code.dart'; // 直接引用變體內的回傳碼工具，確保依賴來源一致
-import 'package:path_provider/path_provider.dart';
 
 import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
 import '../services/imu_data_logger.dart';
 import '../services/keep_screen_on_service.dart';
+import '../services/video_overlay_processor.dart';
 
 // ---------- 分享頻道設定 ----------
 const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
@@ -1307,7 +1305,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   VideoPlayerController? _videoController; // 影片控制器，初始化成功後才會建立
   static const String _shareMessage = '分享我的 TekSwing 揮桿影片'; // 分享時的預設文案
   final TextEditingController _captionController = TextEditingController(); // 影片下方說明輸入
-  final List<String> _generatedTempFiles = []; // 記錄 ffmpeg 產出的暫存檔，頁面結束時統一清理
+  final List<String> _generatedTempFiles = []; // 記錄原生處理後的暫存影片，頁面結束時統一清理
   bool _attachAvatar = false; // 是否要在分享影片中加入個人頭像
   bool _isProcessingShare = false; // 控制分享期間按鈕狀態，避免重複觸發
   late final bool _avatarSelectable; // 記錄頭像檔案是否存在，可供開關判斷
@@ -1336,10 +1334,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         return;
       }
 
-      // 若使用者選擇加入頭像或文字，先透過 ffmpeg 生成新的覆蓋影片
+      // 若使用者選擇加入頭像或文字，委派原生端生成覆蓋影片
       final sharePath = await _prepareShareFile();
       if (sharePath == null) {
-        return; // ffmpeg 失敗或條件不足時直接中止
+        return; // 原生處理失敗或條件不足時直接中止
       }
 
       // 依目標應用程式取得對應的封裝名稱
@@ -1475,7 +1473,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// 嘗試清除 ffmpeg 產製的暫存檔，避免長時間累積佔用空間
+  /// 嘗試清除原生產製的暫存檔，避免長時間累積佔用空間
   void _cleanupTempFiles() {
     for (final path in _generatedTempFiles) {
       try {
@@ -1490,133 +1488,41 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _generatedTempFiles.clear();
   }
 
-  /// 依平台尋找可用字型，供 ffmpeg 繪製文字使用
-  String? _resolveFontFile() {
-    const candidates = [
-      '/system/fonts/NotoSansCJK-Regular.ttc',
-      '/system/fonts/NotoSans-Regular.ttf',
-      '/system/fonts/Roboto-Regular.ttf',
-      '/system/fonts/DroidSansFallback.ttf',
-      '/System/Library/Fonts/PingFang.ttc',
-      '/System/Library/Fonts/Helvetica.ttc',
-    ];
-    for (final path in candidates) {
-      final file = File(path);
-      if (file.existsSync()) {
-        return path;
-      }
-    }
-    return null;
-  }
-
-  /// 針對 drawtext 過濾器進行必要跳脫，避免特殊符號導致 ffmpeg 命令失敗
-  String _escapeDrawText(String input) {
-    return input
-        .replaceAll('\\', r'\\')
-        .replaceAll("'", r"\'")
-        .replaceAll(':', r'\:')
-        .replaceAll('%', r'\%');
-  }
-
-  /// 若使用者開啟頭像或文字選項，利用 ffmpeg 產生覆蓋後的分享檔案
+  /// 若使用者開啟頭像或文字選項，委派原生端生成覆蓋後的分享檔案
   Future<String?> _prepareShareFile() async {
     final bool wantsAvatar = _attachAvatar;
     final String trimmedCaption = _captionController.text.trim();
     final bool wantsCaption = trimmedCaption.isNotEmpty;
 
-    if (!wantsAvatar && !wantsCaption) {
-      return widget.videoPath; // 無額外需求時直接沿用原始影片
-    }
-
-    File? avatarFile;
     if (wantsAvatar) {
       if (!_avatarSelectable || widget.avatarPath == null) {
         _showSnack('尚未設定個人頭像，請先到個資頁上傳照片。');
         return null;
       }
-      avatarFile = File(widget.avatarPath!);
+      final avatarFile = File(widget.avatarPath!);
       if (!avatarFile.existsSync()) {
         _showSnack('找不到個人頭像檔案，請重新選擇。');
         return null;
       }
     }
 
-    String? fontFile;
-    if (wantsCaption) {
-      fontFile = _resolveFontFile();
-      if (fontFile == null) {
-        _showSnack('裝置未提供可用字型，無法繪製文字，請取消下方文字後再試。');
-        return null;
-      }
-    }
+    final result = await VideoOverlayProcessor.process(
+      inputPath: widget.videoPath,
+      attachAvatar: wantsAvatar,
+      avatarPath: widget.avatarPath,
+      attachCaption: wantsCaption,
+      caption: trimmedCaption,
+    );
 
-    final tempDir = await getTemporaryDirectory();
-    final outputPath = '${tempDir.path}/share_${DateTime.now().millisecondsSinceEpoch}.mp4';
-
-    final List<String> filterSegments = [];
-    String currentLabel = '[0:v]';
-
-    if (wantsAvatar && avatarFile != null) {
-      const int avatarSize = 220; // 固定頭像尺寸，確保在手機螢幕上清楚呈現
-      filterSegments.add(
-        "[1:v]scale=${avatarSize}:${avatarSize},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2),(min(W,H)/2)^2),255,0)'[avatar]",
-      );
-      filterSegments.add(
-        '$currentLabel[avatar]overlay=W-w-32:32[vavatar]',
-      );
-      currentLabel = '[vavatar]';
-    }
-
-    if (wantsCaption && fontFile != null) {
-      final escaped = _escapeDrawText(trimmedCaption);
-      filterSegments.add(
-        "$currentLabel drawtext=fontfile='${fontFile}':text='${escaped}':fontcolor=white:fontsize=36:box=1:boxcolor=0x00000088:boxborderw=16:x=(w-text_w)/2:y=h-text_h-60[vtext]",
-      );
-      currentLabel = '[vtext]';
-    }
-
-    // 每次執行濾鏡組合後統一轉為 yuv420p，避免手機播放器無法解析 4:4:4 畫面
-    filterSegments.add('$currentLabel format=yuv420p[vout]');
-    final String filterComplex = filterSegments.join(';');
-    currentLabel = '[vout]';
-
-    final arguments = <String>[
-      '-y',
-      '-i',
-      widget.videoPath,
-      if (wantsAvatar && avatarFile != null) ...['-i', avatarFile.path],
-      '-filter_complex',
-      filterComplex,
-      '-map',
-      currentLabel,
-      '-map',
-      '0:a?',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '20',
-      '-movflags',
-      '+faststart', // 讓播放器能邊下載邊播放，減少等待時間
-      '-c:a',
-      'copy',
-      '-pix_fmt',
-      'yuv420p', // 再次宣告像素格式，確保輸出結果不會掉回到其他色彩空間
-      outputPath,
-    ];
-
-    final session = await FFmpegKit.executeWithArguments(arguments);
-    final returnCode = await session.getReturnCode();
-    if (!ReturnCode.isSuccess(returnCode)) {
-      final failLog = await session.getAllLogsAsString();
-      debugPrint('[Share] ffmpeg 失敗：$returnCode\n$failLog');
+    if (result == null) {
       _showSnack('處理影片時發生錯誤，請稍後再試。');
       return null;
     }
 
-    _generatedTempFiles.add(outputPath);
-    return outputPath;
+    if (result != widget.videoPath) {
+      _generatedTempFiles.add(result);
+    }
+    return result;
   }
 
   @override
