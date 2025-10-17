@@ -12,8 +12,8 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart'; // 透過官方 API 下指令，避免直接操作平台通道
-import 'package:ffmpeg_kit_flutter/return_code.dart'; // 提供回傳碼判斷工具，利於辨識處理是否成功
+import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit.dart'; // 改用 min-gpl 變體提供的 API，避免額外依賴缺少的核心套件
+import 'package:ffmpeg_kit_flutter_min_gpl/return_code.dart'; // 直接引用變體內的回傳碼工具，確保依賴來源一致
 import 'package:path_provider/path_provider.dart';
 
 import '../models/recording_history_entry.dart';
