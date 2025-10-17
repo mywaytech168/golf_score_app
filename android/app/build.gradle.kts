@@ -61,7 +61,7 @@ flutter {
 
 dependencies {
     // ---------- 影片覆蓋處理所需的 Media3 元件 ----------
-    // 升級至 1.4.1 以支援明確指定容器格式，確保覆蓋後的影片仍可被播放器解析
+    // 維持 1.4.1 版本以取得最新的覆蓋穩定性修正與效果 API，確保轉檔結果可被播放器解析
     implementation("androidx.media3:media3-transformer:1.4.1")
     implementation("androidx.media3:media3-effect:1.4.1")
     implementation("androidx.media3:media3-extractor:1.4.1")

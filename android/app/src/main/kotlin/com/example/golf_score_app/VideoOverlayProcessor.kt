@@ -108,11 +108,10 @@ class VideoOverlayProcessor(private val context: Context) {
         val latch = CountDownLatch(1)
         var error: Exception? = null
 
-        // 明確指定輸出容器與影音編碼，避免裝置以預設格式產出播放器無法解析的檔案
+        // 明確指定輸出影音編碼，避免裝置以預設格式產出播放器無法解析的檔案
         val transformationRequest = TransformationRequest.Builder()
             .setVideoMimeType(MimeTypes.VIDEO_H264)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
-            .setContainerMimeType(MimeTypes.VIDEO_MP4)
             .build()
 
         val transformer = Transformer.Builder(context)
@@ -133,6 +132,7 @@ class VideoOverlayProcessor(private val context: Context) {
                 }
             })
             .build()
+        // Transformer 建立在方法作用域內，轉檔完成後即失去引用，交由 GC 自行回收底層資源
 
         try {
             transformer.startTransformation(
@@ -147,8 +147,6 @@ class VideoOverlayProcessor(private val context: Context) {
                 Thread.currentThread().interrupt()
                 error = interrupted
             }
-        } finally {
-            transformer.release()
         }
 
         retainedBitmaps.forEach { it.recycle() }
