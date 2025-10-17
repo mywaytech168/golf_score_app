@@ -129,15 +129,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
     // 依照優先順序逐一測試可用鏡頭，若後鏡頭配置失敗會自動退回其他鏡頭。
     _CameraSelectionResult? selection;
+    CameraDescription? selectedCamera;
     for (final CameraDescription candidate in _orderedCameras(widget.cameras)) {
       selection = await _createBestCameraController(candidate);
       if (selection != null) {
-        _activeCamera = candidate;
+        selectedCamera = candidate;
         break; // 找到可成功初始化的鏡頭立即停止搜尋
       }
     }
 
-    if (selection == null) {
+    if (selection == null || selectedCamera == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('無法初始化鏡頭，請稍後再試。')),
@@ -145,7 +146,23 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       return;
     }
 
+    await _applyCameraSelection(selection, selectedCamera);
+
+    if (_pendingAutoStart) {
+      // 鏡頭就緒後若先前已有硬體按鈕請求，立即啟動倒數錄影
+      _pendingAutoStart = false;
+      unawaited(_handleImuButtonTrigger());
+    }
+  }
+
+  /// 套用鏡頭初始化結果，統一計算預覽比例與方向設定。
+  Future<void> _applyCameraSelection(
+    _CameraSelectionResult selection,
+    CameraDescription camera,
+  ) async {
     controller = selection.controller;
+    _activeCamera = camera;
+
     // 針對大多數手機相機，感光元件以橫向為主，因此在直向預覽時需要將寬高互換。
     // 透過感測器角度判斷是否應交換寬高，再計算適用於直式畫面的長寬比。
     final bool shouldSwapSide =
@@ -158,7 +175,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       final double rawAspect = controller!.value.aspectRatio;
       _previewAspectRatio = shouldSwapSide ? (1 / rawAspect) : rawAspect;
     }
-    // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉
+
+    // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉。
     try {
       await controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
     } catch (error, stackTrace) {
@@ -166,19 +184,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         debugPrint('lockCaptureOrientation 失敗：$error\n$stackTrace');
       }
     }
+
     if (kDebugMode) {
-      // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）
+      // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）。
       debugPrint(
         'Camera initialized with preset ${selection.preset}, size=${selection.previewSize ?? '未知'}, description=${controller!.description.name}',
       );
     }
-    if (!mounted) return;
-    setState(() {}); // 更新畫面顯示預覽
 
-    if (_pendingAutoStart) {
-      // 鏡頭就緒後若先前已有硬體按鈕請求，立即啟動倒數錄影
-      _pendingAutoStart = false;
-      unawaited(_handleImuButtonTrigger());
+    if (mounted) {
+      setState(() {}); // 更新畫面顯示預覽
     }
   }
 
@@ -512,6 +527,56 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
   }
 
+  /// 錄製結束後重建鏡頭控制器，確保下一輪能在乾淨狀態下重新配置。
+  Future<void> _resetCameraForNextRound() async {
+    final CameraDescription? targetCamera = _activeCamera;
+    if (targetCamera == null) {
+      return; // 尚未記錄當前鏡頭時不需重置。
+    }
+
+    final CameraController? oldController = controller;
+    controller = null;
+    if (mounted) {
+      setState(() {}); // 先重設狀態避免 UI 仍引用舊控制器。
+    }
+
+    try {
+      await oldController?.dispose();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('釋放舊鏡頭控制器失敗：$error');
+      }
+    }
+
+    final _CameraSelectionResult? selection =
+        await _createBestCameraController(targetCamera);
+    if (selection == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('鏡頭重新初始化失敗，請稍後再試。')),
+        );
+      }
+      return;
+    }
+
+    await _applyCameraSelection(selection, targetCamera);
+  }
+
+  /// 依剩餘輪次決定下一步操作：剩餘輪次需完整重置，最後一輪則僅預熱即可。
+  Future<void> _refreshCameraAfterRound({required bool hasMoreRounds}) async {
+    try {
+      if (hasMoreRounds) {
+        await _resetCameraForNextRound();
+      } else {
+        await _prepareRecorderSurface();
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('錄影結束後重新整理鏡頭失敗：$error');
+      }
+    }
+  }
+
   // ---------- 方法區 ----------
   /// 依秒數逐步等待，遇到取消訊號時即刻跳出
   Future<void> _waitForDuration(int seconds) async {
@@ -638,7 +703,6 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
           }
         }
-        await _prepareRecorderSurface();
       } catch (error) {
         debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
         // 若拍照失敗，嘗試確保預覽恢復以免畫面停住。
@@ -649,7 +713,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             debugPrint('⚠️ 拍照失敗後恢復預覽再度失敗：$resumeError');
           }
         }
-        await _prepareRecorderSurface();
+      } finally {
+        await _refreshCameraAfterRound(
+          hasMoreRounds: index < widget.totalRounds - 1,
+        );
       }
       final csvPaths = ImuDataLogger.instance.hasActiveRound
           ? await ImuDataLogger.instance.finishRoundLogging()
