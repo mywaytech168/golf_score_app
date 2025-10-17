@@ -5,6 +5,8 @@ import android.graphics.*
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -133,9 +135,17 @@ class VideoOverlayProcessor(private val context: Context) {
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
             .build()
 
+        // ---------- 建立專用執行緒 ----------
+        val transformerThread = HandlerThread("VideoOverlayTransformer").apply {
+            // 以專用執行緒執行 Transformer，避免被主執行緒阻塞
+            start()
+        }
+        val transformerHandler = Handler(transformerThread.looper)
+
         val transformer = Transformer.Builder(context)
             .setTransformationRequest(transformationRequest)
             .setVideoEffects(listOf(OverlayEffect(overlays)))
+            .setLooper(transformerThread.looper)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     Log.i(TAG, "Transformer 完成匯出，耗時=${exportResult.durationMs}ms。")
@@ -155,25 +165,56 @@ class VideoOverlayProcessor(private val context: Context) {
             .build()
         // Transformer 建立在方法作用域內，轉檔完成後即失去引用，交由 GC 自行回收底層資源
 
+        val startLatch = CountDownLatch(1)
+
         try {
-            Log.d(TAG, "開始執行轉檔流程。")
-            transformer.startTransformation(
-                MediaItem.fromUri(Uri.fromFile(inputFile)),
-                outputPath
-            )
+            Log.d(TAG, "開始執行轉檔流程，指定執行緒=${transformerThread.name}。")
+            transformerHandler.post {
+                try {
+                    Log.d(TAG, "已在執行緒 ${Thread.currentThread().name} 啟動 Transformer。")
+                    transformer.startTransformation(
+                        MediaItem.fromUri(Uri.fromFile(inputFile)),
+                        outputPath
+                    )
+                } catch (startException: Exception) {
+                    // 啟動流程若發生錯誤，直接記錄並結束等待
+                    error = startException
+                    Log.e(TAG, "轉檔流程啟動失敗：${startException.message}", startException)
+                    latch.countDown()
+                } finally {
+                    startLatch.countDown()
+                }
+            }
 
             try {
-                latch.await()
+                startLatch.await()
             } catch (interrupted: InterruptedException) {
-                // 若等待期間被中斷，保留例外並恢復執行緒中斷狀態
                 Thread.currentThread().interrupt()
                 error = interrupted
-                Log.e(TAG, "等待轉檔結果時被中斷：${interrupted.message}", interrupted)
+                Log.e(TAG, "等待啟動結果時被中斷：${interrupted.message}", interrupted)
             }
-        } catch (startException: Exception) {
-            // Transformer 啟動階段若丟出例外，直接記錄供後續統一拋出
-            error = startException
-            Log.e(TAG, "轉檔流程啟動失敗：${startException.message}", startException)
+
+            if (error == null) {
+                try {
+                    latch.await()
+                } catch (interrupted: InterruptedException) {
+                    // 若等待期間被中斷，保留例外並恢復執行緒中斷狀態
+                    Thread.currentThread().interrupt()
+                    error = interrupted
+                    Log.e(TAG, "等待轉檔結果時被中斷：${interrupted.message}", interrupted)
+                }
+            }
+        } finally {
+            // ---------- 結束執行緒 ----------
+            Log.d(TAG, "結束 Transformer 執行緒釋放資源。")
+            transformerThread.quitSafely()
+            try {
+                transformerThread.join()
+            } catch (joinError: InterruptedException) {
+                // 若等待執行緒結束時被中斷，記錄後恢復中斷狀態
+                Thread.currentThread().interrupt()
+                Log.w(TAG, "等待 Transformer 執行緒結束被中斷：${joinError.message}")
+            }
         }
 
         retainedBitmaps.forEach { it.recycle() }
