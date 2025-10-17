@@ -431,6 +431,24 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
   }
 
+  /// 重新準備錄影管線，避免多輪錄影時因為缺少關鍵影格而產生空檔案。
+  Future<void> _prepareRecorderSurface() async {
+    if (controller == null || !controller!.value.isInitialized) {
+      return;
+    }
+    if (controller!.value.isRecordingVideo) {
+      return; // 避免錄影進行中重複呼叫導致例外
+    }
+    try {
+      // CameraX 需在每次錄影前重新 warm up，否則有機率等不到第一個 I-Frame。
+      await controller!.prepareForVideoRecording();
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('prepareForVideoRecording 重新預熱失敗：$error\n$stackTrace');
+      }
+    }
+  }
+
   // ---------- 方法區 ----------
   /// 依秒數逐步等待，遇到取消訊號時即刻跳出
   Future<void> _waitForDuration(int seconds) async {
@@ -479,6 +497,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     bool recordedSuccessfully = false; // 標記本輪是否完整完成，供外層計算剩餘次數
     try {
       waveformAccumulated.clear();
+      await _prepareRecorderSurface();
+
       await initAudioCapture();
       if (_shouldCancelRecording) {
         await _closeAudioPipeline();
@@ -515,7 +535,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         return false;
       }
 
+      // 停止錄影後仍需等待 CameraX 完成封裝，避免直接複製造成無法播放的檔案。
       final XFile videoFile = await controller!.stopVideoRecording();
+      await Future.delayed(const Duration(milliseconds: 200));
       await _closeAudioPipeline();
 
       final savedVideoPath = await ImuDataLogger.instance.persistVideoFile(
@@ -553,6 +575,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
           }
         }
+        await _prepareRecorderSurface();
       } catch (error) {
         debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
         // 若拍照失敗，嘗試確保預覽恢復以免畫面停住。
@@ -563,6 +586,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             debugPrint('⚠️ 拍照失敗後恢復預覽再度失敗：$resumeError');
           }
         }
+        await _prepareRecorderSurface();
       }
       final csvPaths = ImuDataLogger.instance.hasActiveRound
           ? await ImuDataLogger.instance.finishRoundLogging()
