@@ -127,12 +127,15 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       return;
     }
 
-    // 依序測試從最高到較低的解析度，找到裝置可支援的最佳錄影規格
-    // 先挑選最適合錄影的鏡頭，預設選擇後鏡頭，若無則退回清單第一顆
-    _activeCamera = _selectPreferredCamera(widget.cameras);
-
-    final _CameraSelectionResult? selection =
-        await _createBestCameraController(_activeCamera!);
+    // 依照優先順序逐一測試可用鏡頭，若後鏡頭配置失敗會自動退回其他鏡頭。
+    _CameraSelectionResult? selection;
+    for (final CameraDescription candidate in _orderedCameras(widget.cameras)) {
+      selection = await _createBestCameraController(candidate);
+      if (selection != null) {
+        _activeCamera = candidate;
+        break; // 找到可成功初始化的鏡頭立即停止搜尋
+      }
+    }
 
     if (selection == null) {
       if (!mounted) return;
@@ -179,16 +182,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
   }
 
-  /// 針對指定鏡頭，嘗試使用最高可支援的解析度與幀率進行初始化
+  /// 針對指定鏡頭，嘗試使用最佳解析度與幀率進行初始化
   Future<_CameraSelectionResult?> _createBestCameraController(
       CameraDescription description) async {
     // 解析度優先順序：依照穩定性由高至低逐一嘗試。
-    // 為了提升初始化成功率，優先嘗試穩定的 1080p（high）與 720p（medium）。
-    // 遇到部分裝置無法在 5 秒內完成高階解析度配置時，可迅速回退避免逾時。
+    // 為了提升初始化成功率，優先嘗試穩定且較快完成配置的 720p（medium）。
+    // 遇到部分裝置在高解析度下出現逾時錯誤（如 csd0 too small），可藉由優先中階解析度避免卡住。
     const List<ResolutionPreset> presetPriority = <ResolutionPreset>[
-      ResolutionPreset.high,
       ResolutionPreset.medium,
       ResolutionPreset.low,
+      ResolutionPreset.high,
       ResolutionPreset.veryHigh,
       ResolutionPreset.ultraHigh,
       ResolutionPreset.max,
@@ -205,7 +208,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         // 透過手動套用逾時計時，若設備長時間卡在 Camera2 配置階段則直接切換下一種解析度。
         await testController
             .initialize()
-            .timeout(const Duration(seconds: 4), onTimeout: () {
+            .timeout(const Duration(seconds: 6), onTimeout: () {
+          // 6 秒內仍未完成初始化代表裝置可能無法支援該解析度，直接丟出逾時讓外層重試下一個設定。
           throw TimeoutException('initialize timeout');
         });
 
@@ -246,15 +250,39 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     return null;
   }
 
-  /// 根據鏡頭清單挑選最適合錄影的鏡頭：優先後鏡頭，其次回退第一顆
-  CameraDescription _selectPreferredCamera(List<CameraDescription> cameras) {
-    // ---------- 邏輯說明 ----------
-    // 1. 大多數揮桿錄影希望使用後鏡頭，因此優先尋找後鏡頭。
-    // 2. 若裝置沒有後鏡頭（例如部分平板），則退回清單中的第一顆以確保功能可用。
-    return cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.back,
-      orElse: () => cameras.first,
-    );
+  /// 根據鏡頭清單建立優先順序，遇到後鏡頭初始化失敗時可退回其他鏡頭
+  List<CameraDescription> _orderedCameras(List<CameraDescription> cameras) {
+    final List<CameraDescription> backCameras = <CameraDescription>[]; // 主要使用後鏡頭
+    final List<CameraDescription> frontCameras = <CameraDescription>[]; // 次要使用前鏡頭
+    final List<CameraDescription> externalCameras = <CameraDescription>[]; // 可能存在的外接鏡頭
+    final List<CameraDescription> others = <CameraDescription>[]; // 其餘未知型別鏡頭
+
+    for (final CameraDescription camera in cameras) {
+      switch (camera.lensDirection) {
+        case CameraLensDirection.back:
+          backCameras.add(camera);
+          break;
+        case CameraLensDirection.front:
+          frontCameras.add(camera);
+          break;
+        case CameraLensDirection.external:
+          externalCameras.add(camera);
+          break;
+        default:
+          others.add(camera);
+          break;
+      }
+    }
+
+    // ---------- 佈局說明 ----------
+    // 1. 後鏡頭 → 外接鏡頭 → 前鏡頭 → 其他：滿足大多數錄影需求並保留替代方案。
+    // 2. 若裝置僅有單一鏡頭則順序即為原清單，保持兼容性。
+    return <CameraDescription>[
+      ...backCameras,
+      ...externalCameras,
+      ...frontCameras,
+      ...others,
+    ];
   }
 
   /// 建立固定比例的預覽畫面，避免錄影時鏡頭切換解析度導致畫面跳動
