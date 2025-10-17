@@ -147,6 +147,9 @@ class VideoOverlayProcessor(private val context: Context) {
                 Thread.currentThread().interrupt()
                 error = interrupted
             }
+        } catch (startException: Exception) {
+            // Transformer 啟動階段若丟出例外，直接記錄供後續統一拋出
+            error = startException
         }
 
         retainedBitmaps.forEach { it.recycle() }
