@@ -576,12 +576,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     await _applyCameraSelection(selection, targetCamera);
   }
 
-  /// 依剩餘輪次決定下一步操作：剩餘輪次需完整重置，最後一輪則僅預熱即可。
+  /// 依剩餘輪次調整鏡頭狀態：每輪都先完整重建控制器，最後一輪額外暖機，確保預覽不卡住。
   Future<void> _refreshCameraAfterRound({required bool hasMoreRounds}) async {
     try {
-      if (hasMoreRounds) {
-        await _resetCameraForNextRound();
-      } else {
+      // 無論是否仍有下一輪，都先完整釋放並重建鏡頭，確保預覽畫面回到乾淨狀態。
+      await _resetCameraForNextRound();
+
+      if (!hasMoreRounds && controller != null && controller!.value.isInitialized) {
+        // 最後一輪結束後仍預先暖機一次，方便使用者再次啟動錄影時不必等待。
         await _prepareRecorderSurface();
       }
     } catch (error) {
