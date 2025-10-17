@@ -99,7 +99,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   @override
   void dispose() {
     _triggerCancel(); // 優先發出取消訊號，停止所有倒數與錄影
-    _stopActiveRecording(updateUi: false); // 嘗試停止仍在進行的錄影與音訊擷取
+    unawaited(_stopActiveRecording(updateUi: false)); // 嘗試停止仍在進行的錄影與音訊擷取
     controller?.dispose();
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
@@ -370,7 +370,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   }
 
   /// 主動停止鏡頭錄影與音訊擷取，確保返回上一頁後不再持續錄製
-  Future<void> _stopActiveRecording({bool updateUi = true}) async {
+  Future<void> _stopActiveRecording({
+    bool updateUi = true,
+    bool refreshCamera = false,
+  }) async {
     if (!isRecording && !_isCountingDown && controller != null && !(controller!.value.isRecordingVideo)) {
       return; // 若沒有任何錄影流程在進行，可直接返回
     }
@@ -399,6 +402,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       setState(() => isRecording = false);
     } else {
       isRecording = false;
+    }
+
+    if (refreshCamera && controller != null && controller!.value.isInitialized) {
+      try {
+        // 取消或結束錄影時強制刷新鏡頭，避免返回首頁後鏡頭仍處於卡住狀態。
+        await _refreshCameraAfterRound(hasMoreRounds: true);
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('強制停止錄影後刷新鏡頭失敗：$error\n$stackTrace');
+        }
+      }
     }
   }
 
@@ -867,7 +881,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   /// 處理返回上一頁事件：先停止錄影再允許跳轉
   Future<bool> _handleWillPop() async {
     _triggerCancel();
-    await _stopActiveRecording();
+    await _stopActiveRecording(refreshCamera: true);
 
     if (mounted) {
       Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_recordedRuns));
