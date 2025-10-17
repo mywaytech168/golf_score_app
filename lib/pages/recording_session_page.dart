@@ -442,9 +442,72 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     try {
       // CameraX 需在每次錄影前重新 warm up，否則有機率等不到第一個 I-Frame。
       await controller!.prepareForVideoRecording();
+      await _performWarmupRecording();
     } catch (error, stackTrace) {
       if (kDebugMode) {
         debugPrint('prepareForVideoRecording 重新預熱失敗：$error\n$stackTrace');
+      }
+    }
+  }
+
+  /// 進行短暫暖機錄影，確保下一輪正式錄影能立即產生關鍵影格。
+  Future<void> _performWarmupRecording() async {
+    if (controller == null || !controller!.value.isInitialized) {
+      return;
+    }
+    if (controller!.value.isRecordingVideo) {
+      return; // 外層已啟動錄影時不可重複進行暖機。
+    }
+
+    // 若預覽仍處於暫停狀態，先嘗試恢復以免暖機錄影缺少畫面來源。
+    if (controller!.value.isPreviewPaused) {
+      try {
+        await controller!.resumePreview();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('暖機前恢復預覽失敗：$error');
+        }
+      }
+    }
+
+    try {
+      await controller!.startVideoRecording();
+      await Future.delayed(const Duration(milliseconds: 600));
+      final XFile warmupFile = await controller!.stopVideoRecording();
+      await _deleteWarmupFile(warmupFile.path);
+      try {
+        await controller!.prepareForVideoRecording();
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('暖機後重新 prepare 失敗：$error\n$stackTrace');
+        }
+      }
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('暖機錄影失敗：$error\n$stackTrace');
+      }
+
+      // 若暖機過程中仍有錄影未停止，強制停止並清理暫存檔。
+      if (controller != null && controller!.value.isRecordingVideo) {
+        try {
+          final XFile leftover = await controller!.stopVideoRecording();
+          await _deleteWarmupFile(leftover.path);
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// 刪除暖機產生的臨時檔案，避免佔用儲存空間與誤判為正式影片。
+  Future<void> _deleteWarmupFile(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      return;
+    }
+    try {
+      await file.delete();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('刪除暖機影片失敗：$error');
       }
     }
   }
