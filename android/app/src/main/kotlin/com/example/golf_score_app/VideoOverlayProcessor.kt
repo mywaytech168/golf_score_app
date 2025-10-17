@@ -112,7 +112,8 @@ class VideoOverlayProcessor(private val context: Context) {
             .setTransformationRequest(
                 TransformationRequest.Builder()
                     .setVideoMimeType(MimeTypes.VIDEO_H264)
-                    .setContainerMimeType(MimeTypes.VIDEO_MP4)
+                    // Media3 1.3.x 尚未提供 setContainerMimeType，可透過預設行為輸出 MP4
+                    // 若後續升級至支援容器型別設定的版本，再補上對應 API
                     .build()
             )
             .setVideoEffects(listOf(OverlayEffect(overlays)))
