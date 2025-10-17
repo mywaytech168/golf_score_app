@@ -211,16 +211,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   /// 針對指定鏡頭，嘗試使用最佳解析度與幀率進行初始化
   Future<_CameraSelectionResult?> _createBestCameraController(
       CameraDescription description) async {
-    // 解析度優先順序：依照穩定性由高至低逐一嘗試。
-    // 為了提升初始化成功率，優先嘗試穩定且較快完成配置的 720p（medium）。
-    // 遇到部分裝置在高解析度下出現逾時錯誤（如 csd0 too small），可藉由優先中階解析度避免卡住。
+    // 解析度優先順序：依照畫質由高至低逐一嘗試。
+    // 依照需求改為優先採用最高畫質（max → ultraHigh → veryHigh），確保能取得最清晰的錄影畫面。
+    // 若裝置在高規格模式初始化失敗，仍會退回較低解析度，兼顧穩定性與畫質需求。
     const List<ResolutionPreset> presetPriority = <ResolutionPreset>[
+      ResolutionPreset.max,
+      ResolutionPreset.ultraHigh,
+      ResolutionPreset.veryHigh,
+      ResolutionPreset.high,
       ResolutionPreset.medium,
       ResolutionPreset.low,
-      ResolutionPreset.high,
-      ResolutionPreset.veryHigh,
-      ResolutionPreset.ultraHigh,
-      ResolutionPreset.max,
     ];
 
     for (final ResolutionPreset preset in presetPriority) {
