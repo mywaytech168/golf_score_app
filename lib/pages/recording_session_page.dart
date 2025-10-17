@@ -182,14 +182,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   /// 針對指定鏡頭，嘗試使用最高可支援的解析度與幀率進行初始化
   Future<_CameraSelectionResult?> _createBestCameraController(
       CameraDescription description) async {
-    // 解析度優先順序：依照套件提供的列舉，由高至低逐一嘗試
+    // 解析度優先順序：依照穩定性由高至低逐一嘗試。
+    // 為了提升初始化成功率，優先嘗試穩定的 1080p（high）與 720p（medium）。
+    // 遇到部分裝置無法在 5 秒內完成高階解析度配置時，可迅速回退避免逾時。
     const List<ResolutionPreset> presetPriority = <ResolutionPreset>[
-      ResolutionPreset.max,
-      ResolutionPreset.ultraHigh,
-      ResolutionPreset.veryHigh,
       ResolutionPreset.high,
       ResolutionPreset.medium,
       ResolutionPreset.low,
+      ResolutionPreset.veryHigh,
+      ResolutionPreset.ultraHigh,
+      ResolutionPreset.max,
     ];
 
     for (final ResolutionPreset preset in presetPriority) {
@@ -200,7 +202,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
 
       try {
-        await testController.initialize();
+        // 透過手動套用逾時計時，若設備長時間卡在 Camera2 配置階段則直接切換下一種解析度。
+        await testController
+            .initialize()
+            .timeout(const Duration(seconds: 4), onTimeout: () {
+          throw TimeoutException('initialize timeout');
+        });
 
         // 在初始化後立即準備錄影管線，避免真正開始錄影時觸發重新配置導致鏡頭切換
         try {
@@ -225,6 +232,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           preset: preset,
           previewSize: previewSize,
         );
+      } on TimeoutException catch (_) {
+        // 針對逾時個案輸出除錯訊息，讓開發者能追蹤實際退回的解析度。
+        if (kDebugMode) {
+          debugPrint('Camera initialize timeout on preset $preset，改用下一個設定');
+        }
+        await testController.dispose();
       } catch (_) {
         await testController.dispose();
       }
