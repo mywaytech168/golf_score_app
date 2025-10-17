@@ -75,6 +75,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   StreamSubscription<void>? _imuButtonSubscription; // 監聽 IMU 按鈕觸發錄影
   bool _pendingAutoStart = false; // 記錄 IMU 事件是否需等待鏡頭初始化後再啟動
   final _SessionProgress _sessionProgress = _SessionProgress(); // 集中管理倒數秒數與剩餘輪次
+  Future<void> _cameraOperationQueue = Future.value(); // 鏡頭操作排程，確保同一時間僅執行一個任務
+  bool _isRunningCameraTask = false; // 標記是否正在執行鏡頭任務，提供再入檢查
+  bool _isDisposing = false; // 錄影頁是否進入釋放狀態，避免離場後仍排程新任務
 
   // ---------- 生命週期 ----------
   @override
@@ -98,9 +101,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   @override
   void dispose() {
+    _isDisposing = true; // 標記進入釋放流程，後續若仍有任務會優先收斂
     _triggerCancel(); // 優先發出取消訊號，停止所有倒數與錄影
-    unawaited(_stopActiveRecording(updateUi: false)); // 嘗試停止仍在進行的錄影與音訊擷取
-    controller?.dispose();
+    // 透過排程方式串接停止錄影與控制器釋放，避免和其他鏡頭任務互搶資源。
+    final Future<void> stopFuture = _stopActiveRecording(updateUi: false);
+    final CameraController? controllerToDispose = controller;
+    controller = null; // 提前解除引用，減少後續誤用機率
+    _cameraOperationQueue = _cameraOperationQueue.then((_) async {
+      await stopFuture; // 確保已停止錄影後再釋放控制器
+      await controllerToDispose?.dispose();
+    });
+    unawaited(_cameraOperationQueue); // 無須等待完成即可繼續進行其餘釋放流程
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
     _imuButtonSubscription?.cancel(); // 解除 IMU 按鈕監聽，避免資源洩漏
@@ -384,13 +395,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       // 音檔可能尚未播放完成，忽略停止時的錯誤
     }
 
-    if (controller != null && controller!.value.isRecordingVideo) {
+    await _runCameraSerial<void>(() async {
+      if (controller == null || !controller!.value.isRecordingVideo) {
+        return; // 鏡頭已停止或尚未啟動錄影，無需額外處理
+      }
       try {
         await controller!.stopVideoRecording();
       } catch (_) {
         // 若已停止或尚未開始錄影，忽略錯誤
       }
-    }
+    }, debugLabel: 'stopActiveRecording');
 
     await _closeAudioPipeline();
 
@@ -462,21 +476,26 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   /// 重新準備錄影管線，避免多輪錄影時因為缺少關鍵影格而產生空檔案。
   Future<void> _prepareRecorderSurface() async {
-    if (controller == null || !controller!.value.isInitialized) {
-      return;
-    }
-    if (controller!.value.isRecordingVideo) {
-      return; // 避免錄影進行中重複呼叫導致例外
-    }
-    try {
-      // CameraX 需在每次錄影前重新 warm up，否則有機率等不到第一個 I-Frame。
-      await controller!.prepareForVideoRecording();
-      await _performWarmupRecording();
-    } catch (error, stackTrace) {
-      if (kDebugMode) {
-        debugPrint('prepareForVideoRecording 重新預熱失敗：$error\n$stackTrace');
+    await _runCameraSerial<void>(() async {
+      if (_isDisposing) {
+        return; // 頁面已進入釋放狀態時，不再進行暖機避免排程殘留
       }
-    }
+      if (controller == null || !controller!.value.isInitialized) {
+        return; // 控制器尚未就緒時不進行預熱，避免觸發例外
+      }
+      if (controller!.value.isRecordingVideo) {
+        return; // 避免錄影進行中重複呼叫導致例外
+      }
+      try {
+        // CameraX 需在每次錄影前重新 warm up，否則有機率等不到第一個 I-Frame。
+        await controller!.prepareForVideoRecording();
+        await _performWarmupRecording();
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('prepareForVideoRecording 重新預熱失敗：$error\n$stackTrace');
+        }
+      }
+    }, debugLabel: 'prepareRecorderSurface');
   }
 
   /// 進行短暫暖機錄影，確保下一輪正式錄影能立即產生關鍵影格。
@@ -543,37 +562,43 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   /// 錄製結束後重建鏡頭控制器，確保下一輪能在乾淨狀態下重新配置。
   Future<void> _resetCameraForNextRound() async {
-    final CameraDescription? targetCamera = _activeCamera;
-    if (targetCamera == null) {
-      return; // 尚未記錄當前鏡頭時不需重置。
-    }
-
-    final CameraController? oldController = controller;
-    controller = null;
-    if (mounted) {
-      setState(() {}); // 先重設狀態避免 UI 仍引用舊控制器。
-    }
-
-    try {
-      await oldController?.dispose();
-    } catch (error) {
-      if (kDebugMode) {
-        debugPrint('釋放舊鏡頭控制器失敗：$error');
+    await _runCameraSerial<void>(() async {
+      final CameraDescription? targetCamera = _activeCamera;
+      if (targetCamera == null) {
+        return; // 尚未記錄當前鏡頭時不需重置。
       }
-    }
 
-    final _CameraSelectionResult? selection =
-        await _createBestCameraController(targetCamera);
-    if (selection == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('鏡頭重新初始化失敗，請稍後再試。')),
-        );
+      final CameraController? oldController = controller;
+      controller = null;
+      if (mounted && !_isDisposing) {
+        setState(() {}); // 先重設狀態避免 UI 仍引用舊控制器。
       }
-      return;
-    }
 
-    await _applyCameraSelection(selection, targetCamera);
+      try {
+        await oldController?.dispose();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('釋放舊鏡頭控制器失敗：$error');
+        }
+      }
+
+      if (_isDisposing) {
+        return; // 頁面離場時不再重新初始化鏡頭，直接結束任務
+      }
+
+      final _CameraSelectionResult? selection =
+          await _createBestCameraController(targetCamera);
+      if (selection == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('鏡頭重新初始化失敗，請稍後再試。')),
+          );
+        }
+        return;
+      }
+
+      await _applyCameraSelection(selection, targetCamera);
+    }, debugLabel: 'resetCameraForNextRound');
   }
 
   /// 依剩餘輪次調整鏡頭狀態：每輪都先完整重建控制器，最後一輪額外暖機，確保預覽不卡住。
@@ -657,7 +682,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
       await ImuDataLogger.instance.startRoundLogging(baseName);
 
-      await controller!.startVideoRecording();
+      await _runCameraSerial<void>(() async {
+        if (controller == null || controller!.value.isRecordingVideo) {
+          return; // 已在錄影中時不重複啟動
+        }
+        await controller!.startVideoRecording();
+      }, debugLabel: 'startVideoRecording');
 
       _sessionProgress.startRecording(
         seconds: widget.durationSeconds,
@@ -667,11 +697,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       await _waitForDuration(widget.durationSeconds);
 
       if (_shouldCancelRecording) {
-        if (controller!.value.isRecordingVideo) {
+        await _runCameraSerial<void>(() async {
+          if (controller == null || !controller!.value.isRecordingVideo) {
+            return; // 錄影已停止或尚未啟動，無需額外處理
+          }
           try {
             await controller!.stopVideoRecording();
           } catch (_) {}
-        }
+        }, debugLabel: 'cancelStopVideo');
         await _closeAudioPipeline();
         if (ImuDataLogger.instance.hasActiveRound) {
           await ImuDataLogger.instance.abortActiveRound();
@@ -680,7 +713,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
 
       // 停止錄影後仍需等待 CameraX 完成封裝，避免直接複製造成無法播放的檔案。
-      final XFile videoFile = await controller!.stopVideoRecording();
+      final XFile videoFile = await _runCameraSerial<XFile>(() async {
+        if (controller == null || !controller!.value.isRecordingVideo) {
+          throw StateError('錄影尚未啟動，無法取得影片檔案');
+        }
+        return controller!.stopVideoRecording();
+      }, debugLabel: 'stopVideoRecording');
       await Future.delayed(const Duration(milliseconds: 200));
       await _closeAudioPipeline();
 
@@ -691,34 +729,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
       String? savedThumbnailPath;
       try {
-        // ---------- 拍攝縮圖 ----------
-        // 先暫停預覽以釋放預覽緩衝區，避免持續出現 ImageReader 無法取得緩衝的警告。
-        bool needResume = false;
-        if (!controller!.value.isPreviewPaused) {
-          try {
-            await controller!.pausePreview();
-            needResume = true;
-          } catch (pauseError) {
-            debugPrint('⚠️ 暫停預覽時發生錯誤：$pauseError');
-          }
-        }
-
-        // 使用 takePicture 直接捕捉預覽畫面，避免再次開啟 MediaMetadataRetriever。
-        final stillImage = await controller!.takePicture();
-        savedThumbnailPath = await ImuDataLogger.instance
-            .persistThumbnailFromPicture(
-          sourcePath: stillImage.path,
-          baseName: baseName,
-        );
-
-        // 拍照結束後恢復預覽，確保畫面持續更新。
-        if (needResume && controller!.value.isPreviewPaused) {
-          try {
-            await controller!.resumePreview();
-          } catch (resumeError) {
-            debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
-          }
-        }
+        savedThumbnailPath = await _captureThumbnail(baseName);
       } catch (error) {
         debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
         // 若拍照失敗，嘗試確保預覽恢復以免畫面停住。
@@ -765,6 +776,88 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     return recordedSuccessfully;
+  }
+
+  /// 排程鏡頭任務，確保相機資源一次只被一個流程操作。
+  Future<T> _runCameraSerial<T>(
+    Future<T> Function() task, {
+    String? debugLabel,
+  }) {
+    if (_isRunningCameraTask) {
+      // 若已在鎖內部執行，直接執行傳入任務以避免死鎖。
+      return task();
+    }
+
+    final Completer<T> completer = Completer<T>();
+
+    Future<void> runner() async {
+      _isRunningCameraTask = true;
+      try {
+        if (debugLabel != null && kDebugMode) {
+          debugPrint('🎥 [$debugLabel] 任務開始');
+        }
+        final T result = await task();
+        if (debugLabel != null && kDebugMode) {
+          debugPrint('🎥 [$debugLabel] 任務結束');
+        }
+        if (!completer.isCompleted) {
+          completer.complete(result);
+        }
+      } catch (error, stackTrace) {
+        if (debugLabel != null && kDebugMode) {
+          debugPrint('🎥 [$debugLabel] 任務失敗：$error');
+        }
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      } finally {
+        _isRunningCameraTask = false;
+      }
+    }
+
+    _cameraOperationQueue = _cameraOperationQueue.then((_) => runner());
+    return completer.future;
+  }
+
+  /// 捕捉當前畫面作為縮圖，並在序列鎖下執行避免 ImageReader 緩衝耗盡。
+  Future<String?> _captureThumbnail(String baseName) async {
+    return _runCameraSerial<String?>(() async {
+      if (_isDisposing) {
+        return null; // 頁面即將離場，略過縮圖產生以縮短釋放時間
+      }
+      if (controller == null || !controller!.value.isInitialized) {
+        return null; // 控制器已被釋放或尚未完成初始化，直接略過縮圖
+      }
+
+      // ---------- 拍攝縮圖 ----------
+      // 先暫停預覽以釋放預覽緩衝區，避免持續出現 ImageReader 無法取得緩衝的警告。
+      bool needResume = false;
+      if (!controller!.value.isPreviewPaused) {
+        try {
+          await controller!.pausePreview();
+          needResume = true;
+        } catch (pauseError) {
+          debugPrint('⚠️ 暫停預覽時發生錯誤：$pauseError');
+        }
+      }
+
+      try {
+        final stillImage = await controller!.takePicture();
+        return await ImuDataLogger.instance.persistThumbnailFromPicture(
+          sourcePath: stillImage.path,
+          baseName: baseName,
+        );
+      } finally {
+        // 拍照結束後恢復預覽，確保畫面持續更新。
+        if (needResume && controller != null && controller!.value.isPreviewPaused) {
+          try {
+            await controller!.resumePreview();
+          } catch (resumeError) {
+            debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
+          }
+        }
+      }
+    }, debugLabel: 'captureThumbnail');
   }
 
   /// 依使用者設定自動執行多輪倒數與錄影，中間保留休息時間
