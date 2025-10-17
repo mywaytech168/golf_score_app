@@ -108,14 +108,15 @@ class VideoOverlayProcessor(private val context: Context) {
         val latch = CountDownLatch(1)
         var error: Exception? = null
 
+        // 明確指定輸出容器與影音編碼，避免裝置以預設格式產出播放器無法解析的檔案
+        val transformationRequest = TransformationRequest.Builder()
+            .setVideoMimeType(MimeTypes.VIDEO_H264)
+            .setAudioMimeType(MimeTypes.AUDIO_AAC)
+            .setContainerMimeType(MimeTypes.VIDEO_MP4)
+            .build()
+
         val transformer = Transformer.Builder(context)
-            .setTransformationRequest(
-                TransformationRequest.Builder()
-                    .setVideoMimeType(MimeTypes.VIDEO_H264)
-                    // Media3 1.3.x 尚未提供 setContainerMimeType，可透過預設行為輸出 MP4
-                    // 若後續升級至支援容器型別設定的版本，再補上對應 API
-                    .build()
-            )
+            .setTransformationRequest(transformationRequest)
             .setVideoEffects(listOf(OverlayEffect(overlays)))
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
@@ -133,12 +134,22 @@ class VideoOverlayProcessor(private val context: Context) {
             })
             .build()
 
-        transformer.startTransformation(
-            MediaItem.fromUri(Uri.fromFile(inputFile)),
-            outputPath
-        )
+        try {
+            transformer.startTransformation(
+                MediaItem.fromUri(Uri.fromFile(inputFile)),
+                outputPath
+            )
 
-        latch.await()
+            try {
+                latch.await()
+            } catch (interrupted: InterruptedException) {
+                // 若等待期間被中斷，保留例外並恢復執行緒中斷狀態
+                Thread.currentThread().interrupt()
+                error = interrupted
+            }
+        } finally {
+            transformer.release()
+        }
 
         retainedBitmaps.forEach { it.recycle() }
 
@@ -149,6 +160,19 @@ class VideoOverlayProcessor(private val context: Context) {
 
         if (!outputFile.exists()) {
             throw IllegalStateException("轉檔完成後未找到輸出檔案")
+        }
+
+        // 確認檔案實際有內容，若轉檔中途失敗會產生 0 byte 檔案
+        if (outputFile.length() <= 0) {
+            outputFile.delete()
+            throw IllegalStateException("輸出檔案大小為 0，判定轉檔失敗")
+        }
+
+        // 透過後續解析再次驗證容器結構，確保回傳路徑能被 ExoPlayer 正確載入
+        val (outWidth, outHeight) = resolveVideoSize(outputPath)
+        if (outWidth <= 0 || outHeight <= 0) {
+            outputFile.delete()
+            throw IllegalStateException("輸出影片格式異常，播放器無法識別")
         }
 
         return outputPath
