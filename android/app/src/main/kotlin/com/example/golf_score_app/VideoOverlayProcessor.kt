@@ -12,13 +12,14 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
 import androidx.annotation.WorkerThread
-import androidx.exifinterface.media.ExifInterface
+import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.Presentation
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportException
@@ -144,9 +145,22 @@ class VideoOverlayProcessor(private val context: Context) {
         }
         val transformerHandler = Handler(transformerThread.looper)
 
+        val videoEffects = mutableListOf<Effect>().apply {
+            // 透過 Presentation 將輸出解析度鎖定為來源影片尺寸，避免降為 360P
+            add(
+                Presentation.createForWidthAndHeight(
+                    videoWidth,
+                    videoHeight,
+                    Presentation.LAYOUT_SCALE_TO_FIT
+                )
+            )
+            // 最後套用覆蓋效果，確保頭像與字幕以指定倍率疊加
+            add(OverlayEffect(overlays))
+        }
+
         val transformer = Transformer.Builder(context)
             .setTransformationRequest(transformationRequest)
-            .setVideoEffects(listOf(OverlayEffect(overlays)))
+            .setVideoEffects(videoEffects)
             .setLooper(transformerThread.looper)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
@@ -290,14 +304,13 @@ class VideoOverlayProcessor(private val context: Context) {
             null
         } ?: return null
         Log.d(TAG, "頭像原始尺寸=${original.width}x${original.height}。")
-        val oriented = applyExifOrientation(original, path)
-
-        val size = min(oriented.width, oriented.height)
-        val offsetX = (oriented.width - size) / 2
-        val offsetY = (oriented.height - size) / 2
-        val square = Bitmap.createBitmap(oriented, offsetX, offsetY, size, size)
-        if (square !== oriented) {
-            oriented.recycle()
+        // 直接以來源位圖建立方形裁切，保留前一版 90 度呈現的方向效果
+        val size = min(original.width, original.height)
+        val offsetX = (original.width - size) / 2
+        val offsetY = (original.height - size) / 2
+        val square = Bitmap.createBitmap(original, offsetX, offsetY, size, size)
+        if (square !== original) {
+            original.recycle()
         }
         val scaled = Bitmap.createScaledBitmap(square, targetSize, targetSize, true)
         if (scaled !== square) {
@@ -362,55 +375,6 @@ class VideoOverlayProcessor(private val context: Context) {
             Log.w(TAG, "頭像解碼結果為空：$path")
         }
         return bitmap
-    }
-
-    private fun applyExifOrientation(source: Bitmap, path: String): Bitmap {
-        // 解析 EXIF 資訊，修正被旋轉的頭像避免覆蓋時出現 90 度偏移
-        val exif = try {
-            ExifInterface(path)
-        } catch (error: Exception) {
-            Log.w(TAG, "讀取頭像 EXIF 失敗：$path", error)
-            return source
-        }
-        val orientation =
-            exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-        val matrix = Matrix()
-        val rotationDegrees = when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 270f
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-            ExifInterface.ORIENTATION_ROTATE_270 -> 90f
-            else -> 0f
-        }
-        if (rotationDegrees != 0f) {
-            // Media3 於 GPU 上繪製位圖時會採用不同座標系，若直接照 EXIF 值旋轉會導致仍有 90 度誤差
-            // 轉換為反向角度，可將頭像調整回人眼預期的方向
-            matrix.postRotate(rotationDegrees)
-        }
-        when (orientation) {
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                matrix.postRotate(270f)
-                matrix.preScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                matrix.postRotate(90f)
-                matrix.preScale(-1f, 1f)
-            }
-        }
-        if (matrix.isIdentity) {
-            return source
-        }
-        val rotated = try {
-            Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-        } catch (error: Exception) {
-            Log.w(TAG, "旋轉頭像失敗：$path", error)
-            return source
-        }
-        if (rotated !== source) {
-            source.recycle()
-        }
-        return rotated
     }
 
     private fun calculateCaptionMargin(videoHeight: Int): Int {
