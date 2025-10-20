@@ -271,7 +271,8 @@ class VideoOverlayProcessor(private val context: Context) {
     private fun calculateAvatarSize(videoWidth: Int, videoHeight: Int): Int {
         // 以影片較短邊計算頭像尺寸，進一步提高係數讓頭像占比更高並維持上下限
         val base = min(videoWidth, videoHeight)
-        return (base * 0.38f).toInt().coerceIn(360, 640)
+        // 因實際分享畫面偏大，調整基準係數讓頭像更顯眼，同時放寬上下限以容納超高畫質影片
+        return (base * 0.52f).toInt().coerceIn(420, 760)
     }
 
     private fun calculateAvatarMargin(videoWidth: Int, videoHeight: Int): Int {
@@ -374,18 +375,26 @@ class VideoOverlayProcessor(private val context: Context) {
         val orientation =
             exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         val matrix = Matrix()
+        val rotationDegrees = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 270f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 90f
+            else -> 0f
+        }
+        if (rotationDegrees != 0f) {
+            // Media3 於 GPU 上繪製位圖時會採用不同座標系，若直接照 EXIF 值旋轉會導致仍有 90 度誤差
+            // 轉換為反向角度，可將頭像調整回人眼預期的方向
+            matrix.postRotate(rotationDegrees)
+        }
         when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
             ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
             ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
             ExifInterface.ORIENTATION_TRANSPOSE -> {
-                matrix.postRotate(90f)
+                matrix.postRotate(270f)
                 matrix.preScale(-1f, 1f)
             }
             ExifInterface.ORIENTATION_TRANSVERSE -> {
-                matrix.postRotate(270f)
+                matrix.postRotate(90f)
                 matrix.preScale(-1f, 1f)
             }
         }
@@ -406,7 +415,7 @@ class VideoOverlayProcessor(private val context: Context) {
 
     private fun calculateCaptionMargin(videoHeight: Int): Int {
         // 根據影片高度設定內縮距離，加大下方保留區避免放大字幕時貼齊邊緣
-        return (videoHeight * 0.07f).toInt().coerceIn(60, 140)
+        return (videoHeight * 0.085f).toInt().coerceIn(72, 160)
     }
 
     private fun createCaptionBitmap(text: String, videoWidth: Int, videoHeight: Int): Bitmap? {
@@ -424,9 +433,9 @@ class VideoOverlayProcessor(private val context: Context) {
         // ---------- 建立品牌標語 ----------
         val taglineText = "Tekswing"
         val taglinePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            // 使用半透明白色與粗體字重，營造層級差
+            // 使用半透明白色與粗體字重，營造層級差，同時提高尺寸以呼應主字幕放大後的視覺比例
             color = Color.parseColor("#F2FFFFFF")
-            textSize = (dynamicTextSizePx * 0.72f).coerceAtLeast(48f)
+            textSize = (dynamicTextSizePx * 0.82f).coerceAtLeast(60f)
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         val taglineLayout = buildStaticLayout(taglineText, taglinePaint, maxWidth)
@@ -470,8 +479,8 @@ class VideoOverlayProcessor(private val context: Context) {
     private fun calculateCaptionTextSize(videoWidth: Int, videoHeight: Int): Float {
         // 文字大小同樣取較短邊為基準，調高係數讓字幕在分享影片中更明顯
         val base = min(videoWidth, videoHeight)
-        val sizePx = base * 0.082f
-        return sizePx.coerceIn(78f, 138f)
+        val sizePx = base * 0.104f
+        return sizePx.coerceIn(96f, 168f)
     }
 
     private fun buildStaticLayout(text: String, paint: TextPaint, width: Int): StaticLayout {
