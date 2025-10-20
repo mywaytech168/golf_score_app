@@ -1043,20 +1043,20 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(width: 12),
             InkWell(
               onTap: _openProfileEditPage,
-              borderRadius: BorderRadius.circular(30),
+              borderRadius: BorderRadius.circular(36),
               child: Container(
-                width: 56,
-                height: 56,
+                width: 72,
+                height: 72,
                 decoration: BoxDecoration(
                   color: const Color(0xFFE6F4EA),
-                  borderRadius: BorderRadius.circular(30),
+                  borderRadius: BorderRadius.circular(36),
                   border: Border.all(color: const Color(0xFF1E8E5A)),
                 ),
                 clipBehavior: Clip.antiAlias,
                 alignment: Alignment.center,
                 child: Builder(
                   builder: (context) {
-                    // 放大頭像容器後同步調整實際顯示比例，確保照片填滿整個按鈕
+                    // 放大頭像容器與邊框，讓個人圖示更醒目，同時維持裁切為正方形避免拉長
                     if (_avatarPath != null) {
                       final avatarFile = File(_avatarPath!);
                       if (avatarFile.existsSync()) {
@@ -1069,7 +1069,7 @@ class _HomePageState extends State<HomePage> {
                     return const Icon(
                       Icons.person_outline,
                       color: Color(0xFF1E8E5A),
-                      size: 30,
+                      size: 40,
                     );
                   },
                 ),

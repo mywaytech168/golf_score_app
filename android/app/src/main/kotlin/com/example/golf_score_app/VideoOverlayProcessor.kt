@@ -76,8 +76,9 @@ class VideoOverlayProcessor(private val context: Context) {
 
         if (attachAvatar && !avatarPath.isNullOrEmpty()) {
             Log.d(TAG, "準備建立頭像覆蓋，來源=$avatarPath。")
-            createCircularAvatar(avatarPath, 220)?.let { avatarBitmap ->
-                val marginPx = 32
+            val targetSize = calculateAvatarSize(videoWidth, videoHeight)
+            createCircularAvatar(avatarPath, targetSize)?.let { avatarBitmap ->
+                val marginPx = calculateAvatarMargin(videoWidth, videoHeight)
                 val anchorX = 1f - (marginPx * 2f / videoWidth)
                 val anchorY = 1f - (marginPx * 2f / videoHeight)
                 val overlaySettings = OverlaySettings.Builder()
@@ -96,8 +97,8 @@ class VideoOverlayProcessor(private val context: Context) {
 
         if (attachCaption && captionText.isNotBlank()) {
             Log.d(TAG, "準備建立字幕覆蓋，內容長度=${captionText.length}。")
-            createCaptionBitmap(captionText.trim(), videoWidth)?.let { captionBitmap ->
-                val marginPx = 48
+            createCaptionBitmap(captionText.trim(), videoWidth, videoHeight)?.let { captionBitmap ->
+                val marginPx = calculateCaptionMargin(videoHeight)
                 val anchorY = -1f + (marginPx * 2f / videoHeight)
                 val overlaySettings = OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(0f, anchorY.coerceIn(-1f, 1f))
@@ -266,6 +267,18 @@ class VideoOverlayProcessor(private val context: Context) {
         }
     }
 
+    private fun calculateAvatarSize(videoWidth: Int, videoHeight: Int): Int {
+        // 以影片較短邊計算頭像尺寸，避免比例失衡，同時保留上下限確保中小螢幕仍然清晰
+        val base = min(videoWidth, videoHeight)
+        return (base * 0.24f).toInt().coerceIn(240, 420)
+    }
+
+    private fun calculateAvatarMargin(videoWidth: Int, videoHeight: Int): Int {
+        // 依畫面尺寸縮放邊距，確保放大頭像後仍與邊界保持距離
+        val base = maxOf(videoWidth, videoHeight)
+        return (base * 0.04f).toInt().coerceIn(36, 96)
+    }
+
     private fun createCircularAvatar(path: String, targetSize: Int): Bitmap? {
         // 嘗試以取樣方式載入圖片，避免超高解析度頭像造成記憶體不足
         val original = try {
@@ -347,18 +360,24 @@ class VideoOverlayProcessor(private val context: Context) {
         return bitmap
     }
 
-    private fun createCaptionBitmap(text: String, videoWidth: Int): Bitmap? {
+    private fun calculateCaptionMargin(videoHeight: Int): Int {
+        // 根據影片高度設定內縮距離，讓字幕留出足夠空間
+        return (videoHeight * 0.06f).toInt().coerceIn(48, 120)
+    }
+
+    private fun createCaptionBitmap(text: String, videoWidth: Int, videoHeight: Int): Bitmap? {
         val density = context.resources.displayMetrics.density
+        val dynamicTextSizePx = calculateCaptionTextSize(videoWidth, videoHeight)
         val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 18f * density
+            textSize = dynamicTextSizePx
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
         }
 
-        val maxWidth = (videoWidth * 0.8f).toInt().coerceAtLeast((videoWidth * 0.5f).toInt())
+        val maxWidth = (videoWidth * 0.85f).toInt().coerceAtLeast((videoWidth * 0.55f).toInt())
         val staticLayout = buildStaticLayout(text, textPaint, maxWidth)
-        val horizontalPadding = (16 * density).toInt()
-        val verticalPadding = (12 * density).toInt()
+        val horizontalPadding = (22 * density).toInt()
+        val verticalPadding = (18 * density).toInt()
         val bitmapWidth = staticLayout.width + horizontalPadding * 2
         val bitmapHeight = staticLayout.height + verticalPadding * 2
         Log.d(TAG, "字幕位圖資訊：maxWidth=$maxWidth，實際尺寸=${bitmapWidth}x$bitmapHeight。")
@@ -379,6 +398,13 @@ class VideoOverlayProcessor(private val context: Context) {
         staticLayout.draw(canvas)
         Log.d(TAG, "字幕位圖建立完成。")
         return bitmap
+    }
+
+    private fun calculateCaptionTextSize(videoWidth: Int, videoHeight: Int): Float {
+        // 文字大小以畫面寬度為基準，同時避免在超高或超寬畫面中顯得失衡
+        val base = min(videoWidth, videoHeight)
+        val sizePx = base * 0.05f
+        return sizePx.coerceIn(48f, 84f)
     }
 
     private fun buildStaticLayout(text: String, paint: TextPaint, width: Int): StaticLayout {
