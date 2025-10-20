@@ -268,9 +268,9 @@ class VideoOverlayProcessor(private val context: Context) {
     }
 
     private fun calculateAvatarSize(videoWidth: Int, videoHeight: Int): Int {
-        // 以影片較短邊計算頭像尺寸，避免比例失衡，同時保留上下限確保中小螢幕仍然清晰
+        // 以影片較短邊計算頭像尺寸，放大係數以提升可讀性，同時設定更高上下限維持彈性
         val base = min(videoWidth, videoHeight)
-        return (base * 0.24f).toInt().coerceIn(240, 420)
+        return (base * 0.32f).toInt().coerceIn(320, 520)
     }
 
     private fun calculateAvatarMargin(videoWidth: Int, videoHeight: Int): Int {
@@ -401,10 +401,10 @@ class VideoOverlayProcessor(private val context: Context) {
     }
 
     private fun calculateCaptionTextSize(videoWidth: Int, videoHeight: Int): Float {
-        // 文字大小以畫面寬度為基準，同時避免在超高或超寬畫面中顯得失衡
+        // 文字大小同樣取較短邊為基準，調高係數讓字幕在分享影片中更明顯
         val base = min(videoWidth, videoHeight)
-        val sizePx = base * 0.05f
-        return sizePx.coerceIn(48f, 84f)
+        val sizePx = base * 0.065f
+        return sizePx.coerceIn(64f, 108f)
     }
 
     private fun buildStaticLayout(text: String, paint: TextPaint, width: Int): StaticLayout {
