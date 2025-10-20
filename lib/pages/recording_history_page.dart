@@ -16,8 +16,13 @@ enum _HistoryMenuAction { rename, editDuration, delete }
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
   final List<RecordingHistoryEntry> entries; // 外部帶入的歷史資料清單
+  final String? userAvatarPath; // 使用者自訂頭像，方便進入播放頁時供分享覆蓋
 
-  const RecordingHistoryPage({super.key, required this.entries});
+  const RecordingHistoryPage({
+    super.key,
+    required this.entries,
+    this.userAvatarPath,
+  });
 
   @override
   State<RecordingHistoryPage> createState() => _RecordingHistoryPageState();
@@ -358,7 +363,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: path)),
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+          videoPath: path,
+          avatarPath: widget.userAvatarPath,
+        ),
+      ),
     );
   }
 

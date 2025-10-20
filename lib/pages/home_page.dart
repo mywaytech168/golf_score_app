@@ -12,8 +12,10 @@ import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
 import '../services/imu_data_logger.dart';
 import '../services/recording_history_storage.dart';
+import '../services/user_profile_storage.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
+import 'profile_edit_page.dart';
 
 /// 錄影卡片支援的操作種類
 enum _HistoryAction { rename, editDuration, delete }
@@ -43,11 +45,28 @@ class _HomePageState extends State<HomePage> {
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
+  String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
+  String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
 
   @override
   void initState() {
     super.initState();
+    _restoreUserProfile();
     _loadInitialHistory();
+  }
+
+  /// 從本地偏好讀取暱稱與頭像，確保重新進入 App 仍保有個人化設定
+  Future<void> _restoreUserProfile() async {
+    final profile =
+        await UserProfileStorage.instance.loadProfile(defaultDisplayName: _displayName);
+    if (!mounted) {
+      return; // 若頁面已卸載則不需更新狀態
+    }
+
+    setState(() {
+      _displayName = profile.displayName; // 還原使用者自訂暱稱
+      _avatarPath = profile.avatarPath; // 還原之前儲存的頭像
+    });
   }
 
   /// 將時間轉換為比較區塊顯示的日期文字（例：05/21）
@@ -200,6 +219,47 @@ class _HomePageState extends State<HomePage> {
           Text(subTitle, style: const TextStyle(fontSize: 13, color: Color(0xFF1E1E1E))),
         ],
       ),
+    );
+  }
+
+  /// 開啟個人資訊編輯頁，並在儲存後更新首頁顯示資訊
+  Future<void> _openProfileEditPage() async {
+    final result = await Navigator.of(context).push<ProfileEditResult>(
+      MaterialPageRoute(
+        builder: (_) => ProfileEditPage(
+          initialDisplayName: _displayName,
+          initialEmail: widget.userEmail,
+          initialAvatarPath: _avatarPath,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) {
+      return; // 使用者取消或頁面已卸載時不處理回傳資料
+    }
+
+    final resolvedDisplayName =
+        result.displayName.trim(); // 再次保險去除頭尾空白避免儲存異常
+    final safeDisplayName =
+        resolvedDisplayName.isEmpty ? 'TekSwing' : resolvedDisplayName; // 防禦性處理空字串
+
+    final nextAvatarPath = result.removeAvatar
+        ? null
+        : result.avatarPath ?? _avatarPath; // 若僅更新暱稱則沿用舊頭像
+
+    setState(() {
+      _displayName = safeDisplayName; // 將最新暱稱同步到標題列
+      _avatarPath = nextAvatarPath; // 更新頭像狀態（可能為 null 代表清除）
+    });
+
+    await UserProfileStorage.instance.saveProfile(
+      displayName: safeDisplayName,
+      avatarPath: nextAvatarPath,
+    );
+
+    // 顯示提示訊息，告知使用者更新已生效
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('個人資訊已更新')),
     );
   }
 
@@ -694,6 +754,7 @@ class _HomePageState extends State<HomePage> {
             cameras: widget.cameras,
             initialHistory: _recordingHistory,
             onHistoryChanged: _handleHistoryUpdated,
+            userAvatarPath: _avatarPath,
           ),
         ),
       );
@@ -802,7 +863,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> _openRecordingHistoryPage() async {
     final result = await Navigator.of(context).push<List<RecordingHistoryEntry>>(
       MaterialPageRoute(
-        builder: (_) => RecordingHistoryPage(entries: _recordingHistory),
+        builder: (_) => RecordingHistoryPage(
+          entries: _recordingHistory,
+          userAvatarPath: _avatarPath,
+        ),
       ),
     );
     if (result != null) {
@@ -823,7 +887,12 @@ class _HomePageState extends State<HomePage> {
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: entry.filePath)),
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+          videoPath: entry.filePath,
+          avatarPath: _avatarPath,
+        ),
+      ),
     );
   }
 
@@ -979,7 +1048,7 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'TekSwing',
+                  _displayName,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF0B2A2E),
@@ -994,7 +1063,43 @@ class _HomePageState extends State<HomePage> {
             const Spacer(),
             IconButton(
               onPressed: () {},
+              tooltip: '通知中心',
               icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0B2A2E)),
+            ),
+            const SizedBox(width: 12),
+            InkWell(
+              onTap: _openProfileEditPage,
+              borderRadius: BorderRadius.circular(36),
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE6F4EA),
+                  borderRadius: BorderRadius.circular(36),
+                  border: Border.all(color: const Color(0xFF1E8E5A)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                alignment: Alignment.center,
+                child: Builder(
+                  builder: (context) {
+                    // 放大頭像容器與邊框，讓個人圖示更醒目，同時維持裁切為正方形避免拉長
+                    if (_avatarPath != null) {
+                      final avatarFile = File(_avatarPath!);
+                      if (avatarFile.existsSync()) {
+                        return Image.file(
+                          avatarFile,
+                          fit: BoxFit.cover,
+                        );
+                      }
+                    }
+                    return const Icon(
+                      Icons.person_outline,
+                      color: Color(0xFF1E8E5A),
+                      size: 40,
+                    );
+                  },
+                ),
+              ),
             ),
           ],
         ),

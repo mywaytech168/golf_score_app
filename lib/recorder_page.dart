@@ -19,12 +19,14 @@ class RecorderPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
   final List<RecordingHistoryEntry> initialHistory; // 外部帶入的歷史紀錄
   final ValueChanged<List<RecordingHistoryEntry>> onHistoryChanged; // 回傳更新後的歷史資料
+  final String? userAvatarPath; // 首頁傳入的個人頭像路徑，用於分享時覆蓋影片
 
   const RecorderPage({
     super.key,
     required this.cameras,
     required this.initialHistory,
     required this.onHistoryChanged,
+    this.userAvatarPath,
   });
 
   @override
@@ -2131,6 +2133,7 @@ class _RecorderPageState extends State<RecorderPage> {
             durationSeconds: seconds,
             autoStartOnReady: triggeredByImuButton,
             imuButtonStream: _imuButtonController.stream,
+            userAvatarPath: widget.userAvatarPath,
           ),
         ),
       );

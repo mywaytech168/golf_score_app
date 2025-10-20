@@ -17,6 +17,7 @@ import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
 import '../services/imu_data_logger.dart';
 import '../services/keep_screen_on_service.dart';
+import '../services/video_overlay_processor.dart';
 
 // ---------- 分享頻道設定 ----------
 const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
@@ -32,6 +33,7 @@ class RecordingSessionPage extends StatefulWidget {
   final int durationSeconds; // 每輪錄影秒數
   final bool autoStartOnReady; // 由 IMU 按鈕開啟時自動啟動錄影
   final Stream<void> imuButtonStream; // 右手腕 IMU 按鈕事件來源
+  final String? userAvatarPath; // 首頁帶入的個人頭像路徑，供分享影片時疊加
 
   const RecordingSessionPage({
     super.key,
@@ -41,6 +43,7 @@ class RecordingSessionPage extends StatefulWidget {
     required this.durationSeconds,
     required this.autoStartOnReady,
     required this.imuButtonStream,
+    this.userAvatarPath,
   });
 
   @override
@@ -72,6 +75,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   StreamSubscription<void>? _imuButtonSubscription; // 監聽 IMU 按鈕觸發錄影
   bool _pendingAutoStart = false; // 記錄 IMU 事件是否需等待鏡頭初始化後再啟動
   final _SessionProgress _sessionProgress = _SessionProgress(); // 集中管理倒數秒數與剩餘輪次
+  Future<void> _cameraOperationQueue = Future.value(); // 鏡頭操作排程，確保同一時間僅執行一個任務
+  bool _isRunningCameraTask = false; // 標記是否正在執行鏡頭任務，提供再入檢查
+  bool _isDisposing = false; // 錄影頁是否進入釋放狀態，避免離場後仍排程新任務
 
   // ---------- 生命週期 ----------
   @override
@@ -95,9 +101,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   @override
   void dispose() {
+    _isDisposing = true; // 標記進入釋放流程，後續若仍有任務會優先收斂
     _triggerCancel(); // 優先發出取消訊號，停止所有倒數與錄影
-    _stopActiveRecording(updateUi: false); // 嘗試停止仍在進行的錄影與音訊擷取
-    controller?.dispose();
+    // 透過排程方式串接停止錄影與控制器釋放，避免和其他鏡頭任務互搶資源。
+    final Future<void> stopFuture = _stopActiveRecording(updateUi: false);
+    final CameraController? controllerToDispose = controller;
+    controller = null; // 提前解除引用，減少後續誤用機率
+    _cameraOperationQueue = _cameraOperationQueue.then((_) async {
+      await stopFuture; // 確保已停止錄影後再釋放控制器
+      await controllerToDispose?.dispose();
+    });
+    unawaited(_cameraOperationQueue); // 無須等待完成即可繼續進行其餘釋放流程
     _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
     _audioPlayer.dispose();
     _imuButtonSubscription?.cancel(); // 解除 IMU 按鈕監聽，避免資源洩漏
@@ -124,14 +138,18 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       return;
     }
 
-    // 依序測試從最高到較低的解析度，找到裝置可支援的最佳錄影規格
-    // 先挑選最適合錄影的鏡頭，預設選擇後鏡頭，若無則退回清單第一顆
-    _activeCamera = _selectPreferredCamera(widget.cameras);
+    // 依照優先順序逐一測試可用鏡頭，若後鏡頭配置失敗會自動退回其他鏡頭。
+    _CameraSelectionResult? selection;
+    CameraDescription? selectedCamera;
+    for (final CameraDescription candidate in _orderedCameras(widget.cameras)) {
+      selection = await _createBestCameraController(candidate);
+      if (selection != null) {
+        selectedCamera = candidate;
+        break; // 找到可成功初始化的鏡頭立即停止搜尋
+      }
+    }
 
-    final _CameraSelectionResult? selection =
-        await _createBestCameraController(_activeCamera!);
-
-    if (selection == null) {
+    if (selection == null || selectedCamera == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('無法初始化鏡頭，請稍後再試。')),
@@ -139,7 +157,23 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       return;
     }
 
+    await _applyCameraSelection(selection, selectedCamera);
+
+    if (_pendingAutoStart) {
+      // 鏡頭就緒後若先前已有硬體按鈕請求，立即啟動倒數錄影
+      _pendingAutoStart = false;
+      unawaited(_handleImuButtonTrigger());
+    }
+  }
+
+  /// 套用鏡頭初始化結果，統一計算預覽比例與方向設定。
+  Future<void> _applyCameraSelection(
+    _CameraSelectionResult selection,
+    CameraDescription camera,
+  ) async {
     controller = selection.controller;
+    _activeCamera = camera;
+
     // 針對大多數手機相機，感光元件以橫向為主，因此在直向預覽時需要將寬高互換。
     // 透過感測器角度判斷是否應交換寬高，再計算適用於直式畫面的長寬比。
     final bool shouldSwapSide =
@@ -152,7 +186,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       final double rawAspect = controller!.value.aspectRatio;
       _previewAspectRatio = shouldSwapSide ? (1 / rawAspect) : rawAspect;
     }
-    // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉
+
+    // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉。
     try {
       await controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
     } catch (error, stackTrace) {
@@ -160,26 +195,25 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         debugPrint('lockCaptureOrientation 失敗：$error\n$stackTrace');
       }
     }
+
     if (kDebugMode) {
-      // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）
+      // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）。
       debugPrint(
         'Camera initialized with preset ${selection.preset}, size=${selection.previewSize ?? '未知'}, description=${controller!.description.name}',
       );
     }
-    if (!mounted) return;
-    setState(() {}); // 更新畫面顯示預覽
 
-    if (_pendingAutoStart) {
-      // 鏡頭就緒後若先前已有硬體按鈕請求，立即啟動倒數錄影
-      _pendingAutoStart = false;
-      unawaited(_handleImuButtonTrigger());
+    if (mounted) {
+      setState(() {}); // 更新畫面顯示預覽
     }
   }
 
-  /// 針對指定鏡頭，嘗試使用最高可支援的解析度與幀率進行初始化
+  /// 針對指定鏡頭，嘗試使用最佳解析度與幀率進行初始化
   Future<_CameraSelectionResult?> _createBestCameraController(
       CameraDescription description) async {
-    // 解析度優先順序：依照套件提供的列舉，由高至低逐一嘗試
+    // 解析度優先順序：依照畫質由高至低逐一嘗試。
+    // 依照需求改為優先採用最高畫質（max → ultraHigh → veryHigh），確保能取得最清晰的錄影畫面。
+    // 若裝置在高規格模式初始化失敗，仍會退回較低解析度，兼顧穩定性與畫質需求。
     const List<ResolutionPreset> presetPriority = <ResolutionPreset>[
       ResolutionPreset.max,
       ResolutionPreset.ultraHigh,
@@ -197,7 +231,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
 
       try {
-        await testController.initialize();
+        // 透過手動套用逾時計時，若設備長時間卡在 Camera2 配置階段則直接切換下一種解析度。
+        await testController
+            .initialize()
+            .timeout(const Duration(seconds: 6), onTimeout: () {
+          // 6 秒內仍未完成初始化代表裝置可能無法支援該解析度，直接丟出逾時讓外層重試下一個設定。
+          throw TimeoutException('initialize timeout');
+        });
 
         // 在初始化後立即準備錄影管線，避免真正開始錄影時觸發重新配置導致鏡頭切換
         try {
@@ -222,6 +262,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           preset: preset,
           previewSize: previewSize,
         );
+      } on TimeoutException catch (_) {
+        // 針對逾時個案輸出除錯訊息，讓開發者能追蹤實際退回的解析度。
+        if (kDebugMode) {
+          debugPrint('Camera initialize timeout on preset $preset，改用下一個設定');
+        }
+        await testController.dispose();
       } catch (_) {
         await testController.dispose();
       }
@@ -230,15 +276,39 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     return null;
   }
 
-  /// 根據鏡頭清單挑選最適合錄影的鏡頭：優先後鏡頭，其次回退第一顆
-  CameraDescription _selectPreferredCamera(List<CameraDescription> cameras) {
-    // ---------- 邏輯說明 ----------
-    // 1. 大多數揮桿錄影希望使用後鏡頭，因此優先尋找後鏡頭。
-    // 2. 若裝置沒有後鏡頭（例如部分平板），則退回清單中的第一顆以確保功能可用。
-    return cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.back,
-      orElse: () => cameras.first,
-    );
+  /// 根據鏡頭清單建立優先順序，遇到後鏡頭初始化失敗時可退回其他鏡頭
+  List<CameraDescription> _orderedCameras(List<CameraDescription> cameras) {
+    final List<CameraDescription> backCameras = <CameraDescription>[]; // 主要使用後鏡頭
+    final List<CameraDescription> frontCameras = <CameraDescription>[]; // 次要使用前鏡頭
+    final List<CameraDescription> externalCameras = <CameraDescription>[]; // 可能存在的外接鏡頭
+    final List<CameraDescription> others = <CameraDescription>[]; // 其餘未知型別鏡頭
+
+    for (final CameraDescription camera in cameras) {
+      switch (camera.lensDirection) {
+        case CameraLensDirection.back:
+          backCameras.add(camera);
+          break;
+        case CameraLensDirection.front:
+          frontCameras.add(camera);
+          break;
+        case CameraLensDirection.external:
+          externalCameras.add(camera);
+          break;
+        default:
+          others.add(camera);
+          break;
+      }
+    }
+
+    // ---------- 佈局說明 ----------
+    // 1. 後鏡頭 → 外接鏡頭 → 前鏡頭 → 其他：滿足大多數錄影需求並保留替代方案。
+    // 2. 若裝置僅有單一鏡頭則順序即為原清單，保持兼容性。
+    return <CameraDescription>[
+      ...backCameras,
+      ...externalCameras,
+      ...frontCameras,
+      ...others,
+    ];
   }
 
   /// 建立固定比例的預覽畫面，避免錄影時鏡頭切換解析度導致畫面跳動
@@ -311,7 +381,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   }
 
   /// 主動停止鏡頭錄影與音訊擷取，確保返回上一頁後不再持續錄製
-  Future<void> _stopActiveRecording({bool updateUi = true}) async {
+  Future<void> _stopActiveRecording({
+    bool updateUi = true,
+    bool refreshCamera = false,
+  }) async {
     if (!isRecording && !_isCountingDown && controller != null && !(controller!.value.isRecordingVideo)) {
       return; // 若沒有任何錄影流程在進行，可直接返回
     }
@@ -322,13 +395,16 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       // 音檔可能尚未播放完成，忽略停止時的錯誤
     }
 
-    if (controller != null && controller!.value.isRecordingVideo) {
+    await _runCameraSerial<void>(() async {
+      if (controller == null || !controller!.value.isRecordingVideo) {
+        return; // 鏡頭已停止或尚未啟動錄影，無需額外處理
+      }
       try {
         await controller!.stopVideoRecording();
       } catch (_) {
         // 若已停止或尚未開始錄影，忽略錯誤
       }
-    }
+    }, debugLabel: 'stopActiveRecording');
 
     await _closeAudioPipeline();
 
@@ -340,6 +416,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       setState(() => isRecording = false);
     } else {
       isRecording = false;
+    }
+
+    if (refreshCamera && controller != null && controller!.value.isInitialized) {
+      try {
+        // 取消或結束錄影時強制刷新鏡頭，避免返回首頁後鏡頭仍處於卡住狀態。
+        await _refreshCameraAfterRound(hasMoreRounds: true);
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('強制停止錄影後刷新鏡頭失敗：$error\n$stackTrace');
+        }
+      }
     }
   }
 
@@ -384,6 +471,150 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     } catch (e) {
       debugPrint('🎙️ 初始化失敗: $e');
       rethrow;
+    }
+  }
+
+  /// 重新準備錄影管線，避免多輪錄影時因為缺少關鍵影格而產生空檔案。
+  Future<void> _prepareRecorderSurface() async {
+    await _runCameraSerial<void>(() async {
+      if (_isDisposing) {
+        return; // 頁面已進入釋放狀態時，不再進行暖機避免排程殘留
+      }
+      if (controller == null || !controller!.value.isInitialized) {
+        return; // 控制器尚未就緒時不進行預熱，避免觸發例外
+      }
+      if (controller!.value.isRecordingVideo) {
+        return; // 避免錄影進行中重複呼叫導致例外
+      }
+      try {
+        // CameraX 需在每次錄影前重新 warm up，否則有機率等不到第一個 I-Frame。
+        await controller!.prepareForVideoRecording();
+        await _performWarmupRecording();
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('prepareForVideoRecording 重新預熱失敗：$error\n$stackTrace');
+        }
+      }
+    }, debugLabel: 'prepareRecorderSurface');
+  }
+
+  /// 進行短暫暖機錄影，確保下一輪正式錄影能立即產生關鍵影格。
+  Future<void> _performWarmupRecording() async {
+    if (controller == null || !controller!.value.isInitialized) {
+      return;
+    }
+    if (controller!.value.isRecordingVideo) {
+      return; // 外層已啟動錄影時不可重複進行暖機。
+    }
+
+    // 若預覽仍處於暫停狀態，先嘗試恢復以免暖機錄影缺少畫面來源。
+    if (controller!.value.isPreviewPaused) {
+      try {
+        await controller!.resumePreview();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('暖機前恢復預覽失敗：$error');
+        }
+      }
+    }
+
+    try {
+      await controller!.startVideoRecording();
+      await Future.delayed(const Duration(milliseconds: 600));
+      final XFile warmupFile = await controller!.stopVideoRecording();
+      await _deleteWarmupFile(warmupFile.path);
+      try {
+        await controller!.prepareForVideoRecording();
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('暖機後重新 prepare 失敗：$error\n$stackTrace');
+        }
+      }
+    } catch (error, stackTrace) {
+      if (kDebugMode) {
+        debugPrint('暖機錄影失敗：$error\n$stackTrace');
+      }
+
+      // 若暖機過程中仍有錄影未停止，強制停止並清理暫存檔。
+      if (controller != null && controller!.value.isRecordingVideo) {
+        try {
+          final XFile leftover = await controller!.stopVideoRecording();
+          await _deleteWarmupFile(leftover.path);
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// 刪除暖機產生的臨時檔案，避免佔用儲存空間與誤判為正式影片。
+  Future<void> _deleteWarmupFile(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      return;
+    }
+    try {
+      await file.delete();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('刪除暖機影片失敗：$error');
+      }
+    }
+  }
+
+  /// 錄製結束後重建鏡頭控制器，確保下一輪能在乾淨狀態下重新配置。
+  Future<void> _resetCameraForNextRound() async {
+    await _runCameraSerial<void>(() async {
+      final CameraDescription? targetCamera = _activeCamera;
+      if (targetCamera == null) {
+        return; // 尚未記錄當前鏡頭時不需重置。
+      }
+
+      final CameraController? oldController = controller;
+      controller = null;
+      if (mounted && !_isDisposing) {
+        setState(() {}); // 先重設狀態避免 UI 仍引用舊控制器。
+      }
+
+      try {
+        await oldController?.dispose();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('釋放舊鏡頭控制器失敗：$error');
+        }
+      }
+
+      if (_isDisposing) {
+        return; // 頁面離場時不再重新初始化鏡頭，直接結束任務
+      }
+
+      final _CameraSelectionResult? selection =
+          await _createBestCameraController(targetCamera);
+      if (selection == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('鏡頭重新初始化失敗，請稍後再試。')),
+          );
+        }
+        return;
+      }
+
+      await _applyCameraSelection(selection, targetCamera);
+    }, debugLabel: 'resetCameraForNextRound');
+  }
+
+  /// 依剩餘輪次調整鏡頭狀態：每輪都先完整重建控制器，最後一輪額外暖機，確保預覽不卡住。
+  Future<void> _refreshCameraAfterRound({required bool hasMoreRounds}) async {
+    try {
+      // 無論是否仍有下一輪，都先完整釋放並重建鏡頭，確保預覽畫面回到乾淨狀態。
+      await _resetCameraForNextRound();
+
+      if (!hasMoreRounds && controller != null && controller!.value.isInitialized) {
+        // 最後一輪結束後仍預先暖機一次，方便使用者再次啟動錄影時不必等待。
+        await _prepareRecorderSurface();
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('錄影結束後重新整理鏡頭失敗：$error');
+      }
     }
   }
 
@@ -435,6 +666,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     bool recordedSuccessfully = false; // 標記本輪是否完整完成，供外層計算剩餘次數
     try {
       waveformAccumulated.clear();
+      await _prepareRecorderSurface();
+
       await initAudioCapture();
       if (_shouldCancelRecording) {
         await _closeAudioPipeline();
@@ -449,7 +682,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
       await ImuDataLogger.instance.startRoundLogging(baseName);
 
-      await controller!.startVideoRecording();
+      await _runCameraSerial<void>(() async {
+        if (controller == null || controller!.value.isRecordingVideo) {
+          return; // 已在錄影中時不重複啟動
+        }
+        await controller!.startVideoRecording();
+      }, debugLabel: 'startVideoRecording');
 
       _sessionProgress.startRecording(
         seconds: widget.durationSeconds,
@@ -459,11 +697,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       await _waitForDuration(widget.durationSeconds);
 
       if (_shouldCancelRecording) {
-        if (controller!.value.isRecordingVideo) {
+        await _runCameraSerial<void>(() async {
+          if (controller == null || !controller!.value.isRecordingVideo) {
+            return; // 錄影已停止或尚未啟動，無需額外處理
+          }
           try {
             await controller!.stopVideoRecording();
           } catch (_) {}
-        }
+        }, debugLabel: 'cancelStopVideo');
         await _closeAudioPipeline();
         if (ImuDataLogger.instance.hasActiveRound) {
           await ImuDataLogger.instance.abortActiveRound();
@@ -471,7 +712,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         return false;
       }
 
-      final XFile videoFile = await controller!.stopVideoRecording();
+      // 停止錄影後仍需等待 CameraX 完成封裝，避免直接複製造成無法播放的檔案。
+      final XFile videoFile = await _runCameraSerial<XFile>(() async {
+        if (controller == null || !controller!.value.isRecordingVideo) {
+          throw StateError('錄影尚未啟動，無法取得影片檔案');
+        }
+        return controller!.stopVideoRecording();
+      }, debugLabel: 'stopVideoRecording');
+      await Future.delayed(const Duration(milliseconds: 200));
       await _closeAudioPipeline();
 
       final savedVideoPath = await ImuDataLogger.instance.persistVideoFile(
@@ -481,34 +729,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
       String? savedThumbnailPath;
       try {
-        // ---------- 拍攝縮圖 ----------
-        // 先暫停預覽以釋放預覽緩衝區，避免持續出現 ImageReader 無法取得緩衝的警告。
-        bool needResume = false;
-        if (!controller!.value.isPreviewPaused) {
-          try {
-            await controller!.pausePreview();
-            needResume = true;
-          } catch (pauseError) {
-            debugPrint('⚠️ 暫停預覽時發生錯誤：$pauseError');
-          }
-        }
-
-        // 使用 takePicture 直接捕捉預覽畫面，避免再次開啟 MediaMetadataRetriever。
-        final stillImage = await controller!.takePicture();
-        savedThumbnailPath = await ImuDataLogger.instance
-            .persistThumbnailFromPicture(
-          sourcePath: stillImage.path,
-          baseName: baseName,
-        );
-
-        // 拍照結束後恢復預覽，確保畫面持續更新。
-        if (needResume && controller!.value.isPreviewPaused) {
-          try {
-            await controller!.resumePreview();
-          } catch (resumeError) {
-            debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
-          }
-        }
+        savedThumbnailPath = await _captureThumbnail(baseName);
       } catch (error) {
         debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
         // 若拍照失敗，嘗試確保預覽恢復以免畫面停住。
@@ -519,6 +740,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             debugPrint('⚠️ 拍照失敗後恢復預覽再度失敗：$resumeError');
           }
         }
+      } finally {
+        await _refreshCameraAfterRound(
+          hasMoreRounds: index < widget.totalRounds - 1,
+        );
       }
       final csvPaths = ImuDataLogger.instance.hasActiveRound
           ? await ImuDataLogger.instance.finishRoundLogging()
@@ -551,6 +776,88 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     }
 
     return recordedSuccessfully;
+  }
+
+  /// 排程鏡頭任務，確保相機資源一次只被一個流程操作。
+  Future<T> _runCameraSerial<T>(
+    Future<T> Function() task, {
+    String? debugLabel,
+  }) {
+    if (_isRunningCameraTask) {
+      // 若已在鎖內部執行，直接執行傳入任務以避免死鎖。
+      return task();
+    }
+
+    final Completer<T> completer = Completer<T>();
+
+    Future<void> runner() async {
+      _isRunningCameraTask = true;
+      try {
+        if (debugLabel != null && kDebugMode) {
+          debugPrint('🎥 [$debugLabel] 任務開始');
+        }
+        final T result = await task();
+        if (debugLabel != null && kDebugMode) {
+          debugPrint('🎥 [$debugLabel] 任務結束');
+        }
+        if (!completer.isCompleted) {
+          completer.complete(result);
+        }
+      } catch (error, stackTrace) {
+        if (debugLabel != null && kDebugMode) {
+          debugPrint('🎥 [$debugLabel] 任務失敗：$error');
+        }
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      } finally {
+        _isRunningCameraTask = false;
+      }
+    }
+
+    _cameraOperationQueue = _cameraOperationQueue.then((_) => runner());
+    return completer.future;
+  }
+
+  /// 捕捉當前畫面作為縮圖，並在序列鎖下執行避免 ImageReader 緩衝耗盡。
+  Future<String?> _captureThumbnail(String baseName) async {
+    return _runCameraSerial<String?>(() async {
+      if (_isDisposing) {
+        return null; // 頁面即將離場，略過縮圖產生以縮短釋放時間
+      }
+      if (controller == null || !controller!.value.isInitialized) {
+        return null; // 控制器已被釋放或尚未完成初始化，直接略過縮圖
+      }
+
+      // ---------- 拍攝縮圖 ----------
+      // 先暫停預覽以釋放預覽緩衝區，避免持續出現 ImageReader 無法取得緩衝的警告。
+      bool needResume = false;
+      if (!controller!.value.isPreviewPaused) {
+        try {
+          await controller!.pausePreview();
+          needResume = true;
+        } catch (pauseError) {
+          debugPrint('⚠️ 暫停預覽時發生錯誤：$pauseError');
+        }
+      }
+
+      try {
+        final stillImage = await controller!.takePicture();
+        return await ImuDataLogger.instance.persistThumbnailFromPicture(
+          sourcePath: stillImage.path,
+          baseName: baseName,
+        );
+      } finally {
+        // 拍照結束後恢復預覽，確保畫面持續更新。
+        if (needResume && controller != null && controller!.value.isPreviewPaused) {
+          try {
+            await controller!.resumePreview();
+          } catch (resumeError) {
+            debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
+          }
+        }
+      }
+    }, debugLabel: 'captureThumbnail');
   }
 
   /// 依使用者設定自動執行多輪倒數與錄影，中間保留休息時間
@@ -639,7 +946,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (!mounted) return;
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => VideoPlayerPage(videoPath: filePath)),
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+          videoPath: filePath,
+          avatarPath: widget.userAvatarPath,
+        ),
+      ),
     );
   }
 
@@ -664,7 +976,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   /// 處理返回上一頁事件：先停止錄影再允許跳轉
   Future<bool> _handleWillPop() async {
     _triggerCancel();
-    await _stopActiveRecording();
+    await _stopActiveRecording(refreshCamera: true);
 
     if (mounted) {
       Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_recordedRuns));
@@ -1281,60 +1593,95 @@ class _StanceGuidePainter extends CustomPainter {
 /// 影片播放頁面，提供錄製檔案的立即檢視
 class VideoPlayerPage extends StatefulWidget {
   final String videoPath; // 影片檔案路徑
-  const VideoPlayerPage({super.key, required this.videoPath});
+  final String? avatarPath; // 首頁傳遞的個人頭像，用於決定是否可疊加
+
+  const VideoPlayerPage({
+    super.key,
+    required this.videoPath,
+    this.avatarPath,
+  });
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
 }
 
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
-  late VideoPlayerController _videoController;
+  VideoPlayerController? _videoController; // 影片控制器，初始化成功後才會建立
   static const String _shareMessage = '分享我的 TekSwing 揮桿影片'; // 分享時的預設文案
+  final TextEditingController _captionController = TextEditingController(); // 影片下方說明輸入
+  final List<String> _generatedTempFiles = []; // 記錄原生處理後的暫存影片，頁面結束時統一清理
+  bool _attachAvatar = false; // 是否要在分享影片中加入個人頭像
+  bool _isProcessingShare = false; // 控制分享期間按鈕狀態，避免重複觸發
+  late final bool _avatarSelectable; // 記錄頭像檔案是否存在，可供開關判斷
+  bool _isVideoLoading = true; // 控制是否顯示讀取中轉圈
+  String? _videoLoadError; // 若載入失敗記錄錯誤訊息，提供使用者提示與重試
+
+  bool get _canControlVideo {
+    // 畫面僅在影片初始化完成後才允許操作播放/暫停，避免觸發例外
+    final controller = _videoController;
+    return controller != null && controller.value.isInitialized;
+  }
 
   // ---------- 分享相關方法區 ----------
   Future<void> _shareToTarget(_ShareTarget target) async {
-    // 事前確認檔案是否存在，避免分享流程出現例外
-    final file = File(widget.videoPath);
-    if (!await file.exists()) {
+    if (_isProcessingShare) {
+      return; // 已經在產製分享檔案，避免同時觸發造成流程衝突
+    }
+
+    setState(() => _isProcessingShare = true);
+
+    try {
+      // 事前確認檔案是否存在，避免分享流程出現例外
+      final file = File(widget.videoPath);
+      if (!await file.exists()) {
+        _showSnack('找不到影片檔案，無法分享。');
+        return;
+      }
+
+      // 若使用者選擇加入頭像或文字，委派原生端生成覆蓋影片
+      final sharePath = await _prepareShareFile();
+      if (sharePath == null) {
+        return; // 原生處理失敗或條件不足時直接中止
+      }
+
+      // 依目標應用程式取得對應的封裝名稱
+      final packageName = switch (target) {
+        _ShareTarget.instagram => 'com.instagram.android',
+        _ShareTarget.facebook => 'com.facebook.katana',
+        _ShareTarget.line => 'jp.naver.line.android',
+      };
+
+      bool sharedByPackage = false; // 紀錄是否已成功透過指定應用分享
+      if (Platform.isAndroid) {
+        try {
+          final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
+            'packageName': packageName,
+            'filePath': sharePath,
+            'mimeType': 'video/*',
+            'text': _shareMessage,
+          });
+          sharedByPackage = result ?? false;
+        } on PlatformException catch (error) {
+          debugPrint('[Share] Android 指定分享失敗：$error');
+        }
+      }
+
+      if (!sharedByPackage) {
+        if (mounted && Platform.isAndroid) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未找到指定社群 App，已改用系統分享選單。')),
+          );
+        }
+        await Share.shareXFiles([
+          XFile(sharePath),
+        ], text: _shareMessage);
+      }
+    } finally {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('找不到影片檔案，無法分享。')),
-        );
+        setState(() => _isProcessingShare = false);
+      } else {
+        _isProcessingShare = false;
       }
-      return;
-    }
-
-    // 依目標應用程式取得對應的封裝名稱
-    final packageName = switch (target) {
-      _ShareTarget.instagram => 'com.instagram.android',
-      _ShareTarget.facebook => 'com.facebook.katana',
-      _ShareTarget.line => 'jp.naver.line.android',
-    };
-
-    bool sharedByPackage = false; // 紀錄是否已成功透過指定應用分享
-    if (Platform.isAndroid) {
-      try {
-        final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
-          'packageName': packageName,
-          'filePath': widget.videoPath,
-          'mimeType': 'video/*',
-          'text': _shareMessage,
-        });
-        sharedByPackage = result ?? false;
-      } on PlatformException catch (error) {
-        debugPrint('[Share] Android 指定分享失敗：$error');
-      }
-    }
-
-    if (!sharedByPackage) {
-      if (mounted && Platform.isAndroid) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未找到指定社群 App，已改用系統分享選單。')),
-        );
-      }
-      await Share.shareXFiles([
-        XFile(widget.videoPath),
-      ], text: _shareMessage);
     }
   }
 
@@ -1347,7 +1694,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     // 建立統一樣式的分享按鈕，維持排版一致
     return Expanded(
       child: ElevatedButton.icon(
-        onPressed: () => _shareToTarget(target),
+        onPressed: _isProcessingShare ? null : () => _shareToTarget(target),
         icon: Icon(icon),
         label: Text(label),
         style: ElevatedButton.styleFrom(
@@ -1362,17 +1709,124 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   @override
   void initState() {
     super.initState();
-    _videoController = VideoPlayerController.file(File(widget.videoPath))
-      ..initialize().then((_) {
-        setState(() {});
-        _videoController.play();
-      });
+    _avatarSelectable = widget.avatarPath != null &&
+        widget.avatarPath!.isNotEmpty &&
+        File(widget.avatarPath!).existsSync(); // 預先判斷頭像是否存在，供 UI 判斷
+    unawaited(_initializeVideo()); // 進入頁面即嘗試初始化播放器
   }
 
   @override
   void dispose() {
-    _videoController.dispose();
+    _videoController?.dispose();
+    _captionController.dispose();
+    _cleanupTempFiles();
     super.dispose();
+  }
+
+  /// 初始化影片播放器，補上錯誤處理與重試機制
+  Future<void> _initializeVideo() async {
+    setState(() {
+      _isVideoLoading = true;
+      _videoLoadError = null;
+    });
+
+    final file = File(widget.videoPath);
+    if (!await file.exists()) {
+      setState(() {
+        _isVideoLoading = false;
+        _videoLoadError = '找不到錄影檔案，請返回上一頁重新錄製。';
+      });
+      return;
+    }
+
+    // 若重新整理需先釋放舊控制器，避免資源外洩
+    await _videoController?.dispose();
+
+    final controller = VideoPlayerController.file(file);
+    try {
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _videoController = controller;
+        _isVideoLoading = false;
+      });
+      controller.play();
+    } catch (error, stackTrace) {
+      debugPrint('[VideoPlayer] 初始化失敗：$error');
+      debugPrintStack(stackTrace: stackTrace);
+      await controller.dispose();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _videoController = null;
+        _isVideoLoading = false;
+        _videoLoadError = '無法載入影片，請稍後再試。';
+      });
+    }
+  }
+
+  /// 統一顯示 Snackbar，確保訊息風格一致
+  void _showSnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 嘗試清除原生產製的暫存檔，避免長時間累積佔用空間
+  void _cleanupTempFiles() {
+    for (final path in _generatedTempFiles) {
+      try {
+        final file = File(path);
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      } catch (_) {
+        // 若刪除失敗可忽略，暫存資料夾會由系統定期清理
+      }
+    }
+    _generatedTempFiles.clear();
+  }
+
+  /// 若使用者開啟頭像或文字選項，委派原生端生成覆蓋後的分享檔案
+  Future<String?> _prepareShareFile() async {
+    final bool wantsAvatar = _attachAvatar;
+    final String trimmedCaption = _captionController.text.trim();
+    final bool wantsCaption = trimmedCaption.isNotEmpty;
+
+    if (wantsAvatar) {
+      if (!_avatarSelectable || widget.avatarPath == null) {
+        _showSnack('尚未設定個人頭像，請先到個資頁上傳照片。');
+        return null;
+      }
+      final avatarFile = File(widget.avatarPath!);
+      if (!avatarFile.existsSync()) {
+        _showSnack('找不到個人頭像檔案，請重新選擇。');
+        return null;
+      }
+    }
+
+    final result = await VideoOverlayProcessor.process(
+      inputPath: widget.videoPath,
+      attachAvatar: wantsAvatar,
+      avatarPath: widget.avatarPath,
+      attachCaption: wantsCaption,
+      caption: trimmedCaption,
+    );
+
+    if (result == null) {
+      _showSnack('處理影片時發生錯誤，請稍後再試。');
+      return null;
+    }
+
+    if (result != widget.videoPath) {
+      _generatedTempFiles.add(result);
+    }
+    return result;
   }
 
   @override
@@ -1383,12 +1837,31 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         children: [
           Expanded(
             child: Center(
-              child: _videoController.value.isInitialized
-                  ? AspectRatio(
-                      aspectRatio: _videoController.value.aspectRatio,
-                      child: VideoPlayer(_videoController),
-                    )
-                  : const CircularProgressIndicator(),
+              child: _isVideoLoading
+                  ? const CircularProgressIndicator()
+                  : _videoLoadError != null
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+                            const SizedBox(height: 12),
+                            Text(
+                              _videoLoadError!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _initializeVideo,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('重新嘗試載入'),
+                            ),
+                          ],
+                        )
+                      : AspectRatio(
+                          aspectRatio: _videoController!.value.aspectRatio,
+                          child: VideoPlayer(_videoController!),
+                        ),
             ),
           ),
           Padding(
@@ -1400,6 +1873,36 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   '分享影片',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
+                const SizedBox(height: 12),
+                SwitchListTile.adaptive(
+                  value: _attachAvatar,
+                  onChanged: !_avatarSelectable
+                      ? null
+                      : (value) {
+                          setState(() => _attachAvatar = value);
+                        },
+                  title: const Text('右上角加入我的個人頭像'),
+                  subtitle: Text(
+                    !_avatarSelectable
+                        ? '尚未設定個人頭像，請先到個人資訊頁上傳照片。'
+                        : '開啟後會以圓形頭像覆蓋在影片右上角。',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  activeColor: const Color(0xFF1E8E5A),
+                ),
+                TextField(
+                  controller: _captionController,
+                  maxLength: 50,
+                  decoration: const InputDecoration(
+                    labelText: '影片下方文字',
+                    hintText: '輸入要顯示在影片底部的描述（可留空）',
+                    counterText: '',
+                  ),
+                ),
+                if (_isProcessingShare) ...[
+                  const SizedBox(height: 8),
+                  const LinearProgressIndicator(),
+                ],
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -1436,14 +1939,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() {
-            _videoController.value.isPlaying
-                ? _videoController.pause()
-                : _videoController.play();
-          });
-        },
-        child: Icon(_videoController.value.isPlaying ? Icons.pause : Icons.play_arrow),
+        onPressed: _canControlVideo
+            ? () {
+                setState(() {
+                  final controller = _videoController!;
+                  controller.value.isPlaying ? controller.pause() : controller.play();
+                });
+              }
+            : null,
+        child: Icon(
+          _canControlVideo && _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+        ),
       ),
     );
   }
