@@ -1,265 +1,85 @@
-<script setup>
-// ---------- API 呼叫區 ----------
-// 後端 API 根網址
-const apiBase = 'https://9eazqxfttdu2jv6j.atk.tw'
-
-// ---------- 方法區 ----------
-import { ref, onMounted } from 'vue'
-
-// 可用鏡頭清單
-const videoDevices = ref([])
-// 選擇中的鏡頭 ID
-const selectedDeviceId = ref('')
-
-// 鏡頭畫面元素
-const videoEl = ref(null)
-// 媒體串流
-const mediaStream = ref(null)
-
-// 錄影相關狀態
-const mediaRecorder = ref(null)
-const recordedChunks = ref([])
-const isRecording = ref(false)
-
-// 使用者選擇的影片格式，預設 webm
-const selectedFormat = ref('webm')
-// 多次錄影設定：錄影次數、每段持續秒數與間隔秒數
-const recordCount = ref(1)
-const durationSec = ref(3)
-const gapSec = ref(1)
-// 累積所有錄影檔案
-const allBlobs = ref([])
-// 錄影過程 log
-const logs = ref([])
-
-// 取得可用鏡頭清單
-async function loadDevices() {
-  // 呼叫硬體取得所有媒體裝置
-  const devices = await navigator.mediaDevices.enumerateDevices()
-  videoDevices.value = devices.filter(d => d.kind === 'videoinput')
-  // 若尚未選擇鏡頭，預設使用第一個
-  if (!selectedDeviceId.value && videoDevices.value.length > 0) {
-    selectedDeviceId.value = videoDevices.value[0].deviceId
-  }
-}
-
-// 開啟鏡頭
-async function startCamera() {
-  if (mediaStream.value) {
-    mediaStream.value.getTracks().forEach(t => t.stop())
-  }
-  // 開啟影像與聲音串流，預覽時靜音避免回聲
-  mediaStream.value = await navigator.mediaDevices.getUserMedia({
-    video: selectedDeviceId.value ? { deviceId: { exact: selectedDeviceId.value } } : true,
-    audio: true
-  })
-  // 取得權限後重新整理鏡頭清單以便切換前後鏡頭
-  await loadDevices()
-  if (videoEl.value) {
-    videoEl.value.srcObject = mediaStream.value
-    videoEl.value.muted = true // 靜音預覽避免聲音外放
-    await videoEl.value.play()
-  }
-}
-
-// 切換鏡頭
-async function switchCamera(id) {
-  selectedDeviceId.value = id
-  await startCamera()
-}
-
-// 取得當前可用的 MIME 類型，若瀏覽器不支援 mp4 則退回 webm
-function getMimeType(format) {
-  const type = format === 'mp4' ? 'video/mp4' : 'video/webm'
-  return MediaRecorder.isTypeSupported(type) ? type : 'video/webm'
-}
-
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-// 開始錄影
-let currentFormat = 'webm'
-function startRecording() {
-  if (!mediaStream.value) return
-  recordedChunks.value = []
-  // 確認瀏覽器支援的格式
-  const mimeType = getMimeType(selectedFormat.value)
-  currentFormat = mimeType === 'video/mp4' ? 'mp4' : 'webm'
-  mediaRecorder.value = new MediaRecorder(mediaStream.value, { mimeType })
-  mediaRecorder.value.ondataavailable = e => recordedChunks.value.push(e.data)
-  mediaRecorder.value.start()
-  isRecording.value = true
-}
-
-// 停止錄影，回傳 Promise 以利自動化流程等待
-function stopRecording() {
-  return new Promise(resolve => {
-    if (mediaRecorder.value && isRecording.value) {
-      mediaRecorder.value.onstop = () => {
-        handleStop()
-        resolve()
-      }
-      mediaRecorder.value.stop()
-    } else {
-      resolve()
-    }
-  })
-}
-
-// 錄影結束後處理檔案
-function handleStop() {
-  isRecording.value = false
-  const mimeType = currentFormat === 'mp4' ? 'video/mp4' : 'video/webm'
-  const blob = new Blob(recordedChunks.value, { type: mimeType })
-  allBlobs.value.push({ blob, format: currentFormat })
-}
-
-// 自動多次錄影，依設定次數、持續時間與間隔重複錄影
-async function autoRecord() {
-  allBlobs.value = []
-  logs.value = []
-  for (let i = 0; i < recordCount.value; i++) {
-    logs.value.push(`目前錄製中第${i + 1}輪`)
-    startRecording()
-    await wait(durationSec.value * 1000)
-    await stopRecording()
-    logs.value.push(`第${i + 1}輪完成錄影`)
-    if (i < recordCount.value - 1) {
-      logs.value.push(`等待 ${gapSec.value} 秒後開始下一輪`)
-      await wait(gapSec.value * 1000)
-    }
-  }
-}
-
-// 下載所有影片
-function downloadAll() {
-  if (allBlobs.value.length === 0) return
-  allBlobs.value.forEach((item, idx) => {
-    const url = URL.createObjectURL(item.blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `record_${idx + 1}.${item.format}`
-    a.click()
-    URL.revokeObjectURL(url)
-  })
-}
-
-// 上傳所有影片至後端 API
-async function uploadAll() {
-  if (allBlobs.value.length === 0) return
-  for (let i = 0; i < allBlobs.value.length; i++) {
-    const item = allBlobs.value[i]
-    const form = new FormData()
-    
-    // 建立時間字串 (yyyyMMdd_HHmmss)
-    const now = new Date()
-    const timestamp = now.toISOString().replace(/[-:T]/g, "").split(".")[0] // 20250822T153045 → 20250822T153045
-    const filename = `record_${timestamp}_${i + 1}.${item.format}`
-
-    form.append('file', item.blob, filename)
-
-    try {
-      await fetch(`${apiBase}/upload`, {
-        method: 'POST',
-        body: form
-      })
-      logs.value.push(`第${i + 1}個檔案上傳成功 (${filename})`)
-    } catch (err) {
-      logs.value.push(`第${i + 1}個檔案上傳失敗`)
-    }
-  }
-  window.loadCloudVideos && window.loadCloudVideos()
-  logs.value.push('所有影片已上傳')
-}
-
-
-// ---------- 生命週期 ----------
-onMounted(async () => {
-  await loadDevices()
-  await startCamera()
-})
-</script>
-
 <template>
-  <el-container class="app-container">
-    <el-main>
-      <h1>鏡頭錄影範例</h1>
+  <div class="app-wrapper">
+    <LoginPanel v-if="!isAuthenticated" @login-success="handleLoginSuccess" />
 
-      <!-- 鏡頭選擇 -->
-      <el-select v-model="selectedDeviceId" placeholder="選擇鏡頭" @change="switchCamera">
-        <el-option
-          v-for="device in videoDevices"
-          :key="device.deviceId"
-          :label="device.label || `鏡頭 ${device.deviceId}`"
-          :value="device.deviceId"
-        />
-      </el-select>
-
-      <!-- 鏡頭畫面 -->
-      <video ref="videoEl" class="preview" autoplay muted></video>
-
-      <!-- 影片格式選擇 -->
-      <el-select v-model="selectedFormat" placeholder="下載格式">
-        <el-option label="WebM" value="webm" />
-        <el-option label="MP4" value="mp4" />
-      </el-select>
-
-      <!-- 多次錄影設定與下載全部 -->
-        <div class="multi-group">
-          <span>錄影次數</span>
-          <el-input-number v-model="recordCount" :min="1" />
-          <span>持續秒數</span>
-          <el-input-number v-model="durationSec" :min="1" />
-          <span>間隔秒數</span>
-          <el-input-number v-model="gapSec" :min="0" />
-          <el-button type="warning" @click="autoRecord">多次錄影</el-button>
-          <el-button type="success" :disabled="allBlobs.length === 0" @click="downloadAll">下載所有影片</el-button>
-          <el-button type="primary" :disabled="allBlobs.length === 0" @click="uploadAll">上傳雲端</el-button>
-        </div>
-
-      <!-- 錄影進度 log -->
-      <div class="log-group">
-        <p v-for="(item, idx) in logs" :key="idx">{{ item }}</p>
-      </div>
-    </el-main>
-  </el-container>
+    <section v-else class="app-placeholder">
+      <el-result icon="success" title="TekSwing 應用主畫面" sub-title="示意畫面：登入成功後導向錄影系統">
+        <template #extra>
+          <el-card class="app-card" shadow="hover">
+            <p class="app-greeting">目前以 {{ activeAccount }} 登入</p>
+            <p class="app-description">稍後可串接實際的揮桿錄影與分析模組</p>
+            <el-button type="primary" @click="handleLogout">返回登入頁</el-button>
+          </el-card>
+        </template>
+      </el-result>
+    </section>
+  </div>
 </template>
 
+<script setup lang="ts">
+// ---------- API 呼叫區 ----------
+// 靜態示範頁面暫無 API 呼叫
+
+// ---------- 方法區 ----------
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import LoginPanel from './components/LoginPanel.vue'
+
+// 控制是否已登入，預設顯示登入畫面，避免啟動後直接進入內部功能
+const isAuthenticated = ref(false)
+
+// 紀錄登入帳號，便於登入後展示歡迎訊息
+const activeAccount = ref('')
+
+// 當子元件完成登入檢核後切換至主畫面
+function handleLoginSuccess(email: string) {
+  activeAccount.value = email
+  isAuthenticated.value = true
+  ElMessage.success(`歡迎回來，${email}`)
+}
+
+// 提供示意的登出行為，讓測試者能回到登入畫面
+function handleLogout() {
+  isAuthenticated.value = false
+  activeAccount.value = ''
+  ElMessage.info('已登出 TekSwing，請重新登入')
+}
+
+// ---------- 生命週期 ----------
+// 本頁面主要透過狀態切換，不需額外生命週期操作
+</script>
+
 <style scoped>
-.app-container {
-  padding: 40px;
+.app-wrapper {
+  min-height: 100vh;
 }
 
-.preview {
-  width: 100%;
-  max-width: 400px;
-  margin-top: 20px;
-  background: #000;
-}
-
-.multi-group {
-  margin-top: 20px;
+.app-placeholder {
   display: flex;
-  gap: 10px;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f5fbff 0%, #ffffff 100%);
+  padding: 48px 24px;
 }
 
-.log-group {
-  margin-top: 20px;
+.app-card {
+  max-width: 360px;
+  text-align: center;
+  border-radius: 24px;
+  border: 1px solid rgba(20, 74, 46, 0.12);
 }
 
-@media (max-width: 600px) {
-  .app-container {
-    padding: 20px;
-  }
-  .multi-group {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .multi-group > * {
-    width: 100%;
-  }
+.app-greeting {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a3a2b;
+}
+
+.app-description {
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: #4b5d52;
 }
 </style>

@@ -1,0 +1,24 @@
+<svg width="640" height="520" viewBox="0 0 640 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">TekSwing 品牌登入插畫</title>
+  <desc id="desc">綠色與黃色漸層的果嶺與揮桿剪影</desc>
+  <defs>
+    <linearGradient id="islandGradient" x1="140" y1="0" x2="280" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9DE07E" />
+      <stop offset="1" stop-color="#4AC29A" />
+    </linearGradient>
+    <linearGradient id="groundGradient" x1="0" y1="220" x2="520" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1FAA8E" />
+      <stop offset="1" stop-color="#FFD43B" />
+    </linearGradient>
+    <filter id="shadow" x="0" y="180" width="560" height="260" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#19563D" flood-opacity="0.2" />
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M40 320C60 270 110 230 200 220C310 210 420 250 500 300C560 340 540 420 460 440C330 470 80 430 40 360C30 340 30 330 40 320Z" fill="url(#groundGradient)" />
+  </g>
+  <path d="M240 140C260 100 320 80 360 90C400 100 420 140 400 170C370 210 280 220 250 200C230 180 220 160 240 140Z" fill="url(#islandGradient)" />
+  <rect x="330" y="90" width="8" height="70" rx="4" fill="white" />
+  <path d="M338 90L380 110L338 130V90Z" fill="#FF5252" />
+  <path d="M320 120L360 140L380 220L340 420L380 480H320L290 420L300 300L240 260L260 220L300 240L320 200L300 150L320 120Z" fill="#0A2F1C" />
+</svg>
