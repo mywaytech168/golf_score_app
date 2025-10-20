@@ -66,4 +66,7 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.4.1")
     implementation("androidx.media3:media3-extractor:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
+    // ---------- 影像處理輔助套件 ----------
+    // 引入 ExifInterface 以解析頭像方向資訊，避免覆蓋後出現 90 度旋轉
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }

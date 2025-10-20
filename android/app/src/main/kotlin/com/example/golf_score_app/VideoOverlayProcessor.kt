@@ -12,6 +12,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
 import androidx.annotation.WorkerThread
+import androidx.exifinterface.media.ExifInterface
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
@@ -268,15 +269,15 @@ class VideoOverlayProcessor(private val context: Context) {
     }
 
     private fun calculateAvatarSize(videoWidth: Int, videoHeight: Int): Int {
-        // 以影片較短邊計算頭像尺寸，放大係數以提升可讀性，同時設定更高上下限維持彈性
+        // 以影片較短邊計算頭像尺寸，進一步提高係數讓頭像占比更高並維持上下限
         val base = min(videoWidth, videoHeight)
-        return (base * 0.32f).toInt().coerceIn(320, 520)
+        return (base * 0.38f).toInt().coerceIn(360, 640)
     }
 
     private fun calculateAvatarMargin(videoWidth: Int, videoHeight: Int): Int {
-        // 依畫面尺寸縮放邊距，確保放大頭像後仍與邊界保持距離
+        // 依畫面尺寸縮放邊距，因頭像放大需拉開距離避免貼齊邊緣
         val base = maxOf(videoWidth, videoHeight)
-        return (base * 0.04f).toInt().coerceIn(36, 96)
+        return (base * 0.05f).toInt().coerceIn(48, 120)
     }
 
     private fun createCircularAvatar(path: String, targetSize: Int): Bitmap? {
@@ -288,12 +289,14 @@ class VideoOverlayProcessor(private val context: Context) {
             null
         } ?: return null
         Log.d(TAG, "頭像原始尺寸=${original.width}x${original.height}。")
-        val size = min(original.width, original.height)
-        val offsetX = (original.width - size) / 2
-        val offsetY = (original.height - size) / 2
-        val square = Bitmap.createBitmap(original, offsetX, offsetY, size, size)
-        if (square !== original) {
-            original.recycle()
+        val oriented = applyExifOrientation(original, path)
+
+        val size = min(oriented.width, oriented.height)
+        val offsetX = (oriented.width - size) / 2
+        val offsetY = (oriented.height - size) / 2
+        val square = Bitmap.createBitmap(oriented, offsetX, offsetY, size, size)
+        if (square !== oriented) {
+            oriented.recycle()
         }
         val scaled = Bitmap.createScaledBitmap(square, targetSize, targetSize, true)
         if (scaled !== square) {
@@ -360,9 +363,50 @@ class VideoOverlayProcessor(private val context: Context) {
         return bitmap
     }
 
+    private fun applyExifOrientation(source: Bitmap, path: String): Bitmap {
+        // 解析 EXIF 資訊，修正被旋轉的頭像避免覆蓋時出現 90 度偏移
+        val exif = try {
+            ExifInterface(path)
+        } catch (error: Exception) {
+            Log.w(TAG, "讀取頭像 EXIF 失敗：$path", error)
+            return source
+        }
+        val orientation =
+            exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.preScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.preScale(-1f, 1f)
+            }
+        }
+        if (matrix.isIdentity) {
+            return source
+        }
+        val rotated = try {
+            Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        } catch (error: Exception) {
+            Log.w(TAG, "旋轉頭像失敗：$path", error)
+            return source
+        }
+        if (rotated !== source) {
+            source.recycle()
+        }
+        return rotated
+    }
+
     private fun calculateCaptionMargin(videoHeight: Int): Int {
-        // 根據影片高度設定內縮距離，讓字幕留出足夠空間
-        return (videoHeight * 0.06f).toInt().coerceIn(48, 120)
+        // 根據影片高度設定內縮距離，加大下方保留區避免放大字幕時貼齊邊緣
+        return (videoHeight * 0.07f).toInt().coerceIn(60, 140)
     }
 
     private fun createCaptionBitmap(text: String, videoWidth: Int, videoHeight: Int): Bitmap? {
@@ -376,10 +420,23 @@ class VideoOverlayProcessor(private val context: Context) {
 
         val maxWidth = (videoWidth * 0.85f).toInt().coerceAtLeast((videoWidth * 0.55f).toInt())
         val staticLayout = buildStaticLayout(text, textPaint, maxWidth)
-        val horizontalPadding = (22 * density).toInt()
-        val verticalPadding = (18 * density).toInt()
-        val bitmapWidth = staticLayout.width + horizontalPadding * 2
-        val bitmapHeight = staticLayout.height + verticalPadding * 2
+
+        // ---------- 建立品牌標語 ----------
+        val taglineText = "Tekswing"
+        val taglinePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            // 使用半透明白色與粗體字重，營造層級差
+            color = Color.parseColor("#F2FFFFFF")
+            textSize = (dynamicTextSizePx * 0.72f).coerceAtLeast(48f)
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val taglineLayout = buildStaticLayout(taglineText, taglinePaint, maxWidth)
+
+        val horizontalPadding = (24 * density).toInt()
+        val verticalPadding = (22 * density).toInt()
+        val taglineSpacing = (14 * density).toInt()
+        val contentWidth = maxOf(staticLayout.width, taglineLayout.width)
+        val bitmapWidth = contentWidth + horizontalPadding * 2
+        val bitmapHeight = staticLayout.height + taglineLayout.height + taglineSpacing + verticalPadding * 2
         Log.d(TAG, "字幕位圖資訊：maxWidth=$maxWidth，實際尺寸=${bitmapWidth}x$bitmapHeight。")
 
         val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
@@ -395,7 +452,17 @@ class VideoOverlayProcessor(private val context: Context) {
             backgroundPaint
         )
         canvas.translate(horizontalPadding.toFloat(), verticalPadding.toFloat())
+        canvas.save()
+        canvas.translate((contentWidth - staticLayout.width) / 2f, 0f)
         staticLayout.draw(canvas)
+        canvas.restore()
+
+        // 重新定位繪圖座標，留出主字幕與標語之間的間距後置中標語
+        canvas.translate(0f, (staticLayout.height + taglineSpacing).toFloat())
+        canvas.save()
+        canvas.translate((contentWidth - taglineLayout.width) / 2f, 0f)
+        taglineLayout.draw(canvas)
+        canvas.restore()
         Log.d(TAG, "字幕位圖建立完成。")
         return bitmap
     }
@@ -403,8 +470,8 @@ class VideoOverlayProcessor(private val context: Context) {
     private fun calculateCaptionTextSize(videoWidth: Int, videoHeight: Int): Float {
         // 文字大小同樣取較短邊為基準，調高係數讓字幕在分享影片中更明顯
         val base = min(videoWidth, videoHeight)
-        val sizePx = base * 0.065f
-        return sizePx.coerceIn(64f, 108f)
+        val sizePx = base * 0.082f
+        return sizePx.coerceIn(78f, 138f)
     }
 
     private fun buildStaticLayout(text: String, paint: TextPaint, width: Int): StaticLayout {
