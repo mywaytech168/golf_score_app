@@ -12,6 +12,7 @@ import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
 import '../services/imu_data_logger.dart';
 import '../services/recording_history_storage.dart';
+import '../services/user_profile_storage.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
 import 'profile_edit_page.dart';
@@ -50,7 +51,22 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _restoreUserProfile();
     _loadInitialHistory();
+  }
+
+  /// 從本地偏好讀取暱稱與頭像，確保重新進入 App 仍保有個人化設定
+  Future<void> _restoreUserProfile() async {
+    final profile =
+        await UserProfileStorage.instance.loadProfile(defaultDisplayName: _displayName);
+    if (!mounted) {
+      return; // 若頁面已卸載則不需更新狀態
+    }
+
+    setState(() {
+      _displayName = profile.displayName; // 還原使用者自訂暱稱
+      _avatarPath = profile.avatarPath; // 還原之前儲存的頭像
+    });
   }
 
   /// 將時間轉換為比較區塊顯示的日期文字（例：05/21）
@@ -222,14 +238,24 @@ class _HomePageState extends State<HomePage> {
       return; // 使用者取消或頁面已卸載時不處理回傳資料
     }
 
+    final resolvedDisplayName =
+        result.displayName.trim(); // 再次保險去除頭尾空白避免儲存異常
+    final safeDisplayName =
+        resolvedDisplayName.isEmpty ? 'TekSwing' : resolvedDisplayName; // 防禦性處理空字串
+
+    final nextAvatarPath = result.removeAvatar
+        ? null
+        : result.avatarPath ?? _avatarPath; // 若僅更新暱稱則沿用舊頭像
+
     setState(() {
-      _displayName = result.displayName; // 將最新暱稱同步到標題列
-      if (result.removeAvatar) {
-        _avatarPath = null; // 使用者明確清除頭像時改回預設
-      } else if (result.avatarPath != null) {
-        _avatarPath = result.avatarPath; // 若挑選新圖則直接覆蓋
-      }
+      _displayName = safeDisplayName; // 將最新暱稱同步到標題列
+      _avatarPath = nextAvatarPath; // 更新頭像狀態（可能為 null 代表清除）
     });
+
+    await UserProfileStorage.instance.saveProfile(
+      displayName: safeDisplayName,
+      avatarPath: nextAvatarPath,
+    );
 
     // 顯示提示訊息，告知使用者更新已生效
     ScaffoldMessenger.of(context).showSnackBar(
