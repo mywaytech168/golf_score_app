@@ -74,12 +74,14 @@ class VideoOverlayProcessor(private val context: Context) {
         val videoInfo = resolveVideoInfo(inputPath)
         val videoWidth = videoInfo.width
         val videoHeight = videoInfo.height
-        if (videoWidth <= 0 || videoHeight <= 0) {
+        val displayWidth = videoInfo.getDisplayWidth()
+        val displayHeight = videoInfo.getDisplayHeight()
+        if (displayWidth <= 0 || displayHeight <= 0) {
             throw IllegalStateException("無法判斷影片尺寸")
         }
         Log.d(
             TAG,
-            "解析影片資訊完成：尺寸=${videoWidth}x$videoHeight，bitrate=${videoInfo.bitrate}。"
+            "解析影片資訊完成：編碼尺寸=${videoWidth}x$videoHeight，顯示尺寸=${displayWidth}x$displayHeight，rotation=${videoInfo.rotation}，bitrate=${videoInfo.bitrate}。"
         )
 
         val overlays = mutableListOf<TextureOverlay>()
@@ -87,20 +89,20 @@ class VideoOverlayProcessor(private val context: Context) {
 
         if (attachAvatar && !avatarPath.isNullOrEmpty()) {
             Log.d(TAG, "準備建立頭像覆蓋，來源=$avatarPath。")
-            val targetSize = calculateAvatarSize(videoWidth, videoHeight)
+            val targetSize = calculateAvatarSize(displayWidth, displayHeight)
             createCircularAvatar(avatarPath, targetSize)?.let { avatarBitmap ->
                 // 針對水平方向與垂直方向分別計算邊距，確保頭像能精準貼近右上角
-                val horizontalMarginPx = calculateAvatarHorizontalMargin(videoWidth)
-                val verticalMarginPx = calculateAvatarVerticalMargin(videoHeight)
+                val horizontalMarginPx = calculateAvatarHorizontalMargin(displayWidth)
+                val verticalMarginPx = calculateAvatarVerticalMargin(displayHeight)
                 // Media3 座標系統以 1 代表畫面右／上邊界，因此扣除邊距後即可取得對應錨點
-                val anchorX = 1f - (horizontalMarginPx * 2f / videoWidth)
-                val anchorY = 1f - (verticalMarginPx * 2f / videoHeight)
+                val anchorX = 1f - (horizontalMarginPx * 2f / displayWidth)
+                val anchorY = 1f - (verticalMarginPx * 2f / displayHeight)
                 val overlaySettings = OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(anchorX.coerceIn(-1f, 1f), anchorY.coerceIn(-1f, 1f))
                     .setOverlayFrameAnchor(1f, 1f)
                     .setScale(
-                        avatarBitmap.width.toFloat() / videoWidth,
-                        avatarBitmap.height.toFloat() / videoHeight
+                        avatarBitmap.width.toFloat() / displayWidth,
+                        avatarBitmap.height.toFloat() / displayHeight
                     )
                     .build()
                 overlays.add(BitmapOverlay.createStaticBitmapOverlay(avatarBitmap, overlaySettings))
@@ -111,15 +113,15 @@ class VideoOverlayProcessor(private val context: Context) {
 
         if (attachCaption && captionText.isNotBlank()) {
             Log.d(TAG, "準備建立字幕覆蓋，內容長度=${captionText.length}。")
-            createCaptionBitmap(captionText.trim(), videoWidth, videoHeight)?.let { captionBitmap ->
-                val marginPx = calculateCaptionMargin(videoHeight)
-                val anchorY = -1f + (marginPx * 2f / videoHeight)
+            createCaptionBitmap(captionText.trim(), displayWidth, displayHeight)?.let { captionBitmap ->
+                val marginPx = calculateCaptionMargin(displayHeight)
+                val anchorY = -1f + (marginPx * 2f / displayHeight)
                 val overlaySettings = OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(0f, anchorY.coerceIn(-1f, 1f))
                     .setOverlayFrameAnchor(0f, -1f)
                     .setScale(
-                        captionBitmap.width.toFloat() / videoWidth,
-                        captionBitmap.height.toFloat() / videoHeight
+                        captionBitmap.width.toFloat() / displayWidth,
+                        captionBitmap.height.toFloat() / displayHeight
                     )
                     .build()
                 overlays.add(BitmapOverlay.createStaticBitmapOverlay(captionBitmap, overlaySettings))
@@ -161,8 +163,8 @@ class VideoOverlayProcessor(private val context: Context) {
             // 透過 Presentation 將輸出解析度鎖定為來源影片尺寸，避免降為 360P
             add(
                 Presentation.createForWidthAndHeight(
-                    videoWidth,
-                    videoHeight,
+                    displayWidth,
+                    displayHeight,
                     Presentation.LAYOUT_SCALE_TO_FIT
                 )
             )
@@ -300,11 +302,13 @@ class VideoOverlayProcessor(private val context: Context) {
                 ?.toIntOrNull() ?: 0
             val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
                 ?.toIntOrNull() ?: 0
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
             Log.v(
                 TAG,
-                "解析影片資訊：path=$path，width=$width，height=$height，bitrate=$bitrate。"
+                "解析影片資訊：path=$path，width=$width，height=$height，rotation=$rotation，bitrate=$bitrate。"
             )
-            VideoInfo(width, height, bitrate)
+            VideoInfo(width, height, bitrate, rotation)
         } finally {
             retriever.release()
         }
@@ -472,7 +476,21 @@ class VideoOverlayProcessor(private val context: Context) {
         return adjusted
     }
 
-    private data class VideoInfo(val width: Int, val height: Int, val bitrate: Int)
+    private data class VideoInfo(
+        val width: Int,
+        val height: Int,
+        val bitrate: Int,
+        val rotation: Int
+    ) {
+        fun getDisplayWidth(): Int {
+            // 當旋轉角度為 90 / 270 時，顯示方向會翻轉成直向，需要交換寬高避免定位錯誤
+            return if (rotation % 180 != 0) height else width
+        }
+
+        fun getDisplayHeight(): Int {
+            return if (rotation % 180 != 0) width else height
+        }
+    }
 
     private fun calculateCaptionMargin(videoHeight: Int): Int {
         // 根據影片高度設定內縮距離，加大下方保留區避免放大字幕時貼齊邊緣
