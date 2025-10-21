@@ -23,10 +23,12 @@ import androidx.media3.effect.OverlaySettings
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderConfig
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
@@ -187,8 +189,17 @@ class VideoOverlayProcessor(private val context: Context) {
             })
 
         if (videoInfo.bitrate > 0) {
-            // 明確指定輸出碼率，避免被系統降級為 360P 低畫質
-            transformerBuilder.setVideoEncodingBitrate(videoInfo.bitrate)
+            // 以 DefaultEncoderFactory 指定目標碼率，避免系統自動降級為 360P 低畫質
+            val encoderFactory = DefaultEncoderFactory.Builder(context)
+                .setRequestedVideoEncoderConfigurations(
+                    listOf(
+                        VideoEncoderConfig.Builder()
+                            .setBitrate(videoInfo.bitrate)
+                            .build()
+                    )
+                )
+                .build()
+            transformerBuilder.setEncoderFactory(encoderFactory)
         }
         val transformer = transformerBuilder.build()
         // Transformer 建立在方法作用域內，轉檔完成後即失去引用，交由 GC 自行回收底層資源
