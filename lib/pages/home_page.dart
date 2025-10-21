@@ -4,12 +4,14 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
+import '../services/external_video_importer.dart';
 import '../services/imu_data_logger.dart';
 import '../services/recording_history_storage.dart';
 import '../services/user_profile_storage.dart';
@@ -47,6 +49,7 @@ class _HomePageState extends State<HomePage> {
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
   String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
   String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
+  final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 匯入外部影片的工具實例
 
   @override
   void initState() {
@@ -113,8 +116,18 @@ class _HomePageState extends State<HomePage> {
         children: [
           _SectionHeader(
             title: 'Comparison',
-            actionLabel: '查看歷史',
-            onTap: _openRecordingHistoryPage,
+            actions: [
+              GestureDetector(
+                onTap: _openRecordingHistoryPage,
+                child: const Text(
+                  '查看歷史',
+                  style: TextStyle(
+                    color: Color(0xFF1E8E5A),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Row(
@@ -769,6 +782,53 @@ class _HomePageState extends State<HomePage> {
     setState(() => _currentIndex = index);
   }
 
+  /// 透過檔案挑選器挑選影片後匯入，提供 Data Metrics 與 Video Library 共同呼叫
+  Future<void> _pickExternalVideoForImport() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.video);
+    if (result == null || result.files.single.path == null) {
+      return; // 使用者取消挑選時直接結束
+    }
+
+    await _importExternalVideo(
+      path: result.files.single.path!,
+      fileName: result.files.single.name,
+    );
+  }
+
+  /// 實際執行影片匯入：複製檔案、建立歷史紀錄並刷新練習統計
+  Future<void> _importExternalVideo({
+    required String path,
+    String? fileName,
+  }) async {
+    final nextRoundIndex =
+        ExternalVideoImporter.calculateNextRoundIndex(_recordingHistory);
+    final entry = await _videoImporter.importVideo(
+      sourcePath: path,
+      originalName: fileName,
+      nextRoundIndex: nextRoundIndex,
+    );
+
+    if (entry == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('匯入影片失敗，請確認檔案是否仍存在。')),
+      );
+      return;
+    }
+
+    final updatedEntries = <RecordingHistoryEntry>[entry, ..._recordingHistory];
+    await _applyHistoryState(updatedEntries);
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已匯入 ${entry.displayTitle}，並同步加入練習統計。')),
+    );
+  }
+
   /// 將更新後的錄影紀錄套用到首頁狀態並觸發儲存與統計重算
   Future<void> _applyHistoryState(List<RecordingHistoryEntry> entries) async {
     if (!mounted) {
@@ -1109,6 +1169,17 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _SectionHeader(
+              title: 'Data Metrics',
+              actions: [
+                FilledButton.icon(
+                  onPressed: _pickExternalVideoForImport,
+                  icon: const Icon(Icons.file_upload_rounded, size: 18),
+                  label: const Text('匯入影片'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
                 // 始終維持同列呈現，窄螢幕改用橫向滑動避免卡片被擠壓
@@ -1191,8 +1262,23 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 24),
             _SectionHeader(
               title: 'Video Library',
-              actionLabel: 'See all',
-              onTap: () => _onBottomNavTap(3),
+              actions: [
+                FilledButton.icon(
+                  onPressed: _pickExternalVideoForImport,
+                  icon: const Icon(Icons.file_upload_rounded, size: 18),
+                  label: const Text('匯入影片'),
+                ),
+                GestureDetector(
+                  onTap: () => _onBottomNavTap(3),
+                  child: const Text(
+                    'See all',
+                    style: TextStyle(
+                      color: Color(0xFF1E8E5A),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             if (_isHistoryLoading)
@@ -1248,7 +1334,21 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _SectionHeader(title: 'Analytics', actionLabel: '詳情報告', onTap: () {}),
+                  _SectionHeader(
+                    title: 'Analytics',
+                    actions: [
+                      GestureDetector(
+                        onTap: () {},
+                        child: const Text(
+                          '詳情報告',
+                          style: TextStyle(
+                            color: Color(0xFF1E8E5A),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -1754,13 +1854,11 @@ class _QuickStartNavItem extends StatelessWidget {
 /// 區塊標題元件，集中管理標題與右側操作按鈕
 class _SectionHeader extends StatelessWidget {
   final String title;
-  final String actionLabel;
-  final VoidCallback onTap;
+  final List<Widget> actions;
 
   const _SectionHeader({
     required this.title,
-    required this.actionLabel,
-    required this.onTap,
+    this.actions = const [],
   });
 
   @override
@@ -1776,13 +1874,10 @@ class _SectionHeader extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        GestureDetector(
-          onTap: onTap,
-          child: Text(
-            actionLabel,
-            style: const TextStyle(color: Color(0xFF1E8E5A), fontWeight: FontWeight.w600),
-          ),
-        ),
+        for (var i = 0; i < actions.length; i++) ...[
+          if (i > 0) const SizedBox(width: 12),
+          actions[i],
+        ],
       ],
     );
   }
