@@ -28,7 +28,7 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
-import androidx.media3.transformer.VideoEncoderConfig
+import androidx.media3.transformer.VideoEncoderSettings
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
@@ -190,14 +190,11 @@ class VideoOverlayProcessor(private val context: Context) {
 
         if (videoInfo.bitrate > 0) {
             // 以 DefaultEncoderFactory 指定目標碼率，避免系統自動降級為 360P 低畫質
+            val encoderSettings = VideoEncoderSettings.Builder()
+                .setBitrate(videoInfo.bitrate)
+                .build()
             val encoderFactory = DefaultEncoderFactory.Builder(context)
-                .setRequestedVideoEncoderConfigurations(
-                    listOf(
-                        VideoEncoderConfig.Builder()
-                            .setBitrate(videoInfo.bitrate)
-                            .build()
-                    )
-                )
+                .setRequestedVideoEncoderSettings(encoderSettings)
                 .build()
             transformerBuilder.setEncoderFactory(encoderFactory)
         }
