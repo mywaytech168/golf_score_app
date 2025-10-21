@@ -66,4 +66,7 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.4.1")
     implementation("androidx.media3:media3-extractor:1.4.1")
     implementation("androidx.media3:media3-common:1.4.1")
+    // ---------- 圖片方向解析 ----------
+    // 透過 ExifInterface 讀取頭像 EXIF 資訊，以修正相機拍攝的旋轉方向
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }
