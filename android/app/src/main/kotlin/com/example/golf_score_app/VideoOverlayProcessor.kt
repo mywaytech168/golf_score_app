@@ -89,9 +89,12 @@ class VideoOverlayProcessor(private val context: Context) {
             Log.d(TAG, "準備建立頭像覆蓋，來源=$avatarPath。")
             val targetSize = calculateAvatarSize(videoWidth, videoHeight)
             createCircularAvatar(avatarPath, targetSize)?.let { avatarBitmap ->
-                val marginPx = calculateAvatarMargin(videoWidth, videoHeight)
-                val anchorX = 1f - (marginPx * 2f / videoWidth)
-                val anchorY = 1f - (marginPx * 2f / videoHeight)
+                // 針對水平方向與垂直方向分別計算邊距，確保頭像能精準貼近右上角
+                val horizontalMarginPx = calculateAvatarHorizontalMargin(videoWidth)
+                val verticalMarginPx = calculateAvatarVerticalMargin(videoHeight)
+                // Media3 座標系統以 1 代表畫面右／上邊界，因此扣除邊距後即可取得對應錨點
+                val anchorX = 1f - (horizontalMarginPx * 2f / videoWidth)
+                val anchorY = 1f - (verticalMarginPx * 2f / videoHeight)
                 val overlaySettings = OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(anchorX.coerceIn(-1f, 1f), anchorY.coerceIn(-1f, 1f))
                     .setOverlayFrameAnchor(1f, 1f)
@@ -319,10 +322,14 @@ class VideoOverlayProcessor(private val context: Context) {
         return (base * 0.52f).toInt().coerceIn(420, 760)
     }
 
-    private fun calculateAvatarMargin(videoWidth: Int, videoHeight: Int): Int {
-        // 依畫面尺寸縮放邊距，因頭像放大需拉開距離避免貼齊邊緣
-        val base = maxOf(videoWidth, videoHeight)
-        return (base * 0.05f).toInt().coerceIn(48, 120)
+    private fun calculateAvatarHorizontalMargin(videoWidth: Int): Int {
+        // 以寬度計算水平邊距，讓頭像距離右側恰到好處
+        return (videoWidth * 0.04f).toInt().coerceIn(36, 96)
+    }
+
+    private fun calculateAvatarVerticalMargin(videoHeight: Int): Int {
+        // 以高度計算垂直邊距，避免覆蓋到影片頂部資訊
+        return (videoHeight * 0.04f).toInt().coerceIn(36, 96)
     }
 
     private fun createCircularAvatar(path: String, targetSize: Int): Bitmap? {
