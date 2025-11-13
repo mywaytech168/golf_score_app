@@ -12,7 +12,6 @@ import 'package:flutter/services.dart';
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
 import '../services/external_video_importer.dart';
-import '../services/imu_data_logger.dart';
 import '../services/recording_history_storage.dart';
 import '../services/user_profile_storage.dart';
 import 'recording_history_page.dart';
@@ -1516,7 +1515,7 @@ class _MetricsCalculator {
         speedSamples++;
         bestSpeedMph = bestSpeedMph == null
             ? snapshot.estimatedSpeedMph
-            : math.max(bestSpeedMph!, snapshot.estimatedSpeedMph!);
+      : math.max(bestSpeedMph, snapshot.estimatedSpeedMph!);
       }
       aggregatedConsistency += snapshot.consistencyScore;
       aggregatedImpact += snapshot.impactClarity;

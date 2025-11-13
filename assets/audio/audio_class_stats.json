@@ -1,0 +1,62 @@
+{
+  "mu": {
+    "pro": {
+      "rms_dbfs": -27.027994941623394,
+      "spectral_centroid": 3971.617671775944,
+      "sharpness_hfxloud": 2.311526388879972,
+      "highband_amp": 15.282312968677946,
+      "peak_dbfs": -7.364620250013813
+    },
+    "good": {
+      "rms_dbfs": -25.28435619157782,
+      "spectral_centroid": 4082.27276324876,
+      "sharpness_hfxloud": 2.3778243240373245,
+      "highband_amp": 24.246832401332007,
+      "peak_dbfs": -3.6548779464876207
+    },
+    "bad": {
+      "rms_dbfs": -20.122473102497455,
+      "spectral_centroid": 3664.967441285539,
+      "sharpness_hfxloud": 1.5359318386156908,
+      "highband_amp": 33.972143529944354,
+      "peak_dbfs": 1.5574219028407739
+    },
+    "nonbad": {
+      "rms_dbfs": -25.972634645543177,
+      "spectral_centroid": 4038.5931218779106,
+      "sharpness_hfxloud": 2.351654086475212,
+      "highband_amp": 20.70820630949488,
+      "peak_dbfs": -5.119249908405855
+    }
+  },
+  "sd": {
+    "pro": {
+      "rms_dbfs": 2.0396668416180224,
+      "spectral_centroid": 296.41900400256793,
+      "sharpness_hfxloud": 0.20744803569475065,
+      "highband_amp": 2.7235759446356678,
+      "peak_dbfs": 1.4884599260703177
+    },
+    "good": {
+      "rms_dbfs": 7.581264256336344,
+      "spectral_centroid": 291.8189325969479,
+      "sharpness_hfxloud": 0.21800880050370788,
+      "highband_amp": 31.549109623563442,
+      "peak_dbfs": 12.815728482053728
+    },
+    "bad": {
+      "rms_dbfs": 9.237319454983744,
+      "spectral_centroid": 998.7582036299034,
+      "sharpness_hfxloud": 0.8069609775403017,
+      "highband_amp": 50.23647596726688,
+      "peak_dbfs": 17.228591393396822
+    },
+    "nonbad": {
+      "rms_dbfs": 6.041094334586012,
+      "spectral_centroid": 294.7628065539936,
+      "sharpness_hfxloud": 0.21359242532144138,
+      "highband_amp": 24.78615405457707,
+      "peak_dbfs": 10.093223690202684
+    }
+  }
+}

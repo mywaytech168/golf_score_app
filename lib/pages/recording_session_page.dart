@@ -12,12 +12,17 @@ import 'package:flutter_audio_capture/flutter_audio_capture.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
+import 'dart:convert';
 
 import '../models/recording_history_entry.dart';
 import '../widgets/recording_history_sheet.dart';
 import '../services/imu_data_logger.dart';
 import '../services/keep_screen_on_service.dart';
 import '../services/video_overlay_processor.dart';
+import '../services/audio_analyzer.dart';
+import '../services/audio_analysis_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 // ---------- 分享頻道設定 ----------
 const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
@@ -71,6 +76,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   Completer<void>? _cancelCompleter; // 將取消訊號傳遞給等待中的 Future
   static const int _restSecondsBetweenRounds = 10; // 每輪錄影間預設的休息秒數
   final List<RecordingHistoryEntry> _recordedRuns = []; // 累積此次錄影產生的檔案
+  String? _lastAnalysisLabel; // persist latest in-app analysis label
+  Map<String, double?> _lastAnalysisFeatures = {}; // persist latest in-app features
   bool _hasTriggeredRecording = false; // 記錄使用者是否啟動過錄影，控制按鈕提示
   StreamSubscription<void>? _imuButtonSubscription; // 監聽 IMU 按鈕觸發錄影
   bool _pendingAutoStart = false; // 記錄 IMU 事件是否需等待鏡頭初始化後再啟動
@@ -78,6 +85,42 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   Future<void> _cameraOperationQueue = Future.value(); // 鏡頭操作排程，確保同一時間僅執行一個任務
   bool _isRunningCameraTask = false; // 標記是否正在執行鏡頭任務，提供再入檢查
   bool _isDisposing = false; // 錄影頁是否進入釋放狀態，避免離場後仍排程新任務
+
+  String _mapPredToLabel(String pred) {
+  final p = pred.toLowerCase().trim();
+  if (p.isEmpty) return 'Unknown';
+  if (p.contains('pro')) return 'Pro';
+  if (p.contains('sweet') || p.contains('good')) return 'Sweet';
+  if (p.contains('bad') || p.contains('keep') || p.contains('try')) return 'Try again';
+  return pred.trim();
+  }
+
+  // (helper removed — not referenced in this file)
+
+
+  Future<void> _runPythonAnalyzer() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始執行聲音分析（桌面）...')));
+    try {
+      // workspace root known as two levels up from app directory; adjust if needed
+      final String workingDir = r'd:\project\golf';
+      final proc = await Process.start('python', ['golf_audio_analysis.py'], workingDirectory: workingDir);
+      proc.stdout.transform(const Utf8Decoder()).listen((data) {
+        debugPrint('[Analyzer stdout] $data');
+      });
+      proc.stderr.transform(const Utf8Decoder()).listen((data) {
+        debugPrint('[Analyzer stderr] $data');
+      });
+      final code = await proc.exitCode;
+      if (code == 0) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('分析完成，請檢查 output 資料夾。')));
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分析失敗，返回碼 $code')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('啟動分析失敗：$e')));
+    }
+  }
 
   // ---------- 生命週期 ----------
   @override
@@ -293,9 +336,6 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           break;
         case CameraLensDirection.external:
           externalCameras.add(camera);
-          break;
-        default:
-          others.add(camera);
           break;
       }
     }
@@ -768,8 +808,104 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         _recordedRuns.insert(0, entry);
       }
 
+      // 嘗試讀取同一路徑下的 classify report，並顯示評分結果（若存在）
+      try {
+          // look for batch_classify.csv in same folder and show prediction for this video if present
+          final batchFile = File('${Directory(entry.filePath).parent.path}${Platform.pathSeparator}batch_classify.csv');
+          if (await batchFile.exists()) {
+            final lines = await batchFile.readAsLines();
+            if (lines.length > 1) {
+              for (var i = 1; i < lines.length; i++) {
+                final cols = lines[i].split(',');
+                if (cols.isEmpty) continue;
+                final videoName = cols[0].trim();
+                if (videoName == entry.filePath.split(Platform.pathSeparator).last) {
+                  final pred = cols.length > 1 ? cols[1].trim() : '';
+                  final label = _mapPredToLabel(pred);
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('評分：$label')));
+                  break;
+                }
+              }
+            }
+          }
+      } catch (_) {}
+
       debugPrint('✅ 儲存影片與感測資料：${entry.fileName}');
       recordedSuccessfully = true;
+      // --- In-app analysis using accumulated waveform ---
+          try {
+        if (waveformAccumulated.isNotEmpty) {
+          final features = analyzeFromSamples(List<double>.from(waveformAccumulated), 22050);
+          final fmap = features.toMap();
+          // save per-video classify report next to video
+          final reportPath = entry.filePath.replaceAll(RegExp(r'\\.mp4$'), '') + '_classify_report.csv';
+          final reportFile = File(reportPath);
+          final rows = <String>[];
+          // header
+          rows.add('feature,target,weight');
+          final weights = {
+            'rms_dbfs': 2.0,
+            'spectral_centroid': 1.0,
+            'sharpness_hfxloud': 2.0,
+            'highband_amp': 1.0,
+            'peak_dbfs': 1.0,
+          };
+          fmap.forEach((k, v) {
+            final w = weights.containsKey(k) ? weights[k] : 1.0;
+            rows.add('$k,${v.toString()},$w');
+          });
+          await reportFile.writeAsString(rows.join('\n'));
+
+          // compare to reference stats in app storage
+          try {
+            final baseDir = await getApplicationDocumentsDirectory();
+            final dirPath = p.join(baseDir.path, 'imu_records');
+            final dir = Directory(dirPath);
+            if (!await dir.exists()) await dir.create(recursive: true);
+            final pro = loadReferenceStats(p.join(dir.path, 'denoised_summary - 150_pro.csv'));
+            final good = loadReferenceStats(p.join(dir.path, 'denoised_summary -130_good.csv'));
+            final bad = loadReferenceStats(p.join(dir.path, 'denoised_summary - bad.csv'));
+            final statsList = {'pro':pro, 'good':good, 'bad':bad};
+            double bestScore = double.infinity; String bestLabel = '';
+            statsList.forEach((k,v){
+              if (v.isNotEmpty) {
+                final mu = Map<String,double>.from(v['mu'] as Map);
+                final sd = Map<String,double>.from(v['sd'] as Map);
+                final x = <String,double>{};
+                fmap.forEach((key,val){ x[key]=val; });
+                final d = z2DistanceWeighted(x, mu, sd, weights);
+                if (d < bestScore) { bestScore = d; bestLabel = k; }
+              }
+            });
+            if (bestLabel.isNotEmpty) {
+              final lab = _mapPredToLabel(bestLabel);
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('內建分析評分：$lab')));
+              // persist latest analysis for preview overlay
+              if (mounted) {
+                setState(() {
+                  _lastAnalysisLabel = lab;
+                  _lastAnalysisFeatures = {
+                    'rms_dbfs': fmap['rms_dbfs'],
+                    'spectral_centroid': fmap['spectral_centroid'],
+                    'sharpness_hfxloud': fmap['sharpness_hfxloud'],
+                    'highband_amp': fmap['highband_amp'],
+                    'peak_dbfs': fmap['peak_dbfs'],
+                  };
+                });
+              }
+              // append label to per-video report so playback can read it
+              try {
+                final labelLine = 'label,$bestLabel,1.0\n';
+                await reportFile.writeAsString(labelLine, mode: FileMode.append);
+              } catch (_) {}
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        debugPrint('分析失敗：$e');
+      } finally {
+        waveformAccumulated.clear();
+      }
     } catch (e) {
       await ImuDataLogger.instance.abortActiveRound();
       debugPrint('❌ 錄影時出錯：$e');
@@ -997,6 +1133,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         appBar: AppBar(
           title: const Text('錄影進行中'),
           backgroundColor: const Color(0xFF123B70),
+          actions: [
+            if (Platform.isWindows)
+              IconButton(
+                tooltip: 'Run audio analyzer (desktop)',
+                onPressed: _runPythonAnalyzer,
+                icon: const Icon(Icons.analytics),
+              ),
+          ],
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1047,6 +1191,50 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                             const Positioned.fill(
                               child: StanceGuideOverlay(),
                             ),
+                            // analysis overlay
+                            if (_lastAnalysisLabel != null)
+                              Positioned(
+                                top: 12,
+                                right: 12,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black87,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(_lastAnalysisLabel!, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                      const SizedBox(height: 6),
+                                      if (_lastAnalysisFeatures.isNotEmpty) ...[
+                                        Text('rms: ${_lastAnalysisFeatures['rms_dbfs'] == null ? '--' : (_lastAnalysisFeatures['rms_dbfs']!.toStringAsFixed(2))}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                        Text('sc: ${_lastAnalysisFeatures['spectral_centroid'] == null ? '--' : (_lastAnalysisFeatures['spectral_centroid']!.toStringAsFixed(1))}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                        Text('sh: ${_lastAnalysisFeatures['sharpness_hfxloud'] == null ? '--' : (_lastAnalysisFeatures['sharpness_hfxloud']!.toStringAsFixed(2))}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                      ],
+                                      const SizedBox(height: 8),
+                                      // Legend so users immediately see the meaning of labels
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.06),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: const [
+                                            Text('Legend:', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                                            SizedBox(height: 2),
+                                            Text('Pro → Pro', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                            Text('Sweet → Good', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                            Text('Try again → Keep practicing', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -1132,7 +1320,7 @@ class _SessionProgress {
   void markCurrentRound(int roundIndex, {void Function(VoidCallback fn)? setStateCallback}) {
     void update(VoidCallback fn) {
       if (setStateCallback != null) {
-        setStateCallback!(fn);
+        setStateCallback(fn);
       } else {
         fn();
       }
@@ -1165,7 +1353,7 @@ class _SessionProgress {
 
     void update(VoidCallback fn) {
       if (setStateCallback != null) {
-        setStateCallback!(fn);
+        setStateCallback(fn);
       } else {
         fn();
       }
@@ -1190,7 +1378,7 @@ class _SessionProgress {
   void completeCurrentRound({void Function(VoidCallback fn)? setStateCallback}) {
     void update(VoidCallback fn) {
       if (setStateCallback != null) {
-        setStateCallback!(fn);
+        setStateCallback(fn);
       } else {
         fn();
       }
@@ -1220,7 +1408,7 @@ class _SessionProgress {
 
     void update(VoidCallback fn) {
       if (setStateCallback != null) {
-        setStateCallback!(fn);
+        setStateCallback(fn);
       } else {
         fn();
       }
@@ -1256,7 +1444,7 @@ class _SessionProgress {
 
     void update(VoidCallback fn) {
       if (setStateCallback != null) {
-        setStateCallback!(fn);
+        setStateCallback(fn);
       } else {
         fn();
       }
@@ -1615,11 +1803,27 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   late final bool _avatarSelectable; // 記錄頭像檔案是否存在，可供開關判斷
   bool _isVideoLoading = true; // 控制是否顯示讀取中轉圈
   String? _videoLoadError; // 若載入失敗記錄錯誤訊息，提供使用者提示與重試
+  String? _classificationLabel; // 影片的聲音評分標籤
+  Map<String, double?> _classificationFeatures = {};
 
   bool get _canControlVideo {
     // 畫面僅在影片初始化完成後才允許操作播放/暫停，避免觸發例外
     final controller = _videoController;
     return controller != null && controller.value.isInitialized;
+  }
+
+  Widget _featRow(String name, double? value) {
+    final String text = value == null ? '--' : value.toStringAsFixed(2);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Text('$name: $text', style: const TextStyle(color: Colors.white, fontSize: 12)),
+    );
+  }
+
+  double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
   }
 
   // ---------- 分享相關方法區 ----------
@@ -1753,6 +1957,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _videoController = controller;
         _isVideoLoading = false;
       });
+  // 嘗試載入同資料夾的 batch_classify.csv 或 per-video report，顯示評分標籤
+  unawaited(_loadClassificationForVideo());
       controller.play();
     } catch (error, stackTrace) {
       debugPrint('[VideoPlayer] 初始化失敗：$error');
@@ -1767,6 +1973,69 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _videoLoadError = '無法載入影片，請稍後再試。';
       });
     }
+  }
+
+  Future<void> _loadClassificationForVideo() async {
+    try {
+      final file = File(widget.videoPath);
+      if (!await file.exists()) return;
+      final parent = file.parent;
+      final batchFile = File('${parent.path}${Platform.pathSeparator}batch_classify.csv');
+      String? pred;
+      if (await batchFile.exists()) {
+        final lines = await batchFile.readAsLines();
+        for (var i = 1; i < lines.length; i++) {
+          final cols = lines[i].split(',');
+          if (cols.isEmpty) continue;
+          if (cols[0].trim() == file.uri.pathSegments.last) {
+            pred = cols.length > 1 ? cols[1].trim() : null;
+            break;
+          }
+        }
+      }
+      // fallback: look for per-video classify report and extract feature 'target' values
+      final per = File(widget.videoPath.replaceAll(RegExp(r'\\.mp4$'), '') + '_classify_report.csv');
+      if (await per.exists()) {
+        final lines = await per.readAsLines();
+        final Map<String, double?> feats = {};
+        for (var i = 0; i < lines.length; i++) {
+          final line = lines[i].trim();
+          if (line.isEmpty) continue;
+          final cols = line.split(',');
+          if (cols.isEmpty) continue;
+          final key = cols[0].toString().trim();
+          // skip header-like rows
+          if (key.startsWith('__') || key.toLowerCase().contains('feature') || key.toLowerCase().contains('title')) continue;
+          final targetStr = cols.length > 1 ? cols[1].toString().trim() : '';
+          final val = double.tryParse(targetStr);
+          feats[key] = val;
+        }
+        // keep only the five expected features
+        final wanted = ['rms_dbfs','spectral_centroid','sharpness_hfxloud','highband_amp','peak_dbfs'];
+        final Map<String, double?> picked = {};
+        for (final k in wanted) picked[k] = feats.containsKey(k) ? feats[k] : null;
+        setState(() {
+          _classificationFeatures = picked;
+        });
+      }
+
+      if (pred != null && pred.isNotEmpty) {
+        final label = _mapPredToLabel(pred);
+        setState(() => _classificationLabel = label);
+      }
+
+  // no in-page waveform analysis here (handled after recording)
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  String _mapPredToLabel(String pred) {
+    final p = pred.toLowerCase().trim();
+    if (p == 'pro') return 'Pro';
+    if (p == 'good' || p == 'sweet') return 'Sweet';
+    if (p == 'bad') return 'Try again';
+    return p.isNotEmpty ? p : 'Unknown';
   }
 
   /// 統一顯示 Snackbar，確保訊息風格一致
@@ -1810,12 +2079,41 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       }
     }
 
+    // If classification info is available, append it to the caption so the
+    // native overlay will render the analysis label and key feature values.
+    String captionToUse = trimmedCaption;
+    bool finalAttachCaption = wantsCaption;
+    try {
+      final List<String> captionParts = [];
+      if (captionToUse.isNotEmpty) captionParts.add(captionToUse);
+      if (_classificationLabel != null && _classificationLabel!.isNotEmpty) {
+        captionParts.add('評分: ${_classificationLabel!}');
+      }
+      if (_classificationFeatures.isNotEmpty) {
+        // compact feature summary
+  final rms = _classificationFeatures['rms_dbfs'];
+  final sc = _classificationFeatures['spectral_centroid'];
+  final sh = _classificationFeatures['sharpness_hfxloud'];
+        final featText = 'rms:${rms == null ? '--' : rms.toStringAsFixed(2)} '
+            'sc:${sc == null ? '--' : sc.toStringAsFixed(1)} '
+            'sh:${sh == null ? '--' : sh.toStringAsFixed(2)}';
+        captionParts.add(featText);
+        // Keep attachCaption true when we have any classification info
+        finalAttachCaption = true;
+      }
+      captionToUse = captionParts.join(' \n');
+    } catch (_) {
+      // ignore formatting errors and fall back to user caption
+      captionToUse = trimmedCaption;
+      finalAttachCaption = wantsCaption;
+    }
+
     final result = await VideoOverlayProcessor.process(
       inputPath: widget.videoPath,
       attachAvatar: wantsAvatar,
       avatarPath: widget.avatarPath,
-      attachCaption: wantsCaption,
-      caption: trimmedCaption,
+      attachCaption: finalAttachCaption,
+      caption: captionToUse,
     );
 
     if (result == null) {
@@ -1827,6 +2125,68 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       _generatedTempFiles.add(result);
     }
     return result;
+  }
+
+  Future<void> _reAnalyzeForVideo() async {
+    if (_isProcessingShare) return;
+    setState(() {
+      _isProcessingShare = true;
+    });
+    try {
+  final result = await AudioAnalysisService.analyzeVideo(widget.videoPath);
+      try {
+        debugPrint('Audio analysis result (share UI): $result');
+      } catch (_) {}
+      final Map<String, dynamic>? summary = result['summary'] as Map<String, dynamic>?;
+      if (summary != null) {
+        final Map<String, double?> feats = <String, double?>{
+          'rms_dbfs': _toDouble(summary['rms_dbfs']),
+          'spectral_centroid': _toDouble(summary['spectral_centroid']),
+          'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
+          'highband_amp': _toDouble(summary['highband_amp']),
+          'peak_dbfs': _toDouble(summary['peak_dbfs']),
+        };
+        String? pred;
+        if (summary.containsKey('audio_class')) pred = summary['audio_class']?.toString();
+        if (mounted) {
+          setState(() {
+            _classificationFeatures = feats;
+            if (pred != null) _classificationLabel = _mapPredToLabel(pred);
+          });
+        }
+
+        // persist next to video if path known
+        try {
+          final file = File(widget.videoPath);
+          if (await file.exists()) {
+            final csvFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_classify_report.csv');
+            final List<String> rows = <String>[];
+            rows.add('feature,target,weight');
+            feats.forEach((k, v) {
+              rows.add('$k,${v == null ? '' : v.toString()},1.0');
+            });
+            if (pred != null && pred.isNotEmpty) rows.add('label,${pred.toString()},1.0');
+            await csvFile.writeAsString(rows.join('\n'));
+          }
+        } catch (_) {}
+
+        try {
+          final debugFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_analysis_debug.json');
+          await debugFile.writeAsString(jsonEncode(result));
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Analysis failed: $e')));
+    } finally {
+      if (mounted) setState(() => _isProcessingShare = false);
+    }
+  }
+
+  Future<void> _showAnalysisFilesDebugForVideo() async {
+    // Try to locate video path from prepared share or last used file; fallback to showing message
+    // We expect the actual video path to be available via recording history entries; best-effort here.
+    // Attempt to use the caption controller content to guess path (not ideal) — instead show a prompt.
+    _showSnack('請在影片播放頁檢查分析檔或回報影片路徑給我以供檔案檢查。');
   }
 
   @override
@@ -1860,7 +2220,49 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         )
                       : AspectRatio(
                           aspectRatio: _videoController!.value.aspectRatio,
-                          child: VideoPlayer(_videoController!),
+                          child: Stack(
+                            children: [
+                              VideoPlayer(_videoController!),
+                              if (_classificationLabel != null)
+                                Positioned(
+                                  top: 12,
+                                  left: 12,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black87,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      _classificationLabel!,
+                                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ),
+                              if (_classificationFeatures.isNotEmpty)
+                                Positioned(
+                                  top: 56,
+                                  left: 12,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        _featRow('rms_dbfs', _classificationFeatures['rms_dbfs']),
+                                        _featRow('spectral_centroid', _classificationFeatures['spectral_centroid']),
+                                        _featRow('sharpness_hfxloud', _classificationFeatures['sharpness_hfxloud']),
+                                        _featRow('highband_amp', _classificationFeatures['highband_amp']),
+                                        _featRow('peak_dbfs', _classificationFeatures['peak_dbfs']),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
             ),
           ),
@@ -1869,6 +2271,43 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Analysis result card placed between the video and share controls
+                if (_classificationLabel != null || _classificationFeatures.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_classificationLabel != null)
+                          Text('評分：${_classificationLabel!}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF123B70))),
+                        const SizedBox(height: 8),
+                        if (_classificationFeatures.isNotEmpty)
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(child: Text('rms: ${_classificationFeatures['rms_dbfs'] == null ? '--' : _classificationFeatures['rms_dbfs']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13))),
+                              Expanded(child: Text('sc: ${_classificationFeatures['spectral_centroid'] == null ? '--' : _classificationFeatures['spectral_centroid']!.toStringAsFixed(1)}', style: const TextStyle(fontSize: 13))),
+                              Expanded(child: Text('sh: ${_classificationFeatures['sharpness_hfxloud'] == null ? '--' : _classificationFeatures['sharpness_hfxloud']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13))),
+                            ],
+                          ),
+                        const SizedBox(height: 6),
+                        if (_classificationFeatures.isNotEmpty)
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(child: Text('highband: ${_classificationFeatures['highband_amp'] == null ? '--' : _classificationFeatures['highband_amp']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12))),
+                              Expanded(child: Text('peak: ${_classificationFeatures['peak_dbfs'] == null ? '--' : _classificationFeatures['peak_dbfs']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12))),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
                 const Text(
                   '分享影片',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -1903,6 +2342,25 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   const SizedBox(height: 8),
                   const LinearProgressIndicator(),
                 ],
+                const SizedBox(height: 12),
+                // Analysis controls added so user can re-run analysis from share UI
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        await _reAnalyzeForVideo();
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Re-run analysis'),
+                    ),
+                    const SizedBox(width: 12),
+                    TextButton.icon(
+                      onPressed: () => _showAnalysisFilesDebugForVideo(),
+                      icon: const Icon(Icons.bug_report, size: 18),
+                      label: const Text('檢查分析檔'),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
