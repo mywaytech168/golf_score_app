@@ -67,7 +67,7 @@ class RecordingHistoryEntry {
     if (name != null && name.isNotEmpty) {
       return name;
     }
-    return '第\u0020${roundIndex}\u0020輪錄影';
+  return '第 ${roundIndex} 輪錄影';
   }
 
   /// 依據是否連線 IMU 回傳中文標籤，顯示當時的錄影模式

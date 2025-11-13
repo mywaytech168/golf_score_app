@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/recording_history_entry.dart';
+import '../services/external_video_importer.dart';
 import '../services/recording_history_storage.dart';
 import 'recording_session_page.dart';
 
@@ -32,6 +33,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   late final List<RecordingHistoryEntry> _entries =
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
   bool _rebuildScheduled = false; // 避免重複排程 setState 造成框架錯誤
+  final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 外部影片匯入工具
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -340,6 +342,44 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     await _playVideoByPath(entry.filePath, missingFileName: entry.fileName);
   }
 
+  /// 透過檔案挑選器匯入外部影片，並加入現有練習歷史清單
+  Future<void> _importExternalVideo() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.video);
+    if (result == null || result.files.single.path == null) {
+      return; // 使用者取消或選取失敗
+    }
+
+    final entry = await _videoImporter.importVideo(
+      sourcePath: result.files.single.path!,
+      originalName: result.files.single.name,
+      nextRoundIndex: ExternalVideoImporter.calculateNextRoundIndex(_entries),
+    );
+
+    if (entry == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('匯入影片失敗，請確認檔案是否可讀取。')),
+      );
+      return;
+    }
+
+    _entries.insert(0, entry); // 新增練習置於最前方，方便立即查看
+    if (mounted) {
+      _scheduleRebuild();
+    }
+
+    await RecordingHistoryStorage.instance.saveHistory(_entries);
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已匯入 ${entry.displayTitle}，同步加入練習紀錄。')),
+    );
+  }
+
   /// 自外部檔案夾挑選影片後播放，支援檢視非當前清單中的檔案
   Future<void> _pickExternalVideo() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.video);
@@ -388,6 +428,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             icon: const Icon(Icons.arrow_back),
           ),
           actions: [
+            IconButton(
+              onPressed: _importExternalVideo,
+              tooltip: '匯入外部影片',
+              icon: const Icon(Icons.file_upload_rounded),
+            ),
             IconButton(
               onPressed: _pickExternalVideo,
               tooltip: '開啟其他影片',
