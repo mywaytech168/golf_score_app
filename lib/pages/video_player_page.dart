@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:golf_score_app/services/audio_analysis_service.dart';
+import 'package:golf_score_app/services/highlight_service.dart';
+import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
 
 /// Lightweight player for reviewing a recorded swing video.
@@ -312,14 +314,40 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     super.dispose();
   }
 
+  // Centralized handler that generates the highlight and opens a preview page
+  Future<void> _handleGenerateHighlight() async {
+    if (_isAnalyzing) return;
+    setState(() => _isAnalyzing = true);
+    try {
+      final out = await HighlightService.generateHighlight(widget.videoPath, beforeMs: 3000, afterMs: 3000, titleData: {
+        'Name': 'Player',
+        'Course': 'Unknown',
+      });
+      if (out != null && out.isNotEmpty) {
+        // Navigate to preview page
+        if (!mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: out)));
+      } else {
+        _showSnack('生成 Highlight 失敗或此平台不支援。');
+      }
+    } finally {
+      if (mounted) setState(() => _isAnalyzing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
 
-    return Scaffold(
+  return Scaffold(
       appBar: AppBar(
         title: const Text('Video Review'),
         actions: [
+          IconButton(
+            tooltip: 'Generate Highlight',
+            onPressed: _isAnalyzing ? null : _handleGenerateHighlight,
+            icon: const Icon(Icons.movie_creation_outlined),
+          ),
           if (widget.avatarPath != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -350,7 +378,31 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                           children: [
                             AspectRatio(
                               aspectRatio: controller.value.aspectRatio,
-                              child: VideoPlayer(controller),
+                              child: Stack(
+                                children: [
+                                  VideoPlayer(controller),
+                                  // overlay highlight button (top-right)
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        onTap: _isAnalyzing ? null : _handleGenerateHighlight,
+                                        borderRadius: BorderRadius.circular(24),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black45,
+                                            borderRadius: BorderRadius.circular(24),
+                                          ),
+                                          child: const Icon(Icons.movie_creation_outlined, color: Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
           // Analysis result card under the video (always visible)
           Container(
@@ -420,9 +472,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                           icon: const Icon(Icons.refresh),
                                           label: const Text('Re-run analysis'),
                                         ),
+                                        const SizedBox(width: 8),
+                                        ElevatedButton.icon(
+                                          onPressed: _isAnalyzing ? null : _handleGenerateHighlight,
+                                          icon: const Icon(Icons.movie),
+                                          label: const Text('Generate Highlight'),
+                                        ),
                                         const SizedBox(width: 12),
                                         if (_isAnalyzing) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                                       ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    // Full-width Chinese-labeled one-tap highlight button
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                                        onPressed: _isAnalyzing ? null : _handleGenerateHighlight,
+                                        icon: const Icon(Icons.movie),
+                                        label: const Text('一鍵生成 Highlight'),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -444,24 +513,130 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     },
                   ),
       ),
+  floatingActionButton: controller == null
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Highlight extended FAB (large and labeled)
+                FloatingActionButton.extended(
+                  heroTag: 'highlight_fab',
+                  label: const Text('一鍵生成 Highlight'),
+                  icon: const Icon(Icons.movie),
+                  backgroundColor: Colors.deepOrange,
+                  onPressed: _isAnalyzing ? null : _handleGenerateHighlight,
+                ),
+                const SizedBox(height: 12),
+                // Play/Pause FAB
+                FloatingActionButton(
+                  heroTag: 'play_fab',
+                  onPressed: () {
+                    if (!controller.value.isInitialized) {
+                      return;
+                    }
+                    setState(() {
+                      if (controller.value.isPlaying) {
+                        controller.pause();
+                      } else {
+                        controller.play();
+                      }
+                    });
+                  },
+                  child: Icon(
+                    controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                  ),
+                ),
+              ],
+            ),
+        // persistent bottom action so the highlight button is always visible
+        bottomSheet: controller == null
+            ? null
+            : SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.white.withOpacity(0.9),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
+                      onPressed: _isAnalyzing
+                          ? null
+                          : () async {
+                              setState(() => _isAnalyzing = true);
+                              try {
+                                final out = await HighlightService.generateHighlight(widget.videoPath, beforeMs: 3000, afterMs: 3000, titleData: {
+                                  'Name': 'Player',
+                                  'Course': 'Unknown',
+                                });
+                                if (out != null && out.isNotEmpty) {
+                                  await Share.shareXFiles([XFile(out)], text: '我的揮桿 Highlight');
+                                } else {
+                                  _showSnack('生成 Highlight 失敗或此平台不支援。');
+                                }
+                              } finally {
+                                if (mounted) setState(() => _isAnalyzing = false);
+                              }
+                            },
+                      icon: const Icon(Icons.movie),
+                      label: const Text('一鍵生成 Highlight'),
+                    ),
+                  ),
+                ),
+              ),
+    );
+  }
+}
+
+/// Simple preview page for a generated highlight clip
+class HighlightPreviewPage extends StatefulWidget {
+  const HighlightPreviewPage({super.key, required this.videoPath});
+  final String videoPath;
+
+  @override
+  State<HighlightPreviewPage> createState() => _HighlightPreviewPageState();
+}
+
+class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
+  VideoPlayerController? _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = VideoPlayerController.file(File(widget.videoPath))
+      ..initialize().then((_) {
+        setState(() {});
+        _ctrl?.play();
+      });
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _ctrl;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Preview Highlight')),
+      body: Center(
+        child: controller == null || !controller.value.isInitialized
+            ? const CircularProgressIndicator()
+            : AspectRatio(aspectRatio: controller.value.aspectRatio, child: VideoPlayer(controller)),
+      ),
       floatingActionButton: controller == null
           ? null
           : FloatingActionButton(
               onPressed: () {
-                if (!controller.value.isInitialized) {
-                  return;
+                if (controller.value.isPlaying) {
+                  controller.pause();
+                } else {
+                  controller.play();
                 }
-                setState(() {
-                  if (controller.value.isPlaying) {
-                    controller.pause();
-                  } else {
-                    controller.play();
-                  }
-                });
+                setState(() {});
               },
-              child: Icon(
-                controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-              ),
+              child: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
             ),
     );
   }

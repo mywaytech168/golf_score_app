@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 
 import 'package:assets_audio_player/assets_audio_player.dart';
 import 'package:camera/camera.dart';
@@ -9,20 +11,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_audio_capture/flutter_audio_capture.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
-import 'dart:convert';
+import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
-import '../widgets/recording_history_sheet.dart';
+import '../services/audio_analysis_service.dart';
+import '../services/highlight_service.dart';
 import '../services/imu_data_logger.dart';
 import '../services/keep_screen_on_service.dart';
 import '../services/video_overlay_processor.dart';
-import '../services/audio_analyzer.dart';
-import '../services/audio_analysis_service.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import '../widgets/recording_history_sheet.dart';
+import 'highlight_preview_page.dart';
 
 // ---------- 分享頻道設定 ----------
 const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
@@ -35,7 +37,7 @@ class RecordingSessionPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
   final bool isImuConnected; // 是否已配對 IMU，決定提示訊息
   final int totalRounds; // 本次預計錄影的輪數
-  final int durationSeconds; // 每輪錄影秒數
+  // final int durationSeconds; // 每輪錄影秒數 - REMOVED for unlimited recording
   final bool autoStartOnReady; // 由 IMU 按鈕開啟時自動啟動錄影
   final Stream<void> imuButtonStream; // 右手腕 IMU 按鈕事件來源
   final String? userAvatarPath; // 首頁帶入的個人頭像路徑，供分享影片時疊加
@@ -45,7 +47,7 @@ class RecordingSessionPage extends StatefulWidget {
     required this.cameras,
     required this.isImuConnected,
     required this.totalRounds,
-    required this.durationSeconds,
+    // required this.durationSeconds, // REMOVED
     required this.autoStartOnReady,
     required this.imuButtonStream,
     this.userAvatarPath,
@@ -55,26 +57,31 @@ class RecordingSessionPage extends StatefulWidget {
   State<RecordingSessionPage> createState() => _RecordingSessionPageState();
 }
 
+// Top-level label mapping helper (used by multiple pages)
+String _mapPredToLabel(String? pred) {
+  if (pred == null) return 'Unknown';
+  final p = pred.toLowerCase().trim();
+  if (p == 'pro') return 'Pro';
+  if (p == 'good' || p == 'sweet') return 'Sweet';
+  if (p == 'bad') return 'Try again';
+  return p.isNotEmpty ? p : 'Unknown';
+}
+
 class _RecordingSessionPageState extends State<RecordingSessionPage> {
   // ---------- 狀態變數區 ----------
   CameraController? controller; // 控制鏡頭操作
-  CameraDescription? _activeCamera; // 紀錄當前使用的鏡頭，確保預覽與錄影一致
-  double? _previewAspectRatio; // 記錄初始化時的預覽比例，避免錄影時變動
   bool isRecording = false; // 標記是否正在錄影
   List<double> waveform = []; // 即時波形資料
   List<double> waveformAccumulated = []; // 累積波形資料供繪圖使用
   final ValueNotifier<int> repaintNotifier = ValueNotifier(0); // 用於觸發波形重繪
 
-  final FlutterAudioCapture _audioCapture = FlutterAudioCapture(); // 音訊擷取工具
+  final FlutterAudioCapture _audioCapture = FlutterAudioCapture(); // Use a single, final instance.
   ReceivePort? _receivePort; // 與 Isolate 溝通的管道
   Isolate? _isolate; // 處理音訊的背景執行緒，可能尚未建立
 
   final AssetsAudioPlayer _audioPlayer = AssetsAudioPlayer(); // 播放倒數音效
   final MethodChannel _volumeChannel = const MethodChannel('volume_button_channel'); // 監聽音量鍵
-  bool _isCountingDown = false; // 避免倒數重複觸發
-  bool _shouldCancelRecording = false; // 控制流程是否應該中斷
   Completer<void>? _cancelCompleter; // 將取消訊號傳遞給等待中的 Future
-  static const int _restSecondsBetweenRounds = 10; // 每輪錄影間預設的休息秒數
   final List<RecordingHistoryEntry> _recordedRuns = []; // 累積此次錄影產生的檔案
   String? _lastAnalysisLabel; // persist latest in-app analysis label
   Map<String, double?> _lastAnalysisFeatures = {}; // persist latest in-app features
@@ -86,1456 +93,821 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   bool _isRunningCameraTask = false; // 標記是否正在執行鏡頭任務，提供再入檢查
   bool _isDisposing = false; // 錄影頁是否進入釋放狀態，避免離場後仍排程新任務
 
-  String _mapPredToLabel(String pred) {
-  final p = pred.toLowerCase().trim();
-  if (p.isEmpty) return 'Unknown';
-  if (p.contains('pro')) return 'Pro';
-  if (p.contains('sweet') || p.contains('good')) return 'Sweet';
-  if (p.contains('bad') || p.contains('keep') || p.contains('try')) return 'Try again';
-  return pred.trim();
-  }
+  // Add a future to track the saving process
+  Future<void>? _savingFuture;
+  DateTime? _recordingStartTime; // To calculate actual duration
+  String? _currentRecordingBaseName; // To hold the base name for the current session
 
-  // (helper removed — not referenced in this file)
-
-
-  Future<void> _runPythonAnalyzer() async {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始執行聲音分析（桌面）...')));
-    try {
-      // workspace root known as two levels up from app directory; adjust if needed
-      final String workingDir = r'd:\project\golf';
-      final proc = await Process.start('python', ['golf_audio_analysis.py'], workingDirectory: workingDir);
-      proc.stdout.transform(const Utf8Decoder()).listen((data) {
-        debugPrint('[Analyzer stdout] $data');
-      });
-      proc.stderr.transform(const Utf8Decoder()).listen((data) {
-        debugPrint('[Analyzer stderr] $data');
-      });
-      final code = await proc.exitCode;
-      if (code == 0) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('分析完成，請檢查 output 資料夾。')));
-      } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分析失敗，返回碼 $code')));
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('啟動分析失敗：$e')));
-    }
-  }
-
-  // ---------- 生命週期 ----------
   @override
   void initState() {
     super.initState();
-    // 進入錄影頁後立即鎖定螢幕常亮，避免長時間錄製時裝置自動休眠
-    unawaited(KeepScreenOnService.enable());
-    initVolumeKeyListener(); // 建立音量鍵快捷鍵
-    // 鎖定裝置方向為直向，以維持預覽與錄影皆為直式畫面
-    SystemChrome.setPreferredOrientations(const <DeviceOrientation>[
-      DeviceOrientation.portraitUp,
-    ]);
-    _sessionProgress.resetForNewSession(widget.totalRounds); // 初始化狀態列顯示預設剩餘次數
-    _prepareSession(); // 非同步初始化鏡頭，等待使用者手動啟動
-    _pendingAutoStart = widget.autoStartOnReady; // 若由 IMU 開啟則在鏡頭就緒後自動啟動
-    // 監聽 IMU 按鈕事件，隨時可從硬體直接觸發錄影
-    _imuButtonSubscription = widget.imuButtonStream.listen((_) {
-      unawaited(_handleImuButtonTrigger());
-    });
+    _sessionProgress.totalRounds = widget.totalRounds;
+    _sessionProgress.remainingRounds = widget.totalRounds;
+    _pendingAutoStart = widget.autoStartOnReady;
+
+    // 訂閱 IMU 按鈕事件
+    _imuButtonSubscription = widget.imuButtonStream.listen((_) => _handleImuTrigger());
+
+    // 註冊音量鍵監聽
+    _volumeChannel.setMethodCallHandler(_handleVolumeButton);
+
+    // 保持螢幕開啟
+    KeepScreenOnService.enable();
+
+    // 初始化鏡頭
+    _enqueueCameraTask(() => _initializeCamera(widget.cameras.first));
   }
 
+  /// 釋放所有資源
   @override
   void dispose() {
-    _isDisposing = true; // 標記進入釋放流程，後續若仍有任務會優先收斂
-    _triggerCancel(); // 優先發出取消訊號，停止所有倒數與錄影
-    // 透過排程方式串接停止錄影與控制器釋放，避免和其他鏡頭任務互搶資源。
-    final Future<void> stopFuture = _stopActiveRecording(updateUi: false);
-    final CameraController? controllerToDispose = controller;
-    controller = null; // 提前解除引用，減少後續誤用機率
-    _cameraOperationQueue = _cameraOperationQueue.then((_) async {
-      await stopFuture; // 確保已停止錄影後再釋放控制器
-      await controllerToDispose?.dispose();
+    _isDisposing = true;
+    _imuButtonSubscription?.cancel();
+    _volumeChannel.setMethodCallHandler(null);
+    _enqueueCameraTask(() async {
+      await controller?.dispose();
+      await _stopAudioCapture();
     });
-    unawaited(_cameraOperationQueue); // 無須等待完成即可繼續進行其餘釋放流程
-    _volumeChannel.setMethodCallHandler(null); // 解除音量鍵監聽，避免重複綁定
-    _audioPlayer.dispose();
-    _imuButtonSubscription?.cancel(); // 解除 IMU 按鈕監聽，避免資源洩漏
-    _sessionProgress.dispose(); // 停止狀態列的計時器，避免離開頁面後仍持續觸發 setState
-    // 還原應用允許的方向，避免離開錄影頁後仍被鎖定
-    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-    // 離開頁面時恢復系統預設的螢幕休眠行為
-    unawaited(KeepScreenOnService.disable());
+    KeepScreenOnService.disable();
     super.dispose();
   }
 
-  // ---------- 初始化流程 ----------
-  /// 初始化鏡頭與權限，僅建立預覽等待使用者手動啟動錄影
-  Future<void> _prepareSession() async {
-    await Permission.camera.request();
-    await Permission.microphone.request();
-    await Permission.storage.request();
-
-    if (widget.cameras.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('沒有可用鏡頭，無法啟動錄影。')),
-      );
-      return;
-    }
-
-    // 依照優先順序逐一測試可用鏡頭，若後鏡頭配置失敗會自動退回其他鏡頭。
-    _CameraSelectionResult? selection;
-    CameraDescription? selectedCamera;
-    for (final CameraDescription candidate in _orderedCameras(widget.cameras)) {
-      selection = await _createBestCameraController(candidate);
-      if (selection != null) {
-        selectedCamera = candidate;
-        break; // 找到可成功初始化的鏡頭立即停止搜尋
-      }
-    }
-
-    if (selection == null || selectedCamera == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('無法初始化鏡頭，請稍後再試。')),
-      );
-      return;
-    }
-
-    await _applyCameraSelection(selection, selectedCamera);
-
-    if (_pendingAutoStart) {
-      // 鏡頭就緒後若先前已有硬體按鈕請求，立即啟動倒數錄影
-      _pendingAutoStart = false;
-      unawaited(_handleImuButtonTrigger());
-    }
-  }
-
-  /// 套用鏡頭初始化結果，統一計算預覽比例與方向設定。
-  Future<void> _applyCameraSelection(
-    _CameraSelectionResult selection,
-    CameraDescription camera,
-  ) async {
-    controller = selection.controller;
-    _activeCamera = camera;
-
-    // 針對大多數手機相機，感光元件以橫向為主，因此在直向預覽時需要將寬高互換。
-    // 透過感測器角度判斷是否應交換寬高，再計算適用於直式畫面的長寬比。
-    final bool shouldSwapSide =
-        controller!.description.sensorOrientation % 180 != 0;
-    if (selection.previewSize != null) {
-      _previewAspectRatio = shouldSwapSide
-          ? selection.previewSize!.height / selection.previewSize!.width
-          : selection.previewSize!.width / selection.previewSize!.height;
+  /// 處理 IMU 按鈕觸發
+  void _handleImuTrigger() {
+    if (isRecording) {
+      _triggerCancel();
     } else {
-      final double rawAspect = controller!.value.aspectRatio;
-      _previewAspectRatio = shouldSwapSide ? (1 / rawAspect) : rawAspect;
-    }
-
-    // 鎖定鏡頭拍攝方向為直向，確保錄影檔案不會自動旋轉。
-    try {
-      await controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
-    } catch (error, stackTrace) {
-      if (kDebugMode) {
-        debugPrint('lockCaptureOrientation 失敗：$error\n$stackTrace');
-      }
-    }
-
-    if (kDebugMode) {
-      // 藉由除錯訊息確認實際採用的解析度（部分平台無法回報幀率）。
-      debugPrint(
-        'Camera initialized with preset ${selection.preset}, size=${selection.previewSize ?? '未知'}, description=${controller!.description.name}',
-      );
-    }
-
-    if (mounted) {
-      setState(() {}); // 更新畫面顯示預覽
+      _triggerRecording();
     }
   }
 
-  /// 針對指定鏡頭，嘗試使用最佳解析度與幀率進行初始化
-  Future<_CameraSelectionResult?> _createBestCameraController(
-      CameraDescription description) async {
-    // 解析度優先順序：依照畫質由高至低逐一嘗試。
-    // 依照需求改為優先採用最高畫質（max → ultraHigh → veryHigh），確保能取得最清晰的錄影畫面。
-    // 若裝置在高規格模式初始化失敗，仍會退回較低解析度，兼顧穩定性與畫質需求。
-    const List<ResolutionPreset> presetPriority = <ResolutionPreset>[
-      ResolutionPreset.max,
-      ResolutionPreset.ultraHigh,
-      ResolutionPreset.veryHigh,
+  /// 處理音量鍵事件
+  Future<dynamic> _handleVolumeButton(MethodCall call) async {
+    if (call.method == 'volumeButtonPressed') {
+      // 在 iOS 上，音量鍵會觸發 startVideoRecording，這裡避免重複啟動
+      if (Platform.isIOS && isRecording) {
+        return;
+      }
+      _handleImuTrigger(); // 借用 IMU 觸發邏輯
+    }
+  }
+
+  /// 建立並執行鏡頭任務，避免衝突
+  Future<void> _enqueueCameraTask(Future<void> Function() task) async {
+    if (_isRunningCameraTask) {
+      // 如果已有任務在執行，將新任務排入佇列
+      _cameraOperationQueue = _cameraOperationQueue.then((_) async {
+        if (!_isDisposing) await task();
+      });
+    } else {
+      // 否則直接執行
+      _isRunningCameraTask = true;
+      _cameraOperationQueue = task().whenComplete(() {
+        _isRunningCameraTask = false;
+      });
+    }
+  }
+
+  /// 初始化鏡頭
+  Future<void> _initializeCamera(CameraDescription cameraDescription) async {
+    if (controller != null) {
+      await controller!.dispose();
+    }
+    controller = CameraController(
+      cameraDescription,
       ResolutionPreset.high,
-      ResolutionPreset.medium,
-      ResolutionPreset.low,
-    ];
-
-    for (final ResolutionPreset preset in presetPriority) {
-      final CameraController testController = CameraController(
-        description,
-        preset,
-        enableAudio: true,
-      );
-
-      try {
-        // 透過手動套用逾時計時，若設備長時間卡在 Camera2 配置階段則直接切換下一種解析度。
-        await testController
-            .initialize()
-            .timeout(const Duration(seconds: 6), onTimeout: () {
-          // 6 秒內仍未完成初始化代表裝置可能無法支援該解析度，直接丟出逾時讓外層重試下一個設定。
-          throw TimeoutException('initialize timeout');
-        });
-
-        // 在初始化後立即準備錄影管線，避免真正開始錄影時觸發重新配置導致鏡頭切換
-        try {
-          await testController.prepareForVideoRecording();
-        } catch (error, stackTrace) {
-          // 部分平台可能尚未實作此 API，失敗時僅輸出除錯資訊不阻斷流程
-          if (kDebugMode) {
-            debugPrint('prepareForVideoRecording 失敗：$error\n$stackTrace');
-          }
-        }
-
-        // 嘗試讀取預覽資訊，若特定平台未提供則以 null 代表未知
-        Size? previewSize;
-        try {
-          previewSize = testController.value.previewSize;
-        } catch (_) {
-          previewSize = null;
-        }
-
-        return _CameraSelectionResult(
-          controller: testController,
-          preset: preset,
-          previewSize: previewSize,
-        );
-      } on TimeoutException catch (_) {
-        // 針對逾時個案輸出除錯訊息，讓開發者能追蹤實際退回的解析度。
-        if (kDebugMode) {
-          debugPrint('Camera initialize timeout on preset $preset，改用下一個設定');
-        }
-        await testController.dispose();
-      } catch (_) {
-        await testController.dispose();
-      }
-    }
-
-    return null;
-  }
-
-  /// 根據鏡頭清單建立優先順序，遇到後鏡頭初始化失敗時可退回其他鏡頭
-  List<CameraDescription> _orderedCameras(List<CameraDescription> cameras) {
-    final List<CameraDescription> backCameras = <CameraDescription>[]; // 主要使用後鏡頭
-    final List<CameraDescription> frontCameras = <CameraDescription>[]; // 次要使用前鏡頭
-    final List<CameraDescription> externalCameras = <CameraDescription>[]; // 可能存在的外接鏡頭
-    final List<CameraDescription> others = <CameraDescription>[]; // 其餘未知型別鏡頭
-
-    for (final CameraDescription camera in cameras) {
-      switch (camera.lensDirection) {
-        case CameraLensDirection.back:
-          backCameras.add(camera);
-          break;
-        case CameraLensDirection.front:
-          frontCameras.add(camera);
-          break;
-        case CameraLensDirection.external:
-          externalCameras.add(camera);
-          break;
-      }
-    }
-
-    // ---------- 佈局說明 ----------
-    // 1. 後鏡頭 → 外接鏡頭 → 前鏡頭 → 其他：滿足大多數錄影需求並保留替代方案。
-    // 2. 若裝置僅有單一鏡頭則順序即為原清單，保持兼容性。
-    return <CameraDescription>[
-      ...backCameras,
-      ...externalCameras,
-      ...frontCameras,
-      ...others,
-    ];
-  }
-
-  /// 建立固定比例的預覽畫面，避免錄影時鏡頭切換解析度導致畫面跳動
-  Widget _buildStablePreview() {
-    if (controller == null || !controller!.value.isInitialized) {
-      return const SizedBox.shrink();
-    }
-
-    final double aspectRatio =
-        _previewAspectRatio ?? controller!.value.aspectRatio;
-
-    return Center(
-      child: AspectRatio(
-        aspectRatio: aspectRatio,
-        child: ClipRect(
-          child: CameraPreview(
-            controller!,
-            child: const SizedBox.shrink(), // 仍可於未來覆寫疊層
-          ),
-        ),
-      ),
+      enableAudio: true,
     );
+
+    try {
+      await controller!.initialize();
+      if (!mounted) return;
+
+      // If there is a pending auto start, trigger it now
+      if (_pendingAutoStart) {
+        _pendingAutoStart = false;
+        _triggerRecording();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('無法初始化鏡頭: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 
-  /// 建立音量鍵監聽器，讓使用者快速啟動錄影
-  void initVolumeKeyListener() {
-    _volumeChannel.setMethodCallHandler((call) async {
-      if (call.method == 'volume_down') {
-        if (!_isCountingDown && !isRecording && controller != null && controller!.value.isInitialized) {
-          _isCountingDown = true;
-          try {
-            await playCountdownAndStart();
-          } finally {
-            _isCountingDown = false;
-          }
-        }
+  /// 觸發錄影流程
+  void _triggerRecording() {
+    if (controller == null || !controller!.value.isInitialized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('鏡頭尚未準備就緒')),
+      );
+      return;
+    }
+    if (_sessionProgress.remainingRounds <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已完成所有錄影輪次')),
+      );
+      return;
+    }
+    setState(() {
+      _hasTriggeredRecording = true;
+    });
+    _startCountdown();
+  }
+
+  /// 處理取消流程
+  void _triggerCancel() {
+    if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
+      _cancelCompleter!.complete();
+    }
+  }
+
+  /// 開始倒數計時
+  void _startCountdown() {
+    _sessionProgress.isCountingDown = true;
+    _sessionProgress.countdownSeconds = 3;
+    _cancelCompleter = Completer<void>();
+
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_cancelCompleter!.isCompleted) {
+        timer.cancel();
+        _resetToIdle();
+        return;
+      }
+
+      if (_sessionProgress.countdownSeconds > 1) {
+        setState(() {
+          _sessionProgress.countdownSeconds--;
+        });
+        _playBeep();
+      } else {
+        timer.cancel();
+        _playBeep(isFinal: true);
+        _startRecording();
       }
     });
   }
 
-  /// 由 IMU 按鈕觸發錄影，統一檢查鏡頭與倒數狀態
-  Future<void> _handleImuButtonTrigger() async {
-    if (!mounted) {
+  /// 開始錄影
+  Future<void> _startRecording() async {
+    if (controller == null || !controller!.value.isInitialized || controller!.value.isRecordingVideo) {
       return;
     }
-    if (controller == null || !controller!.value.isInitialized) {
-      // 鏡頭尚未準備完成，保留旗標待完成初始化後再自動啟動
-      _pendingAutoStart = true;
-      return;
-    }
-    if (_isCountingDown || isRecording) {
-      return; // 已在倒數或錄影中則忽略額外事件
-    }
 
-    _isCountingDown = true; // 鎖定狀態避免連續觸發
-    try {
-      await playCountdownAndStart();
-    } finally {
-      _isCountingDown = false;
-    }
-  }
-
-  /// 發送取消錄影訊號，讓倒數與錄影流程可以即時中斷
-  void _triggerCancel() {
-    _shouldCancelRecording = true;
-    if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
-      _cancelCompleter!.complete();
-    }
-    _sessionProgress.resetToIdle(setStateCallback: mounted ? setState : null); // 取消時立即重置倒數資訊
-  }
-
-  /// 主動停止鏡頭錄影與音訊擷取，確保返回上一頁後不再持續錄製
-  Future<void> _stopActiveRecording({
-    bool updateUi = true,
-    bool refreshCamera = false,
-  }) async {
-    if (!isRecording && !_isCountingDown && controller != null && !(controller!.value.isRecordingVideo)) {
-      return; // 若沒有任何錄影流程在進行，可直接返回
-    }
+    setState(() {
+      isRecording = true;
+      _sessionProgress.isCountingDown = false;
+    });
 
     try {
-      await _audioPlayer.stop();
-    } catch (_) {
-      // 音檔可能尚未播放完成，忽略停止時的錯誤
-    }
+      // --- Generate a consistent base name for all files in this session ---
+      _recordingStartTime = DateTime.now(); // Record start time
+      String two(int v) => v.toString().padLeft(2, '0');
+      final baseTimestamp = '${_recordingStartTime!.year}${two(_recordingStartTime!.month)}${two(_recordingStartTime!.day)}${two(_recordingStartTime!.hour)}${two(_recordingStartTime!.minute)}';
+      _currentRecordingBaseName = 'REC$baseTimestamp';
+      // --- End base name generation ---
 
-    await _runCameraSerial<void>(() async {
-      if (controller == null || !controller!.value.isRecordingVideo) {
-        return; // 鏡頭已停止或尚未啟動錄影，無需額外處理
+      await controller!.startVideoRecording();
+      
+      // If audio capture fails, this will throw and be caught, preventing further execution.
+      await _startAudioCapture();
+      
+      // Use the consistent base name for the IMU logger
+      await ImuDataLogger.instance.startRoundLogging(_currentRecordingBaseName!);
+
+      // REMOVED Timer for unlimited recording. Now only waits for manual stop.
+      // final recordingCompleter = Completer<void>();
+      // Timer(Duration(seconds: widget.durationSeconds), () {
+      //   if (!recordingCompleter.isCompleted) {
+      //     recordingCompleter.complete();
+      //   }
+      // });
+
+      // 等待手動取消
+      await _cancelCompleter!.future;
+
+      // IMPORTANT: Only call stop/save if the recording was successfully started and completed.
+      await _stopRecordingAndSave();
+
+    } catch (e, stackTrace) {
+      debugPrint('[Recording] Start recording failed: $e');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('錄影失敗: $e')),
+        );
       }
-      try {
-        await controller!.stopVideoRecording();
-      } catch (_) {
-        // 若已停止或尚未開始錄影，忽略錯誤
-      }
-    }, debugLabel: 'stopActiveRecording');
-
-    await _closeAudioPipeline();
-
-    if (ImuDataLogger.instance.hasActiveRound) {
-      await ImuDataLogger.instance.abortActiveRound();
-    }
-
-    if (mounted && updateUi) {
-      setState(() => isRecording = false);
-    } else {
-      isRecording = false;
-    }
-
-    if (refreshCamera && controller != null && controller!.value.isInitialized) {
-      try {
-        // 取消或結束錄影時強制刷新鏡頭，避免返回首頁後鏡頭仍處於卡住狀態。
-        await _refreshCameraAfterRound(hasMoreRounds: true);
-      } catch (error, stackTrace) {
-        if (kDebugMode) {
-          debugPrint('強制停止錄影後刷新鏡頭失敗：$error\n$stackTrace');
+      // If starting failed, ensure we clean up immediately.
+      // This prevents a call to _stopRecordingAndSave with an uninitialized state.
+      if (controller?.value.isRecordingVideo ?? false) {
+        try {
+          await controller!.stopVideoRecording();
+        } catch (stopError) {
+          debugPrint('[Recording] Failed to stop video after start error: $stopError');
         }
       }
+      _resetToIdle();
+      // NOTE: We do NOT call _stopRecordingAndSave here.
     }
   }
 
-  /// 停止音訊擷取並回收相關資源，確保下次錄影前狀態乾淨
-  Future<void> _closeAudioPipeline() async {
+  /// 停止錄影並儲存檔案
+  Future<void> _stopRecordingAndSave() async {
+    if (!isRecording || controller == null) {
+      debugPrint('[Save] Stop called but not recording or controller is null.');
+      return;
+    }
+
+    debugPrint('[Save] Starting stop/save process...');
+    final completer = Completer<void>();
+    _savingFuture = completer.future;
+
     try {
-      await _audioCapture.stop();
-    } catch (_) {
-      // 可能尚未成功啟動音訊擷取，忽略錯誤避免阻斷流程
+      debugPrint('[Save] Stopping video recording...');
+      final XFile videoFile = await controller!.stopVideoRecording();
+      debugPrint('[Save] Video recording stopped. File at: ${videoFile.path}');
+      
+      debugPrint('[Save] Stopping audio capture...');
+      await _stopAudioCapture();
+      debugPrint('[Save] Audio capture stopped.');
+
+      debugPrint('[Save] Finishing IMU logging...');
+      final imuFiles = await ImuDataLogger.instance.finishRoundLogging();
+      debugPrint('[Save] IMU logging finished. Files: ${imuFiles.toString()}');
+
+      // Use the base name generated at the start of recording
+      final baseName = _currentRecordingBaseName;
+      if (baseName == null) {
+        throw Exception("Recording base name was not set. Cannot save files.");
+      }
+
+      // Determine public Downloads directory (external storage)
+      Directory? targetDir;
+      try {
+        // Android: getExternalStorageDirectories may return public dirs; try Downloads
+        final exDirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+        if (exDirs != null && exDirs.isNotEmpty) {
+          targetDir = exDirs.first;
+        }
+      } catch (e) {
+        debugPrint('[Save] getExternalStorageDirectories error: $e');
+      }
+
+      // Fallback to application documents
+      if (targetDir == null) {
+        final appDocs = await getApplicationDocumentsDirectory();
+        targetDir = Directory(p.join(appDocs.path, 'Downloads'));
+      }
+
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+
+      // Ensure WRITE permission on Android for external storage (Android 11+ needs special handling)
+      if (Platform.isAndroid) {
+        final status = await Permission.manageExternalStorage.status;
+        if (!status.isGranted) {
+          try {
+            await Permission.manageExternalStorage.request();
+          } catch (e) {
+            debugPrint('[Save] Permission request failed: $e');
+          }
+        }
+      }
+
+      // Move video to targetDir with new name
+      final newVideoPath = p.join(targetDir.path, '$baseName.mp4');
+      try {
+        await videoFile.saveTo(newVideoPath);
+      } catch (e) {
+        debugPrint('[Save] Failed to move video to $newVideoPath: $e');
+        // As last resort, copy bytes
+        final bytes = await videoFile.readAsBytes();
+        final out = File(newVideoPath);
+        await out.writeAsBytes(bytes);
+      }
+
+      // Move and rename IMU files to same directory, preserve slot keys
+      final Map<String, String> imuDestPaths = {};
+      // finishRoundLogging returns Map<String,String>
+      final Map<String, String> imuFilesMap = Map<String, String>.from(imuFiles);
+      for (final entryKvp in imuFilesMap.entries) {
+        final slotKey = entryKvp.key; // e.g., 'RIGHT_WRIST' or 'CHEST'
+        final imuPath = entryKvp.value;
+        try {
+          final imuFile = File(imuPath);
+          // The temp IMU file is already named correctly, just move it.
+          final newImuName = p.basename(imuPath); // e.g., REC202512021328_RIGHT_WRIST.csv
+          final newImuPath = p.join(targetDir.path, newImuName);
+          await imuFile.copy(newImuPath);
+          imuDestPaths[slotKey] = newImuPath;
+        } catch (e) {
+          debugPrint('[Save] Failed to move IMU file $imuPath: $e');
+        }
+      }
+
+      final int recordedDuration;
+      if (_recordingStartTime != null) {
+        recordedDuration = DateTime.now().difference(_recordingStartTime!).inSeconds;
+      } else {
+        recordedDuration = 0;
+      }
+      final recordedAtTime = _recordingStartTime ?? DateTime.now();
+      _recordingStartTime = null; // Reset for next recording
+      _currentRecordingBaseName = null; // Reset for next recording
+
+      final entry = RecordingHistoryEntry(
+        filePath: newVideoPath, // Use the new, permanent path
+        roundIndex: _sessionProgress.totalRounds - _sessionProgress.remainingRounds + 1,
+        recordedAt: recordedAtTime,
+        durationSeconds: recordedDuration, // Use calculated duration
+        imuConnected: widget.isImuConnected,
+        imuCsvPaths: imuDestPaths,
+      );
+      _recordedRuns.add(entry);
+      debugPrint('[Save] Entry added to history. Total runs: ${_recordedRuns.length}');
+
+      // 在背景執行音訊分析
+      unawaited(_runAudioAnalysis(entry));
+
+    } catch (e, stackTrace) {
+      debugPrint('[Save] Error during save process: $e');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('存檔失敗: $e')),
+        );
+      }
+    } finally {
+      setState(() {
+        _sessionProgress.remainingRounds--;
+      });
+      _resetToIdle();
+      completer.complete();
+      debugPrint('[Save] Save process finished.');
     }
-    _receivePort?.close();
-    _receivePort = null;
-    _isolate?.kill(priority: Isolate.immediate);
-    _isolate = null;
   }
 
-  /// 初始化音訊擷取並將資料傳入獨立 Isolate
-  Future<void> initAudioCapture() async {
+  /// 重設為閒置狀態
+  void _resetToIdle() {
+    setState(() {
+      isRecording = false;
+      _hasTriggeredRecording = false;
+      _sessionProgress.isCountingDown = false;
+      waveform.clear();
+      waveformAccumulated.clear();
+    });
+  }
+
+  // ---------- 音訊處理 ----------
+
+  /// 開始擷取音訊
+  Future<void> _startAudioCapture() async {
+    // Ensure microphone permission is granted before proceeding.
+    if (!await Permission.microphone.request().isGranted) {
+      debugPrint('[AudioCapture] Microphone permission not granted.');
+      throw Exception('Microphone permission not granted.');
+    }
+
     try {
       _receivePort = ReceivePort();
-      _receivePort!.listen((data) {
-        if (data is List<double>) {
-          waveform = data;
-          waveformAccumulated.addAll(data);
-
-          repaintNotifier.value++; // 通知波形重繪
-        }
-      });
       _isolate = await Isolate.spawn(
         _audioProcessingIsolate,
         _receivePort!.sendPort,
       );
-      await _audioCapture.init();
-      await _audioCapture.start(
-        (data) => _receivePort?.sendPort.send(
-          List<double>.from((data as List).map((e) => e as double)),
-        ),
-        onError,
-        sampleRate: 22050,
-        bufferSize: 512,
-      );
-    } catch (e) {
-      debugPrint('🎙️ 初始化失敗: $e');
+      _receivePort!.listen(_handleAudioData);
+
+      // The core of the fix: wait for the native side to be ready.
+      await _audioCapture.start(_audioListener, (error) {
+        // Add detailed logging for any errors from the listener.
+        debugPrint('[AudioCapture] Listener Error: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Audio listener error: $error')),
+          );
+        }
+      }, sampleRate: 44100, bufferSize: 4096);
+
+    } catch (e, stackTrace) {
+      // Catch and log any exceptions during the setup process.
+      debugPrint('[AudioCapture] Failed to start audio capture: $e');
+      debugPrintStack(stackTrace: stackTrace);
+      // Re-throw the exception to be caught by the recording logic.
       rethrow;
     }
   }
 
-  /// 重新準備錄影管線，避免多輪錄影時因為缺少關鍵影格而產生空檔案。
-  Future<void> _prepareRecorderSurface() async {
-    await _runCameraSerial<void>(() async {
-      if (_isDisposing) {
-        return; // 頁面已進入釋放狀態時，不再進行暖機避免排程殘留
-      }
-      if (controller == null || !controller!.value.isInitialized) {
-        return; // 控制器尚未就緒時不進行預熱，避免觸發例外
-      }
-      if (controller!.value.isRecordingVideo) {
-        return; // 避免錄影進行中重複呼叫導致例外
-      }
-      try {
-        // CameraX 需在每次錄影前重新 warm up，否則有機率等不到第一個 I-Frame。
-        await controller!.prepareForVideoRecording();
-        await _performWarmupRecording();
-      } catch (error, stackTrace) {
-        if (kDebugMode) {
-          debugPrint('prepareForVideoRecording 重新預熱失敗：$error\n$stackTrace');
-        }
-      }
-    }, debugLabel: 'prepareRecorderSurface');
+  /// 停止擷取音訊並回傳檔案路徑
+  Future<String?> _stopAudioCapture() async {
+    // Use the single instance to stop.
+    await _audioCapture.stop();
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    _receivePort?.close();
+    // 這部分需要原生端實作來回傳檔案路徑
+    return null;
   }
 
-  /// 進行短暫暖機錄影，確保下一輪正式錄影能立即產生關鍵影格。
-  Future<void> _performWarmupRecording() async {
-    if (controller == null || !controller!.value.isInitialized) {
-      return;
-    }
-    if (controller!.value.isRecordingVideo) {
-      return; // 外層已啟動錄影時不可重複進行暖機。
-    }
+  /// Isolate 入口函式，處理音訊資料
+  static void _audioProcessingIsolate(SendPort sendPort) {
+    final receivePort = ReceivePort();
+    sendPort.send(receivePort.sendPort);
 
-    // 若預覽仍處於暫停狀態，先嘗試恢復以免暖機錄影缺少畫面來源。
-    if (controller!.value.isPreviewPaused) {
-      try {
-        await controller!.resumePreview();
-      } catch (error) {
-        if (kDebugMode) {
-          debugPrint('暖機前恢復預覽失敗：$error');
+    receivePort.listen((dynamic data) {
+      if (data is List<double>) {
+        // 簡單的 RMS 計算
+        double sum = 0;
+        for (var sample in data) {
+          sum += sample * sample;
         }
+        double rms = sum > 0 ? (sum / data.length) : 0.0;
+        sendPort.send(rms);
       }
-    }
-
-    try {
-      await controller!.startVideoRecording();
-      await Future.delayed(const Duration(milliseconds: 600));
-      final XFile warmupFile = await controller!.stopVideoRecording();
-      await _deleteWarmupFile(warmupFile.path);
-      try {
-        await controller!.prepareForVideoRecording();
-      } catch (error, stackTrace) {
-        if (kDebugMode) {
-          debugPrint('暖機後重新 prepare 失敗：$error\n$stackTrace');
-        }
-      }
-    } catch (error, stackTrace) {
-      if (kDebugMode) {
-        debugPrint('暖機錄影失敗：$error\n$stackTrace');
-      }
-
-      // 若暖機過程中仍有錄影未停止，強制停止並清理暫存檔。
-      if (controller != null && controller!.value.isRecordingVideo) {
-        try {
-          final XFile leftover = await controller!.stopVideoRecording();
-          await _deleteWarmupFile(leftover.path);
-        } catch (_) {}
-      }
-    }
+    });
   }
 
-  /// 刪除暖機產生的臨時檔案，避免佔用儲存空間與誤判為正式影片。
-  Future<void> _deleteWarmupFile(String path) async {
-    final file = File(path);
-    if (!await file.exists()) {
-      return;
-    }
-    try {
-      await file.delete();
-    } catch (error) {
-      if (kDebugMode) {
-        debugPrint('刪除暖機影片失敗：$error');
-      }
-    }
-  }
-
-  /// 錄製結束後重建鏡頭控制器，確保下一輪能在乾淨狀態下重新配置。
-  Future<void> _resetCameraForNextRound() async {
-    await _runCameraSerial<void>(() async {
-      final CameraDescription? targetCamera = _activeCamera;
-      if (targetCamera == null) {
-        return; // 尚未記錄當前鏡頭時不需重置。
-      }
-
-      final CameraController? oldController = controller;
-      controller = null;
-      if (mounted && !_isDisposing) {
-        setState(() {}); // 先重設狀態避免 UI 仍引用舊控制器。
-      }
-
-      try {
-        await oldController?.dispose();
-      } catch (error) {
-        if (kDebugMode) {
-          debugPrint('釋放舊鏡頭控制器失敗：$error');
-        }
-      }
-
-      if (_isDisposing) {
-        return; // 頁面離場時不再重新初始化鏡頭，直接結束任務
-      }
-
-      final _CameraSelectionResult? selection =
-          await _createBestCameraController(targetCamera);
-      if (selection == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('鏡頭重新初始化失敗，請稍後再試。')),
-          );
-        }
-        return;
-      }
-
-      await _applyCameraSelection(selection, targetCamera);
-    }, debugLabel: 'resetCameraForNextRound');
-  }
-
-  /// 依剩餘輪次調整鏡頭狀態：每輪都先完整重建控制器，最後一輪額外暖機，確保預覽不卡住。
-  Future<void> _refreshCameraAfterRound({required bool hasMoreRounds}) async {
-    try {
-      // 無論是否仍有下一輪，都先完整釋放並重建鏡頭，確保預覽畫面回到乾淨狀態。
-      await _resetCameraForNextRound();
-
-      if (!hasMoreRounds && controller != null && controller!.value.isInitialized) {
-        // 最後一輪結束後仍預先暖機一次，方便使用者再次啟動錄影時不必等待。
-        await _prepareRecorderSurface();
-      }
-    } catch (error) {
-      if (kDebugMode) {
-        debugPrint('錄影結束後重新整理鏡頭失敗：$error');
-      }
-    }
-  }
-
-  // ---------- 方法區 ----------
-  /// 依秒數逐步等待，遇到取消訊號時即刻跳出
-  Future<void> _waitForDuration(int seconds) async {
-    for (int i = 0; i < seconds && !_shouldCancelRecording; i++) {
-      await Future.delayed(const Duration(seconds: 1));
-      if (_shouldCancelRecording) {
-        break;
-      }
-    }
-  }
-
-  /// 播放倒數音效並等待音檔結束或取消
-  Future<void> _playCountdown() async {
-    const int countdownSeconds = 3; // 倒數音效長度（秒）
-    const int bufferSeconds = 3; // 倒數後的緩衝時間
-    final int totalSeconds = countdownSeconds + bufferSeconds;
-
-    _sessionProgress.startCountdown(
-      seconds: totalSeconds,
-      setStateCallback: mounted ? setState : null,
-    );
-
-    await _audioPlayer.open(
-      Audio('assets/sounds/1.mp3'),
-      autoStart: true,
-      showNotification: false,
-    );
-
-    final Future<void> countdownFuture = _waitForDuration(totalSeconds);
-    final Future<void> audioFuture = _audioPlayer.playlistFinished.first;
-
-    await Future.any([
-      Future.wait([countdownFuture, audioFuture]),
-      if (_cancelCompleter != null) _cancelCompleter!.future,
-    ]);
-
-    _sessionProgress.finishCountdown(setStateCallback: mounted ? setState : null);
-  }
-
-  /// 進行一次錄影流程（倒數 -> 錄影 -> 儲存）
-  Future<bool> _recordOnce(int index) async {
-    if (_shouldCancelRecording) {
-      return false; // 若已收到取消訊號則直接跳出，避免繼續操作鏡頭
-    }
-
-    bool recordedSuccessfully = false; // 標記本輪是否完整完成，供外層計算剩餘次數
-    try {
-      waveformAccumulated.clear();
-      await _prepareRecorderSurface();
-
-      await initAudioCapture();
-      if (_shouldCancelRecording) {
-        await _closeAudioPipeline();
-        if (ImuDataLogger.instance.hasActiveRound) {
-          await ImuDataLogger.instance.abortActiveRound();
-        }
-        return false;
-      }
-
-      final baseName = ImuDataLogger.instance.buildBaseFileName(
-        roundIndex: index + 1,
-      );
-      await ImuDataLogger.instance.startRoundLogging(baseName);
-
-      await _runCameraSerial<void>(() async {
-        if (controller == null || controller!.value.isRecordingVideo) {
-          return; // 已在錄影中時不重複啟動
-        }
-        await controller!.startVideoRecording();
-      }, debugLabel: 'startVideoRecording');
-
-      _sessionProgress.startRecording(
-        seconds: widget.durationSeconds,
-        setStateCallback: mounted ? setState : null,
-      );
-
-      await _waitForDuration(widget.durationSeconds);
-
-      if (_shouldCancelRecording) {
-        await _runCameraSerial<void>(() async {
-          if (controller == null || !controller!.value.isRecordingVideo) {
-            return; // 錄影已停止或尚未啟動，無需額外處理
-          }
-          try {
-            await controller!.stopVideoRecording();
-          } catch (_) {}
-        }, debugLabel: 'cancelStopVideo');
-        await _closeAudioPipeline();
-        if (ImuDataLogger.instance.hasActiveRound) {
-          await ImuDataLogger.instance.abortActiveRound();
-        }
-        return false;
-      }
-
-      // 停止錄影後仍需等待 CameraX 完成封裝，避免直接複製造成無法播放的檔案。
-      final XFile videoFile = await _runCameraSerial<XFile>(() async {
-        if (controller == null || !controller!.value.isRecordingVideo) {
-          throw StateError('錄影尚未啟動，無法取得影片檔案');
-        }
-        return controller!.stopVideoRecording();
-      }, debugLabel: 'stopVideoRecording');
-      await Future.delayed(const Duration(milliseconds: 200));
-      await _closeAudioPipeline();
-
-      final savedVideoPath = await ImuDataLogger.instance.persistVideoFile(
-        sourcePath: videoFile.path,
-        baseName: baseName,
-      );
-
-      String? savedThumbnailPath;
-      try {
-        savedThumbnailPath = await _captureThumbnail(baseName);
-      } catch (error) {
-        debugPrint('⚠️ 錄影後拍攝縮圖失敗：$error');
-        // 若拍照失敗，嘗試確保預覽恢復以免畫面停住。
-        if (controller != null && controller!.value.isPreviewPaused) {
-          try {
-            await controller!.resumePreview();
-          } catch (resumeError) {
-            debugPrint('⚠️ 拍照失敗後恢復預覽再度失敗：$resumeError');
-          }
-        }
-      } finally {
-        await _refreshCameraAfterRound(
-          hasMoreRounds: index < widget.totalRounds - 1,
-        );
-      }
-      final csvPaths = ImuDataLogger.instance.hasActiveRound
-          ? await ImuDataLogger.instance.finishRoundLogging()
-          : <String, String>{};
-
-      final entry = RecordingHistoryEntry(
-        filePath: savedVideoPath,
-        roundIndex: index + 1,
-        recordedAt: DateTime.now(),
-        durationSeconds: widget.durationSeconds,
-        imuConnected: widget.isImuConnected,
-        imuCsvPaths: csvPaths,
-        thumbnailPath: savedThumbnailPath,
-      );
-
-      if (mounted) {
-        setState(() {
-          // 新紀錄置頂顯示，方便使用者快速找到最新檔案
-          _recordedRuns.insert(0, entry);
-        });
-      } else {
-        _recordedRuns.insert(0, entry);
-      }
-
-      // 嘗試讀取同一路徑下的 classify report，並顯示評分結果（若存在）
-      try {
-          // look for batch_classify.csv in same folder and show prediction for this video if present
-          final batchFile = File('${Directory(entry.filePath).parent.path}${Platform.pathSeparator}batch_classify.csv');
-          if (await batchFile.exists()) {
-            final lines = await batchFile.readAsLines();
-            if (lines.length > 1) {
-              for (var i = 1; i < lines.length; i++) {
-                final cols = lines[i].split(',');
-                if (cols.isEmpty) continue;
-                final videoName = cols[0].trim();
-                if (videoName == entry.filePath.split(Platform.pathSeparator).last) {
-                  final pred = cols.length > 1 ? cols[1].trim() : '';
-                  final label = _mapPredToLabel(pred);
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('評分：$label')));
-                  break;
-                }
-              }
-            }
-          }
-      } catch (_) {}
-
-      debugPrint('✅ 儲存影片與感測資料：${entry.fileName}');
-      recordedSuccessfully = true;
-      // --- In-app analysis using accumulated waveform ---
-          try {
-        if (waveformAccumulated.isNotEmpty) {
-          final features = analyzeFromSamples(List<double>.from(waveformAccumulated), 22050);
-          final fmap = features.toMap();
-          // save per-video classify report next to video
-          final reportPath = entry.filePath.replaceAll(RegExp(r'\\.mp4$'), '') + '_classify_report.csv';
-          final reportFile = File(reportPath);
-          final rows = <String>[];
-          // header
-          rows.add('feature,target,weight');
-          final weights = {
-            'rms_dbfs': 2.0,
-            'spectral_centroid': 1.0,
-            'sharpness_hfxloud': 2.0,
-            'highband_amp': 1.0,
-            'peak_dbfs': 1.0,
-          };
-          fmap.forEach((k, v) {
-            final w = weights.containsKey(k) ? weights[k] : 1.0;
-            rows.add('$k,${v.toString()},$w');
-          });
-          await reportFile.writeAsString(rows.join('\n'));
-
-          // compare to reference stats in app storage
-          try {
-            final baseDir = await getApplicationDocumentsDirectory();
-            final dirPath = p.join(baseDir.path, 'imu_records');
-            final dir = Directory(dirPath);
-            if (!await dir.exists()) await dir.create(recursive: true);
-            final pro = loadReferenceStats(p.join(dir.path, 'denoised_summary - 150_pro.csv'));
-            final good = loadReferenceStats(p.join(dir.path, 'denoised_summary -130_good.csv'));
-            final bad = loadReferenceStats(p.join(dir.path, 'denoised_summary - bad.csv'));
-            final statsList = {'pro':pro, 'good':good, 'bad':bad};
-            double bestScore = double.infinity; String bestLabel = '';
-            statsList.forEach((k,v){
-              if (v.isNotEmpty) {
-                final mu = Map<String,double>.from(v['mu'] as Map);
-                final sd = Map<String,double>.from(v['sd'] as Map);
-                final x = <String,double>{};
-                fmap.forEach((key,val){ x[key]=val; });
-                final d = z2DistanceWeighted(x, mu, sd, weights);
-                if (d < bestScore) { bestScore = d; bestLabel = k; }
-              }
-            });
-            if (bestLabel.isNotEmpty) {
-              final lab = _mapPredToLabel(bestLabel);
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('內建分析評分：$lab')));
-              // persist latest analysis for preview overlay
-              if (mounted) {
-                setState(() {
-                  _lastAnalysisLabel = lab;
-                  _lastAnalysisFeatures = {
-                    'rms_dbfs': fmap['rms_dbfs'],
-                    'spectral_centroid': fmap['spectral_centroid'],
-                    'sharpness_hfxloud': fmap['sharpness_hfxloud'],
-                    'highband_amp': fmap['highband_amp'],
-                    'peak_dbfs': fmap['peak_dbfs'],
-                  };
-                });
-              }
-              // append label to per-video report so playback can read it
-              try {
-                final labelLine = 'label,$bestLabel,1.0\n';
-                await reportFile.writeAsString(labelLine, mode: FileMode.append);
-              } catch (_) {}
-            }
-          } catch (_) {}
-        }
-      } catch (e) {
-        debugPrint('分析失敗：$e');
-      } finally {
-        waveformAccumulated.clear();
-      }
-    } catch (e) {
-      await ImuDataLogger.instance.abortActiveRound();
-      debugPrint('❌ 錄影時出錯：$e');
-    }
-
-    return recordedSuccessfully;
-  }
-
-  /// 排程鏡頭任務，確保相機資源一次只被一個流程操作。
-  Future<T> _runCameraSerial<T>(
-    Future<T> Function() task, {
-    String? debugLabel,
-  }) {
-    if (_isRunningCameraTask) {
-      // 若已在鎖內部執行，直接執行傳入任務以避免死鎖。
-      return task();
-    }
-
-    final Completer<T> completer = Completer<T>();
-
-    Future<void> runner() async {
-      _isRunningCameraTask = true;
-      try {
-        if (debugLabel != null && kDebugMode) {
-          debugPrint('🎥 [$debugLabel] 任務開始');
-        }
-        final T result = await task();
-        if (debugLabel != null && kDebugMode) {
-          debugPrint('🎥 [$debugLabel] 任務結束');
-        }
-        if (!completer.isCompleted) {
-          completer.complete(result);
-        }
-      } catch (error, stackTrace) {
-        if (debugLabel != null && kDebugMode) {
-          debugPrint('🎥 [$debugLabel] 任務失敗：$error');
-        }
-        if (!completer.isCompleted) {
-          completer.completeError(error, stackTrace);
-        }
-      } finally {
-        _isRunningCameraTask = false;
-      }
-    }
-
-    _cameraOperationQueue = _cameraOperationQueue.then((_) => runner());
-    return completer.future;
-  }
-
-  /// 捕捉當前畫面作為縮圖，並在序列鎖下執行避免 ImageReader 緩衝耗盡。
-  Future<String?> _captureThumbnail(String baseName) async {
-    return _runCameraSerial<String?>(() async {
-      if (_isDisposing) {
-        return null; // 頁面即將離場，略過縮圖產生以縮短釋放時間
-      }
-      if (controller == null || !controller!.value.isInitialized) {
-        return null; // 控制器已被釋放或尚未完成初始化，直接略過縮圖
-      }
-
-      // ---------- 拍攝縮圖 ----------
-      // 先暫停預覽以釋放預覽緩衝區，避免持續出現 ImageReader 無法取得緩衝的警告。
-      bool needResume = false;
-      if (!controller!.value.isPreviewPaused) {
-        try {
-          await controller!.pausePreview();
-          needResume = true;
-        } catch (pauseError) {
-          debugPrint('⚠️ 暫停預覽時發生錯誤：$pauseError');
-        }
-      }
-
-      try {
-        final stillImage = await controller!.takePicture();
-        return await ImuDataLogger.instance.persistThumbnailFromPicture(
-          sourcePath: stillImage.path,
-          baseName: baseName,
-        );
-      } finally {
-        // 拍照結束後恢復預覽，確保畫面持續更新。
-        if (needResume && controller != null && controller!.value.isPreviewPaused) {
-          try {
-            await controller!.resumePreview();
-          } catch (resumeError) {
-            debugPrint('⚠️ 恢復預覽時發生錯誤：$resumeError');
-          }
-        }
-      }
-    }, debugLabel: 'captureThumbnail');
-  }
-
-  /// 依使用者設定自動執行多輪倒數與錄影，中間保留休息時間
-  Future<void> playCountdownAndStart() async {
-    if (controller == null || !controller!.value.isInitialized) {
-      return; // 鏡頭尚未準備完成時不執行
-    }
-
-    if (isRecording) {
-      return; // 避免重複點擊時重入流程
-    }
-
-    if (!widget.isImuConnected && mounted) {
-      // 若尚未連線 IMU，仍允許錄影但提示使用者僅能取得畫面
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('尚未連線 IMU，將以純錄影模式進行。')),
-      );
-    }
-
-    if (mounted) {
+  /// 處理來自 Isolate 的音訊資料
+  void _handleAudioData(dynamic data) {
+    if (data is double) {
       setState(() {
-        isRecording = true;
-        _hasTriggeredRecording = true; // 使用者已主動啟動錄影
-        _sessionProgress.resetForNewSession(widget.totalRounds); // 新一輪錄影重新計算剩餘次數
+        waveform.add(data);
+        if (waveform.length > 200) {
+          waveform.removeAt(0);
+        }
+        waveformAccumulated.add(data);
+        repaintNotifier.value++;
       });
-    } else {
-      isRecording = true;
-      _hasTriggeredRecording = true;
-      _sessionProgress.resetForNewSession(widget.totalRounds);
-    }
-
-    _shouldCancelRecording = false;
-    _cancelCompleter = Completer<void>();
-
-    try {
-      for (int i = 0; i < widget.totalRounds; i++) {
-        if (_shouldCancelRecording) break;
-
-        _sessionProgress.markCurrentRound(i + 1, setStateCallback: mounted ? setState : null);
-        await _playCountdown();
-        if (_shouldCancelRecording) break;
-
-        final bool recorded = await _recordOnce(i);
-        if (recorded) {
-          _sessionProgress.completeCurrentRound(setStateCallback: mounted ? setState : null);
-        }
-        if (_shouldCancelRecording) break;
-
-        if (recorded && i < widget.totalRounds - 1) {
-          _sessionProgress.startRest(
-            seconds: _restSecondsBetweenRounds,
-            setStateCallback: mounted ? setState : null,
-          );
-          await _waitForDuration(_restSecondsBetweenRounds);
-        }
-      }
-    } finally {
-      _cancelCompleter = null;
-      _shouldCancelRecording = false;
-      _sessionProgress.resetToIdle(setStateCallback: mounted ? setState : null);
-      if (mounted) {
-        setState(() => isRecording = false);
-      } else {
-        isRecording = false;
-      }
     }
   }
 
-  /// 讓使用者自選影片並播放
-  Future<void> _pickAndPlayVideo() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      initialDirectory: '/storage/emulated/0/Download',
-    );
-
-    if (!mounted) return;
-
-    if (result != null && result.files.single.path != null) {
-      final filePath = result.files.single.path!;
-      _openVideoPlayer(filePath);
-    }
+  /// 音訊監聽回呼
+  void _audioListener(dynamic data) {
+    _receivePort?.sendPort.send(data as List<double>);
   }
 
-  /// 直接開啟影片播放頁面，統一處理導覽流程
-  Future<void> _openVideoPlayer(String filePath) async {
-    if (!mounted) return;
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VideoPlayerPage(
-          videoPath: filePath,
-          avatarPath: widget.userAvatarPath,
-        ),
+  // ---------- UI 輔助方法 ----------
+
+  /// 建立鏡頭預覽 Widget
+  Widget _buildCameraPreview() {
+    if (controller == null || !controller!.value.isInitialized) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    // Get screen and camera aspect ratios
+    final mediaSize = MediaQuery.of(context).size;
+    final scale = 1 / (controller!.value.aspectRatio * mediaSize.aspectRatio);
+
+    return ClipRect(
+      clipper: _MediaSizeClipper(mediaSize),
+      child: Transform.scale(
+        scale: scale,
+        alignment: Alignment.topCenter,
+        child: CameraPreview(controller!),
       ),
     );
   }
 
-  /// 彈出歷史列表，提供使用者快速檢視本次錄影成果
-  Future<void> _showRecordedRunsSheet() {
-    return showRecordingHistorySheet(
+  /// 播放提示音
+  void _playBeep({bool isFinal = false}) {
+    final sound = isFinal ? 'assets/sounds/final_beep.mp3' : 'assets/sounds/beep.mp3';
+    _audioPlayer.open(Audio(sound), autoStart: true, volume: 0.5);
+  }
+
+  /// 顯示錄影紀錄
+  void _showRecordingHistory(BuildContext context) {
+    showRecordingHistorySheet(
       context: context,
       entries: _recordedRuns,
-      onPlayEntry: (entry) => _openVideoPlayer(entry.filePath),
-      onPickExternal: _pickAndPlayVideo,
+      onPlayEntry: (entry) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VideoPlayerPage(
+              videoPath: entry.filePath,
+              avatarPath: widget.userAvatarPath,
+            ),
+          ),
+        );
+      },
     );
   }
 
-  /// 音訊處理的 Isolate 主體（保留為預留擴充）
-  static void _audioProcessingIsolate(SendPort sendPort) {}
-
-  /// 音訊擷取錯誤處理
-  void onError(Object e) {
-    debugPrint('❌ Audio Capture Error: $e');
-  }
-
-  /// 處理返回上一頁事件：先停止錄影再允許跳轉
-  Future<bool> _handleWillPop() async {
-    _triggerCancel();
-    await _stopActiveRecording(refreshCamera: true);
-
-    if (mounted) {
-      Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_recordedRuns));
+  /// 執行 Python 音訊分析 (Desktop only)
+  Future<void> _runPythonAnalyzer() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['wav', 'mp3', 'm4a', 'aac'],
+    );
+    if (result != null && result.files.single.path != null) {
+      final filePath = result.files.single.path!;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('正在分析: $filePath')),
+        );
+      }
+      try {
+        final analysisResult = await AudioAnalysisService.analyzeVideo(filePath);
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('分析結果'),
+              content: Text(jsonEncode(analysisResult)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('關閉'),
+                ),
+              ],
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('分析失敗: $e')),
+          );
+        }
+      }
     }
-    return false;
   }
 
-  // ---------- 畫面建構 ----------
+  /// 執行音訊分析服務
+  Future<void> _runAudioAnalysis(RecordingHistoryEntry entry) async {
+    try {
+      final result = await AudioAnalysisService.analyzeVideo(entry.filePath);
+      final summary = result['summary'] as Map<String, dynamic>?;
+      if (summary != null) {
+        final pred = summary['audio_class']?.toString();
+        if (pred != null) {
+          setState(() {
+            _lastAnalysisLabel = _mapPredToLabel(pred);
+            _lastAnalysisFeatures = {
+              'rms_dbfs': _toDouble(summary['rms_dbfs']),
+              'spectral_centroid': _toDouble(summary['spectral_centroid']),
+              'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
+            };
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('音訊分析失敗: $e');
+    }
+  }
+
+  double? _toDouble(dynamic val) {
+    if (val is double) return val;
+    if (val is int) return val.toDouble();
+    if (val is String) return double.tryParse(val);
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (controller == null || !controller!.value.isInitialized) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
     return WillPopScope(
-      onWillPop: _handleWillPop,
+      onWillPop: () async {
+        if (isRecording) {
+          _triggerCancel();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('正在儲存影片...')),
+            );
+          }
+          await _savingFuture;
+          return true;
+        }
+        return true;
+      },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('錄影進行中'),
-          backgroundColor: const Color(0xFF123B70),
+          title: const Text('錄影'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              if (isRecording) {
+                _triggerCancel();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('正在儲存影片...')),
+                  );
+                }
+                await _savingFuture;
+                if (mounted) Navigator.of(context).pop();
+              } else {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
           actions: [
-            if (Platform.isWindows)
+            if (kDebugMode)
               IconButton(
                 tooltip: 'Run audio analyzer (desktop)',
                 onPressed: _runPythonAnalyzer,
                 icon: const Icon(Icons.analytics),
               ),
+            IconButton(
+              icon: const Icon(Icons.history),
+              onPressed: () => _showRecordingHistory(context),
+              tooltip: '錄影紀錄',
+            ),
           ],
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!widget.isImuConnected)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                color: const Color(0xFFFFF4E5),
-                child: const Text(
-                  '目前為純錄影模式，返回上一頁可再次嘗試配對 IMU。',
-                  style: TextStyle(color: Color(0xFF9A6A2F), fontSize: 13),
-                ),
-              ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              color: const Color(0xFFF4F7FB),
-              child: Text(
-                '本次預計錄影 ${widget.totalRounds} 次，每次 ${widget.durationSeconds} 秒。',
-                style: const TextStyle(fontSize: 14, color: Color(0xFF123B70), fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (!_hasTriggeredRecording)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                color: const Color(0xFFE8F5E9),
-                child: const Text(
-                  '請確認站位後，點選右下角「開始錄影」才會啟動倒數。',
-                  style: TextStyle(color: Color(0xFF1E8E5A), fontSize: 13),
-                ),
-              ),
-            _SessionStatusBar(
-              totalRounds: widget.totalRounds,
-              remainingRounds: _sessionProgress.calculateRemainingRounds(),
-              activePhase: _sessionProgress.activePhase,
-              secondsLeft: _sessionProgress.secondsLeft,
-            ),
-            Expanded(
-              child: Stack(
-                children: [
-                  Column(
-                    children: [
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            _buildStablePreview(),
-                            const Positioned.fill(
-                              child: StanceGuideOverlay(),
-                            ),
-                            // analysis overlay
-                            if (_lastAnalysisLabel != null)
-                              Positioned(
-                                top: 12,
-                                right: 12,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black87,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(_lastAnalysisLabel!, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                      const SizedBox(height: 6),
-                                      if (_lastAnalysisFeatures.isNotEmpty) ...[
-                                        Text('rms: ${_lastAnalysisFeatures['rms_dbfs'] == null ? '--' : (_lastAnalysisFeatures['rms_dbfs']!.toStringAsFixed(2))}', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                                        Text('sc: ${_lastAnalysisFeatures['spectral_centroid'] == null ? '--' : (_lastAnalysisFeatures['spectral_centroid']!.toStringAsFixed(1))}', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                                        Text('sh: ${_lastAnalysisFeatures['sharpness_hfxloud'] == null ? '--' : (_lastAnalysisFeatures['sharpness_hfxloud']!.toStringAsFixed(2))}', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                                      ],
-                                      const SizedBox(height: 8),
-                                      // Legend so users immediately see the meaning of labels
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.06),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: const [
-                                            Text('Legend:', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                                            SizedBox(height: 2),
-                                            Text('Pro → Pro', style: TextStyle(color: Colors.white, fontSize: 12)),
-                                            Text('Sweet → Good', style: TextStyle(color: Colors.white, fontSize: 12)),
-                                            Text('Try again → Keep practicing', style: TextStyle(color: Colors.white, fontSize: 12)),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                          ],
+            Flexible(
+              flex: 3, // Give preview more space but not all
+              child: Container(
+                color: Colors.black,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _buildCameraPreview(),
+                    if (isRecording)
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.circle, color: Colors.white, size: 14),
+                              SizedBox(width: 6),
+                              Text('REC', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                            ],
+                          ),
                         ),
                       ),
-                      SizedBox(
-                        height: 200,
-                        width: double.infinity,
-                        child: WaveformWidget(
-                          waveformAccumulated: List.from(waveformAccumulated),
-                          repaintNotifier: repaintNotifier,
+                    if (_sessionProgress.isCountingDown)
+                      Center(
+                        child: Text(
+                          '${_sessionProgress.countdownSeconds}',
+                          style: const TextStyle(fontSize: 120, color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 15, color: Colors.black54)]),
                         ),
                       ),
-                    ],
-                  ),
-                  Positioned(
-                    bottom: 20,
-                    right: 20,
-                    child: ElevatedButton(
-                      onPressed: isRecording ? null : playCountdownAndStart,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1E8E5A),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    StanceGuideOverlay(
+                      isVisible: true,
+                      stanceValue: 0.5,
+                      swingDirection: 15,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Flexible(
+              flex: 2, // Give bottom controls some space
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    _SessionStatusBar(
+                      progress: _sessionProgress,
+                      isImuConnected: widget.isImuConnected,
+                      isRecording: isRecording,
+                    ),
+                    const SizedBox(height: 12),
+                    if (_lastAnalysisLabel != null)
+                      _SessionStatusTile(
+                        title: '揮桿分析',
+                        value: _lastAnalysisLabel!,
+                        isActive: true,
                       ),
-                      child: Text(
-                        isRecording
-                            ? '錄製中...'
-                            : (_hasTriggeredRecording ? '再次錄製' : '開始錄影'),
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    if (_lastAnalysisFeatures.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                        child: Wrap(
+                          spacing: 12,
+                          runSpacing: 4,
+                          children: _lastAnalysisFeatures.entries
+                              .map((e) => Text('${e.key}: ${e.value?.toStringAsFixed(2) ?? '--'}', style: const TextStyle(fontSize: 10, color: Colors.grey)))
+                              .toList(),
+                        ),
+                      ),
+                    Container(
+                      height: 100,
+                      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: repaintNotifier,
+                        builder: (context, _, __) {
+                          return WaveformWidget(
+                            waveform: waveformAccumulated,
+                            color: Colors.blueAccent,
+                            strokeWidth: 2.0,
+                          );
+                        },
                       ),
                     ),
-                  ),
-                  Positioned(
-                    bottom: 20,
-                    left: 20,
-                    child: ElevatedButton(
-                      onPressed: _showRecordedRunsSheet,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF123B70),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                      ),
-                      child: const Text(
-                        '曾經錄影紀錄',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
         ),
+        floatingActionButton: FloatingActionButton.large(
+          onPressed: _hasTriggeredRecording ? _triggerCancel : _triggerRecording,
+          backgroundColor: _hasTriggeredRecording ? Colors.red : Colors.blue,
+          child: Icon(
+            _hasTriggeredRecording ? Icons.stop : Icons.camera,
+            color: Colors.white,
+            size: 42,
+          ),
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       ),
     );
   }
 }
 
-/// 錄影流程的各種階段，以便統一更新狀態列與倒數資訊
-enum _SessionPhase { idle, countdown, recording, rest }
-
-/// 專責管理倒數秒數、剩餘輪次與計時器的協助類別
-class _SessionProgress {
-  int _totalRounds = 0; // 本次預計錄影的總輪數
-  int _completedRounds = 0; // 已成功完成的輪數
-  int _currentRound = 0; // 目前正在處理的輪數（含倒數或錄影中）
-
-  _SessionPhase activePhase = _SessionPhase.idle; // 當前階段
-  int secondsLeft = 0; // 當前階段剩餘秒數
-
-  Timer? _timer; // 控制倒數的計時器
-
-  /// 初始化新的錄影任務，重置剩餘輪數與倒數資訊
-  void resetForNewSession(int totalRounds) {
-    _cancelTimer();
-    _totalRounds = totalRounds;
-    _completedRounds = 0;
-    _currentRound = 0;
-    activePhase = _SessionPhase.idle;
-    secondsLeft = 0;
+class _MediaSizeClipper extends CustomClipper<Rect> {
+  final Size mediaSize;
+  const _MediaSizeClipper(this.mediaSize);
+  @override
+  Rect getClip(Size size) {
+    return Rect.fromLTWH(0, 0, mediaSize.width, mediaSize.height);
   }
 
-  /// 紀錄目前準備進行的輪次，讓剩餘次數即刻反映
-  void markCurrentRound(int roundIndex, {void Function(VoidCallback fn)? setStateCallback}) {
-    void update(VoidCallback fn) {
-      if (setStateCallback != null) {
-        setStateCallback(fn);
-      } else {
-        fn();
-      }
-    }
-
-    update(() {
-      _currentRound = roundIndex;
-      if (activePhase == _SessionPhase.idle) {
-        activePhase = _SessionPhase.countdown;
-        secondsLeft = 0;
-      }
-    });
-  }
-
-  /// 啟動倒數計時（含倒數音效與緩衝時間）
-  void startCountdown({required int seconds, void Function(VoidCallback fn)? setStateCallback}) {
-    _startPhaseTimer(
-      phase: _SessionPhase.countdown,
-      seconds: seconds,
-      setStateCallback: setStateCallback,
-    );
-  }
-
-  /// 完成倒數後重置資訊，避免停留在倒數狀態
-  void finishCountdown({void Function(VoidCallback fn)? setStateCallback}) {
-    if (activePhase != _SessionPhase.countdown) {
-      return;
-    }
-    _cancelTimer();
-
-    void update(VoidCallback fn) {
-      if (setStateCallback != null) {
-        setStateCallback(fn);
-      } else {
-        fn();
-      }
-    }
-
-    update(() {
-      secondsLeft = 0;
-      activePhase = _SessionPhase.idle;
-    });
-  }
-
-  /// 開始正式錄影時計算剩餘秒數
-  void startRecording({required int seconds, void Function(VoidCallback fn)? setStateCallback}) {
-    _startPhaseTimer(
-      phase: _SessionPhase.recording,
-      seconds: seconds,
-      setStateCallback: setStateCallback,
-    );
-  }
-
-  /// 輪次完成後更新已完成數量
-  void completeCurrentRound({void Function(VoidCallback fn)? setStateCallback}) {
-    void update(VoidCallback fn) {
-      if (setStateCallback != null) {
-        setStateCallback(fn);
-      } else {
-        fn();
-      }
-    }
-
-    update(() {
-      if (_currentRound > _completedRounds) {
-        _completedRounds = _currentRound;
-      }
-      activePhase = _SessionPhase.idle;
-      secondsLeft = 0;
-    });
-  }
-
-  /// 啟動兩輪錄影間的休息倒數
-  void startRest({required int seconds, void Function(VoidCallback fn)? setStateCallback}) {
-    _startPhaseTimer(
-      phase: _SessionPhase.rest,
-      seconds: seconds,
-      setStateCallback: setStateCallback,
-    );
-  }
-
-  /// 手動重置狀態列，常用於取消錄影或流程結束
-  void resetToIdle({void Function(VoidCallback fn)? setStateCallback}) {
-    _cancelTimer();
-
-    void update(VoidCallback fn) {
-      if (setStateCallback != null) {
-        setStateCallback(fn);
-      } else {
-        fn();
-      }
-    }
-
-    update(() {
-      activePhase = _SessionPhase.idle;
-      secondsLeft = 0;
-      _currentRound = 0;
-    });
-  }
-
-  /// 釋放計時器資源，避免離開頁面後仍持續觸發
-  void dispose() {
-    _cancelTimer();
-  }
-
-  /// 計算剩餘尚未完成的錄影次數
-  int calculateRemainingRounds() {
-    final bool roundInProgress =
-        activePhase == _SessionPhase.countdown || activePhase == _SessionPhase.recording;
-    final int consumed = _completedRounds + (roundInProgress ? 1 : 0);
-    final int remaining = _totalRounds - consumed;
-    return remaining < 0 ? 0 : remaining;
-  }
-
-  void _startPhaseTimer({
-    required _SessionPhase phase,
-    required int seconds,
-    void Function(VoidCallback fn)? setStateCallback,
-  }) {
-    _cancelTimer();
-
-    void update(VoidCallback fn) {
-      if (setStateCallback != null) {
-        setStateCallback(fn);
-      } else {
-        fn();
-      }
-    }
-
-    update(() {
-      activePhase = phase;
-      secondsLeft = seconds;
-    });
-
-    if (seconds <= 0) {
-      if (phase != _SessionPhase.recording) {
-        update(() {
-          activePhase = _SessionPhase.idle;
-        });
-      }
-      return;
-    }
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      final int remaining = seconds - timer.tick;
-      update(() {
-        secondsLeft = remaining > 0 ? remaining : 0;
-        if (secondsLeft == 0 && phase != _SessionPhase.recording) {
-          activePhase = _SessionPhase.idle;
-        }
-      });
-
-      if (remaining <= 0) {
-        timer.cancel();
-        _timer = null;
-      }
-    });
-  }
-
-  void _cancelTimer() {
-    _timer?.cancel();
-    _timer = null;
+  @override
+  bool shouldReclip(CustomClipper<Rect> oldClipper) {
+    return true;
   }
 }
 
-/// 錄影狀態列：呈現剩餘次數、倒數秒數與休息時間
+class _SessionProgress {
+  int remainingRounds = 0; // 剩餘輪次
+  int totalRounds = 0; // 總輪次
+  int countdownSeconds = 0; // 倒數秒數
+  bool isCountingDown = false; // 是否正在倒數中
+}
+
 class _SessionStatusBar extends StatelessWidget {
-  final int totalRounds;
-  final int remainingRounds;
-  final _SessionPhase activePhase;
-  final int secondsLeft;
+  final _SessionProgress progress;
+  final bool isImuConnected;
+  final bool isRecording;
 
   const _SessionStatusBar({
-    required this.totalRounds,
-    required this.remainingRounds,
-    required this.activePhase,
-    required this.secondsLeft,
+    required this.progress,
+    required this.isImuConnected,
+    required this.isRecording,
   });
 
   @override
   Widget build(BuildContext context) {
-    final TextStyle labelStyle = TextStyle(
-      color: const Color(0xFF123B70).withOpacity(0.7),
-      fontSize: 12,
-      fontWeight: FontWeight.w500,
-    );
-
-    final bool showingCountdown =
-        activePhase == _SessionPhase.countdown || activePhase == _SessionPhase.recording;
-    final bool showingRest = activePhase == _SessionPhase.rest;
-
-    final String countdownText = showingCountdown ? '${secondsLeft.toString()} 秒' : '--';
-    final String restText = showingRest ? '${secondsLeft.toString()} 秒' : '--';
-
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      color: const Color(0xFFE1EBF7),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)],
+      ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _SessionStatusTile(
-            label: '剩餘錄影',
-            value: '$remainingRounds / $totalRounds 次',
-            labelStyle: labelStyle,
+          // IMU 連線狀態
+          Row(
+            children: [
+              Icon(
+                isImuConnected ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+                color: isImuConnected ? Colors.green : Colors.red,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isImuConnected ? 'IMU 已連線' : 'IMU 未連線',
+                style: TextStyle(
+                  color: isImuConnected ? Colors.green : Colors.red,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          _SessionStatusTile(
-            label: '倒數時間',
-            value: countdownText,
-            labelStyle: labelStyle,
-          ),
-          const SizedBox(width: 12),
-          _SessionStatusTile(
-            label: '休息時間',
-            value: restText,
-            labelStyle: labelStyle,
+          // 錄影狀態
+          Row(
+            children: [
+              Icon(
+                isRecording ? Icons.videocam : Icons.videocam_off,
+                color: isRecording ? Colors.red : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isRecording ? '正在錄影' : '錄影已停止',
+                style: TextStyle(
+                  color: isRecording ? Colors.red : Colors.grey,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1543,240 +915,216 @@ class _SessionStatusBar extends StatelessWidget {
   }
 }
 
-/// 狀態列的小卡片樣式，保持排版一致
 class _SessionStatusTile extends StatelessWidget {
-  final String label;
+  final String title;
   final String value;
-  final TextStyle labelStyle;
+  final bool isActive;
 
   const _SessionStatusTile({
-    required this.label,
+    required this.title,
     required this.value,
-    required this.labelStyle,
+    this.isActive = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isActive ? const Color(0xFFE8F5E9) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              color: isActive ? const Color(0xFF2E7D32) : Colors.black,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label, style: labelStyle),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF123B70),
-              ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: isActive ? const Color(0xFF2E7D32) : Colors.black54,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// 封裝鏡頭初始化後的結果，保留可用的解析度資訊
-class _CameraSelectionResult {
-  const _CameraSelectionResult({
-    required this.controller,
-    required this.preset,
-    required this.previewSize,
-  });
-
-  final CameraController controller; // 已初始化可直接使用的鏡頭控制器
-  final ResolutionPreset preset; // 成功套用的解析度列舉值
-  final Size? previewSize; // 實際解析度尺寸，無法取得時為 null
-}
-
-/// 用於顯示波形的 Widget，接收累積資料並觸發重繪
 class WaveformWidget extends StatelessWidget {
-  final List<double> waveformAccumulated; // 波形資料來源
-  final ValueNotifier<int> repaintNotifier; // 外部通知刷新
+  final List<double> waveform;
+  final Color color;
+  final double strokeWidth;
 
   const WaveformWidget({
     super.key,
-    required this.waveformAccumulated,
-    required this.repaintNotifier,
+    required this.waveform,
+    this.color = Colors.blue,
+    this.strokeWidth = 2.0,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<int>(
-      valueListenable: repaintNotifier,
-      builder: (context, value, child) {
-        return CustomPaint(
-          size: Size.infinite,
-          painter: WaveformPainter(List.from(waveformAccumulated)),
-        );
-      },
+    return CustomPaint(
+      size: const Size(double.infinity, 100),
+      painter: WaveformPainter(waveform, color, strokeWidth),
     );
   }
 }
 
-/// 自訂波形畫家，將音訊振幅轉成畫面線條
 class WaveformPainter extends CustomPainter {
   final List<double> waveform;
-  WaveformPainter(this.waveform);
+  final Color color;
+  final double strokeWidth;
+
+  WaveformPainter(this.waveform, this.color, this.strokeWidth);
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 1.0;
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
 
-    if (waveform.isEmpty) return;
+    final width = size.width;
+    final height = size.height;
 
-    final double middle = size.height / 2;
-    final int maxSamples = size.width.toInt();
-    final int skip = waveform.length ~/ maxSamples;
-    if (skip == 0) return;
-
-    for (int i = 0; i < maxSamples; i++) {
-      final int idx = i * skip;
-      if (idx >= waveform.length) break;
-      final double x = i.toDouble();
-      final double y = middle - waveform[idx] * 500;
-      canvas.drawLine(Offset(x, middle), Offset(x, y), paint);
+    // Draw the waveform
+    for (int i = 0; i < waveform.length - 1; i++) {
+      final x1 = i * (width / (waveform.length - 1));
+      final y1 = height / 2 - (waveform[i] * height / 2);
+      final x2 = (i + 1) * (width / (waveform.length - 1));
+      final y2 = height / 2 - (waveform[i + 1] * height / 2);
+      canvas.drawLine(Offset(x1, y1), Offset(x2, y2), paint);
     }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-/// 揮桿站位指引覆蓋層，協助使用者對齊姿勢
-class StanceGuideOverlay extends StatelessWidget {
-  const StanceGuideOverlay({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: CustomPaint(
-        painter: _StanceGuidePainter(),
-      ),
-    );
-  }
-}
-
-/// 自訂畫家：繪製左右對稱的揮桿人形與置中的箭頭提示
-class _StanceGuidePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    // ---------- 畫面設定 ----------
-    final Paint guidelinePaint = Paint()
-      ..color = const Color(0x99FFFFFF)
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke;
-
-    final Paint fillPaint = Paint()
-      ..color = const Color(0x4D000000)
-      ..style = PaintingStyle.fill;
-
-    final double centerX = size.width / 2;
-    // 由於使用者希望人形示意圖更加貼近畫面底部，改以底部對齊的方式計算基準高度
-    final double overlayWidth = size.width * 0.7;
-    final double overlayHeight = size.height * 0.6;
-    final double overlayBottom = size.height * 0.92; // 保留 8% 的底部邊界避免被裁切
-    final Rect overlayRect = Rect.fromLTWH(
-      centerX - overlayWidth / 2,
-      overlayBottom - overlayHeight,
-      overlayWidth,
-      overlayHeight,
-    );
-    final double baseY = overlayRect.bottom - size.height * 0.04; // 腳部靠近底部，但仍預留安全距
-    final double figureHeight = size.height * 0.35;
-    final double headRadius = figureHeight * 0.12;
-
-    // ---------- 畫出半透明底框，淡化鏡頭畫面並突顯指引 ----------
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(overlayRect, const Radius.circular(24)),
-      fillPaint,
-    );
-
-    // ---------- 定義左右人形的關鍵點 ----------
-    void drawFigure(bool isLeft) {
-      final double direction = isLeft ? -1 : 1; // 控制左右翻轉
-      final double torsoX = centerX + (size.width * 0.18 * direction);
-      final double headCenterY = baseY - figureHeight;
-      final Offset headCenter = Offset(torsoX, headCenterY);
-
-      // 頭部
-      canvas.drawCircle(headCenter, headRadius, guidelinePaint);
-
-      // 身體與腿部
-      final Offset hip = Offset(torsoX, baseY - headRadius);
-      final Offset knee = Offset(torsoX + direction * headRadius * 0.6, baseY - headRadius * 0.4);
-      final Offset foot = Offset(torsoX + direction * headRadius * 1.4, baseY);
-      canvas.drawLine(headCenter.translate(0, headRadius), hip, guidelinePaint);
-      canvas.drawLine(hip, knee, guidelinePaint);
-      canvas.drawLine(knee, foot, guidelinePaint);
-
-      // 手臂與球桿
-      final Offset shoulder = headCenter.translate(0, headRadius * 1.4);
-      final Offset hand = Offset(centerX + direction * headRadius * 1.8, baseY - headRadius * 0.8);
-      final Offset clubHead = Offset(centerX + direction * headRadius * 3.2, baseY + headRadius * 0.4);
-      canvas.drawLine(shoulder, hand, guidelinePaint);
-      canvas.drawLine(hand, clubHead, guidelinePaint);
-    }
-
-    drawFigure(true);
-    drawFigure(false);
-
-    // ---------- 畫出中央球與箭頭指引 ----------
-    final double ballRadius = headRadius * 0.9;
-    final Offset ballCenter = Offset(centerX, baseY - ballRadius * 0.2);
-    canvas.drawCircle(ballCenter, ballRadius, guidelinePaint);
-
-    final Path arrowPath = Path()
-      ..moveTo(centerX, ballCenter.dy - ballRadius * 1.4)
-      ..lineTo(centerX, ballCenter.dy - ballRadius * 3)
-      ..moveTo(centerX - ballRadius * 0.9, ballCenter.dy - ballRadius * 2.2)
-      ..lineTo(centerX, ballCenter.dy - ballRadius * 3)
-      ..lineTo(centerX + ballRadius * 0.9, ballCenter.dy - ballRadius * 2.2);
-    canvas.drawPath(arrowPath, guidelinePaint);
-
-    // ---------- 在頂部顯示指引文字 ----------
-    const String tip = '請對齊站位指引，確保雙腳與球心對稱';
-    final TextPainter textPainter = TextPainter(
-      text: const TextSpan(
-        text: tip,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          shadows: [Shadow(blurRadius: 6, color: Colors.black45, offset: Offset(0, 1))],
-        ),
-      ),
-      textAlign: TextAlign.center,
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: size.width * 0.8);
-
-    textPainter.paint(
-      canvas,
-      Offset(centerX - textPainter.width / 2, overlayRect.top + 16),
-    );
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+
+class StanceGuideOverlay extends StatelessWidget {
+  final bool isVisible;
+  final double stanceValue; // 0.0 to 1.0 range
+  final double swingDirection; // In degrees
+
+  const StanceGuideOverlay({
+    super.key,
+    required this.isVisible,
+    required this.stanceValue,
+    required this.swingDirection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isVisible) return const SizedBox.shrink();
+
+    // Ensure the painter receives the full available area so the "person" guide is centered
+    return SizedBox.expand(
+      child: CustomPaint(
+        painter: _StanceGuidePainter(stanceValue, swingDirection),
+      ),
+    );
+  }
+}
+
+class _StanceGuidePainter extends CustomPainter {
+  final double stanceValue; // 0.0 to 1.0 range
+  final double swingDirection; // In degrees
+
+  _StanceGuidePainter(this.stanceValue, this.swingDirection);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+
+    final centerX = size.width / 2;
+    final centerY = size.height * 0.85; // Move the drawing lower
+    final figureScale = size.height * 0.0020; // Scale down the figure slightly
+
+    // Define the path for the left golfer silhouette
+    final Path golferPath = Path();
+    golferPath.moveTo(-28, -105); // Head top
+    golferPath.cubicTo(-45, -100, -55, -80, -53, -65); // Head back
+    golferPath.cubicTo(-50, -40, -45, -30, -35, -20); // Neck/Shoulder
+    golferPath.cubicTo(-20, 0, -25, 25, -15, 45); // Back
+    golferPath.cubicTo(-5, 65, 5, 80, 15, 90); // Buttocks
+    golferPath.cubicTo(25, 100, 30, 110, 25, 120); // Back of leg
+    golferPath.cubicTo(20, 130, 0, 135, -15, 130); // Foot bottom
+    golferPath.cubicTo(-30, 125, -35, 115, -30, 105); // Front of foot/leg
+    golferPath.cubicTo(-25, 95, -20, 80, -10, 60); // Front of leg
+    golferPath.cubicTo(0, 40, 15, 30, 25, 10); // Belly
+    golferPath.cubicTo(35, -10, 30, -40, 20, -55); // Chest/Front shoulder
+    golferPath.cubicTo(10, -70, -5, -80, -15, -90); // Front of head
+    golferPath.close();
+
+    // --- Draw Left Golfer ---
+    final double stanceWidth = size.width * 0.25;
+    final Matrix4 leftTransform = Matrix4.identity()
+      ..translate(centerX - stanceWidth / 2, centerY)
+      ..scale(figureScale);
+    final Path transformedLeftPath = golferPath.transform(leftTransform.storage);
+    canvas.drawPath(transformedLeftPath, paint);
+
+    // --- Draw Right Golfer (flipped) ---
+    final Matrix4 rightTransform = Matrix4.identity()
+      ..translate(centerX + stanceWidth / 2, centerY)
+      ..scale(-figureScale, figureScale); // Flip horizontally
+    final Path transformedRightPath = golferPath.transform(rightTransform.storage);
+    canvas.drawPath(transformedRightPath, paint);
+
+    // --- Draw Clubs and Center Circle ---
+    final clubPaint = Paint()
+      ..color = Colors.white.withOpacity(0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.5;
+
+    final circleRadius = size.width * 0.06;
+    final circleCenter = Offset(centerX, centerY + size.height * 0.1);
+
+    // Club lines from an approximate hand position to the circle
+    final leftHandPos = Offset(centerX - stanceWidth / 2 + (10 * figureScale), centerY + (10 * figureScale));
+    final rightHandPos = Offset(centerX + stanceWidth / 2 - (10 * figureScale), centerY + (10 * figureScale));
+    canvas.drawLine(leftHandPos, circleCenter, clubPaint);
+    canvas.drawLine(rightHandPos, circleCenter, clubPaint);
+
+    // Center circle
+    canvas.drawCircle(circleCenter, circleRadius, clubPaint);
+
+    // Arrow inside the circle
+    final arrowPaint = Paint()
+      ..color = Colors.white.withOpacity(0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..strokeCap = StrokeCap.round;
+    final arrowPath = Path();
+    arrowPath.moveTo(circleCenter.dx, circleCenter.dy - circleRadius * 0.4);
+    arrowPath.lineTo(circleCenter.dx, circleCenter.dy + circleRadius * 0.4);
+    arrowPath.moveTo(circleCenter.dx - circleRadius * 0.3, circleCenter.dy);
+    arrowPath.lineTo(circleCenter.dx, circleCenter.dy - circleRadius * 0.4);
+    arrowPath.lineTo(circleCenter.dx + circleRadius * 0.3, circleCenter.dy);
+    canvas.drawPath(arrowPath, arrowPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _StanceGuidePainter oldDelegate) {
+    return oldDelegate.stanceValue != stanceValue || oldDelegate.swingDirection != swingDirection;
+  }
+}
+
 
 /// 影片播放頁面，提供錄製檔案的立即檢視
 class VideoPlayerPage extends StatefulWidget {
@@ -1799,63 +1147,78 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   final TextEditingController _captionController = TextEditingController(); // 影片下方說明輸入
   final List<String> _generatedTempFiles = []; // 記錄原生處理後的暫存影片，頁面結束時統一清理
   bool _attachAvatar = false; // 是否要在分享影片中加入個人頭像
-  bool _isProcessingShare = false; // 控制分享期間按鈕狀態，避免重複觸發
+  bool _isProcessingShare = false; // 控制分享期間按鈕狀態，避免重複觢發
   late final bool _avatarSelectable; // 記錄頭像檔案是否存在，可供開關判斷
   bool _isVideoLoading = true; // 控制是否顯示讀取中轉圈
   String? _videoLoadError; // 若載入失敗記錄錯誤訊息，提供使用者提示與重試
   String? _classificationLabel; // 影片的聲音評分標籤
   Map<String, double?> _classificationFeatures = {};
+  bool _isGeneratingHighlight = false;
 
-  bool get _canControlVideo {
-    // 畫面僅在影片初始化完成後才允許操作播放/暫停，避免觸發例外
-    final controller = _videoController;
-    return controller != null && controller.value.isInitialized;
+  bool get _canControlVideo => _videoController != null && _videoController!.value.isInitialized;
+
+  Widget _featRow(String label, double? value) {
+    return Text('$label: ${value == null ? '--' : value.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 11));
   }
 
-  Widget _featRow(String name, double? value) {
-    final String text = value == null ? '--' : value.toStringAsFixed(2);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Text('$name: $text', style: const TextStyle(color: Colors.white, fontSize: 12)),
-    );
+  double? _toDouble(dynamic val) {
+    if (val is double) return val;
+    if (val is int) return val.toDouble();
+    if (val is String) return double.tryParse(val);
+    return null;
   }
 
-  double? _toDouble(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return v.toDouble();
-    return double.tryParse(v.toString());
+  Future<void> _generateHighlight() async {
+    if (_isGeneratingHighlight) return;
+    setState(() => _isGeneratingHighlight = true);
+    try {
+      final out = await HighlightService.generateHighlight(widget.videoPath, beforeMs: 3000, afterMs: 3000, titleData: {'Name':'Player','Course':'Unknown'});
+      if (out != null && out.isNotEmpty) {
+        if (!mounted) return;
+        debugPrint('[Highlight] generated at: $out');
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Highlight 生成完成: $out')));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: out, avatarPath: widget.avatarPath)));
+      } else {
+        String? debugText;
+        try {
+          final cache = await getTemporaryDirectory();
+          final String debugName = p.basenameWithoutExtension(widget.videoPath) + '_highlight_debug.txt';
+          final f = File('${cache.path}${Platform.pathSeparator}$debugName');
+          if (await f.exists()) debugText = await f.readAsString();
+        } catch (_) {}
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('生成 Highlight 失敗或此平台不支援。')));
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: widget.videoPath, avatarPath: widget.avatarPath, debugText: debugText)));
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('生成 Highlight 發生錯誤：$e')));
+    } finally {
+      if (mounted) setState(() => _isGeneratingHighlight = false);
+    }
   }
 
-  // ---------- 分享相關方法區 ----------
+  /// 根據分享目標，準備檔案並呼叫原生分享
   Future<void> _shareToTarget(_ShareTarget target) async {
     if (_isProcessingShare) {
-      return; // 已經在產製分享檔案，避免同時觸發造成流程衝突
+      return;
     }
-
     setState(() => _isProcessingShare = true);
 
     try {
-      // 事前確認檔案是否存在，避免分享流程出現例外
-      final file = File(widget.videoPath);
-      if (!await file.exists()) {
-        _showSnack('找不到影片檔案，無法分享。');
+      final String? sharePath = await _prepareShareFile();
+
+      if (!mounted || sharePath == null) {
         return;
       }
 
-      // 若使用者選擇加入頭像或文字，委派原生端生成覆蓋影片
-      final sharePath = await _prepareShareFile();
-      if (sharePath == null) {
-        return; // 原生處理失敗或條件不足時直接中止
-      }
-
-      // 依目標應用程式取得對應的封裝名稱
       final packageName = switch (target) {
         _ShareTarget.instagram => 'com.instagram.android',
         _ShareTarget.facebook => 'com.facebook.katana',
         _ShareTarget.line => 'jp.naver.line.android',
       };
 
-      bool sharedByPackage = false; // 紀錄是否已成功透過指定應用分享
+      bool sharedByPackage = false;
       if (Platform.isAndroid) {
         try {
           final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
@@ -1876,15 +1239,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             const SnackBar(content: Text('未找到指定社群 App，已改用系統分享選單。')),
           );
         }
-        await Share.shareXFiles([
-          XFile(sharePath),
-        ], text: _shareMessage);
+        await Share.shareXFiles([XFile(sharePath)], text: _shareMessage);
       }
     } finally {
       if (mounted) {
         setState(() => _isProcessingShare = false);
-      } else {
-        _isProcessingShare = false;
       }
     }
   }
@@ -1895,7 +1254,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     required Color color,
     required _ShareTarget target,
   }) {
-    // 建立統一樣式的分享按鈕，維持排版一致
     return Expanded(
       child: ElevatedButton.icon(
         onPressed: _isProcessingShare ? null : () => _shareToTarget(target),
@@ -1915,8 +1273,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     super.initState();
     _avatarSelectable = widget.avatarPath != null &&
         widget.avatarPath!.isNotEmpty &&
-        File(widget.avatarPath!).existsSync(); // 預先判斷頭像是否存在，供 UI 判斷
-    unawaited(_initializeVideo()); // 進入頁面即嘗試初始化播放器
+        File(widget.avatarPath!).existsSync();
+    unawaited(_initializeVideo());
   }
 
   @override
@@ -1927,7 +1285,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     super.dispose();
   }
 
-  /// 初始化影片播放器，補上錯誤處理與重試機制
   Future<void> _initializeVideo() async {
     setState(() {
       _isVideoLoading = true;
@@ -1943,9 +1300,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       return;
     }
 
-    // 若重新整理需先釋放舊控制器，避免資源外洩
     await _videoController?.dispose();
-
     final controller = VideoPlayerController.file(file);
     try {
       await controller.initialize();
@@ -1957,21 +1312,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         _videoController = controller;
         _isVideoLoading = false;
       });
-  // 嘗試載入同資料夾的 batch_classify.csv 或 per-video report，顯示評分標籤
-  unawaited(_loadClassificationForVideo());
+      unawaited(_loadClassificationForVideo());
       controller.play();
     } catch (error, stackTrace) {
       debugPrint('[VideoPlayer] 初始化失敗：$error');
       debugPrintStack(stackTrace: stackTrace);
       await controller.dispose();
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _videoController = null;
+          _isVideoLoading = false;
+          _videoLoadError = '無法載入影片，請稍後再試。';
+        });
       }
-      setState(() {
-        _videoController = null;
-        _isVideoLoading = false;
-        _videoLoadError = '無法載入影片，請稍後再試。';
-      });
     }
   }
 
@@ -1986,101 +1339,65 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         final lines = await batchFile.readAsLines();
         for (var i = 1; i < lines.length; i++) {
           final cols = lines[i].split(',');
-          if (cols.isEmpty) continue;
-          if (cols[0].trim() == file.uri.pathSegments.last) {
+          if (cols.isNotEmpty && cols[0].trim() == file.uri.pathSegments.last) {
             pred = cols.length > 1 ? cols[1].trim() : null;
             break;
           }
         }
       }
-      // fallback: look for per-video classify report and extract feature 'target' values
       final per = File(widget.videoPath.replaceAll(RegExp(r'\\.mp4$'), '') + '_classify_report.csv');
       if (await per.exists()) {
         final lines = await per.readAsLines();
         final Map<String, double?> feats = {};
-        for (var i = 0; i < lines.length; i++) {
-          final line = lines[i].trim();
-          if (line.isEmpty) continue;
-          final cols = line.split(',');
-          if (cols.isEmpty) continue;
-          final key = cols[0].toString().trim();
-          // skip header-like rows
-          if (key.startsWith('__') || key.toLowerCase().contains('feature') || key.toLowerCase().contains('title')) continue;
-          final targetStr = cols.length > 1 ? cols[1].toString().trim() : '';
-          final val = double.tryParse(targetStr);
-          feats[key] = val;
+        for (var line in lines) {
+          final cols = line.trim().split(',');
+          if (cols.length > 1) {
+            final key = cols[0].trim();
+            if (!key.startsWith('__') && !key.toLowerCase().contains('feature') && !key.toLowerCase().contains('title')) {
+              feats[key] = double.tryParse(cols[1].trim());
+            }
+          }
         }
-        // keep only the five expected features
         final wanted = ['rms_dbfs','spectral_centroid','sharpness_hfxloud','highband_amp','peak_dbfs'];
-        final Map<String, double?> picked = {};
-        for (final k in wanted) picked[k] = feats.containsKey(k) ? feats[k] : null;
-        setState(() {
-          _classificationFeatures = picked;
-        });
+        final picked = { for (var k in wanted) k: feats[k] };
+        setState(() => _classificationFeatures = picked);
       }
 
       if (pred != null && pred.isNotEmpty) {
-        final label = _mapPredToLabel(pred);
-        setState(() => _classificationLabel = label);
+        setState(() => _classificationLabel = _mapPredToLabel(pred));
       }
-
-  // no in-page waveform analysis here (handled after recording)
     } catch (e) {
       // ignore
     }
   }
 
-  String _mapPredToLabel(String pred) {
-    final p = pred.toLowerCase().trim();
-    if (p == 'pro') return 'Pro';
-    if (p == 'good' || p == 'sweet') return 'Sweet';
-    if (p == 'bad') return 'Try again';
-    return p.isNotEmpty ? p : 'Unknown';
-  }
-
-  /// 統一顯示 Snackbar，確保訊息風格一致
   void _showSnack(String message) {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// 嘗試清除原生產製的暫存檔，避免長時間累積佔用空間
   void _cleanupTempFiles() {
     for (final path in _generatedTempFiles) {
       try {
         final file = File(path);
-        if (file.existsSync()) {
-          file.deleteSync();
-        }
-      } catch (_) {
-        // 若刪除失敗可忽略，暫存資料夾會由系統定期清理
-      }
+        if (file.existsSync()) file.deleteSync();
+      } catch (_) {}
     }
     _generatedTempFiles.clear();
   }
 
-  /// 若使用者開啟頭像或文字選項，委派原生端生成覆蓋後的分享檔案
   Future<String?> _prepareShareFile() async {
     final bool wantsAvatar = _attachAvatar;
     final String trimmedCaption = _captionController.text.trim();
     final bool wantsCaption = trimmedCaption.isNotEmpty;
 
     if (wantsAvatar) {
-      if (!_avatarSelectable || widget.avatarPath == null) {
-        _showSnack('尚未設定個人頭像，請先到個資頁上傳照片。');
-        return null;
-      }
-      final avatarFile = File(widget.avatarPath!);
-      if (!avatarFile.existsSync()) {
-        _showSnack('找不到個人頭像檔案，請重新選擇。');
+      if (!_avatarSelectable || widget.avatarPath == null || !File(widget.avatarPath!).existsSync()) {
+        _showSnack('尚未設定或找不到個人頭像檔案。');
         return null;
       }
     }
 
-    // If classification info is available, append it to the caption so the
-    // native overlay will render the analysis label and key feature values.
     String captionToUse = trimmedCaption;
     bool finalAttachCaption = wantsCaption;
     try {
@@ -2090,20 +1407,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         captionParts.add('評分: ${_classificationLabel!}');
       }
       if (_classificationFeatures.isNotEmpty) {
-        // compact feature summary
-  final rms = _classificationFeatures['rms_dbfs'];
-  final sc = _classificationFeatures['spectral_centroid'];
-  final sh = _classificationFeatures['sharpness_hfxloud'];
-        final featText = 'rms:${rms == null ? '--' : rms.toStringAsFixed(2)} '
-            'sc:${sc == null ? '--' : sc.toStringAsFixed(1)} '
-            'sh:${sh == null ? '--' : sh.toStringAsFixed(2)}';
+        final rms = _classificationFeatures['rms_dbfs'];
+        final sc = _classificationFeatures['spectral_centroid'];
+        final sh = _classificationFeatures['sharpness_hfxloud'];
+        final featText = 'rms:${rms?.toStringAsFixed(2) ?? '--'} sc:${sc?.toStringAsFixed(1) ?? '--'} sh:${sh?.toStringAsFixed(2) ?? '--'}';
         captionParts.add(featText);
-        // Keep attachCaption true when we have any classification info
         finalAttachCaption = true;
       }
       captionToUse = captionParts.join(' \n');
     } catch (_) {
-      // ignore formatting errors and fall back to user caption
       captionToUse = trimmedCaption;
       finalAttachCaption = wantsCaption;
     }
@@ -2129,25 +1441,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   Future<void> _reAnalyzeForVideo() async {
     if (_isProcessingShare) return;
-    setState(() {
-      _isProcessingShare = true;
-    });
+    setState(() => _isProcessingShare = true);
     try {
-  final result = await AudioAnalysisService.analyzeVideo(widget.videoPath);
-      try {
-        debugPrint('Audio analysis result (share UI): $result');
-      } catch (_) {}
-      final Map<String, dynamic>? summary = result['summary'] as Map<String, dynamic>?;
+      final result = await AudioAnalysisService.analyzeVideo(widget.videoPath);
+      final summary = result['summary'] as Map<String, dynamic>?;
       if (summary != null) {
-        final Map<String, double?> feats = <String, double?>{
+        final feats = <String, double?>{
           'rms_dbfs': _toDouble(summary['rms_dbfs']),
           'spectral_centroid': _toDouble(summary['spectral_centroid']),
           'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
           'highband_amp': _toDouble(summary['highband_amp']),
           'peak_dbfs': _toDouble(summary['peak_dbfs']),
         };
-        String? pred;
-        if (summary.containsKey('audio_class')) pred = summary['audio_class']?.toString();
+        String? pred = summary['audio_class']?.toString();
         if (mounted) {
           setState(() {
             _classificationFeatures = feats;
@@ -2155,24 +1461,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           });
         }
 
-        // persist next to video if path known
         try {
           final file = File(widget.videoPath);
           if (await file.exists()) {
             final csvFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_classify_report.csv');
-            final List<String> rows = <String>[];
-            rows.add('feature,target,weight');
-            feats.forEach((k, v) {
-              rows.add('$k,${v == null ? '' : v.toString()},1.0');
-            });
-            if (pred != null && pred.isNotEmpty) rows.add('label,${pred.toString()},1.0');
+            final rows = <String>['feature,target,weight'];
+            feats.forEach((k, v) => rows.add('$k,${v ?? ''},1.0'));
+            if (pred != null) rows.add('label,$pred,1.0');
             await csvFile.writeAsString(rows.join('\n'));
+            final debugFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_analysis_debug.json');
+            await debugFile.writeAsString(jsonEncode(result));
           }
-        } catch (_) {}
-
-        try {
-          final debugFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_analysis_debug.json');
-          await debugFile.writeAsString(jsonEncode(result));
         } catch (_) {}
       }
     } catch (e) {
@@ -2180,13 +1479,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     } finally {
       if (mounted) setState(() => _isProcessingShare = false);
     }
-  }
-
-  Future<void> _showAnalysisFilesDebugForVideo() async {
-    // Try to locate video path from prepared share or last used file; fallback to showing message
-    // We expect the actual video path to be available via recording history entries; best-effort here.
-    // Attempt to use the caption controller content to guess path (not ideal) — instead show a prompt.
-    _showSnack('請在影片播放頁檢查分析檔或回報影片路徑給我以供檔案檢查。');
   }
 
   @override
@@ -2200,23 +1492,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               child: _isVideoLoading
                   ? const CircularProgressIndicator()
                   : _videoLoadError != null
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
-                            const SizedBox(height: 12),
-                            Text(
-                              _videoLoadError!,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                            const SizedBox(height: 12),
-                            ElevatedButton.icon(
-                              onPressed: _initializeVideo,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('重新嘗試載入'),
-                            ),
-                          ],
+                      ? Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+                              const SizedBox(height: 12),
+                              Text(_videoLoadError!, textAlign: TextAlign.center),
+                              const SizedBox(height: 12),
+                              ElevatedButton.icon(onPressed: _initializeVideo, icon: const Icon(Icons.refresh), label: const Text('重新嘗試載入')),
+                            ],
+                          ),
                         )
                       : AspectRatio(
                           aspectRatio: _videoController!.value.aspectRatio,
@@ -2225,30 +1512,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               VideoPlayer(_videoController!),
                               if (_classificationLabel != null)
                                 Positioned(
-                                  top: 12,
-                                  left: 12,
+                                  top: 12, left: 12,
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black87,
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      _classificationLabel!,
-                                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                    ),
+                                    decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20)),
+                                    child: Text(_classificationLabel!, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                                   ),
                                 ),
                               if (_classificationFeatures.isNotEmpty)
                                 Positioned(
-                                  top: 56,
-                                  left: 12,
+                                  top: 56, left: 12,
                                   child: Container(
                                     padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black54,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
+                                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
@@ -2268,147 +1544,60 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Analysis result card placed between the video and share controls
-                if (_classificationLabel != null || _classificationFeatures.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (_classificationLabel != null)
-                          Text('評分：${_classificationLabel!}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF123B70))),
-                        const SizedBox(height: 8),
-                        if (_classificationFeatures.isNotEmpty)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(child: Text('rms: ${_classificationFeatures['rms_dbfs'] == null ? '--' : _classificationFeatures['rms_dbfs']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13))),
-                              Expanded(child: Text('sc: ${_classificationFeatures['spectral_centroid'] == null ? '--' : _classificationFeatures['spectral_centroid']!.toStringAsFixed(1)}', style: const TextStyle(fontSize: 13))),
-                              Expanded(child: Text('sh: ${_classificationFeatures['sharpness_hfxloud'] == null ? '--' : _classificationFeatures['sharpness_hfxloud']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13))),
-                            ],
-                          ),
-                        const SizedBox(height: 6),
-                        if (_classificationFeatures.isNotEmpty)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(child: Text('highband: ${_classificationFeatures['highband_amp'] == null ? '--' : _classificationFeatures['highband_amp']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12))),
-                              Expanded(child: Text('peak: ${_classificationFeatures['peak_dbfs'] == null ? '--' : _classificationFeatures['peak_dbfs']!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12))),
-                            ],
-                          ),
-                      ],
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
+                      onPressed: _isGeneratingHighlight ? null : _generateHighlight,
+                      icon: _isGeneratingHighlight ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2,color:Colors.white)) : const Icon(Icons.movie),
+                      label: const Text('一鍵生成 Highlight'),
                     ),
                   ),
-                const Text(
-                  '分享影片',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile.adaptive(
-                  value: _attachAvatar,
-                  onChanged: !_avatarSelectable
-                      ? null
-                      : (value) {
-                          setState(() => _attachAvatar = value);
-                        },
-                  title: const Text('右上角加入我的個人頭像'),
-                  subtitle: Text(
-                    !_avatarSelectable
-                        ? '尚未設定個人頭像，請先到個人資訊頁上傳照片。'
-                        : '開啟後會以圓形頭像覆蓋在影片右上角。',
-                    style: const TextStyle(fontSize: 12),
+                  const SizedBox(height: 12),
+                  SwitchListTile.adaptive(
+                    value: _attachAvatar,
+                    onChanged: !_avatarSelectable ? null : (value) => setState(() => _attachAvatar = value),
+                    title: const Text('右上角加入我的個人頭像'),
+                    subtitle: Text(!_avatarSelectable ? '尚未設定個人頭像。' : '開啟後會以圓形頭像覆蓋在影片右上角。', style: const TextStyle(fontSize: 12)),
+                    activeColor: const Color(0xFF1E8E5A),
                   ),
-                  activeColor: const Color(0xFF1E8E5A),
-                ),
-                TextField(
-                  controller: _captionController,
-                  maxLength: 50,
-                  decoration: const InputDecoration(
-                    labelText: '影片下方文字',
-                    hintText: '輸入要顯示在影片底部的描述（可留空）',
-                    counterText: '',
+                  TextField(
+                    controller: _captionController,
+                    maxLength: 50,
+                    decoration: const InputDecoration(labelText: '影片下方文字', hintText: '輸入要顯示在影片底部的描述', counterText: ''),
                   ),
-                ),
-                if (_isProcessingShare) ...[
-                  const SizedBox(height: 8),
-                  const LinearProgressIndicator(),
+                  if (_isProcessingShare) const LinearProgressIndicator(),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(onPressed: _reAnalyzeForVideo, icon: const Icon(Icons.refresh), label: const Text('Re-run analysis')),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _buildShareButton(icon: Icons.photo_camera, label: 'Instagram', color: const Color(0xFFC13584), target: _ShareTarget.instagram),
+                      const SizedBox(width: 12),
+                      _buildShareButton(icon: Icons.facebook, label: 'Facebook', color: const Color(0xFF1877F2), target: _ShareTarget.facebook),
+                      const SizedBox(width: 12),
+                      _buildShareButton(icon: Icons.chat, label: 'LINE', color: const Color(0xFF00C300), target: _ShareTarget.line),
+                    ],
+                  ),
                 ],
-                const SizedBox(height: 12),
-                // Analysis controls added so user can re-run analysis from share UI
-                Row(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        await _reAnalyzeForVideo();
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Re-run analysis'),
-                    ),
-                    const SizedBox(width: 12),
-                    TextButton.icon(
-                      onPressed: () => _showAnalysisFilesDebugForVideo(),
-                      icon: const Icon(Icons.bug_report, size: 18),
-                      label: const Text('檢查分析檔'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _buildShareButton(
-                      icon: Icons.photo_camera,
-                      label: 'Instagram',
-                      color: const Color(0xFFC13584),
-                      target: _ShareTarget.instagram,
-                    ),
-                    const SizedBox(width: 12),
-                    _buildShareButton(
-                      icon: Icons.facebook,
-                      label: 'Facebook',
-                      color: const Color(0xFF1877F2),
-                      target: _ShareTarget.facebook,
-                    ),
-                    const SizedBox(width: 12),
-                    _buildShareButton(
-                      icon: Icons.chat,
-                      label: 'LINE',
-                      color: const Color(0xFF00C300),
-                      target: _ShareTarget.line,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  '若無對應應用程式，將自動改用系統分享選單。',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-              ],
+              ),
             ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _canControlVideo
-            ? () {
-                setState(() {
-                  final controller = _videoController!;
-                  controller.value.isPlaying ? controller.pause() : controller.play();
-                });
-              }
-            : null,
-        child: Icon(
-          _canControlVideo && _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
-        ),
+        onPressed: _canControlVideo ? () => setState(() { _videoController!.value.isPlaying ? _videoController!.pause() : _videoController!.play(); }) : null,
+        child: Icon(_canControlVideo && _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow),
       ),
     );
   }
 }
+

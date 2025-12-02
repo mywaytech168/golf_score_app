@@ -76,7 +76,6 @@ class _RecorderPageState extends State<RecorderPage> {
   bool _permissionsReady = false; // 記錄藍牙權限是否已完整授權
   late final Map<Permission, String> _runtimeBlePermissions; // 不同平台需申請的權限列表
   int _selectedRounds = 5; // 使用者預設要錄影的次數
-  int _recordingDurationSeconds = 15; // 使用者預設每次錄影長度（秒）
   String _connectionMessage = '尚未搜尋到 IMU 裝置'; // 右手腕 IMU 狀態文字
   String _chestConnectionMessage = '尚未搜尋到胸前 IMU 裝置'; // 胸前 IMU 狀態文字
   int? _lastRssi; // 紀錄訊號強度供顯示
@@ -1318,7 +1317,7 @@ class _RecorderPageState extends State<RecorderPage> {
           _logBle('通知已開啟，略過重複設定：${characteristic.uuid.str}');
         }
       } catch (error, stackTrace) {
-        // 若裝置暫不支援通知則忽略錯誤，改以初始讀取補救
+        // 若裝置暫時無法讀取通知則忽略錯誤，改以初始讀取補救
         shouldListen = false;
         _logBle('開啟通知失敗：${characteristic.uuid.str}，原因：$error',
             error: error, stackTrace: stackTrace);
@@ -2089,36 +2088,8 @@ class _RecorderPageState extends State<RecorderPage> {
 
     setState(() => _isOpeningSession = true);
 
-    Map<String, int>? config;
-    if (triggeredByImuButton) {
-      // ---------- 硬體按鈕自動啟動 ----------
-      // 直接沿用目前頁面記錄的設定值，避免在揮桿時還要操作彈窗
-      config = {
-        'rounds': _selectedRounds,
-        'seconds': _recordingDurationSeconds,
-      };
-    } else {
-      // ---------- 手動點擊按鈕 ----------
-      // 進入錄影前先彈出設定視窗，讓使用者選擇要錄影的次數與長度
-      config = await _showRecordingConfigDialog();
-      if (config == null) {
-        if (!mounted) return;
-        setState(() => _isOpeningSession = false);
-        return; // 使用者取消設定則不進入錄影畫面
-      }
-
-      setState(() {
-        _selectedRounds = config!['rounds']!;
-        _recordingDurationSeconds = config['seconds']!;
-      });
-    }
-
-    config ??= {
-      'rounds': _selectedRounds,
-      'seconds': _recordingDurationSeconds,
-    };
-    final int rounds = config['rounds'] ?? _selectedRounds;
-    final int seconds = config['seconds'] ?? _recordingDurationSeconds;
+  // Always use current stored settings and do not prompt for parameters.
+  final int rounds = _selectedRounds;
 
     List<RecordingHistoryEntry>? historyFromSession;
     _isSessionPageVisible = true; // 標記錄影頁面已開啟，後續按鈕事件直接轉交
@@ -2130,7 +2101,6 @@ class _RecorderPageState extends State<RecorderPage> {
             cameras: widget.cameras,
             isImuConnected: isImuConnected,
             totalRounds: rounds,
-            durationSeconds: seconds,
             autoStartOnReady: triggeredByImuButton,
             imuButtonStream: _imuButtonController.stream,
             userAvatarPath: widget.userAvatarPath,
@@ -2163,178 +2133,6 @@ class _RecorderPageState extends State<RecorderPage> {
     setState(() => _isOpeningSession = false);
   }
 
-  /// 顯示設定錄影次數與秒數的彈窗，確保使用者可以自訂錄影需求
-  Future<Map<String, int>?> _showRecordingConfigDialog() async {
-    int rounds = _selectedRounds;
-    int seconds = _recordingDurationSeconds;
-
-    return showDialog<Map<String, int>>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return AlertDialog(
-              title: const Text('設定錄影參數'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '請選擇本次錄影的輪數與每輪秒數，稍後錄影畫面將依據設定自動執行。',
-                    style: TextStyle(fontSize: 13, height: 1.4),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildConfigSlider(
-                    label: '錄影次數',
-                    description: '可自訂本次要錄影的輪數，建議依自身練習需求調整。',
-                    value: rounds.toDouble(),
-                    min: 1,
-                    max: 12,
-                    division: 11,
-                    unit: '次',
-                    onChanged: (value) {
-                      // 透過 round() 與上下界控制確保數值落在合法範圍
-                      setModalState(() {
-                        rounds = value.round();
-                        if (rounds < 1) rounds = 1;
-                        if (rounds > 12) rounds = 12;
-                      });
-                    },
-                    onInputChanged: (value) {
-                      final parsed = int.tryParse(value);
-                      if (parsed != null) {
-                        setModalState(() {
-                          rounds = parsed;
-                          if (rounds < 1) rounds = 1;
-                          if (rounds > 12) rounds = 12;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _buildConfigSlider(
-                    label: '每次長度',
-                    description: '調整每輪錄影秒數，支援 3 至 60 秒細緻設定。',
-                    value: seconds.toDouble(),
-                    min: 3,
-                    max: 60,
-                    division: 57,
-                    unit: '秒',
-                    onChanged: (value) {
-                      setModalState(() {
-                        seconds = value.round();
-                        if (seconds < 3) seconds = 3;
-                        if (seconds > 60) seconds = 60;
-                      });
-                    },
-                    onInputChanged: (value) {
-                      final parsed = int.tryParse(value);
-                      if (parsed != null) {
-                        setModalState(() {
-                          seconds = parsed;
-                          if (seconds < 3) seconds = 3;
-                          if (seconds > 60) seconds = 60;
-                        });
-                      }
-                    },
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, {'rounds': rounds, 'seconds': seconds}),
-                  child: const Text('確定開始'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /// 建構設定錄影參數的滑桿與輸入欄位，提供使用者細緻調整能力
-  Widget _buildConfigSlider({
-    required String label,
-    required String description,
-    required double value,
-    required double min,
-    required double max,
-    required int division,
-    required String unit,
-    required ValueChanged<double> onChanged,
-    required ValueChanged<String> onInputChanged,
-  }) {
-    final controller = TextEditingController(text: value.round().toString());
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          description,
-          style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-        ),
-        Slider(
-          value: value.clamp(min, max),
-          min: min,
-          max: max,
-          divisions: division,
-          label: '${value.round()} $unit',
-          onChanged: onChanged,
-        ),
-        Row(
-          children: [
-            // 透過 IconButton 提供快速微調
-            IconButton(
-              icon: const Icon(Icons.remove_circle_outline),
-              onPressed: () {
-                final nextValue = (value - 1).clamp(min, max);
-                onChanged(nextValue);
-              },
-            ),
-            SizedBox(
-              width: 72,
-              child: TextField(
-                controller: controller,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  suffixText: unit,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                onChanged: onInputChanged,
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              onPressed: () {
-                final nextValue = (value + 1).clamp(min, max);
-                onChanged(nextValue);
-              },
-            ),
-            const Spacer(),
-            Text(
-              '範圍 ${min.round()}~${max.round()} $unit',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
 
   /// 共用的資訊列樣式，左側顯示圖示右側呈現標題與描述
   Widget _buildInfoRow(
@@ -3155,7 +2953,7 @@ class _RecorderPageState extends State<RecorderPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                '本次將錄影 $_selectedRounds 次，每次 $_recordingDurationSeconds 秒。',
+                '按下即可進入錄影，錄影將依設定自動執行。',
                 style: const TextStyle(fontSize: 13, color: Color(0xFF465A71)),
                 textAlign: TextAlign.center,
               ),

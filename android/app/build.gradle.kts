@@ -7,17 +7,6 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// ---------- 依賴解析區 ----------
-// 統一所有 Kotlin 標準函式庫為 2.0.21，確保與編譯器版本相容
-configurations.all {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "org.jetbrains.kotlin" && requested.name.startsWith("kotlin-")) {
-            useVersion("2.0.21")
-            because("回退 Kotlin 版本以保持與第三方外掛的兼容性")
-        }
-    }
-}
-
 android {
     namespace = "com.example.golf_score_app"
     compileSdk = 36

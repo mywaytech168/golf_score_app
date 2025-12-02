@@ -45,6 +45,10 @@ class ImuDataLogger {
 
   /// 依照錄影輪次產生具可讀性的檔名基底（round_序號_時間戳）。
   String buildBaseFileName({required int roundIndex, DateTime? timestamp}) {
+    // This method is now deprecated in favor of the timestamp-based name
+    // generated in RecordingSessionPage. It's kept for now to avoid
+    // breaking other parts of the code that might still call it, but the
+    // return value is no longer used for the final file name.
     final time = timestamp ?? DateTime.now();
     final buffer = StringBuffer('round_')
       ..write(roundIndex)
@@ -89,7 +93,7 @@ class ImuDataLogger {
       }
       // 先寫入裝置名稱方便離線處理鎖定目標裝置，接著依指定順序輸出四元數與線性加速度欄位。
       sink.writeln('Device:${info.displayName}');
-      sink.writeln('QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
+      sink.writeln('Timestamp,QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
 
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
@@ -204,8 +208,9 @@ class ImuDataLogger {
     if (_storageDirectory != null) {
       return _storageDirectory!;
     }
-    final baseDir = await getApplicationDocumentsDirectory();
-    final target = Directory(p.join(baseDir.path, 'imu_records'));
+    // Use temporary directory for intermediate log files
+    final baseDir = await getTemporaryDirectory();
+    final target = Directory(p.join(baseDir.path, 'imu_records_temp'));
     if (!await target.exists()) {
       await target.create(recursive: true);
     }
@@ -250,7 +255,16 @@ class ImuDataLogger {
     if (linear == null && rotation == null) {
       return;
     }
+    // Add a guard to prevent writing to a closed sink
+    if (log.isClosed) {
+      debugPrint('⚠️ Attempted to write to a closed IMU log sink for ${log.alias}.');
+      return;
+    }
+    // 優先使用旋轉向量的時間戳，若無則嘗試使用線性加速度的。
+    final timestamp = rotation?['timestamp'] ?? linear?['timestamp'];
+
     final values = <String>[
+      (timestamp is int) ? timestamp.toString() : '', // 將 Unix 時間戳轉換為字串
       _formatNumeric(rotation?['i']),
       _formatNumeric(rotation?['j']),
       _formatNumeric(rotation?['k']),
@@ -303,6 +317,7 @@ class _ActiveImuLog {
   final IOSink sink; // 寫入串流
   final ListQueue<Map<String, dynamic>> linearQueue = ListQueue(); // 線性加速度 FIFO
   final ListQueue<Map<String, dynamic>> rotationQueue = ListQueue(); // 旋轉向量 FIFO
+  bool _isClosed = false;
 
   _ActiveImuLog({
     required this.alias,
@@ -310,8 +325,12 @@ class _ActiveImuLog {
     required this.sink,
   });
 
+  bool get isClosed => _isClosed;
+
   /// 關閉寫入器並視需求刪除檔案。
   Future<void> dispose({bool deleteFile = false}) async {
+    if (_isClosed) return;
+    _isClosed = true;
     await sink.close();
     if (deleteFile) {
       final file = File(filePath);
