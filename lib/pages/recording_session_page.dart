@@ -97,6 +97,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   Future<void>? _savingFuture;
   DateTime? _recordingStartTime; // To calculate actual duration
   String? _currentRecordingBaseName; // To hold the base name for the current session
+  Timer? _recordingElapsedTimer; // periodic ticker for elapsed UI
 
   @override
   void initState() {
@@ -124,6 +125,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _isDisposing = true;
     _imuButtonSubscription?.cancel();
     _volumeChannel.setMethodCallHandler(null);
+    _stopRecordingTimer();
     _enqueueCameraTask(() async {
       await controller?.dispose();
       await _stopAudioCapture();
@@ -268,6 +270,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     try {
       // --- Generate a consistent base name for all files in this session ---
       _recordingStartTime = DateTime.now(); // Record start time
+      _startRecordingTimer();
       String two(int v) => v.toString().padLeft(2, '0');
       final baseTimestamp = '${_recordingStartTime!.year}${two(_recordingStartTime!.month)}${two(_recordingStartTime!.day)}${two(_recordingStartTime!.hour)}${two(_recordingStartTime!.minute)}';
       _currentRecordingBaseName = 'REC$baseTimestamp';
@@ -312,6 +315,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           debugPrint('[Recording] Failed to stop video after start error: $stopError');
         }
       }
+      _stopRecordingTimer();
       _resetToIdle();
       // NOTE: We do NOT call _stopRecordingAndSave here.
     }
@@ -456,6 +460,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
   /// 重設為閒置狀態
   void _resetToIdle() {
+    _stopRecordingTimer();
     setState(() {
       isRecording = false;
       _hasTriggeredRecording = false;
@@ -667,6 +672,32 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     return null;
   }
 
+  void _startRecordingTimer() {
+    _recordingElapsedTimer?.cancel();
+    _recordingElapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !isRecording || _recordingStartTime == null) return;
+      setState(() {});
+    });
+  }
+
+  void _stopRecordingTimer() {
+    _recordingElapsedTimer?.cancel();
+    _recordingElapsedTimer = null;
+  }
+
+  String _formatElapsed() {
+    if (_recordingStartTime == null) return '00:00';
+    final diff = DateTime.now().difference(_recordingStartTime!);
+    final hours = diff.inHours;
+    final minutes = diff.inMinutes.remainder(60);
+    final seconds = diff.inSeconds.remainder(60);
+    String two(int v) => v.toString().padLeft(2, '0');
+    if (hours > 0) {
+      return '${two(hours)}:${two(minutes)}:${two(seconds)}';
+    }
+    return '${two(minutes)}:${two(seconds)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -717,100 +748,124 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             ),
           ],
         ),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Flexible(
-              flex: 3, // Give preview more space but not all
-              child: Container(
-                color: Colors.black,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _buildCameraPreview(),
-                    if (isRecording)
-                      Positioned(
-                        top: 12,
-                        left: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.circle, color: Colors.white, size: 14),
-                              SizedBox(width: 6),
-                              Text('REC', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                            ],
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Container(
+                  color: Colors.black,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _buildCameraPreview(),
+                      if (isRecording)
+                        Positioned(
+                          top: 12,
+                          left: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.circle, color: Colors.white, size: 14),
+                                SizedBox(width: 6),
+                                Text('REC', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    if (_sessionProgress.isCountingDown)
-                      Center(
-                        child: Text(
-                          '${_sessionProgress.countdownSeconds}',
-                          style: const TextStyle(fontSize: 120, color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 15, color: Colors.black54)]),
+                      if (isRecording && _recordingStartTime != null)
+                        Positioned(
+                          top: 12,
+                          right: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.timer, color: Colors.white, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _formatElapsed(),
+                                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
+                      if (_sessionProgress.isCountingDown)
+                        Center(
+                          child: Text(
+                            '${_sessionProgress.countdownSeconds}',
+                            style: const TextStyle(fontSize: 120, color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 15, color: Colors.black54)]),
+                          ),
+                        ),
+                      const StanceGuideOverlay(
+                        isVisible: true,
+                        stanceValue: 0.6,
+                        swingDirection: 15,
                       ),
-                    StanceGuideOverlay(
-                      isVisible: true,
-                      stanceValue: 0.5,
-                      swingDirection: 15,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            Flexible(
-              flex: 2, // Give bottom controls some space
-              child: Padding(
+              Container(
+                color: Colors.white,
                 padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    _SessionStatusBar(
-                      progress: _sessionProgress,
-                      isImuConnected: widget.isImuConnected,
-                      isRecording: isRecording,
-                    ),
-                    const SizedBox(height: 12),
-                    if (_lastAnalysisLabel != null)
-                      _SessionStatusTile(
-                        title: '揮桿分析',
-                        value: _lastAnalysisLabel!,
-                        isActive: true,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      _SessionStatusBar(
+                        progress: _sessionProgress,
+                        isImuConnected: widget.isImuConnected,
+                        isRecording: isRecording,
                       ),
-                    if (_lastAnalysisFeatures.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 4,
-                          children: _lastAnalysisFeatures.entries
-                              .map((e) => Text('${e.key}: ${e.value?.toStringAsFixed(2) ?? '--'}', style: const TextStyle(fontSize: 10, color: Colors.grey)))
-                              .toList(),
+                      const SizedBox(height: 12),
+                      if (_lastAnalysisLabel != null)
+                        _SessionStatusTile(
+                          title: '????',
+                          value: _lastAnalysisLabel!,
+                          isActive: true,
+                        ),
+                      if (_lastAnalysisFeatures.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                          child: Wrap(
+                            spacing: 12,
+                            runSpacing: 4,
+                            children: _lastAnalysisFeatures.entries
+                                .map((e) => Text('${e.key}: ${e.value?.toStringAsFixed(2) ?? '--'}', style: const TextStyle(fontSize: 10, color: Colors.grey)))
+                                .toList(),
+                          ),
+                        ),
+                      Container(
+                        height: 100,
+                        decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: repaintNotifier,
+                          builder: (context, _, __) {
+                            return WaveformWidget(
+                              waveform: waveformAccumulated,
+                              color: Colors.blueAccent,
+                              strokeWidth: 2.0,
+                            );
+                          },
                         ),
                       ),
-                    Container(
-                      height: 100,
-                      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: repaintNotifier,
-                        builder: (context, _, __) {
-                          return WaveformWidget(
-                            waveform: waveformAccumulated,
-                            color: Colors.blueAccent,
-                            strokeWidth: 2.0,
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         floatingActionButton: FloatingActionButton.large(
           onPressed: _hasTriggeredRecording ? _triggerCancel : _triggerRecording,
@@ -1600,4 +1655,3 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     );
   }
 }
-
