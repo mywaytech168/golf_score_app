@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 
@@ -18,6 +18,8 @@ class ImuDataLogger {
   final Map<String, _ActiveImuLog> _activeLogs = {}; // 當前錄影輪次的寫入器
 
   Directory? _storageDirectory; // 應用專屬儲存資料夾
+  int? _roundStartSensorTimestampUs; // 錄製起點（感測時間基準）
+  int? _roundStartClockUs; // 錄製起點（系統時間備援）
 
   /// 最多允許同時寫入的裝置數量（依需求限制為 2 台）。
   static const int _maxDevices = 2;
@@ -66,6 +68,8 @@ class ImuDataLogger {
   /// 啟動新的錄影輪次，為每台裝置建立 CSV 檔頭。
   Future<void> startRoundLogging(String baseName) async {
     await abortActiveRound(); // 確保先前輪次完整清除
+    _roundStartSensorTimestampUs = null;
+    _roundStartClockUs = DateTime.now().microsecondsSinceEpoch;
     if (_devices.isEmpty) {
       return; // 沒有裝置連線時不建立任何檔案
     }
@@ -154,6 +158,8 @@ class ImuDataLogger {
       }
     }
     _activeLogs.clear();
+    _roundStartSensorTimestampUs = null;
+    _roundStartClockUs = null;
   }
 
   /// 將臨時影片複製到專屬資料夾，並與 CSV 使用相同檔名基底。
@@ -261,10 +267,39 @@ class ImuDataLogger {
       return;
     }
     // 優先使用旋轉向量的時間戳，若無則嘗試使用線性加速度的。
-    final timestamp = rotation?['timestamp'] ?? linear?['timestamp'];
+    // 這裡僅用來計算「錄影開始後的累計秒數」，不再直接寫入原始感測時間。
+    final rawTimestampUs = rotation?['timestampUs'] ??
+        linear?['timestampUs'] ??
+        rotation?['timestamp'] ??
+        linear?['timestamp'] ??
+        DateTime.now().microsecondsSinceEpoch;
+
+    int? currentTimestampUs;
+    if (rawTimestampUs is num) {
+      currentTimestampUs = rawTimestampUs.toInt();
+    } else {
+      currentTimestampUs = int.tryParse(rawTimestampUs.toString());
+    }
+
+    // 初始化錄影起點時間（優先使用感測器時間戳，否則使用系統時間作為備援）。
+    if (_roundStartSensorTimestampUs == null && currentTimestampUs != null) {
+      _roundStartSensorTimestampUs = currentTimestampUs;
+    }
+    _roundStartClockUs ??= DateTime.now().microsecondsSinceEpoch;
+
+    double elapsedSeconds;
+    final sensorStart = _roundStartSensorTimestampUs;
+    if (sensorStart != null && currentTimestampUs != null) {
+      final diffUs = currentTimestampUs - sensorStart;
+      elapsedSeconds = diffUs >= 0 ? diffUs / 1e6 : 0.0;
+    } else {
+      final nowUs = DateTime.now().microsecondsSinceEpoch;
+      final diffUs = nowUs - (_roundStartClockUs ?? nowUs);
+      elapsedSeconds = diffUs >= 0 ? diffUs / 1e6 : 0.0;
+    }
 
     final values = <String>[
-      (timestamp is int) ? timestamp.toString() : '', // 將 Unix 時間戳轉換為字串
+      elapsedSeconds.toStringAsFixed(6),
       _formatNumeric(rotation?['i']),
       _formatNumeric(rotation?['j']),
       _formatNumeric(rotation?['k']),

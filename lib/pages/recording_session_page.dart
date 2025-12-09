@@ -272,8 +272,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       _recordingStartTime = DateTime.now(); // Record start time
       _startRecordingTimer();
       String two(int v) => v.toString().padLeft(2, '0');
-      final baseTimestamp = '${_recordingStartTime!.year}${two(_recordingStartTime!.month)}${two(_recordingStartTime!.day)}${two(_recordingStartTime!.hour)}${two(_recordingStartTime!.minute)}';
-      _currentRecordingBaseName = 'REC$baseTimestamp';
+      final baseTimestamp = '${_recordingStartTime!.year}'
+          '${two(_recordingStartTime!.month)}'
+          '${two(_recordingStartTime!.day)}'
+          '${two(_recordingStartTime!.hour)}'
+          '${two(_recordingStartTime!.minute)}'
+          '${two(_recordingStartTime!.second)}';
+      _currentRecordingBaseName = 'REC_$baseTimestamp';
       // --- End base name generation ---
 
       await controller!.startVideoRecording();
@@ -353,17 +358,31 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
 
       // Determine public Downloads directory (external storage)
       Directory? targetDir;
-      try {
-        // Android: getExternalStorageDirectories may return public dirs; try Downloads
-        final exDirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
-        if (exDirs != null && exDirs.isNotEmpty) {
-          targetDir = exDirs.first;
+      if (Platform.isAndroid) {
+        // Force saves to the public Downloads directory so files are easy to find
+        targetDir = Directory('/storage/emulated/0/Download');
+        try {
+          if (!await targetDir.exists()) {
+            await targetDir.create(recursive: true);
+          }
+        } catch (e) {
+          debugPrint('[Save] Failed to create /storage/emulated/0/Download: $e');
+          targetDir = null; // Allow fallback below
         }
-      } catch (e) {
-        debugPrint('[Save] getExternalStorageDirectories error: $e');
       }
 
-      // Fallback to application documents
+      // Fallback to platform-provided locations if the primary target is unavailable
+      if (targetDir == null) {
+        try {
+          final exDirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+          if (exDirs != null && exDirs.isNotEmpty) {
+            targetDir = exDirs.first;
+          }
+        } catch (e) {
+          debugPrint('[Save] getExternalStorageDirectories error: $e');
+        }
+      }
+
       if (targetDir == null) {
         final appDocs = await getApplicationDocumentsDirectory();
         targetDir = Directory(p.join(appDocs.path, 'Downloads'));
