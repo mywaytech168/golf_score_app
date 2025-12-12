@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,9 @@ import 'package:golf_score_app/services/audio_analysis_service.dart';
 import 'package:golf_score_app/services/highlight_service.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
+import 'package:video_thumbnail/video_thumbnail.dart';
+import '../services/pose_estimator_service.dart';
+import '../widgets/pose_overlay_painter.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
@@ -30,6 +34,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Map<String, double?> _classificationFeatures = {};
   bool _isAnalyzing = false;
   String? _analysisError;
+  bool _poseOverlayEnabled = false;
+  PoseResult? _poseResult;
+  bool _isPoseBusy = false;
+  DateTime? _lastPoseRun;
+  Timer? _poseTimer;
 
   @override
   void initState() {
@@ -308,8 +317,53 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
+  Future<void> _togglePoseOverlay(bool enabled) async {
+    setState(() => _poseOverlayEnabled = enabled);
+    _poseResult = null;
+    _poseTimer?.cancel();
+    if (!enabled) return;
+    try {
+      await PoseEstimatorService.instance.ensureLoaded();
+      _poseTimer = Timer.periodic(const Duration(milliseconds: 120), (_) => _runPoseOnCurrentFrame());
+    } catch (e) {
+      _showSnack('載入姿勢模型失敗：$e');
+      setState(() => _poseOverlayEnabled = false);
+    }
+  }
+
+  Future<void> _runPoseOnCurrentFrame() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_isPoseBusy) return;
+    final now = DateTime.now();
+    if (_lastPoseRun != null && now.difference(_lastPoseRun!) < const Duration(milliseconds: 100)) {
+      return;
+    }
+    _isPoseBusy = true;
+    try {
+      final posMs = _controller!.value.position.inMilliseconds;
+      final bytes = await VideoThumbnail.thumbnailData(
+        video: widget.videoPath,
+        imageFormat: ImageFormat.PNG,
+        timeMs: posMs,
+        quality: 60,
+      );
+      if (bytes == null) return;
+      final result = await PoseEstimatorService.instance.estimateFromBytes(bytes);
+      if (!mounted || !_poseOverlayEnabled) return;
+      setState(() {
+        _poseResult = result;
+        _lastPoseRun = DateTime.now();
+      });
+    } catch (e) {
+      debugPrint('[PosePlayback] $e');
+    } finally {
+      _isPoseBusy = false;
+    }
+  }
+
   @override
   void dispose() {
+    _poseTimer?.cancel();
     _controller?.dispose();
     super.dispose();
   }
@@ -381,6 +435,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               child: Stack(
                                 children: [
                                   VideoPlayer(controller),
+                                  if (_poseOverlayEnabled && _poseResult != null)
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: PoseOverlayPainter(
+                                          keypoints: _poseResult!.keypoints,
+                                          sourceSize: _poseResult!.inputSize,
+                                          showScores: true,
+                                        ),
+                                      ),
+                                    ),
                                   // overlay highlight button (top-right)
                                   Positioned(
                                     top: 8,
@@ -403,6 +467,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                   ),
                                 ],
                               ),
+                            ),
+                            SwitchListTile.adaptive(
+                              value: _poseOverlayEnabled,
+                              onChanged: (v) => _togglePoseOverlay(v),
+                              title: const Text('骨架預覽 (MoveNet)'),
+                              subtitle: const Text('播放時疊加關鍵點與分數'),
                             ),
           // Analysis result card under the video (always visible)
           Container(

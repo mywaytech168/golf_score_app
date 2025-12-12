@@ -36,6 +36,9 @@ dependencies:
   permission_handler: ^12.0.1
   file_picker: ^10.2.0
   video_player: ^2.7.0
+  tflite_flutter: ^0.10.3
+  image: ^4.2.0
+  video_thumbnail: ^0.5.3
   flutter_blue_plus: ^1.32.5
   path_provider: ^2.1.1
   share_plus: ^7.2.1
@@ -66,6 +69,7 @@ dev_dependencies:
 # following page: https://dart.dev/tools/pub/pubspec
 
 dependency_overrides:
+  tflite_flutter: 0.10.3
   file_picker_macos:
     path: flutter_ignore_plugin/file_picker_macos
   file_picker_linux:
@@ -86,6 +90,7 @@ flutter:
   assets:
     - assets/sounds/1.mp3
     - assets/overlays/stance_overlay.png
+    - assets/models/movenet_singlepose_lightning.tflite
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

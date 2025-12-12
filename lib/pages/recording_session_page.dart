@@ -23,7 +23,9 @@ import '../services/highlight_service.dart';
 import '../services/imu_data_logger.dart';
 import '../services/keep_screen_on_service.dart';
 import '../services/video_overlay_processor.dart';
+import '../services/pose_estimator_service.dart';
 import '../widgets/recording_history_sheet.dart';
+import '../widgets/pose_overlay_painter.dart';
 import 'highlight_preview_page.dart';
 
 // ---------- 分享頻道設定 ----------
@@ -98,6 +100,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   DateTime? _recordingStartTime; // To calculate actual duration
   String? _currentRecordingBaseName; // To hold the base name for the current session
   Timer? _recordingElapsedTimer; // periodic ticker for elapsed UI
+  bool _poseOverlayEnabled = false;
+  PoseResult? _latestPose;
+  bool _isPoseStreamActive = false;
+  bool _isPoseProcessing = false;
+  DateTime? _lastPoseRun;
 
   @override
   void initState() {
@@ -126,6 +133,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _imuButtonSubscription?.cancel();
     _volumeChannel.setMethodCallHandler(null);
     _stopRecordingTimer();
+    _stopPoseStream();
     _enqueueCameraTask(() async {
       await controller?.dispose();
       await _stopAudioCapture();
@@ -184,6 +192,10 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     try {
       await controller!.initialize();
       if (!mounted) return;
+
+      if (_poseOverlayEnabled && !isRecording) {
+        unawaited(_startPoseStream());
+      }
 
       // If there is a pending auto start, trigger it now
       if (_pendingAutoStart) {
@@ -268,6 +280,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     });
 
     try {
+      // Stop pose stream while recording to avoid camera conflicts
+      await _stopPoseStream();
       // --- Generate a consistent base name for all files in this session ---
       _recordingStartTime = DateTime.now(); // Record start time
       _startRecordingTimer();
@@ -472,6 +486,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         _sessionProgress.remainingRounds--;
       });
       _resetToIdle();
+      _restartPoseIfNeeded();
       completer.complete();
       debugPrint('[Save] Save process finished.');
     }
@@ -575,6 +590,91 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     _receivePort?.sendPort.send(data as List<double>);
   }
 
+  // ---------- 姿勢估計 ----------
+  Future<void> _togglePoseOverlay(bool enabled) async {
+    setState(() => _poseOverlayEnabled = enabled);
+    if (!enabled) {
+      _latestPose = null;
+      await _stopPoseStream();
+      return;
+    }
+    try {
+      await PoseEstimatorService.instance.ensureLoaded();
+      if (!isRecording) {
+        await _startPoseStream();
+      }
+    } catch (e) {
+      debugPrint('[Pose] failed to load model: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('姿勢模型載入失敗：$e')),
+        );
+      }
+      setState(() => _poseOverlayEnabled = false);
+    }
+  }
+
+  Future<void> _startPoseStream() async {
+    if (_isPoseStreamActive || controller == null || !controller!.value.isInitialized) return;
+    // Ensure no other stream is active
+    if (controller!.value.isStreamingImages) {
+      try {
+        await controller!.stopImageStream();
+      } catch (_) {}
+    }
+    _isPoseStreamActive = true;
+    await controller!.startImageStream((CameraImage image) async {
+      if (!_poseOverlayEnabled || _isPoseProcessing) return;
+      final now = DateTime.now();
+      if (_lastPoseRun != null && now.difference(_lastPoseRun!) < const Duration(milliseconds: 33)) {
+        return; // throttle to ~30fps
+      }
+      _isPoseProcessing = true;
+      try {
+        final result = await PoseEstimatorService.instance.estimateFromCameraImage(
+          y: image.planes[0].bytes,
+          u: image.planes[1].bytes,
+          v: image.planes[2].bytes,
+          width: image.width,
+          height: image.height,
+          uvRowStride: image.planes[1].bytesPerRow,
+          uvPixelStride: image.planes[1].bytesPerPixel ?? 1,
+        );
+        if (!mounted || !_poseOverlayEnabled) return;
+        if (result != null) {
+          setState(() {
+            _latestPose = result;
+          });
+        }
+      } catch (e) {
+        debugPrint('[Pose] stream error: $e');
+      } finally {
+        _isPoseProcessing = false;
+        _lastPoseRun = DateTime.now();
+      }
+    });
+  }
+
+  Future<void> _stopPoseStream() async {
+    if (!_isPoseStreamActive || controller == null) return;
+    try {
+      if (controller!.value.isStreamingImages) {
+        await controller!.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint('[Pose] stop stream error: $e');
+    } finally {
+      _isPoseStreamActive = false;
+      _isPoseProcessing = false;
+    }
+  }
+
+  Future<void> _restartPoseIfNeeded() async {
+    if (_poseOverlayEnabled && !isRecording) {
+      await _startPoseStream();
+    }
+  }
+
   // ---------- UI 輔助方法 ----------
 
   /// 建立鏡頭預覽 Widget
@@ -592,7 +692,20 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       child: Transform.scale(
         scale: scale,
         alignment: Alignment.topCenter,
-        child: CameraPreview(controller!),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            CameraPreview(controller!),
+            if (_poseOverlayEnabled && _latestPose != null)
+              CustomPaint(
+                painter: PoseOverlayPainter(
+                  keypoints: _latestPose!.keypoints,
+                  sourceSize: _latestPose!.inputSize,
+                  showScores: true,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -865,6 +978,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                                 .toList(),
                           ),
                         ),
+                      SwitchListTile.adaptive(
+                        value: _poseOverlayEnabled,
+                        onChanged: (value) => _togglePoseOverlay(value),
+                        title: const Text('骨架預覽 (MoveNet)'),
+                        subtitle: const Text('在預覽上顯示關鍵點與分數'),
+                      ),
                       Container(
                         height: 100,
                         decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
