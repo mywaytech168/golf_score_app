@@ -18,7 +18,6 @@ class ImuDataLogger {
   final Map<String, _ActiveImuLog> _activeLogs = {}; // 當前錄影輪次的寫入器
 
   Directory? _storageDirectory; // 應用專屬儲存資料夾
-  int? _roundStartSensorTimestampUs; // 錄製起點（感測時間基準）
   int? _roundStartClockUs; // 錄製起點（系統時間備援）
 
   /// 最多允許同時寫入的裝置數量（依需求限制為 2 台）。
@@ -68,7 +67,6 @@ class ImuDataLogger {
   /// 啟動新的錄影輪次，為每台裝置建立 CSV 檔頭。
   Future<void> startRoundLogging(String baseName) async {
     await abortActiveRound(); // 確保先前輪次完整清除
-    _roundStartSensorTimestampUs = null;
     _roundStartClockUs = DateTime.now().microsecondsSinceEpoch;
     if (_devices.isEmpty) {
       return; // 沒有裝置連線時不建立任何檔案
@@ -97,7 +95,7 @@ class ImuDataLogger {
       }
       // 先寫入裝置名稱方便離線處理鎖定目標裝置，接著依指定順序輸出四元數與線性加速度欄位。
       sink.writeln('Device:${info.displayName}');
-      sink.writeln('Timestamp,QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
+      sink.writeln('ElapsedSec,QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
 
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
@@ -144,6 +142,7 @@ class ImuDataLogger {
       results[alias] = entry.value.filePath;
     }
     _activeLogs.clear();
+    _roundStartClockUs = null;
     return results;
   }
 
@@ -158,7 +157,6 @@ class ImuDataLogger {
       }
     }
     _activeLogs.clear();
-    _roundStartSensorTimestampUs = null;
     _roundStartClockUs = null;
   }
 
@@ -266,40 +264,19 @@ class ImuDataLogger {
       debugPrint('⚠️ Attempted to write to a closed IMU log sink for ${log.alias}.');
       return;
     }
-    // 優先使用旋轉向量的時間戳，若無則嘗試使用線性加速度的。
-    // 這裡僅用來計算「錄影開始後的累計秒數」，不再直接寫入原始感測時間。
-    final rawTimestampUs = rotation?['timestampUs'] ??
-        linear?['timestampUs'] ??
-        rotation?['timestamp'] ??
-        linear?['timestamp'] ??
-        DateTime.now().microsecondsSinceEpoch;
-
-    int? currentTimestampUs;
-    if (rawTimestampUs is num) {
-      currentTimestampUs = rawTimestampUs.toInt();
-    } else {
-      currentTimestampUs = int.tryParse(rawTimestampUs.toString());
-    }
-
-    // 初始化錄影起點時間（優先使用感測器時間戳，否則使用系統時間作為備援）。
-    if (_roundStartSensorTimestampUs == null && currentTimestampUs != null) {
-      _roundStartSensorTimestampUs = currentTimestampUs;
-    }
-    _roundStartClockUs ??= DateTime.now().microsecondsSinceEpoch;
-
-    double elapsedSeconds;
-    final sensorStart = _roundStartSensorTimestampUs;
-    if (sensorStart != null && currentTimestampUs != null) {
-      final diffUs = currentTimestampUs - sensorStart;
-      elapsedSeconds = diffUs >= 0 ? diffUs / 1e6 : 0.0;
-    } else {
-      final nowUs = DateTime.now().microsecondsSinceEpoch;
-      final diffUs = nowUs - (_roundStartClockUs ?? nowUs);
-      elapsedSeconds = diffUs >= 0 ? diffUs / 1e6 : 0.0;
-    }
+    // 以「開始錄影時的牆鐘時間」為基準計算累計秒數，確保兩顆 IMU
+    // 以及影片的時間軸一致，即便感測器各自的時間戳不同步。
+    final nowUs = DateTime.now().microsecondsSinceEpoch;
+    _roundStartClockUs ??= nowUs;
+    final wallClockElapsedUs = nowUs - _roundStartClockUs!;
+    final wallClockElapsedSeconds =
+        wallClockElapsedUs >= 0 ? wallClockElapsedUs / 1e6 : 0.0;
+    final safeElapsed = wallClockElapsedSeconds.isFinite
+        ? wallClockElapsedSeconds
+        : 0.0;
 
     final values = <String>[
-      elapsedSeconds.toStringAsFixed(6),
+      safeElapsed.toStringAsFixed(6),
       _formatNumeric(rotation?['i']),
       _formatNumeric(rotation?['j']),
       _formatNumeric(rotation?['k']),
