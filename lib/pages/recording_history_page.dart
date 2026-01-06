@@ -1,5 +1,6 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -8,11 +9,13 @@ import 'package:flutter/services.dart';
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
 import '../services/external_video_importer.dart';
+import '../services/swing_split_service.dart';
+import 'package:path/path.dart' as p;
 import '../services/recording_history_storage.dart';
 import 'recording_session_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, editDuration, delete }
+enum _HistoryMenuAction { rename, editDuration, delete, split }
 
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
@@ -85,6 +88,58 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已刪除 ${entry.fileName}')),
     );
+  }
+
+
+  Future<void> _splitEntry(RecordingHistoryEntry entry) async {
+    final String? csvPath = entry.imuCsvPaths.isNotEmpty
+        ? entry.imuCsvPaths.values.first
+        : null;
+    if (csvPath == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到 IMU CSV，無法分片')));
+      return;
+    }
+    final String outDir = p.join(p.dirname(entry.filePath), 'cut_${entry.roundIndex}');
+    try {
+      final results = await SwingSplitService.split(
+        videoPath: entry.filePath,
+        imuCsvPath: csvPath,
+        outDirName: p.basename(outDir),
+      );
+      if (results.isNotEmpty) {
+        final int baseIndex = _entries.isEmpty
+            ? 1
+            : (_entries.map((e) => e.roundIndex).reduce(math.max) + 1);
+        final List<RecordingHistoryEntry> newEntries = [];
+        for (int i = 0; i < results.length; i++) {
+          final r = results[i];
+          final duration = (r.endSecond - r.startSecond).round().clamp(0, 24 * 60 * 60);
+          newEntries.add(
+            RecordingHistoryEntry(
+              filePath: r.videoPath,
+              roundIndex: baseIndex + i,
+              recordedAt: DateTime.now(),
+              durationSeconds: duration,
+              imuConnected: true,
+              customName: '${entry.displayTitle}_${r.tag}',
+              imuCsvPaths: {'split': r.csvPath},
+              thumbnailPath: null,
+            ),
+          );
+        }
+        _entries.insertAll(0, newEntries);
+        await RecordingHistoryStorage.instance.saveHistory(_entries);
+        if (mounted) {
+          setState(() {});
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分片完成：${results.length} 段')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分片失敗：$e')));
+    }
   }
 
   /// 顯示輸入框調整秒數並更新記錄
@@ -349,10 +404,18 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 使用者取消或選取失敗
     }
 
+    final csvResult = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+      dialogTitle: '選擇對應的 IMU CSV（可略過）',
+    );
+    final String? imuCsvPath = csvResult?.files.single.path;
+
     final entry = await _videoImporter.importVideo(
       sourcePath: result.files.single.path!,
       originalName: result.files.single.name,
       nextRoundIndex: ExternalVideoImporter.calculateNextRoundIndex(_entries),
+      imuCsvPath: imuCsvPath,
     );
 
     if (entry == null) {
@@ -452,6 +515,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     onTap: () => _playEntry(entry),
                     onRename: () => _renameEntry(entry),
                     onEditDuration: () => _editEntryDuration(entry),
+                    onSplit: () => _splitEntry(entry),
                     onDelete: () => _deleteEntry(entry),
                   );
                 },
@@ -497,6 +561,7 @@ class _HistoryTile extends StatelessWidget {
   final VoidCallback onTap; // 點擊後的播放行為
   final VoidCallback onRename; // 重新命名影片
   final VoidCallback onEditDuration; // 調整影片時長
+  final VoidCallback onSplit; // 自動分片
   final VoidCallback onDelete; // 刪除影片紀錄
 
   const _HistoryTile({
@@ -505,6 +570,7 @@ class _HistoryTile extends StatelessWidget {
     required this.onTap,
     required this.onRename,
     required this.onEditDuration,
+    required this.onSplit,
     required this.onDelete,
   });
 
@@ -573,6 +639,9 @@ class _HistoryTile extends StatelessWidget {
                     case _HistoryMenuAction.editDuration:
                       onEditDuration();
                       break;
+                    case _HistoryMenuAction.split:
+                      onSplit();
+                      break;
                     case _HistoryMenuAction.delete:
                       onDelete();
                       break;
@@ -587,6 +656,10 @@ class _HistoryTile extends StatelessWidget {
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.editDuration,
                   child: Text('調整時長'),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.split,
+                  child: Text('自動分片'),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.delete,

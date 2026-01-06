@@ -16,6 +16,7 @@ class ExternalVideoImporter {
     required String sourcePath,
     required int nextRoundIndex,
     String? originalName,
+    String? imuCsvPath,
   }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
@@ -34,6 +35,13 @@ class ExternalVideoImporter {
     final durationSeconds = await _resolveDurationSeconds(persistedPath);
     final sanitizedName = _normalizeName(originalName);
 
+    final Map<String, String> imuCsvPaths = {};
+    final String? csvDetected = imuCsvPath ?? _detectCsvForVideo(sourcePath);
+    if (csvDetected != null && csvDetected.isNotEmpty && await File(csvDetected).exists()) {
+      // 嘗試用來源檔案所在的 CSV
+      imuCsvPaths['AUTO'] = csvDetected;
+    }
+
     return RecordingHistoryEntry(
       filePath: persistedPath,
       roundIndex: math.max(nextRoundIndex, 1),
@@ -41,7 +49,7 @@ class ExternalVideoImporter {
       durationSeconds: durationSeconds,
       imuConnected: false,
       customName: sanitizedName,
-      imuCsvPaths: const {},
+      imuCsvPaths: imuCsvPaths,
       thumbnailPath: null,
     );
   }
@@ -58,6 +66,32 @@ class ExternalVideoImporter {
   /// 以毫秒時間戳產生唯一檔名，避免與原始錄影衝突
   String _buildBaseName(DateTime timestamp) {
     return 'import_${timestamp.millisecondsSinceEpoch}';
+  }
+
+  /// 嘗試依影片路徑偵測同名 CSV
+  String? _detectCsvForVideo(String videoPath) {
+    final File videoFile = File(videoPath);
+    if (!videoFile.existsSync()) return null;
+    final dir = videoFile.parent;
+    final base = p.basenameWithoutExtension(videoPath);
+
+    // 先試完全同名 .csv
+    final String sameName = p.join(dir.path, '$base.csv');
+    if (File(sameName).existsSync()) return sameName;
+
+    // 再試常見的 IMU 命名（CHEST / RIGHT_WRIST 等）
+    final candidates = dir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.toLowerCase().endsWith('.csv'))
+        .where((f) {
+          final name = p.basenameWithoutExtension(f.path);
+          return name.startsWith(base) || base.startsWith(name);
+        })
+        .map((f) => f.path)
+        .toList();
+
+    return candidates.isNotEmpty ? candidates.first : null;
   }
 
   /// 掃描影片長度並至少回傳 1 秒，避免出現 0 秒造成 UI 顯示異常

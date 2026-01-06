@@ -800,12 +800,21 @@ class _HomePageState extends State<HomePage> {
     required String path,
     String? fileName,
   }) async {
+    // Optional: pick matching CSV
+    final csvResult = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+      dialogTitle: '選擇對應的 IMU CSV（可略過）',
+    );
+    final String? imuCsvPath = csvResult?.files.single.path;
+
     final nextRoundIndex =
         ExternalVideoImporter.calculateNextRoundIndex(_recordingHistory);
     final entry = await _videoImporter.importVideo(
       sourcePath: path,
       originalName: fileName,
       nextRoundIndex: nextRoundIndex,
+      imuCsvPath: imuCsvPath,
     );
 
     if (entry == null) {

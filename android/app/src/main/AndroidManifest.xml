@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- Android 11+ all files access (需額外向使用者說明用途，並引導到設定頁授權) -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <!-- Android 12 以前的裝置仍需傳統藍牙權限才能完成掃描與連線 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
@@ -71,6 +73,10 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- 開啟「所有檔案存取」設定頁 -->
+        <intent>
+            <action android:name="android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION"/>
         </intent>
     </queries>
 </manifest>
