@@ -5,13 +5,13 @@ import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
-import 'imu_data_logger.dart';
+import '../services/imu_data_logger.dart';
 
-/// å¤–éƒ¨å½±ç??¯å…¥å·¥å…·ï¼šé?ä¸­è??†è?è£½ã€ç??¸è§£?è?ç´€?„å»ºç«‹æ?ç¨?
+/// å¤–éƒ¨å½±ç‰‡åŒ¯å…¥å·¥å…·ï¼šè² è²¬è¤‡è£½å½±ç‰‡ã€å˜—è©¦æ‰¾ IMU CSV ä¸¦å»ºç«‹æ­·å²ç´€éŒ„
 class ExternalVideoImporter {
   const ExternalVideoImporter();
 
-  /// ?¯å…¥?‡å?å½±ç?ä¸¦å??³å»ºç«‹å??ç?æ­·å²ç´€?„å¯¦ä¾?
+  /// åŒ¯å…¥å–®æ”¯å½±ç‰‡ä¸¦å›å‚³å»ºç«‹å¥½çš„æ­·å²ç´€éŒ„æ¢ç›®
   Future<RecordingHistoryEntry?> importVideo({
     required String sourcePath,
     required int nextRoundIndex,
@@ -20,13 +20,13 @@ class ExternalVideoImporter {
   }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
-      return null; // ?¾ä??°ä?æºæ?æ¡ˆæ??´æ¥çµæ?
+      return null; // æ‰¾ä¸åˆ°ä¾†æºæª”æ¡ˆå°±çµæŸ
     }
 
     final timestamp = DateTime.now();
     final baseName = _buildBaseName(timestamp);
 
-    // ?é??¢æ??„å„²å­˜æ??™è?è£½æ?æ¡ˆï?ç¢ºä?å½±ç??†ä¸­å­˜æ”¾??imu_records è³‡æ?å¤?
+    // å½±ç‰‡è¤‡è£½åˆ° app çš„è³‡æ–™å¤¾ï¼ˆç”± ImuDataLogger ç®¡ç†ï¼‰
     final persistedPath = await ImuDataLogger.instance.persistVideoFile(
       sourcePath: sourcePath,
       baseName: baseName,
@@ -35,10 +35,12 @@ class ExternalVideoImporter {
     final durationSeconds = await _resolveDurationSeconds(persistedPath);
     final sanitizedName = _normalizeName(originalName);
 
+    // ç›¡é‡å¹«å¿™æ‰¾ CSVï¼Œè‹¥æœ‰å‰‡è¤‡è£½åˆ°åŒè³‡æ–™å¤¾
     final Map<String, String> imuCsvPaths = {};
     final String? csvDetected = imuCsvPath ?? _detectCsvForVideo(sourcePath);
-    if (csvDetected != null && csvDetected.isNotEmpty && await File(csvDetected).exists()) {
-      // ?—è©¦?¨ä?æºæ?æ¡ˆæ??¨ç? CSV
+    if (csvDetected != null &&
+        csvDetected.isNotEmpty &&
+        await File(csvDetected).exists()) {
       final String csvName = '_IMU.csv';
       final String csvTarget = p.join(File(persistedPath).parent.path, csvName);
       await File(csvDetected).copy(csvTarget);
@@ -57,7 +59,7 @@ class ExternalVideoImporter {
     );
   }
 
-  /// ä¾æ?æ­·å²ç´€?„æ¨ç®—ä?ä¸€?‹è¼ªæ¬¡ç·¨?Ÿï??¿å??‡æ—¢?‰è??™é?è¤?
+  /// ä¾ç¾æœ‰æ­·å²æ¨ç®—ä¸‹ä¸€å€‹ round index
   static int calculateNextRoundIndex(List<RecordingHistoryEntry> entries) {
     if (entries.isEmpty) {
       return 1;
@@ -66,23 +68,20 @@ class ExternalVideoImporter {
     return maxRound + 1;
   }
 
-  /// ä»¥æ¯«ç§’æ??“æˆ³?¢ç??¯ä?æª”å?ï¼Œé¿?è??Ÿå??„å½±è¡ç?
   String _buildBaseName(DateTime timestamp) {
     return 'import_${timestamp.millisecondsSinceEpoch}';
   }
 
-  /// ?—è©¦ä¾å½±?‡è·¯å¾‘åµæ¸¬å???CSV
+  /// å˜—è©¦ä¾å½±ç‰‡è·¯å¾‘æ¨æ¸¬é™„è¿‘çš„ CSV
   String? _detectCsvForVideo(String videoPath) {
     final File videoFile = File(videoPath);
     if (!videoFile.existsSync()) return null;
     final dir = videoFile.parent;
     final base = p.basenameWithoutExtension(videoPath);
 
-    // ?ˆè©¦å®Œå…¨?Œå? .csv
     final String sameName = p.join(dir.path, '$base.csv');
     if (File(sameName).existsSync()) return sameName;
 
-    // ?è©¦å¸¸è???IMU ?½å?ï¼ˆCHEST / RIGHT_WRIST ç­‰ï?
     final candidates = dir
         .listSync()
         .whereType<File>()
@@ -97,7 +96,7 @@ class ExternalVideoImporter {
     return candidates.isNotEmpty ? candidates.first : null;
   }
 
-  /// ?ƒæ?å½±ç??·åº¦ä¸¦è‡³å°‘å???1 ç§’ï??¿å??ºç¾ 0 ç§’é€ æ? UI é¡¯ç¤º?°å¸¸
+  /// è§£æå½±ç‰‡é•·åº¦ï¼Œè‡³å°‘å›å‚³ 1 ç§’é¿å… UI é¡¯ç¤ºç‚º 0
   Future<int> _resolveDurationSeconds(String videoPath) async {
     final controller = VideoPlayerController.file(File(videoPath));
     try {
@@ -106,13 +105,13 @@ class ExternalVideoImporter {
       final seconds = duration.inSeconds;
       return math.max(seconds, 1);
     } catch (_) {
-      return 1; // ?å??–å¤±?—æ?ä»?1 ç§’ä??ºä?åº?
+      return 1; // å¤±æ•—å°±çµ¦é è¨­ 1 ç§’
     } finally {
       await controller.dispose();
     }
   }
 
-  /// ?–å‡º?Ÿå?æª”å?ä¸¦ç§»?¤å‰¯æª”å?ï¼Œé??¶é•·åº¦é¿??UI ?†ç?
+  /// æ¸…ç†åç¨±ä¸¦é™åˆ¶é•·åº¦
   String? _normalizeName(String? originalName) {
     final raw = originalName?.trim();
     if (raw == null || raw.isEmpty) {
@@ -127,4 +126,3 @@ class ExternalVideoImporter {
         : withoutExtension;
   }
 }
-

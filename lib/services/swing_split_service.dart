@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
@@ -28,6 +29,8 @@ class SwingClipResult {
 
 /// Pure Dart swing splitter: parse IMU CSV, detect peaks, and cut video/CSV (no ffmpeg dependency).
 class SwingSplitService {
+  static const MethodChannel _trimChannel =
+      MethodChannel('com.example.golf_score_app/trimmer');
   static const double _defaultWindowBefore = 3.0;
   static const double _defaultWindowAfter = 1.0;
   static const double _defaultSmoothWinSec = 0.05;
@@ -226,10 +229,21 @@ class SwingSplitService {
     required double end,
     required bool forceSar1,
   }) async {
-    // NOTE: without ffmpeg-kit or native trimming, we currently fall back to copying
-    // the full source video. Start/end are still recorded in summary for reference.
     await Directory(p.dirname(dst)).create(recursive: true);
-    await File(src).copy(dst);
+    final int startMs = (start * 1000).round();
+    final int endMs = (end * 1000).round();
+    try {
+      await _trimChannel.invokeMethod<bool>('trim', {
+        'srcPath': src,
+        'dstPath': dst,
+        'startMs': startMs,
+        'endMs': endMs,
+      });
+    } on PlatformException catch (e) {
+      // fallback: copy full video to avoid silent failure
+      await File(src).copy(dst);
+      throw StateError('Video trim failed: ${e.message}');
+    }
   }
 
   static Future<void> _writeCsvSegment(

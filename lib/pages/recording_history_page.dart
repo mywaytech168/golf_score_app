@@ -3,15 +3,14 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
-import '../services/external_video_importer.dart';
-import '../services/swing_split_service.dart';
-import 'package:path/path.dart' as p;
+import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
+import '../services/swing_split_service.dart';
 import 'recording_session_page.dart';
 
 /// 列表操作選項
@@ -101,12 +100,33 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return;
     }
     final String outDir = p.join(p.dirname(entry.filePath), 'cut_${entry.roundIndex}');
+    // 顯示簡易等待動畫，避免使用者誤以為卡住
+    void hideLoading() {
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('自動分片進行中，請稍候...'),
+          ],
+        ),
+      ),
+    );
     try {
       final results = await SwingSplitService.split(
         videoPath: entry.filePath,
         imuCsvPath: csvPath,
         outDirName: p.basename(outDir),
       );
+      hideLoading();
       if (results.isNotEmpty) {
         final int baseIndex = _entries.isEmpty
             ? 1
@@ -137,6 +157,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分片完成：${results.length} 段')));
     } catch (e) {
+      hideLoading();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分片失敗：$e')));
     }

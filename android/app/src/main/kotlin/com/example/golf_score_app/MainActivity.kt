@@ -28,9 +28,11 @@ class MainActivity: FlutterActivity() {
     private val KEEP_SCREEN_CHANNEL = "keep_screen_on_channel"
     private val AUDIO_EXTRACT_CHANNEL = "audio_extractor_channel"
     private val VIDEO_OVERLAY_CHANNEL = "video_overlay_channel"
+    private val TRIMMER_CHANNEL = "com.example.golf_score_app/trimmer"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
+    private val videoTrimmer by lazy { VideoTrimmer(this) }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -186,6 +188,10 @@ class MainActivity: FlutterActivity() {
                 } else {
                     result.notImplemented()
                 }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRIMMER_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                videoTrimmer.handle(call, result)
             }
     }
 

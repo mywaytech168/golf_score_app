@@ -26,19 +26,19 @@ import '../services/pose_estimator_service.dart';
 import '../widgets/recording_history_sheet.dart';
 import '../widgets/pose_overlay_painter.dart';
 import 'highlight_preview_page.dart';
-// ---------- ?嚙賭澈?嚙踝蕭?閮哨蕭? ----------
+// ---------- MethodChannel for sharing ----------
 const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
-// ---------- ?嚙賭澈?嚙踝蕭??嚙踝蕭? ----------
+// ---------- Share target enum ----------
 enum _ShareTarget { instagram, facebook, line }
-/// ?嚙賢蔣撠?嚙賡嚗蕭?瘜券?嚙踝蕭?閬賬?嚙賡閮郭敶ｇ蕭???IMU ?嚙踝蕭??嚙賡?嚙賡
+/// Recording session page - handles camera, audio, and IMU data for recording sessions
 class RecordingSessionPage extends StatefulWidget {
-  final List<CameraDescription> cameras; // ?嚙賢?嚙?嚙賢?嚙賡??
-  final bool isImuConnected; // ?嚙賢撌莎蕭?嚙?IMU嚗捱摰蕭?蝷綽蕭???
-  final int totalRounds; // ?嚙賣活?嚙踝蕭??嚙賢蔣?嚙質憚??
-  // final int durationSeconds; // 瘥憚?嚙賢蔣蝘 - REMOVED for unlimited recording
-  final bool autoStartOnReady; // ??IMU ?嚙踝蕭??嚙踝蕭??嚙質?嚙踝蕭??嚙踝蕭?嚙?
-  final Stream<void> imuButtonStream; // ?嚙踝蕭???IMU ?嚙踝蕭?鈭辣靘蕭?
-  final String? userAvatarPath; // 擐蕭?撣嗅?嚙賢犖?嚙踝蕭?頝荔蕭?嚗蕭??嚙賭澈敶梧蕭??嚙踝蕭???
+  final List<CameraDescription> cameras; // Available cameras on the device
+  final bool isImuConnected; // IMU connection status
+  final int totalRounds; // Total number of recording rounds
+  // final int durationSeconds; // Duration for each recording round - REMOVED for unlimited recording
+  final bool autoStartOnReady; // Auto start recording when ready
+  final Stream<void> imuButtonStream; // Stream for IMU button events
+  final String? userAvatarPath; // Path to the user's avatar image
   const RecordingSessionPage({
     super.key,
     required this.cameras,
@@ -62,55 +62,55 @@ String _mapPredToLabel(String? pred) {
   return p.isNotEmpty ? p : 'Unknown';
 }
 class _RecordingSessionPageState extends State<RecordingSessionPage> {
-  // ---------- ?嚙?嚙踝蕭??嚙踝蕭? ----------
-  CameraController? controller; // ?嚙賢?嚙賡?嚙踝蕭?
-  bool isRecording = false; // 璅蕭??嚙賢嚙?嚙踝蕭?嚙賢蔣
-  List<double> waveform = []; // ?嚙踝蕭?瘜Ｗ耦鞈蕭?
-  List<double> waveformAccumulated = []; // 蝝荔蕭?瘜Ｗ耦鞈蕭?靘鼓?嚙賭蝙??
-  final ValueNotifier<int> repaintNotifier = ValueNotifier(0); // ?嚙賣閫貊瘜Ｗ耦?嚙賜鼓
-  final FlutterAudioCapture _audioCapture = FlutterAudioCapture(); // Use a single, final instance.
-  ReceivePort? _receivePort; // ??Isolate 皞蕭?蝞∴蕭?
-  Isolate? _isolate; // ?嚙踝蕭??嚙踝蕭??嚙踝蕭??嚙賢銵蕭?嚗?嚙踝蕭??嚙賢遣嚙?
-  final AssetsAudioPlayer _audioPlayer = AssetsAudioPlayer(); // ?嚙賣?嚙賣?嚙踝蕭?
-  final MethodChannel _volumeChannel = const MethodChannel('volume_button_channel'); // ??嚙踝蕭?嚙踝蕭???
-  Completer<void>? _cancelCompleter; // 撠蕭?瘨蕭??嚙賢?嚙賜策蝑蕭?銝哨蕭? Future
-  final List<RecordingHistoryEntry> _recordedRuns = []; // 蝝荔蕭?甇斗活?嚙賢蔣?嚙踝蕭??嚙踝蕭?嚙?
-  String? _lastAnalysisLabel; // persist latest in-app analysis label
-  Map<String, double?> _lastAnalysisFeatures = {}; // persist latest in-app features
-  bool _hasTriggeredRecording = false; // 閮蕭?雿輻?嚙賣?嚙踝蕭??嚙踝蕭??嚙賢蔣嚗?嚙踝蕭??嚙踝蕭?嚙?
-  StreamSubscription<void>? _imuButtonSubscription; // ??嚙踝蕭 IMU ?嚙踝蕭?閫貊?嚙賢蔣
-  bool _pendingAutoStart = false; // 閮蕭? IMU 鈭辣?嚙賢?嚙賜?嚙??嚙賡?嚙踝蕭??嚙踝蕭??嚙踝蕭???
-  final _SessionProgress _sessionProgress = _SessionProgress(); // ?嚙賭葉蝞∴蕭??嚙賣蝘?嚙賢擗憚嚙?
-  Future<void> _cameraOperationQueue = Future.value(); // ?嚙賡?嚙踝蕭??嚙踝蕭?嚗Ⅱ靽蕭?銝?嚙踝蕭??嚙賢銵蕭??嚙賭遙??
-  bool _isRunningCameraTask = false; // 璅蕭??嚙賢嚙?嚙踝蕭?嚙踝蕭??嚙賡隞鳴蕭?嚗蕭?靘蕭??嚙賣炎??
-  bool _isDisposing = false; // ?嚙賢蔣?嚙賣?嚙賡脣?嚙賣?嚙?嚙踝蕭??嚙踝蕭??嚙賢敺蕭??嚙踝蕭??嚙賭遙??
-  bool _isSplitting = false; // 嚙踝蕭嚙踝蕭u嚙諛動歹蕭嚙踝蕭嚙緞嚙踝蕭嚙編嚙踝蕭嚙璀
+  // ---------- Camera and recording state ----------
+  CameraController? controller; // Camera controller for managing camera operations
+  bool isRecording = false; // Indicates if recording is in progress
+  List<double> waveform = []; // Audio waveform data for visualization
+  List<double> waveformAccumulated = []; // Accumulated audio waveform data
+  final ValueNotifier<int> repaintNotifier = ValueNotifier(0); // Notifier for triggering UI repaint
+  final FlutterAudioCapture _audioCapture = FlutterAudioCapture(); // Audio capture instance
+  ReceivePort? _receivePort; // Receive port for isolate communication
+  Isolate? _isolate; // Isolate for processing audio data
+  final AssetsAudioPlayer _audioPlayer = AssetsAudioPlayer(); // Audio player instance
+  final MethodChannel _volumeChannel = const MethodChannel('volume_button_channel'); // Method channel for volume button events
+  Completer<void>? _cancelCompleter; // Completer for canceling recording
+  final List<RecordingHistoryEntry> _recordedRuns = []; // List of recorded sessions for history
+  String? _lastAnalysisLabel; // Persisted label from the last audio analysis
+  Map<String, double?> _lastAnalysisFeatures = {}; // Persisted features from the last audio analysis
+  bool _hasTriggeredRecording = false; // Indicates if recording was triggered by the user
+  StreamSubscription<void>? _imuButtonSubscription; // Subscription to IMU button stream
+  bool _pendingAutoStart = false; // Indicates if auto start is pending
+  final _SessionProgress _sessionProgress = _SessionProgress(); // Session progress tracker
+  Future<void> _cameraOperationQueue = Future.value(); // Queue for camera operations
+  bool _isRunningCameraTask = false; // Indicates if a camera task is currently running
+  bool _isDisposing = false; // Indicates if the widget is being disposed
+  bool _isSplitting = false; // Indicates if the video is being split
   // Add a future to track the saving process
   Future<void>? _savingFuture;
   DateTime? _recordingStartTime; // To calculate actual duration
   String? _currentRecordingBaseName; // To hold the base name for the current session
   Timer? _recordingElapsedTimer; // periodic ticker for elapsed UI
-  bool _poseOverlayEnabled = false;
-  PoseResult? _latestPose;
-  bool _isPoseStreamActive = false;
-  bool _isPoseProcessing = false;
-  DateTime? _lastPoseRun;
+  bool _poseOverlayEnabled = false; // Indicates if pose overlay is enabled
+  PoseResult? _latestPose; // Latest pose data from the pose estimator
+  bool _isPoseStreamActive = false; // Indicates if the pose stream is active
+  bool _isPoseProcessing = false; // Indicates if pose processing is in progress
+  DateTime? _lastPoseRun; // Timestamp of the last pose processing
   @override
   void initState() {
     super.initState();
     _sessionProgress.totalRounds = widget.totalRounds;
     _sessionProgress.remainingRounds = widget.totalRounds;
     _pendingAutoStart = widget.autoStartOnReady;
-    // 閮 IMU ?嚙踝蕭?鈭辣
+    // Subscribe to IMU button stream
     _imuButtonSubscription = widget.imuButtonStream.listen((_) => _handleImuTrigger());
-    // 閮鳴蕭??嚙踝蕭??嚙賜??
+    // Set method call handler for volume button events
     _volumeChannel.setMethodCallHandler(_handleVolumeButton);
-    // 靽蕭??嚙踝蕭??嚙踝蕭?
+    // Enable keep screen on service
     KeepScreenOnService.enable();
-    // ?嚙踝蕭??嚙賡??
+    // Initialize camera
     _enqueueCameraTask(() => _initializeCamera(widget.cameras.first));
   }
-  /// ?嚙賣?嚙?嚙踝蕭?嚙?
+  /// Dispose resources and cancel subscriptions
   @override
   void dispose() {
     _isDisposing = true;
@@ -125,7 +125,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     KeepScreenOnService.disable();
     super.dispose();
   }
-  /// ?嚙踝蕭? IMU ?嚙踝蕭?閫貊
+  /// Handle IMU trigger - starts or stops recording based on current state
   void _handleImuTrigger() {
     if (isRecording) {
       _triggerCancel();
@@ -133,32 +133,32 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       _triggerRecording();
     }
   }
-  /// ?嚙踝蕭??嚙踝蕭??嚙踝蕭?嚙?
+  /// Handle volume button press - triggers IMU action
   Future<dynamic> _handleVolumeButton(MethodCall call) async {
     if (call.method == 'volumeButtonPressed') {
-      // ??iOS 銝蕭??嚙踝蕭??嚙踝蕭?閫貊 startVideoRecording嚗ㄐ?嚙踝蕭??嚙踝蕭??嚙踝蕭?
+      // Ignore volume button presses if recording is active (iOS specific)
       if (Platform.isIOS && isRecording) {
         return;
       }
-      _handleImuTrigger(); // ?嚙賜 IMU 閫貊?嚙質摩
+      _handleImuTrigger(); // Trigger IMU action
     }
   }
-  /// 撱綽蕭?銝血銵?嚙賭遙?嚙踝蕭??嚙踝蕭?銵蕭?
+  /// Enqueue a camera task to the operation queue
   Future<void> _enqueueCameraTask(Future<void> Function() task) async {
     if (_isRunningCameraTask) {
-      // 憒蕭?撌莎蕭?隞鳴蕭??嚙賢銵蕭?撠隞鳴蕭??嚙賢雿蕭?
+      // If a camera task is already running, chain the new task to run after the current one
       _cameraOperationQueue = _cameraOperationQueue.then((_) async {
         if (!_isDisposing) await task();
       });
     } else {
-      // ?嚙踝蕭??嚙賣?嚙踝蕭?
+      // If no camera task is running, run the new task immediately
       _isRunningCameraTask = true;
       _cameraOperationQueue = task().whenComplete(() {
         _isRunningCameraTask = false;
       });
     }
   }
-  /// ?嚙踝蕭??嚙賡??
+  /// Initialize the camera with the given description
   Future<void> _initializeCamera(CameraDescription cameraDescription) async {
     if (controller != null) {
       await controller!.dispose();
@@ -182,7 +182,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('?嚙踝蕭??嚙踝蕭??嚙賡?? $e')),
+          SnackBar(content: Text('Camera initialization failed: $e')),
         );
       }
     } finally {
@@ -191,17 +191,17 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
     }
   }
-  /// 閫貊?嚙賢蔣瘚蕭?
+  /// Trigger the recording process
   void _triggerRecording() {
     if (controller == null || !controller!.value.isInitialized) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('相機尚未準備好')), 
+        const SnackBar(content: Text('Camera is not ready')), 
       );
       return;
     }
     if (_sessionProgress.remainingRounds <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已達到錄影輪次')), 
+        const SnackBar(content: Text('Maximum recording rounds reached')), 
       );
       return;
     }
@@ -210,13 +210,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     });
     _startCountdown();
   }
-  /// ?嚙踝蕭??嚙踝蕭?瘚蕭?
+  /// Trigger the cancellation of the current recording
   void _triggerCancel() {
     if (_cancelCompleter != null && !_cancelCompleter!.isCompleted) {
       _cancelCompleter!.complete();
     }
   }
-  /// ?嚙踝蕭??嚙賣閮蕭?
+  /// Start the countdown timer before recording
   void _startCountdown() {
     _sessionProgress.isCountingDown = true;
     _sessionProgress.countdownSeconds = 3;
@@ -239,7 +239,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
     });
   }
-  /// ?嚙踝蕭??嚙賢蔣
+  /// Start the recording process
   Future<void> _startRecording() async {
     if (controller == null || !controller!.value.isInitialized || controller!.value.isRecordingVideo) {
       return;
@@ -277,7 +277,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       //     recordingCompleter.complete();
       //   }
       // });
-      // 蝑蕭??嚙踝蕭??嚙踝蕭?
+      // Wait for the recording to be canceled
       await _cancelCompleter!.future;
       // IMPORTANT: Only call stop/save if the recording was successfully started and completed.
       await _stopRecordingAndSave();
@@ -286,7 +286,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       debugPrintStack(stackTrace: stackTrace);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('?嚙賢蔣憭梧蕭?: $e')),
+          SnackBar(content: Text('Recording start error: $e')),
         );
       }
       // If starting failed, ensure we clean up immediately.
@@ -303,7 +303,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       // NOTE: We do NOT call _stopRecordingAndSave here.
     }
   }
-  /// ?嚙賣迫?嚙賢蔣銝血摮蕭?嚙?
+  /// Stop the recording and save the files
   Future<void> _stopRecordingAndSave() async {
     if (!isRecording || controller == null) {
       debugPrint('[Save] Stop called but not recording or controller is null.');
@@ -419,14 +419,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
       _recordedRuns.add(entry);
       debugPrint('[Save] Entry added to history. Total runs: ${_recordedRuns.length}');
-      // ?嚙踝蕭??嚙賢銵閮蕭???
+      // Run audio analysis on the saved recording
       unawaited(_runAudioAnalysis(entry));
     } catch (e, stackTrace) {
       debugPrint('[Save] Error during save process: $e');
       debugPrintStack(stackTrace: stackTrace);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('摮蕭?憭梧蕭?: $e')),
+          SnackBar(content: Text('Save error: $e')),
         );
       }
     } finally {
@@ -439,7 +439,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       debugPrint('[Save] Save process finished.');
     }
   }
-  /// ?嚙質身?嚙踝蕭?蝵殷蕭???
+  /// Reset the recording state to idle
   void _resetToIdle() {
     _stopRecordingTimer();
     setState(() {
@@ -450,8 +450,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       waveformAccumulated.clear();
     });
   }
-  // ---------- ?嚙踝蕭??嚙踝蕭? ----------
-  /// ?嚙踝蕭??嚙踝蕭??嚙踝蕭?
+  // ---------- Audio capture and processing ----------
+  /// Start audio capture and processing
   Future<void> _startAudioCapture() async {
     // Ensure microphone permission is granted before proceeding.
     if (!await Permission.microphone.request().isGranted) {
@@ -483,23 +483,23 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       rethrow;
     }
   }
-  /// ?嚙賣迫?嚙踝蕭??嚙踝蕭?銝佗蕭??嚙踝蕭?獢楝嚙?
+  /// Stop audio capture and processing
   Future<String?> _stopAudioCapture() async {
     // Use the single instance to stop.
     await _audioCapture.stop();
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _receivePort?.close();
-    // ?嚙賡?嚙踝蕭?閬蕭??嚙賜垢撖佗蕭?靘蕭??嚙踝蕭?獢楝嚙?
+    // Return null to indicate completion
     return null;
   }
-  /// Isolate ?嚙賢?嚙踝蕭?嚗蕭??嚙賡閮蕭???
+  /// Isolate for processing audio data
   static void _audioProcessingIsolate(SendPort sendPort) {
     final receivePort = ReceivePort();
     sendPort.send(receivePort.sendPort);
     receivePort.listen((dynamic data) {
       if (data is List<double>) {
-        // 蝪∪??RMS 閮蕭?
+        // Calculate RMS (Root Mean Square) for the audio data
         double sum = 0;
         for (var sample in data) {
           sum += sample * sample;
@@ -509,7 +509,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
     });
   }
-  /// ?嚙踝蕭?靘 Isolate ?嚙賡閮蕭???
+  /// Handle incoming audio data from the isolate
   void _handleAudioData(dynamic data) {
     if (data is double) {
       setState(() {
@@ -522,11 +522,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       });
     }
   }
-  /// ?嚙踝蕭???嚙踝蕭?嚙賢
+  /// Audio listener callback for processing audio data
   void _audioListener(dynamic data) {
     _receivePort?.sendPort.send(data as List<double>);
   }
-  // ---------- 憪踹隡堆蕭? ----------
+  // ---------- Pose estimation and overlay ----------
+  /// Toggle the pose overlay visibility and state
   Future<void> _togglePoseOverlay(bool enabled) async {
     setState(() => _poseOverlayEnabled = enabled);
     if (!enabled) {
@@ -543,12 +544,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       debugPrint('[Pose] failed to load model: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('憪踹璅∴蕭?頛憭梧蕭?嚙?e')),
+          SnackBar(content: Text('Pose model loading error: $e')),
         );
       }
       setState(() => _poseOverlayEnabled = false);
     }
   }
+  /// Start the pose stream for real-time pose estimation
   Future<void> _startPoseStream() async {
     if (_isPoseStreamActive || controller == null || !controller!.value.isInitialized) return;
     // Ensure no other stream is active
@@ -589,6 +591,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
     });
   }
+  /// Stop the pose stream
   Future<void> _stopPoseStream() async {
     if (!_isPoseStreamActive || controller == null) return;
     try {
@@ -602,13 +605,14 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       _isPoseProcessing = false;
     }
   }
+  /// Restart the pose stream if needed
   Future<void> _restartPoseIfNeeded() async {
     if (_poseOverlayEnabled && !isRecording) {
       await _startPoseStream();
     }
   }
-  // ---------- UI 頛?嚙踝蕭? ----------
-  /// 撱綽蕭??嚙賡?嚙質汗 Widget
+  // ---------- UI and rendering ----------
+  /// Build the camera preview widget
   Widget _buildCameraPreview() {
     if (controller == null || !controller!.value.isInitialized) {
       return const Center(child: CircularProgressIndicator());
@@ -638,12 +642,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       ),
     );
   }
-  /// ?嚙賣?嚙賜內??
+  /// Play the beep sound for recording feedback
   void _playBeep({bool isFinal = false}) {
     final sound = isFinal ? 'assets/sounds/final_beep.mp3' : 'assets/sounds/beep.mp3';
     _audioPlayer.open(Audio(sound), autoStart: true, volume: 0.5);
   }
-  /// 憿舐內?嚙賢蔣蝝??
+  /// Show the recording history sheet
   void _showRecordingHistory(BuildContext context) {
     showRecordingHistorySheet(
       context: context,
@@ -660,7 +664,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       },
     );
   }
-  /// ?嚙踝蕭? Python ?嚙踝蕭??嚙踝蕭? (Desktop only)
+  /// Run the Python audio analyzer (desktop only)
   Future<void> _runPythonAnalyzer() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -670,7 +674,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       final filePath = result.files.single.path!;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('嚙?嚙踝蕭?嚙踝蕭?: $filePath')),
+          SnackBar(content: Text('Selected audio file: $filePath')),
         );
       }
       try {
@@ -679,12 +683,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('?嚙踝蕭?蝯蕭?'),
+              title: const Text('Audio Analysis Result'),
               content: Text(jsonEncode(analysisResult)),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('?嚙踝蕭?'),
+                  child: const Text('Close'),
                 ),
               ],
             ),
@@ -693,13 +697,13 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('?嚙踝蕭?憭梧蕭?: $e')),
+            SnackBar(content: Text('Analysis error: $e')),
           );
         }
       }
     }
   }
-  /// ?嚙踝蕭??嚙踝蕭??嚙踝蕭??嚙踝蕭?
+  /// Run the audio analysis on the recorded entry
   Future<void> _runAudioAnalysis(RecordingHistoryEntry entry) async {
     try {
       final result = await AudioAnalysisService.analyzeVideo(entry.filePath);
@@ -718,7 +722,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         }
       }
     } catch (e) {
-      debugPrint('?嚙踝蕭??嚙踝蕭?憭梧蕭?: $e');
+      debugPrint('Audio analysis error: $e');
     }
   }
   double? _toDouble(dynamic val) {
@@ -757,7 +761,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (_recordedRuns.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('目前沒有可分片的錄影')));
+            .showSnackBar(const SnackBar(content: Text('No recordings available for splitting')));
       }
       return;
     }
@@ -780,7 +784,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (csvToUse == null || !File(csvToUse).existsSync()) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('找不到 IMU CSV：${csvPath ?? "未指定"}')));
+            .showSnackBar(SnackBar(content: Text('IMU CSV not found: ${csvPath ?? "Not specified"}')));
       }
       return;
     }
@@ -788,7 +792,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     if (!File(videoPath).existsSync()) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('找不到影片檔：$videoPath')));
+            .showSnackBar(SnackBar(content: Text('Video file not found: $videoPath')));
       }
       return;
     }
@@ -803,11 +807,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('分片完成：${results.length} 段')));
+          .showSnackBar(SnackBar(content: Text('Splitting complete: ${results.length} segments')));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('分片失敗：$e')));
+            .showSnackBar(SnackBar(content: Text('Splitting failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isSplitting = false);
@@ -826,7 +830,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       if (!status.isGranted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('需要「所有檔案存取」權限才能讀取 IMU CSV')),
+            const SnackBar(content: Text('Storage permission is required to access IMU CSV files')),
           );
         }
         return false;
@@ -837,7 +841,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       if (!status.isGranted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('需要儲存空間讀取權限才能讀取 IMU CSV')),
+            const SnackBar(content: Text('Storage permission is required to access IMU CSV files')),
           );
         }
         return false;
@@ -854,7 +858,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
           _triggerCancel();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('嚙?嚙踝蕭?嚙踝蕭?敶梧蕭?...')),
+              const SnackBar(content: Text('Recording in progress, please stop first...')),
             );
           }
           await _savingFuture;
@@ -864,7 +868,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('?嚙賢蔣'),
+          title: const Text('Recording Session'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () async {
@@ -872,7 +876,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                 _triggerCancel();
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('嚙?嚙踝蕭?嚙踝蕭?敶梧蕭?...')),
+                    const SnackBar(content: Text('Recording in progress, please stop first...')),
                   );
                 }
                 await _savingFuture;
@@ -894,12 +898,12 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.cut),
               onPressed: _isSplitting ? null : _splitLatestRun,
-              tooltip: '?芸??? (??圈?敶?',
+              tooltip: 'Split Recording',
             ),
             IconButton(
               icon: const Icon(Icons.history),
               onPressed: () => _showRecordingHistory(context),
-              tooltip: '?亦?甇瑕',
+              tooltip: 'Recording History',
             ),
           ],
         ),
@@ -986,7 +990,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                       const SizedBox(height: 12),
                       if (_lastAnalysisLabel != null)
                         _SessionStatusTile(
-                          title: '????',
+                          title: 'Analysis Result',
                           value: _lastAnalysisLabel!,
                           isActive: true,
                         ),
@@ -1004,8 +1008,8 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                       SwitchListTile.adaptive(
                         value: _poseOverlayEnabled,
                         onChanged: (value) => _togglePoseOverlay(value),
-                        title: const Text('撉冽?嚙質汗 (MoveNet)'),
-                        subtitle: const Text('?嚙踝蕭?閬踝蕭?憿舐內?嚙賡暺蕭??嚙賣'),
+                        title: const Text('Enable Pose Overlay (MoveNet)'),
+                        subtitle: const Text('Shows pose estimation overlay on the camera feed'),
                       ),
                       Container(
                         height: 100,
@@ -1055,10 +1059,10 @@ class _MediaSizeClipper extends CustomClipper<Rect> {
   }
 }
 class _SessionProgress {
-  int remainingRounds = 0; // ?嚙踝蕭?頛芣活
-  int totalRounds = 0; // 蝮質憚嚙?
-  int countdownSeconds = 0; // ?嚙賣蝘
-  bool isCountingDown = false; // ?嚙賢嚙?嚙踝蕭?嚙賣嚙?
+  int remainingRounds = 0; // Remaining rounds to record
+  int totalRounds = 0; // Total rounds configured
+  int countdownSeconds = 0; // Seconds remaining in the countdown
+  bool isCountingDown = false; // Indicates if a countdown is active
 }
 class _SessionStatusBar extends StatelessWidget {
   final _SessionProgress progress;
@@ -1081,7 +1085,7 @@ class _SessionStatusBar extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // IMU ????嚙??
+          // IMU connection status
           Row(
             children: [
               Icon(
@@ -1091,7 +1095,7 @@ class _SessionStatusBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                isImuConnected ? 'IMU 撌莎蕭??' : 'IMU ?嚙踝蕭??',
+                isImuConnected ? 'IMU Connected' : 'IMU Disconnected',
                 style: TextStyle(
                   color: isImuConnected ? Colors.green : Colors.red,
                   fontSize: 14,
@@ -1100,7 +1104,7 @@ class _SessionStatusBar extends StatelessWidget {
               ),
             ],
           ),
-          // ?嚙賢蔣?嚙??
+          // Recording status
           Row(
             children: [
               Icon(
@@ -1110,7 +1114,7 @@ class _SessionStatusBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                isRecording ? '正在錄影' : '錄影已停止',
+                isRecording ? 'Recording' : 'Not Recording',
                 style: TextStyle(
                   color: isRecording ? Colors.red : Colors.grey,
                   fontSize: 14,
@@ -1305,10 +1309,10 @@ class _StanceGuidePainter extends CustomPainter {
     return oldDelegate.stanceValue != stanceValue || oldDelegate.swingDirection != swingDirection;
   }
 }
-/// 敶梧蕭??嚙賣?嚙賡嚗蕭?靘蕭?鋆踝蕭?獢蕭?蝡瑼ｇ蕭?
+/// Video player page - displays the recorded video and allows sharing
 class VideoPlayerPage extends StatefulWidget {
-  final String videoPath; // 敶梧蕭?瑼蕭?頝荔蕭?
-  final String? avatarPath; // 擐蕭??嚙踝蕭??嚙賢犖?嚙踝蕭?嚗?嚙賣捱摰?嚙賢?嚙踝蕭?
+  final String videoPath; // Path to the video file
+  final String? avatarPath; // Path to the user's avatar image
   const VideoPlayerPage({
     super.key,
     required this.videoPath,
@@ -1318,18 +1322,18 @@ class VideoPlayerPage extends StatefulWidget {
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
 }
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
-  VideoPlayerController? _videoController; // 敶梧蕭??嚙賢?嚙踝蕭??嚙踝蕭??嚙踝蕭??嚙踝蕭??嚙踝蕭?撱綽蕭?
-  static const String _shareMessage = '?嚙賭澈?嚙踝蕭? TekSwing ?嚙賣▼敶梧蕭?'; // ?嚙賭澈?嚙踝蕭??嚙質身?嚙踝蕭?
-  final TextEditingController _captionController = TextEditingController(); // 敶梧蕭?銝隤迎蕭?頛詨
-  final List<String> _generatedTempFiles = []; // 閮蕭??嚙踝蕭??嚙踝蕭?敺蕭??嚙踝蕭?敶梧蕭?嚗蕭??嚙踝蕭??嚙踝蕭?蝯梧蕭?皜蕭?
-  bool _attachAvatar = false; // ?嚙賢閬?嚙賭澈敶梧蕭?銝哨蕭??嚙賢犖?嚙踝蕭?
-  bool _isProcessingShare = false; // ?嚙賢?嚙賭澈?嚙踝蕭??嚙踝蕭??嚙?嚙踝蕭??嚙踝蕭??嚙踝蕭?閫Ｙ
-  late final bool _avatarSelectable; // 閮蕭??嚙踝蕭?瑼蕭??嚙賢摮嚗靘蕭??嚙賢??
-  bool _isVideoLoading = true; // ?嚙賢?嚙賢憿舐內霈?嚙賭葉頧蕭?
-  String? _videoLoadError; // ?嚙踝蕭??嚙賢仃?嚙踝蕭??嚙賡隤歹蕭??嚙踝蕭??嚙踝蕭?雿輻?嚙踝蕭?蝷綽蕭??嚙質岫
-  String? _classificationLabel; // 敶梧蕭??嚙質?嚙踝蕭??嚙踝蕭?嚙?
-  Map<String, double?> _classificationFeatures = {};
-  bool _isGeneratingHighlight = false;
+  VideoPlayerController? _videoController; // Video player controller
+  static const String _shareMessage = 'Check out my recording on TekSwing!'; // Default share message
+  final TextEditingController _captionController = TextEditingController(); // Controller for the caption text field
+  final List<String> _generatedTempFiles = []; // List of temporary files generated during processing
+  bool _attachAvatar = false; // Indicates if the avatar should be attached to the video
+  bool _isProcessingShare = false; // Indicates if a share operation is in progress
+  late final bool _avatarSelectable; // Indicates if the avatar can be selected
+  bool _isVideoLoading = true; // Indicates if the video is currently loading
+  String? _videoLoadError; // Error message if video loading fails
+  String? _classificationLabel; // Label for the video classification
+  Map<String, double?> _classificationFeatures = {}; // Features for the video classification
+  bool _isGeneratingHighlight = false; // Indicates if a highlight is being generated
   bool get _canControlVideo => _videoController != null && _videoController!.value.isInitialized;
   Widget _featRow(String label, double? value) {
     return Text('$label: ${value == null ? '--' : value.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 11));
@@ -1375,6 +1379,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (val is String) return double.tryParse(val);
     return null;
   }
+  /// Generate the highlight video for the recording
   Future<void> _generateHighlight() async {
     if (_isGeneratingHighlight) return;
     setState(() => _isGeneratingHighlight = true);
@@ -1383,7 +1388,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       if (out != null && out.isNotEmpty) {
         if (!mounted) return;
         debugPrint('[Highlight] generated at: $out');
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Highlight ?嚙踝蕭?摰蕭?: $out')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Highlight video generated: $out')));
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: out, avatarPath: widget.avatarPath)));
       } else {
         String? debugText;
@@ -1394,17 +1399,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           if (await f.exists()) debugText = await f.readAsString();
         } catch (_) {}
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('生成 Highlight 失敗，此平台不支援')));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Highlight generation failed')));
           Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: widget.videoPath, avatarPath: widget.avatarPath, debugText: debugText)));
         }
       }
     } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('生成 Highlight 發生錯誤: ' + e.toString())));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Highlight generation error: ' + e.toString())));
     } finally {
       if (mounted) setState(() => _isGeneratingHighlight = false);
     }
   }
-  /// ?嚙踝蕭??嚙賭澈?嚙踝蕭?嚗蕭??嚙踝蕭?獢蒂?嚙賢?嚙踝蕭??嚙賭澈
+  /// Share the recording to the selected target (Instagram, Facebook, LINE)
   Future<void> _shareToTarget(_ShareTarget target) async {
     if (_isProcessingShare) {
       return;
@@ -1431,13 +1436,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           });
           sharedByPackage = result ?? false;
         } on PlatformException catch (error) {
-          debugPrint('[Share] Android ?嚙踝蕭??嚙賭澈憭梧蕭?嚙?error');
+          debugPrint('[Share] Android share failed: $error');
         }
       }
       if (!sharedByPackage) {
         if (mounted && Platform.isAndroid) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未找到預設社群 App，已改用系統分享單')), 
+            const SnackBar(content: Text('Default app not found, using system share')),
           );
         }
         await Share.shareXFiles([XFile(sharePath)], text: _shareMessage);
@@ -1482,6 +1487,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     _cleanupTempFiles();
     super.dispose();
   }
+  /// Initialize the video player with the selected video
   Future<void> _initializeVideo() async {
     setState(() {
       _isVideoLoading = true;
@@ -1491,7 +1497,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (!await file.exists()) {
       setState(() {
         _isVideoLoading = false;
-        _videoLoadError = '找不到影片檔案，請重新匯入或錄製';
+        _videoLoadError = 'Video file not found, please re-import or record';
       });
       return;
     }
@@ -1510,18 +1516,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       unawaited(_loadClassificationForVideo());
       controller.play();
     } catch (error, stackTrace) {
-      debugPrint('[VideoPlayer] ?嚙踝蕭??嚙賢仃?嚙踝蕭?$error');
+      debugPrint('[VideoPlayer] Video initialization error: $error');
       debugPrintStack(stackTrace: stackTrace);
       await controller.dispose();
       if (mounted) {
         setState(() {
           _videoController = null;
           _isVideoLoading = false;
-          _videoLoadError = '無法載入影片，請稍後再試';
+          _videoLoadError = 'Unable to load video, please try again later';
         });
       }
     }
   }
+  /// Load the classification data for the video
   Future<void> _loadClassificationForVideo() async {
     try {
       final file = File(widget.videoPath);
@@ -1576,13 +1583,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     _generatedTempFiles.clear();
   }
+  /// Prepare the video for sharing by processing overlays and captions
   Future<String?> _prepareShareFile() async {
     final bool wantsAvatar = _attachAvatar;
     final String trimmedCaption = _captionController.text.trim();
     final bool wantsCaption = trimmedCaption.isNotEmpty;
     if (wantsAvatar) {
       if (!_avatarSelectable || widget.avatarPath == null || !File(widget.avatarPath!).existsSync()) {
-        _showSnack('尚未設置或找不到個人頭像檔案');
+        _showSnack('Avatar not set or file not found');
         return null;
       }
     }
@@ -1592,7 +1600,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       final List<String> captionParts = [];
       if (captionToUse.isNotEmpty) captionParts.add(captionToUse);
       if (_classificationLabel != null && _classificationLabel!.isNotEmpty) {
-        captionParts.add('閰蕭?: ${_classificationLabel!}');
+        captionParts.add('Label: ${_classificationLabel!}');
       }
       if (_classificationFeatures.isNotEmpty) {
         final rms = _classificationFeatures['rms_dbfs'];
@@ -1615,7 +1623,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       caption: captionToUse,
     );
     if (result == null) {
-      _showSnack('生成影片發生錯誤，請稍後再試');
+      _showSnack('Error generating video, please try again later');
       return null;
     }
     if (result != widget.videoPath) {
@@ -1667,7 +1675,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Widget build(BuildContext context) {
     final controller = _videoController;
     return Scaffold(
-        appBar: AppBar(title: const Text('影片播放')),
+        appBar: AppBar(title: const Text('Video Playback')),
       body: Column(
         children: [
           Expanded(
@@ -1684,7 +1692,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                               const SizedBox(height: 12),
                               Text(_videoLoadError!, textAlign: TextAlign.center),
                               const SizedBox(height: 12),
-                                ElevatedButton.icon(onPressed: _initializeVideo, icon: const Icon(Icons.refresh), label: const Text('重新嘗試載入')),
+                                ElevatedButton.icon(onPressed: _initializeVideo, icon: const Icon(Icons.refresh), label: const Text('Retry Loading')),
                             ],
                           ),
                         )
@@ -1737,16 +1745,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
                       onPressed: _isGeneratingHighlight ? null : _generateHighlight,
                       icon: _isGeneratingHighlight ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2,color:Colors.white)) : const Icon(Icons.movie),
-                      label: const Text('生成 Highlight'),
+                      label: const Text('Generate Highlight'),
                     ),
                   ),
                   const SizedBox(height: 12),
                   SwitchListTile.adaptive(
                     value: _attachAvatar,
                     onChanged: !_avatarSelectable ? null : (value) => setState(() => _attachAvatar = value),
-                    title: const Text('附加頭像與字幕'),
+                    title: const Text('Attach Avatar and Caption'),
                     subtitle: Text(
-                      !_avatarSelectable ? '尚未選擇頭像，附加頭像停用' : '字幕會顯示在影片下方',
+                      !_avatarSelectable ? 'Avatar not selected, attachment disabled' : 'Caption will be displayed at the bottom of the video',
                       style: const TextStyle(fontSize: 12),
                     ),
                     activeColor: const Color(0xFF1E8E5A),
@@ -1754,7 +1762,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   TextField(
                     controller: _captionController,
                     maxLength: 50,
-                    decoration: const InputDecoration(labelText: '字幕內容', hintText: '填寫要顯示在影片底部的文字', counterText: ''),
+                    decoration: const InputDecoration(labelText: 'Caption', hintText: 'Enter text to display at the bottom of the video', counterText: ''),
                   ),
                   if (_isProcessingShare) const LinearProgressIndicator(),
                   const SizedBox(height: 1),
