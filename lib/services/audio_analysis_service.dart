@@ -172,6 +172,8 @@ class AudioAnalysisService {
         'segment_count': 0,
         'peak_count': 0,
         'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
+        'audio_class': 'unknown',
+        'audio_feedback': 'Unknown',
       };
       return <String, dynamic>{'summary': summary, 'segments': <Map<String, dynamic>>[]};
     }
@@ -201,8 +203,15 @@ class AudioAnalysisService {
           summary['audio_distances'] = score.distances;
           // expose highband_amp in summary consistent with other callers
           if (score.featureValues.containsKey('highband_amp')) summary['highband_amp'] = score.featureValues['highband_amp'];
+        } else {
+          // Model stats loaded但沒有產出分級，給預設未知狀態，讓 UI 至少顯示一個標籤
+          summary['audio_class'] = 'unknown';
+          summary['audio_feedback'] = 'Unknown';
         }
       } catch (_) {}
+      // 確保一定有 audio_class / audio_feedback 欄位，避免前端拿到 null
+      summary['audio_class'] ??= 'unknown';
+      summary['audio_feedback'] ??= 'Unknown';
 
       final List<Map<String, dynamic>> segments = <Map<String, dynamic>>[
         {
@@ -227,6 +236,8 @@ class AudioAnalysisService {
         'segment_count': 0,
         'peak_count': 0,
         'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
+        'audio_class': 'unknown',
+        'audio_feedback': 'Unknown',
       };
       return <String, dynamic>{'summary': summary, 'segments': <Map<String, dynamic>>[]};
     }

@@ -709,17 +709,15 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       final result = await AudioAnalysisService.analyzeVideo(entry.filePath);
       final summary = result['summary'] as Map<String, dynamic>?;
       if (summary != null) {
-        final pred = summary['audio_class']?.toString();
-        if (pred != null) {
-          setState(() {
-            _lastAnalysisLabel = _mapPredToLabel(pred);
-            _lastAnalysisFeatures = {
-              'rms_dbfs': _toDouble(summary['rms_dbfs']),
-              'spectral_centroid': _toDouble(summary['spectral_centroid']),
-              'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
-            };
-          });
-        }
+        final pred = summary['audio_class']?.toString() ?? 'unknown';
+        setState(() {
+          _lastAnalysisLabel = _mapPredToLabel(pred);
+          _lastAnalysisFeatures = {
+            'rms_dbfs': _toDouble(summary['rms_dbfs']),
+            'spectral_centroid': _toDouble(summary['spectral_centroid']),
+            'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
+          };
+        });
       }
     } catch (e) {
       debugPrint('Audio analysis error: $e');
@@ -1323,6 +1321,8 @@ class VideoPlayerPage extends StatefulWidget {
 }
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   VideoPlayerController? _videoController; // Video player controller
+  Duration _playbackPosition = Duration.zero;
+  Duration _playbackDuration = Duration.zero;
   static const String _shareMessage = 'Check out my recording on TekSwing!'; // Default share message
   final TextEditingController _captionController = TextEditingController(); // Controller for the caption text field
   final List<String> _generatedTempFiles = []; // List of temporary files generated during processing
@@ -1341,6 +1341,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   double _effectiveAspectRatio(VideoPlayerController controller) {
     return 9 / 16; // force portrait container
+  }
+
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final String h = d.inHours > 0 ? '${two(d.inHours)}:' : '';
+    final String m = two(d.inMinutes.remainder(60));
+    final String s = two(d.inSeconds.remainder(60));
+    return '$h$m:$s';
   }
 
   Widget _buildPlaybackVideo(VideoPlayerController controller) {
@@ -1482,6 +1490,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
   @override
   void dispose() {
+    _videoController?.removeListener(_handleVideoTick);
     _videoController?.dispose();
     _captionController.dispose();
     _cleanupTempFiles();
@@ -1509,8 +1518,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         await controller.dispose();
         return;
       }
+      controller.addListener(_handleVideoTick);
       setState(() {
         _videoController = controller;
+        _playbackDuration = controller.value.duration;
+        _playbackPosition = controller.value.position;
         _isVideoLoading = false;
       });
       unawaited(_loadClassificationForVideo());
@@ -1638,27 +1650,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       final result = await AudioAnalysisService.analyzeVideo(widget.videoPath);
       final summary = result['summary'] as Map<String, dynamic>?;
       if (summary != null) {
-        final feats = <String, double?>{
-          'rms_dbfs': _toDouble(summary['rms_dbfs']),
-          'spectral_centroid': _toDouble(summary['spectral_centroid']),
-          'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
-          'highband_amp': _toDouble(summary['highband_amp']),
-          'peak_dbfs': _toDouble(summary['peak_dbfs']),
-        };
-        String? pred = summary['audio_class']?.toString();
-        if (mounted) {
-          setState(() {
-            _classificationFeatures = feats;
-            if (pred != null) _classificationLabel = _mapPredToLabel(pred);
-          });
-        }
+        _applyAudioSummary(summary);
         try {
           final file = File(widget.videoPath);
           if (await file.exists()) {
             final csvFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_classify_report.csv');
             final rows = <String>['feature,target,weight'];
-            feats.forEach((k, v) => rows.add('$k,${v ?? ''},1.0'));
-            if (pred != null) rows.add('label,$pred,1.0');
+            _classificationFeatures.forEach((k, v) => rows.add('$k,${v ?? ''},1.0'));
+            final label = summary['audio_class']?.toString() ?? 'unknown';
+            rows.add('label,$label,1.0');
             await csvFile.writeAsString(rows.join('\n'));
             final debugFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_analysis_debug.json');
             await debugFile.writeAsString(jsonEncode(result));
@@ -1670,6 +1670,40 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     } finally {
       if (mounted) setState(() => _isProcessingShare = false);
     }
+  }
+  void _handleVideoTick() {
+    if (!mounted || _videoController == null) return;
+    final v = _videoController!;
+    if (!v.value.isInitialized) return;
+    final pos = v.value.position;
+    final dur = v.value.duration;
+    // Update only when changed to reduce rebuilds
+    if (pos != _playbackPosition || dur != _playbackDuration) {
+      setState(() {
+        _playbackPosition = pos;
+        _playbackDuration = dur;
+      });
+    }
+  }
+
+  void _restartVideo() {
+    final ctrl = _videoController;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    ctrl.seekTo(Duration.zero);
+    ctrl.play();
+  }
+  void _applyAudioSummary(Map<String, dynamic> summary) {
+    final pred = summary['audio_class']?.toString();
+    setState(() {
+      _classificationLabel = _mapPredToLabel(pred ?? 'unknown');
+      _classificationFeatures = {
+        'rms_dbfs': _toDouble(summary['rms_dbfs']),
+        'spectral_centroid': _toDouble(summary['spectral_centroid']),
+        'sharpness_hfxloud': _toDouble(summary['sharpness_hfxloud']),
+        'highband_amp': _toDouble(summary['highband_amp']),
+        'peak_dbfs': _toDouble(summary['peak_dbfs']),
+      };
+    });
   }
   @override
   Widget build(BuildContext context) {
@@ -1733,6 +1767,39 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         ),
             ),
           ),
+          if (_canControlVideo)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  VideoProgressIndicator(
+                    _videoController!,
+                    allowScrubbing: true,
+                    colors: VideoProgressColors(
+                      playedColor: Colors.deepOrange,
+                      bufferedColor: Colors.white70,
+                      backgroundColor: Colors.white24,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.replay),
+                        onPressed: _restartVideo,
+                        tooltip: 'Replay',
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_formatDuration(_playbackPosition)} / ${_formatDuration(_playbackDuration)}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             child: SingleChildScrollView(
