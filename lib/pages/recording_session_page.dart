@@ -2,7 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math' as math;
+// import 'dart:math' as math;
 import 'package:assets_audio_player/assets_audio_player.dart';
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
@@ -15,10 +15,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 import '../models/recording_history_entry.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/highlight_service.dart';
 import '../services/imu_data_logger.dart';
+import '../services/recording_history_storage.dart';
 import '../services/keep_screen_on_service.dart';
 import '../services/swing_split_service.dart';
 import '../services/video_overlay_processor.dart';
@@ -409,6 +411,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       final recordedAtTime = _recordingStartTime ?? DateTime.now();
       _recordingStartTime = null; // Reset for next recording
       _currentRecordingBaseName = null; // Reset for next recording
+      final thumb = await _generateThumbnail(newVideoPath);
       final entry = RecordingHistoryEntry(
         filePath: newVideoPath, // Use the new, permanent path
         roundIndex: _sessionProgress.totalRounds - _sessionProgress.remainingRounds + 1,
@@ -416,9 +419,18 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         durationSeconds: recordedDuration, // Use calculated duration
         imuConnected: widget.isImuConnected,
         imuCsvPaths: imuDestPaths,
+        thumbnailPath: thumb,
       );
       _recordedRuns.add(entry);
       debugPrint('[Save] Entry added to history. Total runs: ${_recordedRuns.length}');
+      // Persist to shared history so Home/History pages can show it immediately
+      try {
+        final existing = await RecordingHistoryStorage.instance.loadHistory();
+        final updated = <RecordingHistoryEntry>[entry, ...existing];
+        await RecordingHistoryStorage.instance.saveHistory(updated);
+      } catch (e) {
+        debugPrint('[Save] Failed to persist history: $e');
+      }
       // Run audio analysis on the saved recording
       unawaited(_runAudioAnalysis(entry));
     } catch (e, stackTrace) {
@@ -449,6 +461,32 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       waveform.clear();
       waveformAccumulated.clear();
     });
+  }
+
+  void _returnHistoryIfAny() {
+    final history = List<RecordingHistoryEntry>.from(_recordedRuns);
+    if (history.isNotEmpty) {
+      Navigator.of(context).pop(history);
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+  Future<String?> _generateThumbnail(String videoPath) async {
+    try {
+      final dir = p.dirname(videoPath);
+      final target = p.join(dir, '${p.basenameWithoutExtension(videoPath)}_thumb.jpg');
+      final thumb = await vt.VideoThumbnail.thumbnailFile(
+        video: videoPath,
+        imageFormat: vt.ImageFormat.JPEG,
+        timeMs: 0,
+        quality: 75,
+        thumbnailPath: target,
+      );
+      return thumb;
+    } catch (e) {
+      debugPrint('[Thumbnail] generate failed: $e');
+      return null;
+    }
   }
   // ---------- Audio capture and processing ----------
   /// Start audio capture and processing
@@ -860,9 +898,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             );
           }
           await _savingFuture;
-          return true;
+          _returnHistoryIfAny();
+          return false;
         }
-        return true;
+        _returnHistoryIfAny();
+        return false;
       },
       child: Scaffold(
         appBar: AppBar(
@@ -878,9 +918,9 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
                   );
                 }
                 await _savingFuture;
-                if (mounted) Navigator.of(context).pop();
+                if (mounted) _returnHistoryIfAny();
               } else {
-                Navigator.of(context).pop();
+                _returnHistoryIfAny();
               }
             },
           ),
@@ -1043,6 +1083,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       ),
     );
   }
+
 }
 class _MediaSizeClipper extends CustomClipper<Rect> {
   final Size mediaSize;
@@ -1643,6 +1684,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     return result;
   }
+
   Future<void> _reAnalyzeForVideo() async {
     if (_isProcessingShare) return;
     setState(() => _isProcessingShare = true);
@@ -1671,13 +1713,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       if (mounted) setState(() => _isProcessingShare = false);
     }
   }
+
   void _handleVideoTick() {
     if (!mounted || _videoController == null) return;
     final v = _videoController!;
     if (!v.value.isInitialized) return;
     final pos = v.value.position;
     final dur = v.value.duration;
-    // Update only when changed to reduce rebuilds
     if (pos != _playbackPosition || dur != _playbackDuration) {
       setState(() {
         _playbackPosition = pos;
@@ -1692,6 +1734,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     ctrl.seekTo(Duration.zero);
     ctrl.play();
   }
+
   void _applyAudioSummary(Map<String, dynamic> summary) {
     final pred = summary['audio_class']?.toString();
     setState(() {

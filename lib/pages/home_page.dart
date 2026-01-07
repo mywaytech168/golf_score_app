@@ -50,6 +50,11 @@ class _HomePageState extends State<HomePage> {
   String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
   String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 匯入外部影片的工具實例
+  String _formatDurationShort(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   void initState() {
@@ -938,8 +943,11 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+    // 無論是否有回傳，重新載入儲存的歷史，確保分片/匯入後首頁同步
     if (result != null) {
       _handleHistoryUpdated(result);
+    } else {
+      await _loadInitialHistory();
     }
   }
 
@@ -1053,8 +1061,86 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
+          const SizedBox(height: 16),
+          _buildRecentPreviewList(),
         ],
       ),
+    );
+  }
+
+  Widget _buildRecentPreviewList() {
+    if (_isHistoryLoading) return const SizedBox.shrink();
+    final recent = _recordingHistory.take(4).toList();
+    if (recent.isEmpty) {
+      return const Text('尚無影片可預覽，錄影或匯入後會出現在此處。', style: TextStyle(fontSize: 13, color: Color(0xFF6F7B86)));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('最近影片預覽', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF123B70))),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 130,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: recent.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final entry = recent[index];
+              final thumbPath = entry.thumbnailPath;
+              final hasThumb = thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync();
+              return InkWell(
+                onTap: () => _playHistoryEntry(entry),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 180,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7F9FB),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE3E8EE)),
+                  ),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: hasThumb
+                            ? Image.file(
+                                File(thumbPath!),
+                                width: 72,
+                                height: 72,
+                                fit: BoxFit.cover,
+                              )
+                            : Container(
+                                width: 72,
+                                height: 72,
+                                color: const Color(0xFFDCE3EC),
+                                child: const Icon(Icons.movie, color: Color(0xFF123B70)),
+                              ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(entry.displayTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${_formatDurationShort(entry.durationSeconds)} ・ ${entry.modeLabel}',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
