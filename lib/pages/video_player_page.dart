@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:flutter/services.dart';
 
 import '../services/highlight_service.dart';
 
@@ -41,7 +42,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   VideoPlayerController? _controller;
   Future<void>? _initializeFuture;
   bool _isAnalyzing = false;
+  bool _isTrajectoryRunning = false;
   String? _errorMessage;
+  Map<String, dynamic>? _trajectoryResult;
 
   @override
   void initState() {
@@ -86,6 +89,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       }
     } finally {
       if (mounted) setState(() => _isAnalyzing = false);
+    }
+  }
+
+  Future<void> _runTrajectoryAnalysis() async {
+    if (_isTrajectoryRunning) return;
+    setState(() => _isTrajectoryRunning = true);
+    const channel = MethodChannel('com.example.golf_score_app/trajectory');
+    try {
+      final res = await channel.invokeMethod<Map>('analyzeTrajectory', {
+        'videoPath': widget.videoPath,
+      });
+      if (!mounted) return;
+      if (res != null) {
+        setState(() => _trajectoryResult = res.cast<String, dynamic>());
+        _showSnack('軌跡分析完成');
+      } else {
+        _showSnack('沒有收到軌跡結果');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('軌跡分析失敗: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isTrajectoryRunning = false);
     }
   }
 
@@ -150,8 +177,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                   icon: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
                                   label: const Text('Play/Pause'),
                                 ),
+                                const SizedBox(width: 12),
+                                ElevatedButton.icon(
+                                  onPressed: _isTrajectoryRunning ? null : _runTrajectoryAnalysis,
+                                  icon: _isTrajectoryRunning
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.track_changes),
+                                  label: const Text('軌跡分析'),
+                                ),
                               ],
                             ),
+                            if (_trajectoryResult != null) ...[
+                              const SizedBox(height: 12),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: Text(
+                                  '軌跡結果：$_trajectoryResult',
+                                  style: const TextStyle(fontSize: 12, color: Colors.black87),
+                                ),
+                              ),
+                            ],
                           ],
                         );
                       }

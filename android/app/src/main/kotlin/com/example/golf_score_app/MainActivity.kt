@@ -29,10 +29,13 @@ class MainActivity: FlutterActivity() {
     private val AUDIO_EXTRACT_CHANNEL = "audio_extractor_channel"
     private val VIDEO_OVERLAY_CHANNEL = "video_overlay_channel"
     private val TRIMMER_CHANNEL = "com.example.golf_score_app/trimmer"
+    private val TRAJECTORY_CHANNEL = "com.example.golf_score_app/trajectory"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
+    private val trajectoryExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
     private val videoTrimmer by lazy { VideoTrimmer(this) }
+    private val trajectoryAnalyzer by lazy { TrajectoryAnalyzer() }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -193,6 +196,35 @@ class MainActivity: FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 videoTrimmer.handle(call, result)
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRAJECTORY_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "analyzeTrajectory") {
+                    val videoPath = call.argument<String>("videoPath")
+                    if (videoPath.isNullOrBlank()) {
+                        result.error("invalid_args", "videoPath is empty", null)
+                        return@setMethodCallHandler
+                    }
+                    trajectoryExecutor.execute {
+                        try {
+                            val r = trajectoryAnalyzer.analyze(videoPath)
+                            runOnUiThread {
+                                result.success(
+                                    mapOf(
+                                        "hit_frame" to r.hitFrame,
+                                        "init_ball" to r.initBall,
+                                        "polyfit" to r.polyfit,
+                                        "points" to r.points
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("analysis_failed", e.message, null) }
+                        }
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -208,6 +240,7 @@ class MainActivity: FlutterActivity() {
         super.onDestroy()
         overlayExecutor.shutdown()
         audioExtractorExecutor.shutdown()
+        trajectoryExecutor.shutdown()
     }
 
     private data class AudioExtractionResult(

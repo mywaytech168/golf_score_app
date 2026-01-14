@@ -18,6 +18,8 @@ import '../services/user_profile_storage.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
 import 'profile_edit_page.dart';
+import 'today_info_page.dart';
+import 'upgrade_page.dart';
 
 /// 錄影卡片支援的操作種類
 enum _HistoryAction { rename, editDuration, delete }
@@ -80,6 +82,63 @@ class _HomePageState extends State<HomePage> {
   /// 將時間轉換為比較區塊顯示的日期文字（例：05/21）
   String _formatComparisonDate(DateTime dateTime) {
     return '${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildTodayInfoCard() {
+    final practice = _practiceCount;
+    final sweetPct = (_sweetSpotPercentage ?? 0).clamp(0, 100);
+    final goodHits = practice > 0 ? (practice * sweetPct / 100).round() : 0;
+    final badHits = math.max(practice - goodHits, 0);
+    final avgSpeed = _averageSpeedMph != null ? '${_averageSpeedMph!.toStringAsFixed(1)} mph' : '--';
+    final sweetText = sweetPct > 0 ? '${sweetPct.toStringAsFixed(0)}%' : '--';
+    final impactText = _impactClarity != null ? '${(_impactClarity!.clamp(0, 1) * 100).toStringAsFixed(0)}%' : '--';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader(title: 'Today Info', actions: const []),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _miniStat(title: '好球', value: '$goodHits')),
+              Expanded(child: _miniStat(title: '壞球', value: '$badHits')),
+              Expanded(child: _miniStat(title: '練習次數', value: '$practice')),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _miniStat(title: '平均速度', value: avgSpeed)),
+              Expanded(child: _miniStat(title: '甜蜜點命中', value: sweetText)),
+              Expanded(child: _miniStat(title: '擊球清脆度', value: impactText)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniStat({required String title, required String value}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(color: Color(0xFF7D8B9A), fontSize: 13)),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E8E5A)),
+        ),
+      ],
+    );
   }
 
   /// 建立比較區塊，呈現最新與上一筆揮桿的差異
@@ -765,6 +824,30 @@ class _HomePageState extends State<HomePage> {
 
   /// 處理底部導覽點擊，依據不同索引執行對應導覽
   void _onBottomNavTap(int index) {
+    if (index == 1) {
+      final practice = _practiceCount;
+      final sweetPct = (_sweetSpotPercentage ?? 0).clamp(0, 100);
+      final goodHits = practice > 0 ? (practice * sweetPct / 100).round() : 0;
+      final badHits = math.max(practice - goodHits, 0);
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TodayInfoPage(
+            practiceCount: practice,
+            averageSpeedMph: _averageSpeedMph,
+            bestSpeedMph: _bestSpeedMph,
+            impactClarity: _impactClarity,
+            sweetSpotPercentage: sweetPct.toDouble(),
+            goodHits: goodHits,
+            badHits: badHits,
+            goodVideoPath: null,
+            badVideoPath: null,
+          ),
+        ),
+      );
+      setState(() => _currentIndex = index);
+      return;
+    }
     if (index == 2) {
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -781,6 +864,13 @@ class _HomePageState extends State<HomePage> {
     if (index == 3) {
       // 點選 Data Metrics 時直接導向錄影歷史頁，方便快速檢視過往紀錄
       unawaited(_openRecordingHistoryPage());
+      setState(() => _currentIndex = index);
+      return;
+    }
+    if (index == 4) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const UpgradePage()),
+      );
       setState(() => _currentIndex = index);
       return;
     }
@@ -1520,6 +1610,8 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
+            const SizedBox(height: 24),
+            _buildTodayInfoCard(),
             const SizedBox(height: 24),
             _buildComparisonCard(),
             const SizedBox(height: 32),

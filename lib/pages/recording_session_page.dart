@@ -1372,6 +1372,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   late final bool _avatarSelectable; // Indicates if the avatar can be selected
   bool _isVideoLoading = true; // Indicates if the video is currently loading
   String? _videoLoadError; // Error message if video loading fails
+  bool _isTrajectoryRunning = false; // Indicates if trajectory analysis is running
+  Map<String, dynamic>? _trajectoryResult; // Latest trajectory result
+  bool _trajectoryVisible = true; // Toggle overlay visibility
   String? _classificationLabel; // Label for the video classification
   Map<String, double?> _classificationFeatures = {}; // Features for the video classification
   bool _isGeneratingHighlight = false; // Indicates if a highlight is being generated
@@ -1398,15 +1401,81 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final double vh = s.height == 0 ? 1 : s.height;
     return AspectRatio(
       aspectRatio: _effectiveAspectRatio(controller),
-      child: Center(
-        child: FittedBox(
-          fit: BoxFit.contain,
-          child: SizedBox(
-            width: vh,
-            height:vw ,
-            child: VideoPlayer(controller),
-          ),
-        ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              InteractiveViewer(
+                minScale: 1.0,
+                maxScale: 4.0,
+                boundaryMargin: const EdgeInsets.all(80),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Center(
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width: vh, // swap to keep portrait look as之前
+                          height: vw,
+                          child: VideoPlayer(controller),
+                        ),
+                      ),
+                    ),
+                    if (_trajectoryVisible &&
+                        _trajectoryResult != null &&
+                        _trajectoryResult!['points'] is List &&
+                        (_trajectoryResult!['points'] as List).isNotEmpty)
+                      CustomPaint(
+                        painter: _TrajectoryPainter(
+                          points: (_trajectoryResult!['points'] as List)
+                              .whereType<Map>()
+                              .map((p) => _TrajectoryPoint(
+                                    frame: (p['frame'] ?? 0) as int,
+                                    x: (p['x'] ?? -1) as int,
+                                    y: (p['y'] ?? -1) as int,
+                                    isInlier: (p['isInlier'] ?? p['is_inlier'] ?? 0) as int,
+                                  ))
+                              .toList(),
+                          // keep painter scale consistent with rendered swap
+                          videoSize: Size(vh, vw),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // keep overlays (classification) above zoom/pan layer
+              if (_classificationLabel != null)
+                Positioned(
+                  top: 12, left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20)),
+                    child: Text(_classificationLabel!, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              if (_classificationFeatures.isNotEmpty)
+                Positioned(
+                  top: 56, left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _featRow('rms_dbfs', _classificationFeatures['rms_dbfs']),
+                        _featRow('spectral_centroid', _classificationFeatures['spectral_centroid']),
+                        _featRow('sharpness_hfxloud', _classificationFeatures['sharpness_hfxloud']),
+                        _featRow('highband_amp', _classificationFeatures['highband_amp']),
+                        _featRow('peak_dbfs', _classificationFeatures['peak_dbfs']),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1735,6 +1804,51 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     ctrl.play();
   }
 
+  Future<void> _runTrajectoryAnalysis() async {
+    if (_isTrajectoryRunning) return;
+    setState(() => _isTrajectoryRunning = true);
+    const channel = MethodChannel('com.example.golf_score_app/trajectory');
+    try {
+      final res = await channel.invokeMethod<Map>('analyzeTrajectory', {
+        'videoPath': widget.videoPath,
+      });
+      if (!mounted) return;
+      if (res != null) {
+        setState(() => _trajectoryResult = res.cast<String, dynamic>());
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('軌跡分析完成')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未收到軌跡結果')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('軌跡分析失敗: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isTrajectoryRunning = false);
+    }
+  }
+
+  void _setDemoTrajectory() {
+    final demoPoints = List.generate(12, (i) {
+      return {
+        'frame': i,
+        'x': 100 + i * 15,
+        'y': 600 - i * 25,
+        'isInlier': 1,
+      };
+    });
+    setState(() {
+      _trajectoryResult = {
+        'hit_frame': 3,
+        'init_ball': {'x': 100, 'y': 600, 'r': 10},
+        'polyfit': {'a': -0.0005, 'b': -0.2, 'c': 600.0},
+        'points': demoPoints,
+      };
+      _trajectoryVisible = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已載入模擬軌跡')));
+  }
+
   void _applyAudioSummary(Map<String, dynamic> summary) {
     final pred = summary['audio_class']?.toString();
     setState(() {
@@ -1881,6 +1995,54 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                       ElevatedButton.icon(onPressed: _reAnalyzeForVideo, icon: const Icon(Icons.refresh), label: const Text('Re-run analysis')),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: _isTrajectoryRunning ? null : _runTrajectoryAnalysis,
+                        icon: _isTrajectoryRunning
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.track_changes),
+                        label: const Text('軌跡分析'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _setDemoTrajectory,
+                        child: const Text('模擬軌跡'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => _FullscreenVideoPage(videoPath: widget.videoPath),
+                            ),
+                          );
+                        },
+                        child: const Text('全螢幕'),
+                      ),
+                      if (_trajectoryResult != null) ...[
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '軌跡: ${_trajectoryResult!['hit_frame'] ?? ''}',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        Switch(
+          value: _trajectoryVisible,
+          onChanged: (v) => setState(() => _trajectoryVisible = v),
+          activeColor: Colors.green,
+        ),
+        if ((_trajectoryResult!['points'] as List?)?.isEmpty ?? true)
+          const Padding(
+            padding: EdgeInsets.only(left: 8.0),
+            child: Text('無點資料', style: TextStyle(fontSize: 12, color: Colors.redAccent)),
+          ),
+      ],
+    ],
+  ),
                   const SizedBox(height: 1),
                   Row(
                     children: [
@@ -1901,6 +2063,149 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         onPressed: _canControlVideo ? () => setState(() { _videoController!.value.isPlaying ? _videoController!.pause() : _videoController!.play(); }) : null,
         child: Icon(_canControlVideo && _videoController!.value.isPlaying ? Icons.pause : Icons.play_arrow),
       ),
+    );
+  }
+}
+
+class _TrajectoryPoint {
+  final int frame;
+  final int x;
+  final int y;
+  final int isInlier;
+  _TrajectoryPoint({required this.frame, required this.x, required this.y, required this.isInlier});
+}
+
+class _TrajectoryPainter extends CustomPainter {
+  final List<_TrajectoryPoint> points;
+  final Size videoSize;
+  _TrajectoryPainter({required this.points, required this.videoSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (videoSize.width <= 0 || videoSize.height <= 0) return;
+    final scaleX = size.width / videoSize.width;
+    final scaleY = size.height / videoSize.height;
+    // draw polyline for inliers
+    final inlierPath = Path();
+    final paintInlier = Paint()
+      ..color = Colors.greenAccent.withOpacity(0.8)
+      ..style = PaintingStyle.fill;
+    final paintOutlier = Paint()
+      ..color = Colors.redAccent.withOpacity(0.6)
+      ..style = PaintingStyle.fill;
+    Offset? lastInlier;
+    for (final p in points) {
+      if (p.x < 0 || p.y < 0) continue;
+      final offset = Offset(p.x * scaleX, p.y * scaleY);
+      if (p.isInlier == 1) {
+        if (lastInlier == null) {
+          inlierPath.moveTo(offset.dx, offset.dy);
+        } else {
+          inlierPath.lineTo(offset.dx, offset.dy);
+        }
+        lastInlier = offset;
+      }
+      canvas.drawCircle(offset, 4, p.isInlier == 1 ? paintInlier : paintOutlier);
+    }
+    if (!inlierPath.getBounds().isEmpty) {
+      final linePaint = Paint()
+        ..color = Colors.greenAccent.withOpacity(0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5;
+      canvas.drawPath(inlierPath, linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrajectoryPainter oldDelegate) {
+    return oldDelegate.points != points || oldDelegate.videoSize != videoSize;
+  }
+}
+
+class _FullscreenVideoPage extends StatefulWidget {
+  final String videoPath;
+  const _FullscreenVideoPage({required this.videoPath});
+
+  @override
+  State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
+}
+
+class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
+  VideoPlayerController? _controller;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final file = File(widget.videoPath);
+    if (!file.existsSync()) {
+      _error = 'Video not found';
+      _loading = false;
+      return;
+    }
+    _controller = VideoPlayerController.file(file)
+      ..initialize().then((_) {
+        _controller?.setLooping(true);
+        _controller?.play();
+        if (mounted) setState(() => _loading = false);
+      }).catchError((e) {
+        if (mounted) setState(() {
+          _error = 'Load error: $e';
+          _loading = false;
+        });
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('全螢幕播放'),
+      ),
+      body: Center(
+        child: _loading
+            ? const CircularProgressIndicator()
+            : _error != null
+                ? Text(_error!, style: const TextStyle(color: Colors.white))
+                : InteractiveViewer(
+                    minScale: 1.0,
+                    maxScale: 4.0,
+                    child: AspectRatio(
+                      aspectRatio: 9 / 16, // force portrait container
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width: _controller!.value.size.height == 0 ? 1 : _controller!.value.size.height,
+                          height: _controller!.value.size.width == 0 ? 1 : _controller!.value.size.width,
+                          child: VideoPlayer(_controller!),
+                        ),
+                      ),
+                    ),
+                  ),
+      ),
+      floatingActionButton: _controller == null
+          ? null
+          : FloatingActionButton(
+              onPressed: () {
+                if (_controller!.value.isPlaying) {
+                  _controller!.pause();
+                } else {
+                  _controller!.play();
+                }
+                setState(() {});
+              },
+              child: Icon(_controller!.value.isPlaying ? Icons.pause : Icons.play_arrow),
+            ),
     );
   }
 }

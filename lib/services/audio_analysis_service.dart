@@ -21,6 +21,8 @@ class AudioAnalysisService {
   static const bool _stage2UseThreshold = true;
   static const double _stage2ProZ2Thresh = 10.0;
   static const double _epsilon = 1e-12;
+  // Approximate Python's PEAK_REL_STRENGTH; used for simple peak counting on waveform envelope.
+  static const double _peakRelStrength = 1.0;
 
   static Map<String, dynamic>? _modelStats;
 
@@ -151,96 +153,124 @@ class AudioAnalysisService {
       final Map<dynamic, dynamic>? resp =
           await ch.invokeMapMethod<dynamic, dynamic>('extractAudio', <String, dynamic>{'videoPath': videoPath});
       wavPath = resp?['path'] as String?;
-    } catch (_) {
-      // ignore and try to fall back
+    } catch (e) {
+      print('Error extracting audio: $e');
     }
 
-    // If extractor didn't return a path but the provided path is a WAV, use it
     if ((wavPath == null || wavPath.isEmpty) && videoPath.toLowerCase().endsWith('.wav')) {
       wavPath = videoPath;
     }
 
     if (wavPath == null || wavPath.isEmpty) {
-      // return placeholder to keep callers safe
-      final Map<String, dynamic> summary = <String, dynamic>{
-        'rms_dbfs': null,
-        'peak_dbfs': null,
-        'spectral_centroid': null,
-        'sharpness_hfxloud': null,
-        'band_2k_3k_peak_amp': null,
-        'band_3k_4k_peak_amp': null,
-        'segment_count': 0,
-        'peak_count': 0,
-        'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
-        'audio_class': 'unknown',
-        'audio_feedback': 'Unknown',
-      };
-      return <String, dynamic>{'summary': summary, 'segments': <Map<String, dynamic>>[]};
+      print('No valid WAV path found.');
+      return <String, dynamic>{'summary': {}, 'segments': <Map<String, dynamic>>[]};
     }
 
     try {
       final _WavData wav = await _readWav(wavPath);
       if (wav.samples.isEmpty) {
-        return <String, dynamic>{'summary': <String, dynamic>{}, 'segments': <Map<String, dynamic>>[]};
+        print('WAV file contains no samples.');
+        return <String, dynamic>{'summary': {}, 'segments': <Map<String, dynamic>>[]};
       }
 
-      // Use existing analyzer (audio_analyzer.dart) to compute features on the whole audio
-      final AudioFeatures feats = analyzeFromSamples(wav.samples, wav.sampleRate);
-      final Map<String, double> fmap = feats.toMap();
+      // Detect peaks and segment audio
+      final List<int> peakIndices = _detectPeaks(wav.samples, wav.sampleRate);
+      print('Detected ${peakIndices.length} peaks.');
 
-      final Map<String, dynamic> summary = <String, dynamic>{};
-      summary.addAll(fmap);
-      summary['segment_count'] = 1;
-      summary['peak_count'] = 1;
-      summary['analysis_seconds'] = sw.elapsedMilliseconds / 1000.0;
+      final List<Map<String, dynamic>> segments = _segmentAudio(wav.samples, wav.sampleRate, peakIndices);
+      print('Created ${segments.length} segments.');
 
-      // Run classifier using in-app stats (scoreSummary)
-      try {
+      // Analyze each segment and find the best hit
+      Map<String, dynamic>? bestSegment;
+      double bestScore = double.infinity; // lower distance is better
+
+      for (final segment in segments) {
+        final List<double> segmentSamples = segment['samples'];
+        final AudioFeatures features = analyzeFromSamples(segmentSamples, wav.sampleRate);
+        final Map<String, dynamic> summary = features.toMap();
+        print('Extracted features: $summary');
+
         final _AudioScore? score = await scoreSummary(summary);
+
         if (score != null) {
-          summary['audio_class'] = score.predictedClass;
-          summary['audio_feedback'] = score.feedbackLabel;
-          summary['audio_distances'] = score.distances;
-          // expose highband_amp in summary consistent with other callers
-          if (score.featureValues.containsKey('highband_amp')) summary['highband_amp'] = score.featureValues['highband_amp'];
+          print('Segment score: ${score.distances}, Predicted class: ${score.predictedClass}');
+          final double segmentScore = score.distances.values.isEmpty
+              ? double.infinity
+              : score.distances.values.reduce((a, b) => a + b);
+          if (segmentScore < bestScore) {
+            bestScore = segmentScore;
+            bestSegment = {
+              'start_time': segment['start_time'],
+              'end_time': segment['end_time'],
+              'audio_class': score.predictedClass,
+              'audio_feedback': score.feedbackLabel,
+              'features': summary,
+              'score': segmentScore,
+              'distances': score.distances,
+            };
+          }
         } else {
-          // Model stats loaded但沒有產出分級，給預設未知狀態，讓 UI 至少顯示一個標籤
-          summary['audio_class'] = 'unknown';
-          summary['audio_feedback'] = 'Unknown';
+          print('Score for segment is null.');
         }
-      } catch (_) {}
-      // 確保一定有 audio_class / audio_feedback 欄位，避免前端拿到 null
-      summary['audio_class'] ??= 'unknown';
-      summary['audio_feedback'] ??= 'Unknown';
+      }
 
-      final List<Map<String, dynamic>> segments = <Map<String, dynamic>>[
-        {
-          'idx': 1,
-          'start_time': 0.0,
-          'end_time': wav.samples.length / wav.sampleRate,
-          'peak_time': 0.0,
-          for (final MapEntry<String, double> e in fmap.entries) e.key: e.value,
-        }
-      ];
-
-      return <String, dynamic>{'summary': summary, 'segments': segments};
-    } catch (e) {
-      // fallback placeholder
-      final Map<String, dynamic> summary = <String, dynamic>{
-        'rms_dbfs': null,
-        'peak_dbfs': null,
-        'spectral_centroid': null,
-        'sharpness_hfxloud': null,
-        'band_2k_3k_peak_amp': null,
-        'band_3k_4k_peak_amp': null,
-        'segment_count': 0,
-        'peak_count': 0,
-        'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
-        'audio_class': 'unknown',
-        'audio_feedback': 'Unknown',
+      final double elapsedSeconds = sw.elapsedMilliseconds / 1000.0;
+      return <String, dynamic>{
+        'summary': bestSegment ??
+            {
+              'audio_class': 'unknown',
+              'audio_feedback': 'No valid hits detected',
+            },
+        'segments': segments,
+        'analysis_seconds': elapsedSeconds,
       };
-      return <String, dynamic>{'summary': summary, 'segments': <Map<String, dynamic>>[]};
+    } catch (e) {
+      print('Error during analysis: $e');
+      return <String, dynamic>{'summary': {}, 'segments': <Map<String, dynamic>>[]};
     }
+  }
+
+  static List<int> _detectPeaks(List<double> samples, int sampleRate) {
+    final List<int> peaks = [];
+    if (samples.isEmpty) return peaks;
+    final double maxAbs = samples.map((e) => e.abs()).reduce(max);
+    final double threshold = max(_peakRelStrength * maxAbs, _epsilon);
+    // simple local-max detector with min distance ~0.35s
+    final int minDist = (0.35 * sampleRate).toInt();
+    int lastPeak = -minDist;
+    print('Peak detection threshold: $threshold');
+    for (int i = 1; i < samples.length - 1; i++) {
+      final double v = samples[i].abs();
+      if (v >= threshold && v >= samples[i - 1].abs() && v >= samples[i + 1].abs()) {
+        if (i - lastPeak >= minDist) {
+          peaks.add(i);
+          lastPeak = i;
+          print('Detected peak at index $i with value ${samples[i]}');
+        }
+      }
+    }
+    if (peaks.isEmpty) {
+      print('No peaks detected. Max sample value: $maxAbs');
+    }
+    return peaks;
+  }
+
+  static List<Map<String, dynamic>> _segmentAudio(List<double> samples, int sampleRate, List<int> peakIndices) {
+    final List<Map<String, dynamic>> segments = [];
+    const double segmentDuration = 0.5; // seconds
+    final int segmentSamples = (segmentDuration * sampleRate).toInt();
+
+    for (final int peak in peakIndices) {
+      final int start = max(0, peak - segmentSamples ~/ 2);
+      final int end = min(samples.length, peak + segmentSamples ~/ 2);
+      segments.add({
+        'start_time': start / sampleRate,
+        'end_time': end / sampleRate,
+        'samples': samples.sublist(start, end),
+      });
+    }
+
+    return segments;
   }
 
 }
