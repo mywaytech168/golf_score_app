@@ -10,12 +10,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_audio_capture/flutter_audio_capture.dart';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/recording_history_entry.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/highlight_service.dart';
@@ -1773,6 +1775,41 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             await csvFile.writeAsString(rows.join('\n'));
             final debugFile = File(widget.videoPath.replaceAll(RegExp(r'\.mp4$'), '') + '_analysis_debug.json');
             await debugFile.writeAsString(jsonEncode(result));
+
+            // 將分析結果同步到後端 Swing API
+            final prefs = await SharedPreferences.getInstance();
+            final memberId = prefs.getInt('member_id');
+            if (memberId != null) {
+              final avgAccel = _classificationFeatures['avg_acceleration'] ??
+                  _classificationFeatures['acc_mag_mean'] ??
+                  summary['avg_acceleration'];
+              final maxAccel = _classificationFeatures['max_acceleration'] ?? summary['max_acceleration'];
+              final payload = {
+                'memberId': memberId,
+                'videoPath': widget.videoPath,
+                'label': label,
+                'avgSpeedMph': summary['avg_speed_mph'] ?? summary['avgSpeedMph'],
+                'maxAcceleration': maxAccel,
+                'avgAcceleration': avgAccel,
+                'csvPath': csvFile.path,
+                'dateTime': DateTime.now().toIso8601String(),
+              };
+
+              try {
+                final resp = await http.post(
+                  Uri.parse('http://192.168.0.232:8000/api/Swing/update-or-create'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode(payload),
+                );
+                if (resp.statusCode != 200) {
+                  debugPrint('Sync swing failed: ${resp.statusCode} ${resp.body}');
+                } else {
+                  debugPrint('Swing synced to API: ${resp.body}');
+                }
+              } catch (e) {
+                debugPrint('Sync swing exception: $e');
+              }
+            }
           }
         } catch (_) {}
       }

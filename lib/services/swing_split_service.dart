@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
@@ -15,6 +18,10 @@ class SwingClipResult {
   final double peakValue;
   final String videoPath;
   final String csvPath;
+  final bool goodShot;
+  final bool badShot;
+  final double maxAcceleration;
+  final double avgAcceleration;
 
   SwingClipResult({
     required this.tag,
@@ -24,6 +31,10 @@ class SwingClipResult {
     required this.peakValue,
     required this.videoPath,
     required this.csvPath,
+    required this.goodShot,
+    required this.badShot,
+    required this.maxAcceleration,
+    required this.avgAcceleration,
   });
 }
 
@@ -49,6 +60,8 @@ class SwingSplitService {
     double? prominenceG,
     String outDirName = _defaultOutDirName,
     bool forceSar1 = true,
+    int? memberId,
+    String apiBase = 'http://192.168.0.232:8000',
   }) async {
     final File csvFile = File(imuCsvPath);
     final File videoFile = File(videoPath);
@@ -96,6 +109,20 @@ class SwingSplitService {
       );
       await _writeCsvSegment(series, clipCsv, start, end, pk.time);
 
+      // 計算時間區段內的最大 / 平均加速度（使用 |acc| 而非單軸）
+      final List<double> windowMag = [];
+      for (int j = 0; j < series.time.length; j++) {
+        final t = series.time[j];
+        if (t < start || t > end) continue;
+        final mag = math.sqrt(series.ax[j] * series.ax[j] +
+            series.ay[j] * series.ay[j] +
+            series.az[j] * series.az[j]);
+        windowMag.add(mag);
+      }
+      final double maxAccel = windowMag.isEmpty ? 0 : windowMag.reduce(math.max);
+      final double avgAccel =
+          windowMag.isEmpty ? 0 : windowMag.reduce((a, b) => a + b) / windowMag.length;
+
       results.add(
         SwingClipResult(
           tag: tag,
@@ -105,12 +132,52 @@ class SwingSplitService {
           peakValue: pk.value,
           videoPath: clipPath,
           csvPath: clipCsv,
+          goodShot: pk.value > 30.0, // Example threshold for good shot
+          badShot: pk.value < 10.0, // Example threshold for bad shot
+          maxAcceleration: maxAccel,
+          avgAcceleration: avgAccel,
         ),
       );
+
+      // 將結果同步到後端
+      if (memberId != null) {
+        final label = pk.value >= 30
+            ? 'good'
+            : pk.value <= 10
+                ? 'bad'
+                : 'unknown';
+        final payload = {
+          'memberId': memberId,
+          'videoPath': clipPath,
+          'label': label,
+          'avgSpeedMph': null,
+          'maxAcceleration': maxAccel,
+          'avgAcceleration': avgAccel,
+          'csvPath': clipCsv,
+          'dateTime': DateTime.now().toIso8601String(),
+          'extraJson': '{"peak":${pk.value.toStringAsFixed(4)},"hit":${pk.time.toStringAsFixed(4)}}',
+        };
+        unawaited(_postSwing(apiBase, payload));
+      }
     }
 
     await _writeSummary(results, p.join(outDir.path, 'hits_summary.csv'));
     return results;
+  }
+
+  static Future<void> _postSwing(String apiBase, Map<String, dynamic> payload) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$apiBase/api/Swing/update-or-create'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+      if (resp.statusCode != 200) {
+        debugPrint('swing sync failed: ${resp.statusCode} ${resp.body}');
+      }
+    } catch (e) {
+      debugPrint('swing sync exception: $e');
+    }
   }
 
   // ---- IMU parsing / detection ----
@@ -182,14 +249,14 @@ class SwingSplitService {
 
     final double dtEst = (s.time.last - s.time.first) / math.max(1, (n - 1));
     final int win = math.max(1, (smoothWinSec / math.max(1e-6, dtEst)).round());
+    final int minDistSamples = math.max(1, (minIntervalSec / math.max(1e-6, dtEst)).round());
 
-    final List<double> mag = List<double>.generate(n, (i) {
-      final double x = s.ax[i], y = s.ay[i], z = s.az[i];
-      return math.sqrt(x * x + y * y + z * z);
-    });
+    // 取 |acc| 並做居中移動平均，模擬 python 版 rolling(center=True)
+    final List<double> mag = List<double>.generate(
+        n, (i) => math.sqrt(s.ax[i] * s.ax[i] + s.ay[i] * s.ay[i] + s.az[i] * s.az[i]));
     final List<double> smooth = List<double>.filled(n, 0);
-    final int half = win ~/ 2;
     for (int i = 0; i < n; i++) {
+      final int half = win ~/ 2;
       final int start = math.max(0, i - half);
       final int end = math.min(n - 1, i + half);
       double sum = 0;
@@ -200,21 +267,22 @@ class SwingSplitService {
     }
 
     final List<_Peak> peaks = [];
-    double lastPeakTime = -1e9;
+    int lastPeakIdx = -999999;
     for (int i = 1; i < n - 1; i++) {
       final double v = smooth[i];
       if (v < threshG) continue;
-      if (v < smooth[i - 1] || v < smooth[i + 1]) continue;
-      final double t = s.time[i];
-      if (t - lastPeakTime < minIntervalSec) continue;
+      if (v < smooth[i - 1] || v < smooth[i + 1]) continue; // 必須是局部峰
+      if (i - lastPeakIdx < minDistSamples) continue;
+
       if (prominenceG != null) {
         final double leftMin = smooth[math.max(0, i - win)];
         final double rightMin = smooth[math.min(n - 1, i + win)];
         final double prom = v - math.min(leftMin, rightMin);
         if (prom < prominenceG) continue;
       }
-      peaks.add(_Peak(time: t, value: v));
-      lastPeakTime = t;
+
+      peaks.add(_Peak(time: s.time[i], value: v));
+      lastPeakIdx = i;
     }
     peaks.sort((a, b) => a.time.compareTo(b.time));
     return peaks;
@@ -266,10 +334,10 @@ class SwingSplitService {
 
   static Future<void> _writeSummary(List<SwingClipResult> results, String dst) async {
     final StringBuffer buf = StringBuffer();
-    buf.writeln('hit,t_hit,start_t,end_t,peak_smooth,video_path,csv_path');
+    buf.writeln('hit,t_hit,start_t,end_t,peak_smooth,video_path,csv_path,good_shot,bad_shot,max_acceleration,avg_acceleration');
     for (final r in results) {
       buf.writeln(
-          '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)},${r.videoPath},${r.csvPath}');
+          '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)},${r.videoPath},${r.csvPath},${r.goodShot},${r.badShot},${r.maxAcceleration.toStringAsFixed(6)},${r.avgAcceleration.toStringAsFixed(6)}');
     }
     await File(dst).writeAsString(buf.toString());
   }
@@ -329,5 +397,3 @@ class _Peak {
   final double value;
   _Peak({required this.time, required this.value});
 }
-
-

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'dart:io';
 
 /// 記錄單次錄影完成後的資料，方便首頁與歷史列表顯示
 @immutable
@@ -126,5 +127,28 @@ class RecordingHistoryEntry {
       thumbnailPath:
           rawThumbnail == null || rawThumbnail.isEmpty ? null : rawThumbnail,
     );
+  }
+
+  /// 從 IMU 數據中檢測峰值並返回時間戳
+  List<int> detectPeaksFromImuData(String csvPath) {
+    final peaks = <int>[];
+
+    try {
+      final lines = File(csvPath).readAsLinesSync();
+      for (var i = 1; i < lines.length; i++) {
+        final columns = lines[i].split(',');
+        final timestamp = int.parse(columns[0]);
+        final value = double.parse(columns[1]);
+
+        // 偵測峰值邏輯（簡化版）
+        if (value > 1.0) {
+          peaks.add(timestamp);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error parsing IMU data: $e');
+    }
+
+    return peaks;
   }
 }

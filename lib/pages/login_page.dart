@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io'; // 判斷平台以動態決定權限清單
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // 捕捉平台層級錯誤以便顯示友善訊息
 import 'package:google_sign_in/google_sign_in.dart'; // 引入 Google 登入套件以支援第三方登入
+import 'package:http/http.dart' as http; // 引入 HTTP 套件以支援 API 呼叫
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
 import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
 
@@ -33,6 +36,7 @@ class _LoginPageState extends State<LoginPage> {
   late final Map<Permission, String> _blePermissions; // 依照平台動態產生的權限顯示名稱
   Map<Permission, PermissionStatus> _permissionStatuses = {}; // 儲存各項權限授權狀態
   bool _isGoogleSigningIn = false; // 控制 Google 登入的載入狀態以避免重複觸發
+  bool _isLoading = false; // 控制登入按鈕的載入狀態以避免重複觸發
 
   @override
   void initState() {
@@ -79,21 +83,55 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// 當使用者按下登入按鈕時觸發，先驗證資料再導向首頁
-  Future<void> _handleLogin() async {
+    Future<void> _handleLogin() async {
     if (!(_formKey.currentState?.validate() ?? false)) {
-      return; // 若表單驗證失敗則直接結束
+      return;
     }
 
-    // 登入前先要求使用者授權藍牙與定位權限，確保後續流程正常運作
-    final permissionsGranted = await _ensureBlePermissions();
-    if (!mounted || !permissionsGranted) {
-      return; // 權限未完整授權時暫停導向首頁
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('http://192.168.0.232:8000/api/members/login'),
+            headers: {'Content-Type': 'application/json'},
+            body:
+                '{"email": "${_emailController.text}", "password": "${_passwordController.text}"}',
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final userData = jsonDecode(response.body);
+        final prefs = await SharedPreferences.getInstance();
+        if (userData is Map && userData.containsKey('id')) {
+          final idVal = userData['id'];
+          if (idVal is int) {
+            await prefs.setInt('member_id', idVal);
+          } else if (idVal is String) {
+            final parsed = int.tryParse(idVal);
+            if (parsed != null) await prefs.setInt('member_id', parsed);
+          }
+        }
+        if (userData is Map && userData.containsKey('email')) {
+          await prefs.setString('user_email', userData['email'].toString());
+        }
+        await _persistRememberedCredentials();
+        await _navigateToHome(userData['email']);
+        _showLoginResultSnackBar('Login successful');
+      } else if (response.statusCode == 401) {
+        _showLoginResultSnackBar('Login failed: wrong email or password', isError: true);
+      } else {
+        _showLoginResultSnackBar('Login failed: ${response.body}', isError: true);
+      }
+    } on TimeoutException {
+      _showLoginResultSnackBar('伺服器回應逾時，請稍後再試', isError: true);
+    } catch (_) {
+      _showLoginResultSnackBar('Unable to reach server, please try again', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
-
-    await _persistRememberedCredentials(); // 根據記住我設定保存或清除登入資訊
-
-    // 權限與驗證皆通過後才導向首頁並帶入鏡頭資訊
-    await _navigateToHome(_emailController.text); // 透過共用方法導向首頁並帶入信箱
   }
 
   /// 載入記住我狀態與帳號密碼，協助使用者快速登入
@@ -186,9 +224,10 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// 共用的導向首頁流程，集中管理導航邏輯
+    /// ?????????? email
   Future<void> _navigateToHome(String email) async {
     if (!mounted) {
-      return; // 確認組件仍存在以避免 Navigator 錯誤
+      return;
     }
 
     await Navigator.of(context).pushReplacement(
@@ -201,8 +240,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  /// 使用者切換記住我選項時立即同步本地儲存，避免殘留敏感資訊
-  Future<void> _onRememberMeChanged(bool value) async {
+Future<void> _onRememberMeChanged(bool value) async {
     setState(() {
       _rememberMe = value;
     });
@@ -480,10 +518,11 @@ class _LoginPageState extends State<LoginPage> {
                             ],
                           ),
                           const SizedBox(height: 12),
+                          /// 更新登入按鈕以顯示載入指示器
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: () => _handleLogin(), // 透過匿名函式呼叫非同步登入流程
+                              onPressed: _isLoading ? null : () => _handleLogin(), // 禁用按鈕於載入中
                               style: ElevatedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 backgroundColor: const Color(0xFF1E8E5A),
@@ -491,7 +530,16 @@ class _LoginPageState extends State<LoginPage> {
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                               ),
-                              child: const Text('登入 TekSwing'),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('登入 TekSwing'),
                             ),
                           ),
                           const SizedBox(height: 18),
