@@ -272,3 +272,37 @@ android/app/google-services.json
 web/dist/
 server/wwwroot/dist/
 
+# C# / .NET Server
+## Build results
+server/bin/
+server/obj/
+server/**/bin/
+server/**/obj/
+
+## Visual Studio cache/options
+.vs/
+.vscode/launch.json
+.vscode/extensions.json
+
+## NuGet
+server/*.nuget.props
+server/*.nuget.targets
+server/packages/
+server/.nuget/
+
+## User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+server/appsettings.local.json
+
+## Build folders
+server/*/bin
+server/*/obj
+server/.vs
+
+## Testing
+TestResults/
+coverage.opencover.xml

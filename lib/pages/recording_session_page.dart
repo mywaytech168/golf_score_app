@@ -422,6 +422,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
         imuConnected: widget.isImuConnected,
         imuCsvPaths: imuDestPaths,
         thumbnailPath: thumb,
+        cloudVideoId: null,
       );
       _recordedRuns.add(entry);
       debugPrint('[Save] Entry added to history. Total runs: ${_recordedRuns.length}');

@@ -9,12 +9,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 // restored original local VideoPlayerPage usage
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
 import '../recorder_page.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import '../services/user_profile_storage.dart';
+import '../services/auth_token_storage.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
 import 'profile_edit_page.dart';
@@ -26,10 +28,9 @@ enum _HistoryAction { rename, editDuration, delete }
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
-  final String userEmail; // 使用者登入後的電子郵件
   final List<CameraDescription> cameras; // 傳入鏡頭資訊供後續錄影使用
 
-  const HomePage({super.key, required this.userEmail, required this.cameras});
+  const HomePage({super.key, required this.cameras});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -50,6 +51,7 @@ class _HomePageState extends State<HomePage> {
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
   String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
+  String _userEmail = ''; // 使用者電郵，從 SharedPreferences 讀取
   String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 匯入外部影片的工具實例
   String _formatDurationShort(int seconds) {
@@ -65,16 +67,20 @@ class _HomePageState extends State<HomePage> {
     _loadInitialHistory();
   }
 
-  /// 從本地偏好讀取暱稱與頭像，確保重新進入 App 仍保有個人化設定
+  /// 從本地偏好讀取暱稱、電郵與頭像，確保重新進入 App 仍保有個人化設定
   Future<void> _restoreUserProfile() async {
     final profile =
         await UserProfileStorage.instance.loadProfile(defaultDisplayName: _displayName);
+    final prefs = await SharedPreferences.getInstance();
+    final userEmail = prefs.getString('user_email') ?? '';
+    
     if (!mounted) {
       return; // 若頁面已卸載則不需更新狀態
     }
 
     setState(() {
       _displayName = profile.displayName; // 還原使用者自訂暱稱
+      _userEmail = userEmail; // 還原使用者電郵
       _avatarPath = profile.avatarPath; // 還原之前儲存的頭像
     });
   }
@@ -299,13 +305,51 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 登出用戶
+  Future<void> _logout() async {
+    // 顯示確認對話框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('確認登出'),
+          content: const Text('您確定要登出嗎？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('確定登出', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    // 清除令牌
+    await AuthTokenStorage.instance.clearTokens();
+
+    // 清除本地存儲的用戶信息
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_email');
+
+    if (!mounted) return;
+
+    // 返回登錄頁面
+    Navigator.of(context).pushReplacementNamed('/login');
+  }
+
   /// 開啟個人資訊編輯頁，並在儲存後更新首頁顯示資訊
   Future<void> _openProfileEditPage() async {
     final result = await Navigator.of(context).push<ProfileEditResult>(
       MaterialPageRoute(
         builder: (_) => ProfileEditPage(
           initialDisplayName: _displayName,
-          initialEmail: widget.userEmail,
+          initialEmail: _userEmail,
           initialAvatarPath: _avatarPath,
         ),
       ),
@@ -874,7 +918,6 @@ class _HomePageState extends State<HomePage> {
       setState(() => _currentIndex = index);
       return;
     }
-    setState(() => _currentIndex = index);
   }
 
   /// 透過檔案挑選器挑選影片後匯入，提供 Data Metrics 與 Video Library 共同呼叫
@@ -1300,7 +1343,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 Text(
-                  widget.userEmail,
+                  _userEmail,
                   style: theme.textTheme.bodyMedium?.copyWith(color: const Color(0xFF6E7B87)),
                 ),
               ],
@@ -1310,6 +1353,12 @@ class _HomePageState extends State<HomePage> {
               onPressed: () {},
               tooltip: '通知中心',
               icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0B2A2E)),
+            ),
+            const SizedBox(width: 12),
+            IconButton(
+              onPressed: _logout,
+              tooltip: '登出',
+              icon: const Icon(Icons.logout_rounded, color: Color(0xFF0B2A2E)),
             ),
             const SizedBox(width: 12),
             InkWell(
@@ -1624,10 +1673,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 自訂底部導覽列，模擬設計稿中的五個項目並保留 Quick Start 強調樣式
+  /// 自訂底部導覽列，模擬設計稿中的項目並保留 Quick Start 強調樣式
   Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))],
@@ -1643,7 +1692,7 @@ class _HomePageState extends State<HomePage> {
           ),
           _BottomNavItem(
             icon: Icons.calendar_today_rounded,
-            label: 'Today Info',
+            label: 'Today',
             isActive: _currentIndex == 1,
             onTap: () => _onBottomNavTap(1),
           ),
@@ -1652,7 +1701,7 @@ class _HomePageState extends State<HomePage> {
           ),
           _BottomNavItem(
             icon: Icons.bar_chart_rounded,
-            label: 'Data Metrics',
+            label: 'Metrics',
             isActive: _currentIndex == 3,
             onTap: () => _onBottomNavTap(3),
           ),

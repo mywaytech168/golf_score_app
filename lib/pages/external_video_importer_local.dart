@@ -56,6 +56,7 @@ class ExternalVideoImporter {
       customName: sanitizedName,
       imuCsvPaths: imuCsvPaths,
       thumbnailPath: null,
+      cloudVideoId: null,
     );
   }
 

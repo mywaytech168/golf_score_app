@@ -1,5 +1,126 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'dart:io';
+
+/// 影片類型枚舉
+enum VideoType {
+  /// 本地原始影片
+  original,
+  /// 本地切片
+  localClip,
+  /// 雲端原始影片
+  cloudOriginal,
+  /// 雲端切片
+  cloudClip;
+
+  /// 中文標籤
+  String get label {
+    switch (this) {
+      case VideoType.original:
+        return '本地原始影片';
+      case VideoType.localClip:
+        return '本地切片';
+      case VideoType.cloudOriginal:
+        return '雲端原始影片';
+      case VideoType.cloudClip:
+        return '雲端切片';
+    }
+  }
+
+  /// 圖標表示
+  String get icon {
+    switch (this) {
+      case VideoType.original:
+        return '🎥';
+      case VideoType.localClip:
+        return '✂️';
+      case VideoType.cloudOriginal:
+        return '☁️';
+      case VideoType.cloudClip:
+        return '☁️✂️';
+    }
+  }
+}
+
+/// 同步狀態枚舉
+enum SyncStatus {
+  /// 已同步到雲端
+  synced,
+  /// 未同步到雲端
+  notSynced,
+  /// 同步中
+  syncing,
+  /// 同步失敗
+  failed;
+
+  /// 中文標籤
+  String get label {
+    switch (this) {
+      case SyncStatus.synced:
+        return '✓ 已同步';
+      case SyncStatus.notSynced:
+        return '↻ 未同步';
+      case SyncStatus.syncing:
+        return '⟳ 同步中';
+      case SyncStatus.failed:
+        return '✗ 失敗';
+    }
+  }
+
+  /// 徽章顏色
+  Color get badgeColor {
+    switch (this) {
+      case SyncStatus.synced:
+        return const Color(0xFF1E8E5A); // 綠色
+      case SyncStatus.notSynced:
+        return const Color(0xFF1E88E5); // 藍色
+      case SyncStatus.syncing:
+        return const Color(0xFFFF9800); // 橙色
+      case SyncStatus.failed:
+        return const Color(0xFFD32F2F); // 紅色
+    }
+  }
+}
+
+/// 上傳狀態枚舉
+enum UploadStatus {
+  /// 本地只 - 未上傳
+  local,
+  /// 上傳中
+  uploading,
+  /// 已上傳
+  uploaded,
+  /// 上傳失敗
+  failed;
+
+  /// 轉為使用者可讀的中文標籤
+  String get label {
+    switch (this) {
+      case UploadStatus.local:
+        return '本地';
+      case UploadStatus.uploading:
+        return '上傳中...';
+      case UploadStatus.uploaded:
+        return '已上傳';
+      case UploadStatus.failed:
+        return '上傳失敗';
+    }
+  }
+
+  /// 轉為簡短標籤（UI 顯示用）
+  String get badge {
+    switch (this) {
+      case UploadStatus.local:
+        return '📱 本地';
+      case UploadStatus.uploading:
+        return '⬆️ 上傳中';
+      case UploadStatus.uploaded:
+        return '☁️ 已上傳';
+      case UploadStatus.failed:
+        return '❌ 失敗';
+    }
+  }
+}
 
 /// 記錄單次錄影完成後的資料，方便首頁與歷史列表顯示
 @immutable
@@ -28,6 +149,30 @@ class RecordingHistoryEntry {
   /// 影片縮圖的完整路徑，供首頁與歷史頁顯示預覽畫面
   final String? thumbnailPath;
 
+  /// 上傳狀態：本地 | 上傳中 | 已上傳 | 上傳失敗
+  final UploadStatus uploadStatus;
+
+  /// 上傳到雲端的影片 ID（已上傳時有值）
+  final String? cloudVideoId;
+
+  /// 上傳失敗的原因（uploadStatus=failed 時有值）
+  final String? uploadError;
+
+  /// 最後一次上傳嘗試的時間
+  final DateTime? lastUploadAttempt;
+
+  /// 影片類型（原始/本地切片/雲端切片）
+  final VideoType videoType;
+
+  /// 同步狀態
+  final SyncStatus syncStatus;
+
+  /// 如果是原始影片，標記是否已被切片（只對 VideoType.original 有效）
+  final bool isClipped;
+
+  /// 對應的本地檔案路徑（當影片上傳到雲端時，記錄本地檔案的路徑，用於追踪來源）
+  final String? sourceLocalFilePath;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -37,6 +182,14 @@ class RecordingHistoryEntry {
     this.customName,
     this.imuCsvPaths = const {},
     this.thumbnailPath,
+    this.uploadStatus = UploadStatus.local,
+    this.cloudVideoId,
+    this.uploadError,
+    this.lastUploadAttempt,
+    this.videoType = VideoType.original,
+    this.syncStatus = SyncStatus.notSynced,
+    this.isClipped = false,
+    this.sourceLocalFilePath,
   });
 
   /// 建立更新後的新實例，方便調整時長或其他欄位
@@ -49,6 +202,14 @@ class RecordingHistoryEntry {
     String? customName,
     Map<String, String>? imuCsvPaths,
     String? thumbnailPath,
+    UploadStatus? uploadStatus,
+    String? cloudVideoId,
+    String? uploadError,
+    DateTime? lastUploadAttempt,
+    VideoType? videoType,
+    SyncStatus? syncStatus,
+    bool? isClipped,
+    String? sourceLocalFilePath,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -59,6 +220,14 @@ class RecordingHistoryEntry {
       customName: customName ?? this.customName,
       imuCsvPaths: imuCsvPaths ?? this.imuCsvPaths,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
+      uploadStatus: uploadStatus ?? this.uploadStatus,
+      cloudVideoId: cloudVideoId ?? this.cloudVideoId,
+      uploadError: uploadError ?? this.uploadError,
+      lastUploadAttempt: lastUploadAttempt ?? this.lastUploadAttempt,
+      videoType: videoType ?? this.videoType,
+      syncStatus: syncStatus ?? this.syncStatus,
+      isClipped: isClipped ?? this.isClipped,
+      sourceLocalFilePath: sourceLocalFilePath ?? this.sourceLocalFilePath,
     );
   }
 
@@ -99,6 +268,14 @@ class RecordingHistoryEntry {
       'customName': customName,
       'imuCsvPaths': imuCsvPaths,
       'thumbnailPath': thumbnailPath,
+      'uploadStatus': uploadStatus.name,
+      'cloudVideoId': cloudVideoId,
+      'uploadError': uploadError,
+      'lastUploadAttempt': lastUploadAttempt?.toIso8601String(),
+      'videoType': videoType.name,
+      'syncStatus': syncStatus.name,
+      'isClipped': isClipped,
+      'sourceLocalFilePath': sourceLocalFilePath,
     };
   }
 
@@ -114,6 +291,39 @@ class RecordingHistoryEntry {
     }
 
     final rawThumbnail = (json['thumbnailPath'] as String?)?.trim();
+    
+    // 從字串恢復上傳狀態，預設為本地
+    UploadStatus uploadStatus = UploadStatus.local;
+    final statusStr = json['uploadStatus'] as String?;
+    if (statusStr != null) {
+      try {
+        uploadStatus = UploadStatus.values.byName(statusStr);
+      } catch (e) {
+        debugPrint('Unknown uploadStatus: $statusStr, defaulting to local');
+      }
+    }
+
+    // 從字串恢復影片類型，預設為原始影片
+    VideoType videoType = VideoType.original;
+    final videoTypeStr = json['videoType'] as String?;
+    if (videoTypeStr != null) {
+      try {
+        videoType = VideoType.values.byName(videoTypeStr);
+      } catch (e) {
+        debugPrint('Unknown videoType: $videoTypeStr, defaulting to original');
+      }
+    }
+
+    // 從字串恢復同步狀態，預設為未同步
+    SyncStatus syncStatus = SyncStatus.notSynced;
+    final syncStatusStr = json['syncStatus'] as String?;
+    if (syncStatusStr != null) {
+      try {
+        syncStatus = SyncStatus.values.byName(syncStatusStr);
+      } catch (e) {
+        debugPrint('Unknown syncStatus: $syncStatusStr, defaulting to notSynced');
+      }
+    }
 
     return RecordingHistoryEntry(
       filePath: (json['filePath'] as String?) ?? '',
@@ -126,6 +336,16 @@ class RecordingHistoryEntry {
       imuCsvPaths: parsedCsv,
       thumbnailPath:
           rawThumbnail == null || rawThumbnail.isEmpty ? null : rawThumbnail,
+      uploadStatus: uploadStatus,
+      cloudVideoId: (json['cloudVideoId'] as String?),
+      uploadError: (json['uploadError'] as String?),
+      lastUploadAttempt: json['lastUploadAttempt'] != null
+          ? DateTime.tryParse(json['lastUploadAttempt'] as String)
+          : null,
+      videoType: videoType,
+      syncStatus: syncStatus,
+      isClipped: (json['isClipped'] as bool?) ?? false,
+      sourceLocalFilePath: (json['sourceLocalFilePath'] as String?),
     );
   }
 

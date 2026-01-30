@@ -6,15 +6,18 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
+import '../services/auth_token_storage.dart';
+import '../services/video_server_client.dart';
 import '../services/swing_split_service.dart';
 import 'recording_session_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, editDuration, delete, split }
+enum _HistoryMenuAction { rename, editDuration, delete, split, upload, unbindCloud }
 
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
@@ -40,6 +43,43 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
     Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_entries));
+  }
+
+  /// 根據視頻檔案路徑獲取對應的縮略圖路徑
+  /// 例如：/path/REC_20260129100658.mp4 -> /path/REC_20260129100658.jpg
+  String _getThumbnailPath(String videoFilePath) {
+    final withoutExtension = videoFilePath.replaceFirst(RegExp(r'\.[^.]*$'), '');
+    return '$withoutExtension.jpg';
+  }
+
+  /// 為指定的視頻生成縮略圖
+  /// 使用 VideoThumbnail 套件從視頻的第一幀提取縮略圖
+  Future<String?> _generateThumbnailForVideo(String videoPath) async {
+    try {
+      debugPrint('[歷史頁] 正在為 $videoPath 生成縮略圖...');
+      final targetPath = _getThumbnailPath(videoPath);
+      
+      // 使用 video_thumbnail 套件生成縮略圖
+      // 如果套件可用，會生成 JPEG 縮略圖；否則返回 null
+      final thumb = await vt.VideoThumbnail.thumbnailFile(
+        video: videoPath,
+        imageFormat: vt.ImageFormat.JPEG,
+        timeMs: 0, // 從第 0 毫秒處提取
+        quality: 75,
+        thumbnailPath: targetPath,
+      );
+      
+      if (thumb != null && thumb.isNotEmpty) {
+        debugPrint('[歷史頁] ✅ 縮略圖成功生成: $targetPath');
+        return targetPath;
+      } else {
+        debugPrint('[歷史頁] ⚠️ 縮略圖生成失敗: $videoPath');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('[歷史頁] ❌ 生成縮略圖時發生錯誤: $e');
+      return null;
+    }
   }
 
   /// 移除指定紀錄並同步刪除實體檔案
@@ -90,6 +130,49 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   }
 
 
+  /// 移除影片與雲端的綁定，將狀態重置為未同步
+  Future<void> _unbindCloudVideo(RecordingHistoryEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('確認移除雲端綁定'),
+        content: const Text('這將解除影片與雲端的連接，但不會刪除雲端檔案。解除後可以重新上傳為新的影片。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('移除綁定'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final index = _entries.indexWhere((item) =>
+        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
+    if (index == -1) return;
+
+    // 更新條目：清除雲端相關資訊，重置為未同步狀態
+    _entries[index] = _entries[index].copyWith(
+      syncStatus: SyncStatus.notSynced,
+      cloudVideoId: null,
+    );
+
+    await RecordingHistoryStorage.instance.saveHistory(_entries);
+    
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已移除 ${entry.displayTitle} 的雲端綁定')),
+      );
+    }
+  }
+
   Future<void> _splitEntry(RecordingHistoryEntry entry) async {
     final String? csvPath = entry.imuCsvPaths.isNotEmpty
         ? entry.imuCsvPaths.values.first
@@ -135,6 +218,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         for (int i = 0; i < results.length; i++) {
           final r = results[i];
           final duration = (r.endSecond - r.startSecond).round().clamp(0, 24 * 60 * 60);
+          
+          // 為切片生成縮圖
+          final clipThumbnailPath = _getThumbnailPath(r.videoPath);
+          
           newEntries.add(
             RecordingHistoryEntry(
               filePath: r.videoPath,
@@ -143,8 +230,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
               durationSeconds: duration,
               imuConnected: true,
               customName: '${entry.displayTitle}_${r.tag}',
-              imuCsvPaths: {'split': r.csvPath},
-              thumbnailPath: null,
+              imuCsvPaths: {'right_wrist': r.csvPath},
+              thumbnailPath: clipThumbnailPath,
+              cloudVideoId: null,
+              isClipped: true,
+              videoType: VideoType.localClip,
             ),
           );
         }
@@ -152,6 +242,32 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         await RecordingHistoryStorage.instance.saveHistory(_entries);
         if (mounted) {
           setState(() {});
+        }
+        
+        // 為每個切片生成縮略圖
+        debugPrint('[歷史頁] 開始為 ${newEntries.length} 個切片生成縮略圖');
+        for (int i = 0; i < newEntries.length; i++) {
+          final clipEntry = newEntries[i];
+          debugPrint('[歷史頁] 正在為第 $i 個切片生成縮略圖: ${clipEntry.filePath}');
+          
+          // 實際生成縮略圖文件
+          final generatedThumbnailPath = await _generateThumbnailForVideo(clipEntry.filePath);
+          
+          if (generatedThumbnailPath != null && generatedThumbnailPath.isNotEmpty) {
+            // 更新本地記錄中的縮略圖路徑
+            _entries[i] = _entries[i].copyWith(thumbnailPath: generatedThumbnailPath);
+            debugPrint('[歷史頁] ✅ 第 $i 個切片的縮略圖已生成: $generatedThumbnailPath');
+          } else {
+            debugPrint('[歷史頁] ⚠️ 第 $i 個切片的縮略圖生成失敗');
+          }
+        }
+        await RecordingHistoryStorage.instance.saveHistory(_entries);
+        
+        // 自動上傳每個切片
+        debugPrint('[歷史頁] 開始自動上傳 ${newEntries.length} 個切片');
+        for (final clipEntry in newEntries) {
+          debugPrint('[歷史頁] 正在上傳切片: ${clipEntry.customName}');
+          await _uploadEntry(clipEntry);
         }
       }
       if (!mounted) return;
@@ -418,6 +534,312 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     await _playVideoByPath(entry.filePath, missingFileName: entry.fileName);
   }
 
+  /// 上傳未同步的錄影
+  Future<void> _uploadEntry(RecordingHistoryEntry entry) async {
+    // 只有已同步或正在同步中的才禁止上傳，失败也允许重新上传
+    if (entry.syncStatus == SyncStatus.synced || entry.syncStatus == SyncStatus.syncing) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('此影片已同步或正在同步中')),
+      );
+      return;
+    }
+
+    debugPrint('═══════════════════════════════════════════════════════════');
+    debugPrint('[歷史頁] 開始上傳流程');
+    debugPrint('═══════════════════════════════════════════════════════════');
+    debugPrint('📹 影片名稱: ${entry.displayTitle}');
+    debugPrint('📂 檔案名稱: ${entry.fileName}');
+    debugPrint('📍 檔案路徑: ${entry.filePath}');
+    debugPrint('⏰ 錄製時間: ${entry.recordedAt}');
+    debugPrint('📊 同步狀態: ${entry.syncStatus}');
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('開始上傳 ${entry.displayTitle}...')),
+    );
+
+    // 更新同步狀態為 syncing
+    final int entryIndex = _entries.indexWhere((e) =>
+        e.filePath == entry.filePath && e.recordedAt == entry.recordedAt);
+    if (entryIndex == -1) return;
+
+    _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.syncing);
+    if (mounted) {
+      setState(() {});
+    }
+
+    try {
+      // 檢查用戶是否已登入
+      debugPrint('[歷史頁] 檢查登入狀態...');
+      final isLoggedIn = await AuthTokenStorage.instance.isLoggedIn();
+      final userId = await AuthTokenStorage.instance.getUserId();
+      debugPrint('✅ 登入狀態: $isLoggedIn');
+      debugPrint('👤 用戶 ID: $userId');
+      
+      if (!isLoggedIn) {
+        // 導航到登入頁面
+        if (!mounted) return;
+        
+        _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
+        if (mounted) {
+          setState(() {});
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('請登入後重試上傳')),
+        );
+        
+        Navigator.of(context).pushReplacementNamed('/login');
+        return;
+      }
+
+      // 檢查文件是否存在
+      debugPrint('[歷史頁] 檢查本地檔案...');
+      final file = File(entry.filePath);
+      final exists = await file.exists();
+      debugPrint('📂 檔案存在: $exists');
+      
+      if (!exists) {
+        throw Exception('視頻文件不存在：${entry.filePath}');
+      }
+
+      final fileSize = await file.length();
+      debugPrint('💾 檔案大小: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
+
+      final serverClient = VideoServerClient();
+
+      // 1. 在服務器上建立視頻紀錄
+      debugPrint('[歷史頁] 步驟 1：建立服務器視頻紀錄');
+      final createResponse = await serverClient.createVideo(
+        name: entry.displayTitle,
+        type: 'original',
+      );
+
+      if (!createResponse['success']) {
+        final error = createResponse['error'] ?? '未知錯誤';
+        
+        // 如果是 401 未授權，返回登入頁
+        if (error.contains('401') || error.contains('未授權') || error.contains('無效的用戶身份')) {
+          if (!mounted) return;
+          
+          _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
+          if (mounted) {
+            setState(() {});
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('登入已過期，請重新登入')),
+          );
+          
+          await AuthTokenStorage.instance.clearTokens();
+          Navigator.of(context).pushReplacementNamed('/login');
+          return;
+        }
+        
+        throw Exception('建立視頻失敗：$error');
+      }
+
+      // 從響應中提取視頻 ID
+      // VideoServerClient 返回結構: { success: true, data: {...parsed json...} }
+      // 而伺服器 API 的 JSON 返回結構: { success: true, video: { id: "...", ... } }
+      var videoId;
+      
+      final data = createResponse['data'];
+      if (data is Map) {
+        // 直接取 data['video']['id'] 或 data['id']
+        if (data['video'] != null) {
+          videoId = data['video']['id'];
+        } else {
+          videoId = data['id'];
+        }
+      }
+      
+      if (videoId == null || videoId.toString().isEmpty) {
+        debugPrint('[歷史頁] DEBUG 回應: $createResponse');
+        throw Exception('無法從服務器回應取得視頻 ID');
+      }
+
+      debugPrint('[歷史頁] ✅ 視頻紀錄建立成功，ID: $videoId');
+
+      // 立即將 videoId 綁定到本地記錄（用於追踪和恢復）
+      _entries[entryIndex] = _entries[entryIndex].copyWith(
+        cloudVideoId: videoId,
+      );
+      await RecordingHistoryStorage.instance.saveHistory(_entries);
+      debugPrint('[歷史頁] 已將視頻 ID 綁定到本地記錄：cloudVideoId=$videoId');
+
+      // 2. 上傳視頻文件
+      debugPrint('[歷史頁] 步驟 2：上傳視頻文件');
+      debugPrint('📤 正在上傳檔案到伺服器...');
+      debugPrint('🔗 API 端點: /api/videos/$videoId/files');
+      final videoFileType = entry.isClipped ? 'clip' : 'original';
+      final uploadResponse = await serverClient.uploadVideoFile(
+        videoId: videoId,
+        videoFilePath: entry.filePath,
+        fileType: videoFileType,
+        sourceLocalFilePath: entry.filePath,
+      );
+
+      debugPrint('📥 上傳回應: ${uploadResponse['success']}');
+      
+      if (!uploadResponse['success']) {
+        final error = uploadResponse['error'] ?? '未知錯誤';
+        debugPrint('❌ 上傳錯誤: $error');
+        
+        // 如果是 401 未授權，返回登入頁
+        if (error.contains('401') || error.contains('未授權')) {
+          if (!mounted) return;
+          
+          _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
+          if (mounted) {
+            setState(() {});
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('登入已過期，請重新登入')),
+          );
+          
+          await AuthTokenStorage.instance.clearTokens();
+          Navigator.of(context).pushReplacementNamed('/login');
+          return;
+        }
+        
+        throw Exception('上傳文件失敗：$error');
+      }
+
+      debugPrint('[歷史頁] ✅ 視頻文件上傳成功');
+
+      // 2.5 上傳 CSV 文件（IMU 數據）
+      debugPrint('[歷史頁] 步驟 2.5：上傳 CSV 文件');
+      if (entry.imuCsvPaths.isNotEmpty) {
+        for (final csvEntry in entry.imuCsvPaths.entries) {
+          final csvLabel = csvEntry.key; // e.g., "RIGHT_WRIST", "CHEST"
+          final csvPath = csvEntry.value;
+          
+          if (await File(csvPath).exists()) {
+            debugPrint('📊 上傳 $csvLabel CSV: $csvPath');
+            final csvResponse = await serverClient.uploadVideoFile(
+              videoId: videoId,
+              videoFilePath: csvPath,
+              fileType: csvLabel.toLowerCase(), // 使用 "right_wrist" 或 "chest" 作為檔案類型
+              sourceLocalFilePath: csvPath,
+            );
+
+            if (csvResponse['success']) {
+              debugPrint('[歷史頁] ✅ $csvLabel CSV 上傳成功');
+            } else {
+              debugPrint('[歷史頁] ⚠️ $csvLabel CSV 上傳失敗，但繼續進行');
+            }
+          } else {
+            debugPrint('📊 未找到 $csvLabel CSV: $csvPath，跳過上傳');
+          }
+        }
+      } else {
+        debugPrint('📊 未找到任何 CSV 文件，跳過上傳');
+      }
+
+      // 2.6 上傳縮略圖（如果存在）
+      debugPrint('[歷史頁] 步驟 2.6：上傳縮略圖');
+      // 優先使用本地記錄的 thumbnailPath，如果沒有則試圖生成
+      final storedThumbnailPath = entry.thumbnailPath?.trim() ?? '';
+      final generatedThumbnailPath = _getThumbnailPath(entry.filePath);
+      
+      String? finalThumbnailPath;
+      if (storedThumbnailPath.isNotEmpty && await File(storedThumbnailPath).exists()) {
+        finalThumbnailPath = storedThumbnailPath;
+        debugPrint('📸 使用已記錄的縮略圖: $storedThumbnailPath');
+      } else if (await File(generatedThumbnailPath).exists()) {
+        finalThumbnailPath = generatedThumbnailPath;
+        debugPrint('📸 使用生成的縮略圖路徑: $generatedThumbnailPath');
+      }
+      
+      if (finalThumbnailPath != null && finalThumbnailPath.isNotEmpty) {
+        debugPrint('📸 發現縮略圖: $finalThumbnailPath');
+        final thumbnailResponse = await serverClient.uploadVideoFile(
+          videoId: videoId,
+          videoFilePath: finalThumbnailPath,
+          fileType: 'thumbnail',
+          sourceLocalFilePath: finalThumbnailPath,
+        );
+
+        if (thumbnailResponse['success']) {
+          debugPrint('[歷史頁] ✅ 縮略圖上傳成功');
+        } else {
+          debugPrint('[歷史頁] ⚠️ 縮略圖上傳失敗，但繼續進行');
+        }
+      } else {
+        debugPrint('📸 未找到縮略圖，跳過上傳');
+      }
+
+      // 3. 標記影片上傳完成
+      debugPrint('[歷史頁] 步驟 3：標記上傳完成');
+      final completeResponse = await serverClient.markVideoUploadComplete(
+        videoId: videoId,
+      );
+
+      if (!completeResponse['success']) {
+        final error = completeResponse['error'] ?? '未知錯誤';
+        debugPrint('❌ 標記完成失敗: $error');
+        
+        if (error.contains('401') || error.contains('未授權')) {
+          if (!mounted) return;
+          
+          _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
+          if (mounted) {
+            setState(() {});
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('登入已過期，請重新登入')),
+          );
+          
+          await AuthTokenStorage.instance.clearTokens();
+          Navigator.of(context).pushReplacementNamed('/login');
+          return;
+        }
+        
+        throw Exception('標記上傳完成失敗：$error');
+      }
+
+      debugPrint('[歷史頁] ✅ 影片上傳完成標記成功');
+
+      // 4. 更新同步狀態
+      debugPrint('[歷史頁] 步驟 4：保存同步狀態');
+      _entries[entryIndex] = _entries[entryIndex].copyWith(
+        syncStatus: SyncStatus.synced,
+        cloudVideoId: videoId.toString(),
+      );
+      await RecordingHistoryStorage.instance.saveHistory(_entries);
+      
+      if (!mounted) return;
+      setState(() {});
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${entry.displayTitle} 上傳成功')),
+      );
+
+      debugPrint('[歷史頁] ✅ 上傳流程完成');
+      debugPrint('═══════════════════════════════════════════════════════════');
+    } catch (e) {
+      debugPrint('═══════════════════════════════════════════════════════════');
+      debugPrint('[歷史頁] ❌ 上傳失敗: $e');
+      debugPrint('📋 堆棧追蹤:');
+      debugPrint(e.toString());
+      debugPrint('═══════════════════════════════════════════════════════════');
+      
+      _entries[entryIndex] = _entries[entryIndex].copyWith(
+        syncStatus: SyncStatus.failed,
+        uploadError: e.toString(),
+      );
+      if (mounted) {
+        setState(() {});
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('上傳失敗：$e')),
+      );
+    }
+  }
+
   /// 透過檔案挑選器匯入外部影片，並加入現有練習歷史清單
   Future<void> _importExternalVideo() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.video);
@@ -538,6 +960,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     onEditDuration: () => _editEntryDuration(entry),
                     onSplit: () => _splitEntry(entry),
                     onDelete: () => _deleteEntry(entry),
+                    onUpload: entry.syncStatus == SyncStatus.notSynced || entry.syncStatus == SyncStatus.failed
+                        ? () => _uploadEntry(entry)
+                        : null,
+                    onUnbindCloud: entry.syncStatus == SyncStatus.synced
+                        ? () => _unbindCloudVideo(entry)
+                        : null,
                   );
                 },
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -584,6 +1012,8 @@ class _HistoryTile extends StatelessWidget {
   final VoidCallback onEditDuration; // 調整影片時長
   final VoidCallback onSplit; // 自動分片
   final VoidCallback onDelete; // 刪除影片紀錄
+  final VoidCallback? onUpload; // 上傳影片（未同步時可用）
+  final VoidCallback? onUnbindCloud; // 移除雲端綁定（已同步時可用）
 
   const _HistoryTile({
     required this.entry,
@@ -593,6 +1023,8 @@ class _HistoryTile extends StatelessWidget {
     required this.onEditDuration,
     required this.onSplit,
     required this.onDelete,
+    this.onUpload,
+    this.onUnbindCloud,
   });
 
   @override
@@ -601,7 +1033,7 @@ class _HistoryTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -609,85 +1041,204 @@ class _HistoryTile extends StatelessWidget {
             BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
           ],
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _HistoryPreview(thumbnailPath: entry.thumbnailPath, roundIndex: entry.roundIndex),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.displayTitle,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF123B70),
+            // 第一行：縮圖、標題和操作按鈕
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 縮圖
+                _HistoryPreview(
+                  thumbnailPath: entry.thumbnailPath,
+                  roundIndex: entry.roundIndex,
+                ),
+                const SizedBox(width: 12),
+                // 標題和同步狀態
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        entry.displayTitle,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF123B70),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      // 狀態徽章區
+                      Row(
+                        children: [
+                          // 同步狀態徽章
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: entry.syncStatus.badgeColor.withAlpha(30),
+                              border: Border.all(
+                                color: entry.syncStatus.badgeColor,
+                                width: 1,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              entry.syncStatus.label,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: entry.syncStatus.badgeColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // 已切片標記（只對原始影片顯示）
+                          if (entry.videoType == VideoType.original &&
+                              entry.isClipped)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF9800).withAlpha(30),
+                                border: Border.all(
+                                  color: const Color(0xFFFF9800),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                '✂️ 已切片',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFFFF9800),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // 右側操作按鈕（固定位置）
+                PopupMenuButton<_HistoryMenuAction>(
+                  tooltip: '更多操作',
+                  icon: const Icon(
+                    Icons.more_vert,
+                    color: Color(0xFF123B70),
+                    size: 20,
+                  ),
+                  onSelected: (action) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      switch (action) {
+                        case _HistoryMenuAction.rename:
+                          onRename();
+                          break;
+                        case _HistoryMenuAction.editDuration:
+                          onEditDuration();
+                          break;
+                        case _HistoryMenuAction.split:
+                          onSplit();
+                          break;
+                        case _HistoryMenuAction.upload:
+                          onUpload?.call();
+                          break;
+                        case _HistoryMenuAction.delete:
+                          onDelete();
+                          break;
+                        case _HistoryMenuAction.unbindCloud:
+                          onUnbindCloud?.call();
+                          break;
+                      }
+                    });
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.rename,
+                      child: Text('重新命名'),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '$formattedTime · ${entry.durationSeconds} 秒 · ${entry.modeLabel}',
-                    style: const TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    entry.fileName,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF9AA6B2)),
-                  ),
-                  if (entry.hasImuCsv) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'IMU CSV：${entry.csvFileNames.join(', ')}',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF4F5D75)),
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.editDuration,
+                      child: Text('調整時長'),
+                    ),
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.split,
+                      child: Text('自動分片'),
+                    ),
+                    if (onUpload != null)
+                      const PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.upload,
+                        child: Text('上傳到雲端'),
+                      ),
+                    if (entry.syncStatus == SyncStatus.synced)
+                      const PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.unbindCloud,
+                        child: Text('移除雲端綁定'),
+                      ),
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.delete,
+                      child: Text('刪除影片'),
                     ),
                   ],
-                ],
-              ),
-            ),
-            const Icon(Icons.play_arrow_rounded, color: Color(0xFF1E8E5A), size: 32),
-            const SizedBox(width: 4),
-            PopupMenuButton<_HistoryMenuAction>(
-              tooltip: '更多操作',
-              icon: const Icon(Icons.more_vert, color: Color(0xFF123B70)),
-              onSelected: (action) {
-                // 透過 addPostFrameCallback 於下一幀處理操作，避免 PopupMenu 關閉動畫期間觸發 setState
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  switch (action) {
-                    case _HistoryMenuAction.rename:
-                      onRename();
-                      break;
-                    case _HistoryMenuAction.editDuration:
-                      onEditDuration();
-                      break;
-                    case _HistoryMenuAction.split:
-                      onSplit();
-                      break;
-                    case _HistoryMenuAction.delete:
-                      onDelete();
-                      break;
-                  }
-                });
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem<_HistoryMenuAction>(
-                  value: _HistoryMenuAction.rename,
-                  child: Text('重新命名'),
-                ),
-                PopupMenuItem<_HistoryMenuAction>(
-                  value: _HistoryMenuAction.editDuration,
-                  child: Text('調整時長'),
-                ),
-                PopupMenuItem<_HistoryMenuAction>(
-                  value: _HistoryMenuAction.split,
-                  child: Text('自動分片'),
-                ),
-                PopupMenuItem<_HistoryMenuAction>(
-                  value: _HistoryMenuAction.delete,
-                  child: Text('刪除影片'),
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            // 第二行：時間、時長、模式（帶播放按鈕）
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    '$formattedTime · ${entry.durationSeconds} 秒 · ${entry.modeLabel}',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: onTap,
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 12),
+                    child: Icon(
+                      Icons.play_arrow_rounded,
+                      color: Color(0xFF1E8E5A),
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // 第三行：影片類型和檔名
+            Text(
+              '${entry.videoType.icon} ${entry.videoType.label}',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF9AA6B2)),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              entry.fileName,
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (entry.hasImuCsv) ...[
+              const SizedBox(height: 6),
+              Text(
+                'IMU CSV：${entry.csvFileNames.join(', ')}',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF4F5D75)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ],
         ),
       ),
