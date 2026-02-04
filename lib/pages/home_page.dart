@@ -17,6 +17,7 @@ import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import '../services/user_profile_storage.dart';
 import '../services/auth_token_storage.dart';
+import '../services/video_server_client.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
 import 'profile_edit_page.dart';
@@ -65,6 +66,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _restoreUserProfile();
     _loadInitialHistory();
+    _loadCloudHistory();  // 並行加載雲端列表
   }
 
   /// 從本地偏好讀取暱稱、電郵與頭像，確保重新進入 App 仍保有個人化設定
@@ -576,6 +578,101 @@ class _HomePageState extends State<HomePage> {
     }
 
     unawaited(_refreshDashboardMetrics());
+  }
+
+  /// 從雲端 API 載入用戶上傳的影片列表，並合併到本地列表
+  Future<void> _loadCloudHistory() async {
+    try {
+      // 檢查用戶是否已登錄（基於 token）
+      final token = await AuthTokenStorage.instance.getAccessToken();
+      if (token == null || token.isEmpty) {
+        debugPrint('[首頁] 未登錄或 token 已過期，跳過雲端列表載入');
+        return;
+      }
+
+      // 呼叫 API 獲取用戶的雲端影片列表
+      final result = await VideoServerClient.instance.getVideos(
+        limit: 100, // 一次載入最多 100 部影片
+      );
+      
+      if (!result['success'] || result['data'] == null) {
+        debugPrint('[首頁] ⚠️ 雲端列表載入失敗：${result['error'] ?? "未知錯誤"}');
+        return;
+      }
+
+      final videoList = result['data'];
+      if (videoList is! List) {
+        debugPrint('[首頁] ⚠️ 雲端列表格式錯誤');
+        return;
+      }
+
+      debugPrint('[首頁] 雲端列表載入完成，共 ${videoList.length} 部影片');
+
+      if (!mounted) return;
+
+      // 轉換雲端影片為 RecordingHistoryEntry 物件
+      final cloudEntries = <RecordingHistoryEntry>[];
+      for (final video in videoList) {
+        try {
+          final entry = RecordingHistoryEntry(
+            filePath: video['videoUrl'] ?? video['url'] ?? '',
+            roundIndex: 0, // 雲端影片不在本地，設為 0
+            recordedAt: video['createdAt'] != null
+                ? DateTime.parse(video['createdAt'])
+                : DateTime.now(),
+            durationSeconds: (video['duration'] as num?)?.toInt() ?? 0,
+            imuConnected: false, // 雲端影片無法判斷 IMU 狀態
+            cloudVideoId: video['id']?.toString() ?? '',
+            videoType: VideoType.cloudOriginal,
+            uploadStatus: UploadStatus.uploaded,
+            syncStatus: SyncStatus.synced,
+          );
+          cloudEntries.add(entry);
+        } catch (e) {
+          debugPrint('[首頁] ⚠️ 轉換雲端影片失敗：$e');
+        }
+      }
+
+      // 合併本地和雲端列表
+      _mergeHistoryLists(cloudEntries);
+    } catch (e) {
+      debugPrint('[首頁] ❌ 載入雲端列表異常：$e');
+      // 不影響本地列表顯示，靜默處理錯誤
+    }
+  }
+
+  /// 合併雲端列表到本地列表，進行去重和排序
+  void _mergeHistoryLists(List<RecordingHistoryEntry> cloudEntries) {
+    if (cloudEntries.isEmpty) return;
+
+    setState(() {
+      // 用於去重的集合（使用 cloudVideoId 和 sourceLocalFilePath）
+      final localCloudIds = _recordingHistory
+          .where((e) => e.cloudVideoId != null && e.cloudVideoId!.isNotEmpty)
+          .map((e) => e.cloudVideoId!)
+          .toSet();
+
+      // 過濾掉已存在於本地列表的雲端影片
+      final newCloudEntries = cloudEntries
+          .where((cloud) =>
+              !localCloudIds.contains(cloud.cloudVideoId) &&
+              !_recordingHistory.any((local) =>
+                  local.cloudVideoId == cloud.cloudVideoId ||
+                  local.filePath == cloud.filePath))
+          .toList();
+
+      if (newCloudEntries.isNotEmpty) {
+        debugPrint('[首頁] 添加 ${newCloudEntries.length} 部新的雲端影片');
+        _recordingHistory.addAll(newCloudEntries);
+
+        // 重新排序：按時間戳記排序（最新在前）
+        _recordingHistory.sort(
+          (a, b) => b.recordedAt.compareTo(a.recordedAt),
+        );
+
+        _practiceCount = _recordingHistory.length;
+      }
+    });
   }
 
   /// 檢查縮圖檔案是否存在，若遺失則將欄位清空避免顯示破圖

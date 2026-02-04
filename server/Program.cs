@@ -73,6 +73,12 @@ builder.Services.AddDbContext<VideoDbContext>(options =>
 builder.Services.AddScoped<VideoUploadService>();
 builder.Services.AddScoped<AuthService>();
 
+// HTTP 客戶端工廠配置
+builder.Services.AddHttpClient();
+
+// 後台服務 - 排程器
+builder.Services.AddHostedService<ProcessingSchedulerService>();
+
 // ============================================================
 // 3. CORS 跨域配置
 // ============================================================

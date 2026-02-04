@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
 
 import '../services/highlight_service.dart';
+import '../services/auth_token_storage.dart';
 
 const double _portraitAspect = 16/ 9; // force a portrait container regardless of source video
 
@@ -29,10 +30,16 @@ Widget _buildVideoBox(VideoPlayerController controller) {
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
-  const VideoPlayerPage({super.key, required this.videoPath, this.avatarPath});
+  const VideoPlayerPage({
+    super.key,
+    required this.videoPath,
+    this.avatarPath,
+    this.cloudVideoId,
+  });
 
   final String videoPath;
   final String? avatarPath;
+  final String? cloudVideoId; // 云端视频 ID（如果有的话）
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -53,6 +60,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   void _initController() {
+    // 如果有云端视频 ID，优先使用云端版本
+    if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
+      debugPrint('[播放器] 检测到云端视频 ID，优先使用云端版本');
+      _initCloudController();
+    } else {
+      debugPrint('[播放器] 使用本地视频文件');
+      _initLocalController();
+    }
+  }
+
+  /// 初始化本地视频播放器
+  void _initLocalController() {
     final file = File(widget.videoPath);
     if (!file.existsSync()) {
       setState(() => _errorMessage = 'Video file not found.');
@@ -67,6 +86,48 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }).catchError((e) {
       setState(() => _errorMessage = 'Unable to play: $e');
     });
+  }
+
+  /// 初始化云端视频播放器
+  void _initCloudController() async {
+    try {
+      // 获取访问令牌
+      final token = await AuthTokenStorage.instance.getAccessToken();
+      if (token == null) {
+        setState(() => _errorMessage = 'Please login to play cloud videos');
+        return;
+      }
+
+      // 构建云端视频流 URL
+      const String baseUrl = 'https://tekswing.api.atk.tw';
+      final streamUrl = '$baseUrl/api/videos/${widget.cloudVideoId}/stream';
+      
+      debugPrint('[播放器] 云端视频流 URL: $streamUrl');
+
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(streamUrl),
+        httpHeaders: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+      
+      _controller = controller;
+      _initializeFuture = controller.initialize().then((_) {
+        debugPrint('[播放器] 云端视频初始化成功');
+        controller.setLooping(true);
+        controller.play();
+        setState(() {});
+      }).catchError((e) {
+        debugPrint('[播放器] 云端视频初始化失败: $e');
+        // 如果云端加载失败，回退到本地版本
+        setState(() => _errorMessage = 'Failed to load cloud video: $e. Falling back to local version.');
+        _initLocalController();
+      });
+    } catch (e) {
+      debugPrint('[播放器] 云端视频初始化异常: $e');
+      setState(() => _errorMessage = 'Error loading cloud video: $e');
+      _initLocalController();
+    }
   }
 
   @override

@@ -24,7 +24,7 @@ namespace UploadServer.Data
         public DbSet<User> Users { get; set; }
         public DbSet<Video> Videos { get; set; }
         public DbSet<FileModel> Files { get; set; }
-        public DbSet<ProcessQueueItem> ProcessQueue { get; set; }
+        public DbSet<ProcessQueueItem> ProcessQueueItems { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -306,14 +306,6 @@ namespace UploadServer.Data
                     .HasMaxLength(36)
                     .IsRequired();
 
-                entity.Property(e => e.Priority)
-                    .HasColumnName("priority")
-                    .HasDefaultValue(0);
-
-                entity.Property(e => e.AssignedWorkerId)
-                    .HasColumnName("assigned_worker_id")
-                    .HasMaxLength(100);
-
                 entity.Property(e => e.Status)
                     .HasColumnName("status")
                     .HasMaxLength(50)
@@ -335,15 +327,18 @@ namespace UploadServer.Data
                     .HasColumnName("retry_count")
                     .HasDefaultValue(0);
 
-                entity.Property(e => e.ErrorMessage)
-                    .HasColumnName("error_message")
-                    .HasColumnType("TEXT");
+                entity.Property(e => e.IsSuccess)
+                    .HasColumnName("is_success")
+                    .HasDefaultValue(false);
 
                 // Indexes
                 entity.HasIndex(e => e.VideoId).HasDatabaseName("idx_queue_video_id");
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_queue_status");
-                entity.HasIndex(e => new { e.Status, e.Priority, e.CreatedAt })
-                    .HasDatabaseName("idx_queue_status_priority_created");
+                entity.HasIndex(e => e.IsSuccess).HasDatabaseName("idx_queue_is_success");
+                entity.HasIndex(e => new { e.CompletedAt, e.Status })
+                    .HasDatabaseName("idx_queue_completed_status");
+                entity.HasIndex(e => new { e.Status, e.CreatedAt })
+                    .HasDatabaseName("idx_queue_status_created");
 
                 // Foreign Key relationship with Video
                 entity.HasOne(q => q.Video)

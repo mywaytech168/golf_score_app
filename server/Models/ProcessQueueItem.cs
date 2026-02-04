@@ -19,17 +19,8 @@ namespace UploadServer.Models
         public string VideoId { get; set; }
 
         /// <summary>
-        /// 優先級，數值越小越先處理（預設 0）
-        /// </summary>
-        public int Priority { get; set; } = 0;
-
-        /// <summary>
-        /// 分配給的 Worker ID
-        /// </summary>
-        public string? AssignedWorkerId { get; set; }
-
-        /// <summary>
         /// 處理狀態：
+        /// - "ready": 準備中
         /// - "queued": 排隊中
         /// - "processing": 處理中
         /// - "completed": 已處理
@@ -58,9 +49,9 @@ namespace UploadServer.Models
         public int RetryCount { get; set; } = 0;
 
         /// <summary>
-        /// 失敗原因
+        /// 處理是否成功
         /// </summary>
-        public string? ErrorMessage { get; set; }
+        public bool IsSuccess { get; set; } = false;
 
         // 導航屬性
         /// <summary>
@@ -69,3 +60,4 @@ namespace UploadServer.Models
         public Video Video { get; set; }
     }
 }
+

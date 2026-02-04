@@ -43,7 +43,7 @@ class SwingSplitService {
   static const MethodChannel _trimChannel =
       MethodChannel('com.example.golf_score_app/trimmer');
   static const double _defaultWindowBefore = 3.0;
-  static const double _defaultWindowAfter = 1.0;
+  static const double _defaultWindowAfter = 3.0;
   static const double _defaultSmoothWinSec = 0.05;
   static const double _defaultThreshG = 20.0;
   static const double _defaultMinInterval = 1.0;

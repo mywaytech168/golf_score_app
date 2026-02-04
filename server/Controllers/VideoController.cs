@@ -272,7 +272,24 @@ namespace UploadServer.Controllers
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation($"✅ 影片狀態已更新為 completed");
-                _logger.LogInformation("════════════════════════════════════════════════════════════");
+
+                // ✅ 改進：創建對應的處理隊列項目
+                if (files.Any(x=>x.Type == "clip"))
+                {
+                    var queueItem = new ProcessQueueItem
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        VideoId = videoId,
+                        Status = "ready",
+                        CreatedAt = DateTime.Now,
+                        Video = video
+                    };
+                    _context.ProcessQueueItems.Add(queueItem);
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation($"✅ 處理隊列項目已創建: {queueItem.Id}");
+                    _logger.LogInformation("════════════════════════════════════════════════════════════");
+                }
+
 
                 return Ok(new
                 {
@@ -296,7 +313,7 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
-        /// 取得用戶的影片列表
+        /// 取得用戶的影片列表（帶處理隊列狀態）
         /// GET: /api/videos?status={status}&page={page}&limit={limit}
         /// </summary>
         [Authorize]
@@ -340,12 +357,45 @@ namespace UploadServer.Controllers
                     })
                     .ToListAsync();
 
+                // 為每個影片獲取其處理隊列狀態
+                var videosWithQueueStatus = new List<dynamic>();
+                foreach (var video in videos)
+                {
+                    // 查詢該影片的所有隊列項目
+                    var queueItems = await _context.ProcessQueueItems
+                        .Where(q => q.VideoId == video.Id)
+                        .OrderByDescending(q => q.CreatedAt)
+                        .ToListAsync();
+
+                    var queueStatus = queueItems.Any() ? new
+                    {
+                        total = queueItems.Count,
+                        pending = queueItems.Count(q => q.Status == "pending"),
+                        processing = queueItems.Count(q => q.Status == "processing"),
+                        completed = queueItems.Count(q => q.Status == "completed"),
+                        failed = queueItems.Count(q => q.Status == "failed"),
+                        successCount = queueItems.Count(q => q.IsSuccess == true),
+                        latestStatus = queueItems.FirstOrDefault()?.Status
+                    } : null;
+
+                    videosWithQueueStatus.Add(new
+                    {
+                        video.Id,
+                        video.Name,
+                        video.Status,
+                        video.ParentVideoId,
+                        video.CreatedAt,
+                        video.UpdatedAt,
+                        queueStatus
+                    });
+                }
+
                 _logger.LogInformation($"📊 查詢影片列表: UserId={userId}, Total={total}");
 
                 return Ok(new
                 {
                     success = true,
-                    data = videos,
+                    data = videosWithQueueStatus,
                     pagination = new
                     {
                         page,
@@ -358,6 +408,76 @@ namespace UploadServer.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ 取得影片列表失敗");
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 取得特定影片的處理隊列狀態
+        /// GET: /api/videos/{videoId}/queue-status
+        /// </summary>
+        [Authorize]
+        [HttpGet("videos/{videoId}/queue-status")]
+        public async Task<IActionResult> GetVideoQueueStatus(string videoId)
+        {
+            try
+            {
+                var userId = GetUserIdFromClaims();
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized(new { success = false, error = "無效的用戶身份" });
+                }
+
+                // 驗證影片是否存在且屬於當前用戶
+                var video = await _context.Videos.FirstOrDefaultAsync(v => v.Id == videoId && v.UserId == userId);
+                if (video == null)
+                {
+                    _logger.LogWarning($"❌ 影片未找到或無權限: VideoId={videoId}");
+                    return NotFound(new { success = false, error = "影片不存在或無權限" });
+                }
+
+                // 查詢該影片的所有隊列項目
+                var queueItems = await _context.ProcessQueueItems
+                    .Where(q => q.VideoId == videoId)
+                    .OrderByDescending(q => q.CreatedAt)
+                    .ToListAsync();
+
+                var queueStatus = new
+                {
+                    videoId,
+                    videoName = video.Name,
+                    summary = new
+                    {
+                        total = queueItems.Count,
+                        pending = queueItems.Count(q => q.Status == "pending"),
+                        processing = queueItems.Count(q => q.Status == "processing"),
+                        completed = queueItems.Count(q => q.Status == "completed"),
+                        failed = queueItems.Count(q => q.Status == "failed"),
+                        successCount = queueItems.Count(q => q.IsSuccess == true),
+                    },
+                    items = queueItems.Select(q => new
+                    {
+                        id = q.Id,
+                        status = q.Status,
+                        isSuccess = q.IsSuccess,
+                        createdAt = q.CreatedAt,
+                        startedAt = q.StartedAt,
+                        completedAt = q.CompletedAt,
+                        retryCount = q.RetryCount
+                    }).ToList()
+                };
+
+                _logger.LogInformation($"📊 查詢影片隊列狀態: VideoId={videoId}, Items={queueItems.Count}");
+
+                return Ok(new
+                {
+                    success = true,
+                    data = queueStatus
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ 取得影片隊列狀態失敗");
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
@@ -387,9 +507,15 @@ namespace UploadServer.Controllers
                 }
 
                 var files = await _context.Files.Where(f => f.VideoId == videoId).ToListAsync();
-                var processQueue = await _context.ProcessQueue.Where(pq => pq.VideoId == videoId).ToListAsync();
+                var processQueue = await _context.ProcessQueueItems.Where(pq => pq.VideoId == videoId).ToListAsync();
 
                 _logger.LogInformation($"📋 查詢影片詳情: VideoId={videoId}");
+
+                // 按優先度排序檔案：clip 優先，然後是 pose_phase_trajectory_video
+                var sortedFiles = files
+                    .OrderByDescending(f => f.Type == "clip")
+                    .ThenByDescending(f => f.Type == "pose_phase_trajectory_video")
+                    .ToList();
 
                 return Ok(new
                 {
@@ -403,7 +529,7 @@ namespace UploadServer.Controllers
                         CreatedAt = video.CreatedAt,
                         UpdatedAt = video.UpdatedAt,
                     },
-                    files = files.Select(f => new
+                    files = sortedFiles.Select(f => new
                     {
                         f.Id,
                         f.Type,
@@ -415,7 +541,6 @@ namespace UploadServer.Controllers
                     {
                         p.Id,
                         p.Status,
-                        p.Priority,
                         p.RetryCount,
                         p.CreatedAt,
                     }),
@@ -424,6 +549,112 @@ namespace UploadServer.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ 取得影片詳情失敗");
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 重新分析影片 (Re-run Analysis)
+        /// POST: /api/videos/{videoId}/rerun-analysis
+        /// 邏輯：
+        ///   1. 檢查該影片是否已經在隊列中 + status = "ready"
+        ///   2. 如果有 → 重用現有隊列項目（改為 "queued"）
+        ///   3. 如果沒有 → 創建新的隊列項目
+        /// </summary>
+        [Authorize]
+        [HttpPost("videos/{videoId}/rerun-analysis")]
+        public async Task<IActionResult> RerunAnalysis(string videoId)
+        {
+            try
+            {
+                _logger.LogInformation("════════════════════════════════════════════════════════════");
+                _logger.LogInformation("🔄 重新分析影片 (Re-run Analysis)");
+                _logger.LogInformation("════════════════════════════════════════════════════════════");
+                _logger.LogInformation($"🎯 VideoId: {videoId}");
+
+                var userId = GetUserIdFromClaims();
+                if (string.IsNullOrEmpty(userId))
+                {
+                    _logger.LogWarning("❌ 未找到用戶身份");
+                    return Unauthorized(new { success = false, error = "無效的用戶身份" });
+                }
+
+                _logger.LogInformation($"👤 UserId: {userId}");
+
+                // ✅ 驗證影片是否存在且屬於當前用戶
+                var video = await _context.Videos.FirstOrDefaultAsync(v => v.Id == videoId && v.UserId == userId);
+                if (video == null)
+                {
+                    _logger.LogWarning($"❌ 影片未找到或無權限");
+                    return NotFound(new { success = false, error = "影片不存在或無權限" });
+                }
+
+                _logger.LogInformation($"✅ 影片存在: {video.Name}");
+
+                // ✅ 檢查該影片是否已有隊列項目
+                var existingReadyQueue = await _context.ProcessQueueItems
+                    .FirstOrDefaultAsync(q => q.VideoId == videoId);
+
+                ProcessQueueItem queueItem;
+
+                if (existingReadyQueue != null)
+                {
+                    // 📌 情況 1：有現成的 "ready" 隊列項目 → 重用它
+                    _logger.LogInformation($"♻️ 找到現成的 'ready' 隊列項目: {existingReadyQueue.Id}");
+                    
+                    // 重設隊列項目狀態為 "queued"
+                    existingReadyQueue.Status = "ready";
+                    existingReadyQueue.RetryCount = 0;
+                    existingReadyQueue.StartedAt = null;
+                    existingReadyQueue.CompletedAt = null;
+                    existingReadyQueue.IsSuccess = false;
+                    
+                    _context.ProcessQueueItems.Update(existingReadyQueue);
+                    queueItem = existingReadyQueue;
+
+                    _logger.LogInformation($"✅ 已重用隊列項目，狀態改為 'ready': {queueItem.Id}");
+                }
+                else
+                {
+                    // 📌 情況 2：沒有現成的隊列項目 → 創建新的
+                    _logger.LogInformation($"✨ 沒有現成的隊列項目，創建新的");
+                    
+                    queueItem = new ProcessQueueItem
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        VideoId = videoId,
+                        Status = "ready",
+                        CreatedAt = DateTime.Now,
+                        Video = video
+                    };
+                    
+                    _context.ProcessQueueItems.Add(queueItem);
+
+                    _logger.LogInformation($"✅ 新隊列項目已創建: {queueItem.Id}");
+                }
+
+                // ✅ 保存變更
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"✅ 數據庫已更新");
+                _logger.LogInformation("════════════════════════════════════════════════════════════");
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "重新分析已排隊",
+                    queueItem = new
+                    {
+                        id = queueItem.Id,
+                        videoId = queueItem.VideoId,
+                        status = queueItem.Status,
+                        createdAt = queueItem.CreatedAt,
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ 重新分析影片失敗");
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }
@@ -469,6 +700,63 @@ namespace UploadServer.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ 刪除影片失敗");
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 獲取影片文件流（用於播放）
+        /// GET: /api/videos/{videoId}/stream
+        /// 優先返回 clip 類型，其次是 original 類型
+        /// </summary>
+        [Authorize]
+        [HttpGet("videos/{videoId}/stream")]
+        public async Task<IActionResult> GetVideoStream(string videoId)
+        {
+            try
+            {
+                var userId = GetUserIdFromClaims();
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return Unauthorized(new { success = false, error = "無效的用戶身份" });
+                }
+
+                // 驗證影片是否存在且屬於當前用戶
+                var video = await _context.Videos.FirstOrDefaultAsync(v => v.Id == videoId && v.UserId == userId);
+                if (video == null)
+                {
+                    _logger.LogWarning($"❌ 影片未找到或無權限: VideoId={videoId}");
+                    return NotFound(new { success = false, error = "影片不存在或無權限" });
+                }
+
+                // 優先取得 clip，其次是 original
+                var videoFile = await _context.Files
+                    .Where(f => f.VideoId == videoId && (f.Type == "clip" || f.Type == "original"))
+                    .OrderByDescending(f => f.Type == "clip") // clip 優先
+                    .FirstOrDefaultAsync();
+
+                if (videoFile == null)
+                {
+                    _logger.LogWarning($"❌ 影片檔案未找到: VideoId={videoId}");
+                    return NotFound(new { success = false, error = "影片檔案不存在" });
+                }
+
+                _logger.LogInformation($"📤 獲取影片流: VideoId={videoId}, FileType={videoFile.Type}, FilePath={videoFile.FilePath}");
+
+                // 檢查檔案是否存在
+                if (!System.IO.File.Exists(videoFile.FilePath))
+                {
+                    _logger.LogWarning($"❌ 檔案不存在: {videoFile.FilePath}");
+                    return NotFound(new { success = false, error = "影片檔案不存在於伺服器" });
+                }
+
+                // 打開檔案流並返回
+                var stream = System.IO.File.OpenRead(videoFile.FilePath);
+                return File(stream, videoFile.MimeType ?? "video/mp4", enableRangeProcessing: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ 獲取影片流失敗");
                 return StatusCode(500, new { success = false, error = ex.Message });
             }
         }

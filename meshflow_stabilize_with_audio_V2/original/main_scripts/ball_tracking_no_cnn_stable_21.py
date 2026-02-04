@@ -8,16 +8,16 @@ from datetime import datetime
 # ============================================================
 # ✅ 新增：批量處理 / 固定 ROI 中心模式
 # ============================================================
-BATCH_MODE = True  # ✅ 是否啟用批量模式
+BATCH_MODE = False  # ✅ 是否啟用批量模式
 
 # 批量輸入資料夾（會掃描 *.mp4）
-INPUT_DIR = r"Z:\Data\golf\20260126\cut\stabilized\phase"
+INPUT_DIR = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase"
 
 # 批量輸出資料夾（None=輸出到影片同資料夾；建議設一個子資料夾）
-BATCH_OUTPUT_DIR = r"Z:\Data\golf\20260126\cut\stabilized\phase\traj_out"
+BATCH_OUTPUT_DIR = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase\traj_out"
 
 # 單支影片模式用
-VIDEO_PATH = r"Z:\Data\golf\20260126\cut\stabilized\phase\hit_001_pose_phase.mp4"
+VIDEO_PATH = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase\clip_stabilized_pose_phase.mp4"
 
 # ✅ 固定 ROI center 模式（新增）
 FIXED_ROI_MODE = True
@@ -646,7 +646,7 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
                             if pool_y:
                                 pool = pool_y
                             else:
-                                pool = [] if STRICT_Y_DIRECTION else pool_left
+                                pool = [] if STRICT_Y_DIRECTION else pool_left 
 
                         if pool:
                             pred = this_blue_xy

@@ -28,6 +28,7 @@ import '../services/swing_split_service.dart';
 import '../services/video_overlay_processor.dart';
 import '../services/pose_estimator_service.dart';
 import '../widgets/recording_history_sheet.dart';
+import '../services/video_server_client.dart';
 import '../widgets/pose_overlay_painter.dart';
 import 'highlight_preview_page.dart';
 // ---------- MethodChannel for sharing ----------
@@ -1353,13 +1354,17 @@ class _StanceGuidePainter extends CustomPainter {
 }
 /// Video player page - displays the recorded video and allows sharing
 class VideoPlayerPage extends StatefulWidget {
-  final String videoPath; // Path to the video file
+  final String videoPath; // Path to the video file (local or cloud URL)
   final String? avatarPath; // Path to the user's avatar image
+  final String? cloudVideoId; // Cloud video ID for priority playback
+  
   const VideoPlayerPage({
     super.key,
     required this.videoPath,
     this.avatarPath,
+    this.cloudVideoId,
   });
+  
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
 }
@@ -1610,22 +1615,44 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     super.dispose();
   }
   /// Initialize the video player with the selected video
+  /// Prioritizes cloud video URL if cloudVideoId is available
   Future<void> _initializeVideo() async {
     setState(() {
       _isVideoLoading = true;
       _videoLoadError = null;
     });
-    final file = File(widget.videoPath);
-    if (!await file.exists()) {
+
+    // Resolve which video URL to use: cloud or local
+    final videoUrl = await _resolveVideoUrl();
+    if (videoUrl == null) {
       setState(() {
         _isVideoLoading = false;
-        _videoLoadError = 'Video file not found, please re-import or record';
+        _videoLoadError = 'Unable to load video, please try again later';
       });
       return;
     }
+
     await _videoController?.dispose();
-    final controller = VideoPlayerController.file(file);
+
+    // Create the appropriate video controller based on URL type
+    VideoPlayerController? controller;
     try {
+      if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
+        // Cloud video - use network URL
+        controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      } else {
+        // Local video - use file path
+        final file = File(videoUrl);
+        if (!await file.exists()) {
+          setState(() {
+            _isVideoLoading = false;
+            _videoLoadError = 'Video file not found, please re-import or record';
+          });
+          return;
+        }
+        controller = VideoPlayerController.file(file);
+      }
+
       await controller.initialize();
       if (!mounted) {
         await controller.dispose();
@@ -1634,8 +1661,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       controller.addListener(_handleVideoTick);
       setState(() {
         _videoController = controller;
-        _playbackDuration = controller.value.duration;
-        _playbackPosition = controller.value.position;
+        _playbackDuration = controller?.value.duration ?? Duration.zero;
+        _playbackPosition = controller?.value.position ?? Duration.zero;
         _isVideoLoading = false;
       });
       unawaited(_loadClassificationForVideo());
@@ -1643,7 +1670,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     } catch (error, stackTrace) {
       debugPrint('[VideoPlayer] Video initialization error: $error');
       debugPrintStack(stackTrace: stackTrace);
-      await controller.dispose();
+      if (controller != null) {
+        await controller.dispose();
+      }
       if (mounted) {
         setState(() {
           _videoController = null;
@@ -1651,6 +1680,38 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
           _videoLoadError = 'Unable to load video, please try again later';
         });
       }
+    }
+  }
+
+  /// Resolve the video URL with cloud priority
+  /// Returns cloud streaming URL if cloudVideoId exists, otherwise returns local file path
+  Future<String?> _resolveVideoUrl() async {
+    try {
+      // If cloudVideoId is available, prioritize cloud streaming URL
+      if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
+        try {
+          final streamUrl = VideoServerClient.instance.getVideoStreamUrl(widget.cloudVideoId!);
+          if (streamUrl.isNotEmpty) {
+            debugPrint('[VideoPlayer] Using cloud video URL: $streamUrl');
+            return streamUrl;
+          }
+        } catch (e) {
+          debugPrint('[VideoPlayer] Failed to get cloud video URL: $e, falling back to local');
+        }
+      }
+
+      // Fallback to local file path
+      final file = File(widget.videoPath);
+      if (await file.exists()) {
+        debugPrint('[VideoPlayer] Using local video path: ${widget.videoPath}');
+        return widget.videoPath;
+      }
+
+      // Neither cloud nor local available
+      return null;
+    } catch (e) {
+      debugPrint('[VideoPlayer] Error resolving video URL: $e');
+      return null;
     }
   }
   /// Load the classification data for the video

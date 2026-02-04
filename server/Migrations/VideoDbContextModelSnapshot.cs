@@ -112,11 +112,6 @@ namespace UploadServer.Migrations
                         .HasColumnType("varchar(36)")
                         .HasColumnName("id");
 
-                    b.Property<string>("AssignedWorkerId")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("assigned_worker_id");
-
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("datetime")
                         .HasColumnName("completed_at");
@@ -125,15 +120,11 @@ namespace UploadServer.Migrations
                         .HasColumnType("datetime")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("error_message");
-
-                    b.Property<int>("Priority")
+                    b.Property<bool>("IsSuccess")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0)
-                        .HasColumnName("priority");
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_success");
 
                     b.Property<int>("RetryCount")
                         .ValueGeneratedOnAdd()
@@ -161,14 +152,20 @@ namespace UploadServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IsSuccess")
+                        .HasDatabaseName("idx_queue_is_success");
+
                     b.HasIndex("Status")
                         .HasDatabaseName("idx_queue_status");
 
                     b.HasIndex("VideoId")
                         .HasDatabaseName("idx_queue_video_id");
 
-                    b.HasIndex("Status", "Priority", "CreatedAt")
-                        .HasDatabaseName("idx_queue_status_priority_created");
+                    b.HasIndex("CompletedAt", "Status")
+                        .HasDatabaseName("idx_queue_completed_status");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("idx_queue_status_created");
 
                     b.ToTable("process_queue", (string)null);
                 });

@@ -14,6 +14,9 @@ class VideoServerClient {
     return _instance;
   }
 
+  /// 靜態實例訪問器
+  static VideoServerClient get instance => _instance;
+
   VideoServerClient._internal();
 
   /// 獲取認證請求頭
@@ -477,6 +480,91 @@ class VideoServerClient {
     return results;
   }
 
+  /// 上傳摆球摘要 CSV 到原始視頻
+  ///
+  /// [videoId]: 原始視頻 ID（字符串形式）
+  /// [hitsSummaryCsvPath]: hits_summary.csv 的文件路徑
+  Future<Map<String, dynamic>> uploadHitsSummary({
+    required String videoId,
+    required String hitsSummaryCsvPath,
+  }) async {
+    try {
+      debugPrint(
+          '════════════════════════════════════════════════════════════');
+      debugPrint('📤 上傳摆球摘要');
+      debugPrint(
+          '════════════════════════════════════════════════════════════');
+      debugPrint('🎯 視頻 ID: $videoId');
+      debugPrint('📂 摆球摘要路徑: $hitsSummaryCsvPath');
+
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_baseUrl/api/videos/$videoId/hits-summary'),
+      );
+
+      // 添加認證頭
+      final authHeaders = await _getAuthMultipartHeaders();
+      request.headers.addAll(authHeaders);
+
+      // 添加 CSV 檔案
+      debugPrint('📎 添加摆球摘要 CSV 到請求...');
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          hitsSummaryCsvPath,
+        ),
+      );
+
+      debugPrint('⬆️ 發送摆球摘要上傳請求...');
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint('📥 上傳回應狀態: ${response.statusCode}');
+      debugPrint('📝 回應長度: ${response.body.length} 字符');
+      if (response.body.length <= 500) {
+        debugPrint('📋 回應內容: ${response.body}');
+      } else {
+        debugPrint('📋 回應內容（前500字符）: ${response.body.substring(0, 500)}...');
+      }
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        debugPrint('✅ 摆球摘要上傳成功');
+        try {
+          final jsonData = jsonDecode(response.body);
+          return {
+            'success': true,
+            'data': jsonData,
+          };
+        } catch (parseError) {
+          debugPrint('⚠️ JSON 解析失敗，返回原始響應');
+          return {
+            'success': true,
+            'data': {
+              'raw': response.body,
+            },
+          };
+        }
+      } else {
+        debugPrint('❌ 摆球摘要上傳失敗: ${response.statusCode}');
+        return {
+          'success': false,
+          'error': 'Upload failed: ${response.statusCode}',
+          'body': response.body,
+        };
+      }
+    } catch (e) {
+      debugPrint(
+          '════════════════════════════════════════════════════════════');
+      debugPrint('❌ 摆球摘要上傳異常: $e');
+      debugPrint(
+          '════════════════════════════════════════════════════════════');
+      return {
+        'success': false,
+        'error': 'Upload error: $e',
+      };
+    }
+  }
+
   /// 取得所有視頻列表
   ///
   /// [userId]: 用戶 ID
@@ -484,14 +572,12 @@ class VideoServerClient {
   /// [page]: 分頁號（預設 1）
   /// [limit]: 每頁數量（預設 10）
   Future<Map<String, dynamic>> getVideos({
-    required int userId,
     String? status,
     int page = 1,
     int limit = 10,
   }) async {
     try {
       var url = Uri.parse('$_baseUrl/api/videos').replace(queryParameters: {
-        'user_id': userId.toString(),
         'page': page.toString(),
         'limit': limit.toString(),
         if (status != null) 'status': status,
@@ -538,6 +624,48 @@ class VideoServerClient {
         };
       }
     } catch (e) {
+      return {
+        'success': false,
+        'error': 'Network error: $e',
+      };
+    }
+  }
+
+  /// 取得單個視頻的詳細信息（包括隊列狀態）
+  /// 用於視頻細項頁面顯示云端視頻的詳細信息
+  ///
+  /// [videoId]: 視頻 ID（云端視頻 ID）
+  Future<Map<String, dynamic>> getVideoDetail(String videoId) async {
+    try {
+      final url = Uri.parse('$_baseUrl/api/videos/$videoId');
+      final headers = await _getAuthHeaders();
+
+      debugPrint('📋 取得視頻詳情: $videoId');
+
+      final response = await http.get(
+        url,
+        headers: headers,
+      );
+
+      debugPrint('📥 Response Status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        debugPrint('✅ 視頻詳情取得成功');
+        return {
+          'success': true,
+          'data': result,
+        };
+      } else {
+        debugPrint('❌ 取得視頻詳情失敗: ${response.statusCode}');
+        return {
+          'success': false,
+          'error': 'Failed to fetch video detail: ${response.statusCode}',
+          'body': response.body,
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ 取得視頻詳情異常: $e');
       return {
         'success': false,
         'error': 'Network error: $e',
@@ -682,5 +810,64 @@ class VideoServerClient {
     } catch (e) {
       throw Exception('Error generating download URL: $e');
     }
+  }
+
+  /// 重新分析影片 (Re-run Analysis)
+  ///
+  /// [videoId]: 影片 ID
+  /// 邏輯：
+  ///   1. 檢查該影片是否已經在隊列中 + status = "ready"
+  ///   2. 如果有 → 重用現有隊列項目（改為 "queued"）
+  ///   3. 如果沒有 → 創建新的隊列項目
+  Future<Map<String, dynamic>> rerunAnalysis(String videoId) async {
+    try {
+      final url = Uri.parse('$_baseUrl/api/videos/$videoId/rerun-analysis');
+      final headers = await _getAuthHeaders();
+
+      debugPrint('════════════════════════════════════════');
+      debugPrint('🔄 重新分析影片 (Re-run Analysis)');
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📍 URL: $url');
+      debugPrint('🎯 VideoId: $videoId');
+
+      final response = await http.post(
+        url,
+        headers: headers,
+      );
+
+      debugPrint('📥 Response Status: ${response.statusCode}');
+      debugPrint('📝 Response: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final result = jsonDecode(response.body);
+        debugPrint('✅ 重新分析已排隊');
+        return {
+          'success': true,
+          'data': result,
+        };
+      } else {
+        final errorJson = jsonDecode(response.body);
+        debugPrint('❌ 重新分析失敗: ${response.statusCode}');
+        return {
+          'success': false,
+          'error': errorJson['error'] ?? 'Failed to rerun analysis: ${response.statusCode}',
+          'body': response.body,
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ 重新分析異常: $e');
+      return {
+        'success': false,
+        'error': 'Network error: $e',
+      };
+    }
+  }
+
+  /// 獲取影片的流式傳輸 URL（用於在線播放）
+  ///
+  /// [videoId]: 影片 ID
+  /// 返回可以直接用於視頻播放的 URL
+  String getVideoStreamUrl(String videoId) {
+    return '$_baseUrl/api/videos/$videoId/stream';
   }
 }
