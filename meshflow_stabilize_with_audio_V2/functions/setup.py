@@ -12,30 +12,24 @@ from Cython.Build import cythonize
 import numpy as np
 import sys
 
-import setuptools
-from distutils import ccompiler
-
-# 🔥 強制移除 MSVC 的 /GL（Whole Program Optimization）
-if ccompiler.get_default_compiler() == "msvc":
-    from distutils._msvccompiler import MSVCCompiler
-
-    _orig_compile = MSVCCompiler.compile
-
-    def _compile_without_gl(self, sources, *args, **kwargs):
-        if "extra_preargs" in kwargs and kwargs["extra_preargs"]:
-            kwargs["extra_preargs"] = [
-                arg for arg in kwargs["extra_preargs"]
-                if arg.upper() != "/GL"
-            ]
-        return _orig_compile(self, sources, *args, **kwargs)
-
-    MSVCCompiler.compile = _compile_without_gl
+# Windows MSVC 使用 /O2，其他编译器使用 -O3
+if sys.platform == 'win32':
+    compile_args = ["/O2"]
+else:
+    compile_args = ["-O3"]
 
 extensions = [
     Extension(
         "meshflow_stabilize_fast",
         ["meshflow_stabilize_fast.pyx"],
         include_dirs=[np.get_include()],
+        extra_compile_args=compile_args,
+    ),
+    Extension(
+        "meshflow_warp_fast",
+        ["meshflow_warp_fast.pyx"],
+        include_dirs=[np.get_include()],
+        extra_compile_args=compile_args,
     )
 ]
 
