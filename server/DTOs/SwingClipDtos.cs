@@ -24,14 +24,8 @@ public class SwingClipMetadataRequest
     /// 是否好球
     public bool GoodShot { get; set; }
 
-    /// 是否壞球
-    public bool BadShot { get; set; }
-
-    /// 最大加速度（G）
-    public double MaxAcceleration { get; set; }
-
-    /// 平均加速度（G）
-    public double AvgAcceleration { get; set; }
+    /// 聲音清脆度 (0-100)
+    public double AudioCrispness { get; set; }
 }
 
 /// 切片元數據回應 - 返回上傳 URL 和 clipId

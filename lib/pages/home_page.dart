@@ -12,12 +12,14 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
+import '../models/statistics_response.dart';
 import '../recorder_page.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import '../services/user_profile_storage.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
+import '../services/statistics_service.dart';
 import 'recording_history_page.dart';
 import 'recording_session_page.dart';
 import 'profile_edit_page.dart';
@@ -43,11 +45,9 @@ class _HomePageState extends State<HomePage> {
   final List<RecordingHistoryEntry> _recordingHistory = []; // 首頁內部維護的錄影紀錄
   bool _isHistoryLoading = true; // 控制歷史載入狀態，避免 UI 閃爍
   int _practiceCount = 0; // 累積練習次數
-  double? _averageSpeedMph; // 估算出的平均揮桿速度（MPH）
   double? _bestSpeedMph; // 歷史紀錄中的最佳揮桿速度
-  double? _consistencyScore; // 揮桿穩定度（0-1）
-  double? _impactClarity; // 擊球清脆度（0-1）
   double? _sweetSpotPercentage; // 甜蜜點命中率百分比
+  double? _audioCrispness; // 聲音清脆度（0-100）
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
   _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
   _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
@@ -55,6 +55,10 @@ class _HomePageState extends State<HomePage> {
   String _userEmail = ''; // 使用者電郵，從 SharedPreferences 讀取
   String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 匯入外部影片的工具實例
+  
+  // 統計服務相關
+  late final StatisticsService _statisticsService = StatisticsService();
+  
   String _formatDurationShort(int seconds) {
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
     final s = (seconds % 60).toString().padLeft(2, '0');
@@ -66,7 +70,34 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _restoreUserProfile();
     _loadInitialHistory();
-    _loadCloudHistory();  // 並行加載雲端列表
+    // 初始化統計服務並加載後端和本地數據
+    _initializeStatistics();
+    // 首頁不進行云端和本地視頻的匹配，只顯示本地列表
+    // 云端同步由 recording_history_page 統一處理
+  }
+
+  @override
+  void dispose() {
+    // 清理統計服務
+    _statisticsService.dispose();
+    super.dispose();
+  }
+
+  /// 初始化統計服務，同時加載後端 API 和本地計算的指標
+  /// 如果返回 401，跳轉到登入頁面
+  Future<void> _initializeStatistics() async {
+    try {
+      await _statisticsService.loadAllStatistics();
+    } on UnauthorizedException {
+      // Token 無效或過期，跳回登入頁
+      if (mounted) {
+        debugPrint('🔐 統計數據未授權，跳轉到登入頁');
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
+    } catch (e) {
+      debugPrint('⚠️ 初始化統計服務失敗: $e');
+    }
+    // 本地指標會在 _refreshDashboardMetrics 中計算並更新
   }
 
   /// 從本地偏好讀取暱稱、電郵與頭像，確保重新進入 App 仍保有個人化設定
@@ -93,13 +124,19 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildTodayInfoCard() {
-    final practice = _practiceCount;
-    final sweetPct = (_sweetSpotPercentage ?? 0).clamp(0, 100);
-    final goodHits = practice > 0 ? (practice * sweetPct / 100).round() : 0;
-    final badHits = math.max(practice - goodHits, 0);
-    final avgSpeed = _averageSpeedMph != null ? '${_averageSpeedMph!.toStringAsFixed(1)} mph' : '--';
+    // 使用今天的後端數據
+    final todayStats = _statisticsService.todayStatistics;
+    final practice = todayStats?.totalCount ?? 0;
+    final goodHits = todayStats?.goodShot ?? 0;
+    final badHits = todayStats?.badShot ?? 0;
+    final sweetPct = todayStats?.sweetSpotPercentage ?? 0;
     final sweetText = sweetPct > 0 ? '${sweetPct.toStringAsFixed(0)}%' : '--';
-    final impactText = _impactClarity != null ? '${(_impactClarity!.clamp(0, 1) * 100).toStringAsFixed(0)}%' : '--';
+    final crispnessText = todayStats != null && todayStats.audioCrispness.average > 0 
+        ? '${todayStats.audioCrispness.average.toStringAsFixed(0)}' 
+        : '--';
+    final bestSpeedDisplay = todayStats != null && todayStats.peakValue.maximum > 0
+        ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH' 
+        : '--';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -125,9 +162,9 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _miniStat(title: '平均速度', value: avgSpeed)),
+              Expanded(child: _miniStat(title: '最佳速度', value: bestSpeedDisplay)),
               Expanded(child: _miniStat(title: '甜蜜點命中', value: sweetText)),
-              Expanded(child: _miniStat(title: '擊球清脆度', value: impactText)),
+              Expanded(child: _miniStat(title: '聲音清脆度', value: crispnessText)),
             ],
           ),
         ],
@@ -149,29 +186,18 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 建立比較區塊，呈現最新與上一筆揮桿的差異
+  /// 建立比較區塊，呈現昨天與今天的速度對比
   Widget _buildComparisonCard() {
-    final before = _comparisonBefore;
-    final after = _comparisonAfter;
-    final analyzing = _isMetricCalculating;
-
-    // ---------- 內部小工具：負責產生顯示文字 ----------
-    String buildSpeedLabel(_ComparisonSnapshot? snapshot) {
-      if (analyzing) return '分析中...';
-      if (snapshot?.speedMph != null) {
-        return '${snapshot!.speedMph!.toStringAsFixed(1)} MPH';
-      }
-      return snapshot == null ? '--' : '無速度資訊';
-    }
-
-    String buildSubtitle(_ComparisonSnapshot? snapshot) {
-      if (analyzing) return '資料整理中';
-      if (snapshot == null) {
-        return '完成更多錄影即可生成比較';
-      }
-      final dateLabel = _formatComparisonDate(snapshot.entry.recordedAt);
-      final impactLabel = '${(snapshot.impactClarity * 100).clamp(0, 100).toStringAsFixed(0)}%';
-      return '$dateLabel  •  $impactLabel';
+    // 使用後端 API 的昨天和今天數據
+    final yesterdayStats = _statisticsService.yesterdayStatistics;
+    final todayStats = _statisticsService.todayStatistics;
+    
+    final yesterdaySpeed = yesterdayStats?.peakValue.maximum;
+    final todaySpeed = todayStats?.peakValue.maximum;
+    
+    String buildSpeedLabel(double? speed) {
+      if (speed == null || speed == 0) return '--';
+      return '${speed.toStringAsFixed(1)} MPH';
     }
 
     return Container(
@@ -208,10 +234,10 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Before', style: TextStyle(color: Color(0xFF7D8B9A))),
+                    const Text('昨天', style: TextStyle(color: Color(0xFF7D8B9A))),
                     const SizedBox(height: 6),
                     Text(
-                      buildSpeedLabel(before),
+                      buildSpeedLabel(yesterdaySpeed),
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -219,9 +245,9 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      buildSubtitle(before),
-                      style: const TextStyle(color: Color(0xFF7D8B9A)),
+                    const Text(
+                      '昨天的最佳速度',
+                      style: TextStyle(color: Color(0xFF7D8B9A)),
                     ),
                   ],
                 ),
@@ -235,10 +261,10 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('After', style: TextStyle(color: Color(0xFF7D8B9A))),
+                    const Text('今天', style: TextStyle(color: Color(0xFF7D8B9A))),
                     const SizedBox(height: 6),
                     Text(
-                      buildSpeedLabel(after),
+                      buildSpeedLabel(todaySpeed),
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -246,24 +272,14 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      buildSubtitle(after),
-                      style: const TextStyle(color: Color(0xFF7D8B9A)),
+                    const Text(
+                      '今天的最佳速度',
+                      style: TextStyle(color: Color(0xFF7D8B9A)),
                     ),
                   ],
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () => _onBottomNavTap(2),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E8E5A),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            ),
-            child: const Text('立即開始錄影'),
           ),
         ],
       ),
@@ -494,6 +510,33 @@ class _HomePageState extends State<HomePage> {
                     ),
                     Positioned(
                       top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: entry.goodShot == null
+                              ? Colors.grey.withOpacity(0.7)
+                              : entry.goodShot == true
+                                  ? Colors.green.withOpacity(0.8)
+                                  : Colors.red.withOpacity(0.8),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          entry.goodShot == null
+                              ? '未分類'
+                              : entry.goodShot == true
+                                  ? '好球'
+                                  : '壞球',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 6,
                       right: 6,
                       child: PopupMenuButton<_HistoryAction>(
                         tooltip: '更多操作',
@@ -543,19 +586,17 @@ class _HomePageState extends State<HomePage> {
 
   /// 將儀表板數值轉換為雷達圖比例，便於統一控制上限
   List<double> _buildRadarValues() {
-    final averageSpeedScore = _averageSpeedMph != null
-        ? (_averageSpeedMph! / 120).clamp(0.0, 1.0)
-        : 0.0;
     final bestSpeedScore = _bestSpeedMph != null
         ? (_bestSpeedMph! / 130).clamp(0.0, 1.0)
-        : averageSpeedScore;
-    final stabilityScore = (_consistencyScore ?? 0).clamp(0.0, 1.0);
-    final clarityScore = (_impactClarity ??
-            (_sweetSpotPercentage != null ? _sweetSpotPercentage! / 100 : 0))
+        : 0.0;
+    final clarityScore = (_sweetSpotPercentage != null ? _sweetSpotPercentage! / 100.0 : 0.0)
         .clamp(0.0, 1.0);
-    final volumeScore = (_practiceCount / 12).clamp(0.0, 1.0);
+    // 安全地處理 _audioCrispness 可能是 int 或 double 的情況
+    final crispValue = _audioCrispness != null ? (_audioCrispness is int ? (_audioCrispness as int).toDouble() : _audioCrispness as double) : 0.0;
+    final crispnessScore = (crispValue / 100).clamp(0.0, 1.0);
+    final volumeScore = (_practiceCount / 12.0).clamp(0.0, 1.0);
 
-    return [averageSpeedScore, stabilityScore, clarityScore, bestSpeedScore, volumeScore];
+    return [bestSpeedScore, clarityScore, crispnessScore, volumeScore];
   }
 
   /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
@@ -578,101 +619,6 @@ class _HomePageState extends State<HomePage> {
     }
 
     unawaited(_refreshDashboardMetrics());
-  }
-
-  /// 從雲端 API 載入用戶上傳的影片列表，並合併到本地列表
-  Future<void> _loadCloudHistory() async {
-    try {
-      // 檢查用戶是否已登錄（基於 token）
-      final token = await AuthTokenStorage.instance.getAccessToken();
-      if (token == null || token.isEmpty) {
-        debugPrint('[首頁] 未登錄或 token 已過期，跳過雲端列表載入');
-        return;
-      }
-
-      // 呼叫 API 獲取用戶的雲端影片列表
-      final result = await VideoServerClient.instance.getVideos(
-        limit: 100, // 一次載入最多 100 部影片
-      );
-      
-      if (!result['success'] || result['data'] == null) {
-        debugPrint('[首頁] ⚠️ 雲端列表載入失敗：${result['error'] ?? "未知錯誤"}');
-        return;
-      }
-
-      final videoList = result['data'];
-      if (videoList is! List) {
-        debugPrint('[首頁] ⚠️ 雲端列表格式錯誤');
-        return;
-      }
-
-      debugPrint('[首頁] 雲端列表載入完成，共 ${videoList.length} 部影片');
-
-      if (!mounted) return;
-
-      // 轉換雲端影片為 RecordingHistoryEntry 物件
-      final cloudEntries = <RecordingHistoryEntry>[];
-      for (final video in videoList) {
-        try {
-          final entry = RecordingHistoryEntry(
-            filePath: video['videoUrl'] ?? video['url'] ?? '',
-            roundIndex: 0, // 雲端影片不在本地，設為 0
-            recordedAt: video['createdAt'] != null
-                ? DateTime.parse(video['createdAt'])
-                : DateTime.now(),
-            durationSeconds: (video['duration'] as num?)?.toInt() ?? 0,
-            imuConnected: false, // 雲端影片無法判斷 IMU 狀態
-            cloudVideoId: video['id']?.toString() ?? '',
-            videoType: VideoType.cloudOriginal,
-            uploadStatus: UploadStatus.uploaded,
-            syncStatus: SyncStatus.synced,
-          );
-          cloudEntries.add(entry);
-        } catch (e) {
-          debugPrint('[首頁] ⚠️ 轉換雲端影片失敗：$e');
-        }
-      }
-
-      // 合併本地和雲端列表
-      _mergeHistoryLists(cloudEntries);
-    } catch (e) {
-      debugPrint('[首頁] ❌ 載入雲端列表異常：$e');
-      // 不影響本地列表顯示，靜默處理錯誤
-    }
-  }
-
-  /// 合併雲端列表到本地列表，進行去重和排序
-  void _mergeHistoryLists(List<RecordingHistoryEntry> cloudEntries) {
-    if (cloudEntries.isEmpty) return;
-
-    setState(() {
-      // 用於去重的集合（使用 cloudVideoId 和 sourceLocalFilePath）
-      final localCloudIds = _recordingHistory
-          .where((e) => e.cloudVideoId != null && e.cloudVideoId!.isNotEmpty)
-          .map((e) => e.cloudVideoId!)
-          .toSet();
-
-      // 過濾掉已存在於本地列表的雲端影片
-      final newCloudEntries = cloudEntries
-          .where((cloud) =>
-              !localCloudIds.contains(cloud.cloudVideoId) &&
-              !_recordingHistory.any((local) =>
-                  local.cloudVideoId == cloud.cloudVideoId ||
-                  local.filePath == cloud.filePath))
-          .toList();
-
-      if (newCloudEntries.isNotEmpty) {
-        debugPrint('[首頁] 添加 ${newCloudEntries.length} 部新的雲端影片');
-        _recordingHistory.addAll(newCloudEntries);
-
-        // 重新排序：按時間戳記排序（最新在前）
-        _recordingHistory.sort(
-          (a, b) => b.recordedAt.compareTo(a.recordedAt),
-        );
-
-        _practiceCount = _recordingHistory.length;
-      }
-    });
   }
 
   /// 檢查縮圖檔案是否存在，若遺失則將欄位清空避免顯示破圖
@@ -975,10 +921,9 @@ class _HomePageState extends State<HomePage> {
         MaterialPageRoute(
           builder: (_) => TodayInfoPage(
             practiceCount: practice,
-            averageSpeedMph: _averageSpeedMph,
             bestSpeedMph: _bestSpeedMph,
-            impactClarity: _impactClarity,
             sweetSpotPercentage: sweetPct.toDouble(),
+            audioCrispness: _audioCrispness,
             goodHits: goodHits,
             badHits: badHits,
             goodVideoPath: null,
@@ -1114,20 +1059,22 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察
+  /// 並將計算結果存儲到 StatisticsService 中供 Data Metrics 和 Analytics 使用
   Future<void> _refreshDashboardMetrics() async {
     final snapshot = List<RecordingHistoryEntry>.from(_recordingHistory);
     if (snapshot.isEmpty) {
       if (!mounted) return;
       setState(() {
         _isMetricCalculating = false;
-        _averageSpeedMph = null;
-        _bestSpeedMph = null;
-        _consistencyScore = null;
-        _impactClarity = null;
-        _sweetSpotPercentage = null;
-        _comparisonBefore = null;
-        _comparisonAfter = null;
       });
+      _statisticsService.setLocalMetrics(
+        consistencyScore: null,
+        bestSpeedMph: null,
+        sweetSpotPercentage: null,
+        audioCrispness: null,
+        comparisonBefore: null,
+        comparisonAfter: null,
+      );
       return;
     }
 
@@ -1138,28 +1085,72 @@ class _HomePageState extends State<HomePage> {
     try {
       final metrics = await _MetricsCalculator.compute(snapshot);
       if (!mounted) return;
+      
+      // 從最新的錄影紀錄中取得聲音清脆度
+      double? latestAudioCrispness;
+      for (final entry in snapshot.reversed) {
+        if (entry.audioCrispness != null) {
+          final crispValue = entry.audioCrispness;
+          latestAudioCrispness = (crispValue is int) ? (crispValue as int).toDouble() : crispValue as double?;
+          break;
+        }
+      }
+      
+      // 轉換 _ComparisonSnapshot 為 ComparisonSnapshot
+      ComparisonSnapshot? before;
+      if (metrics.comparisonBefore != null) {
+        before = ComparisonSnapshot(
+          entryId: metrics.comparisonBefore!.entry.filePath,
+          recordedAtLabel: _formatComparisonDate(metrics.comparisonBefore!.entry.recordedAt),
+          speedMph: metrics.comparisonBefore!.speedMph,
+          impactClarity: metrics.comparisonBefore!.impactClarity,
+          audioCrispness: metrics.comparisonBefore!.audioCrispness,
+        );
+      }
+      
+      ComparisonSnapshot? after;
+      if (metrics.comparisonAfter != null) {
+        after = ComparisonSnapshot(
+          entryId: metrics.comparisonAfter!.entry.filePath,
+          recordedAtLabel: _formatComparisonDate(metrics.comparisonAfter!.entry.recordedAt),
+          speedMph: metrics.comparisonAfter!.speedMph,
+          impactClarity: metrics.comparisonAfter!.impactClarity,
+          audioCrispness: metrics.comparisonAfter!.audioCrispness,
+        );
+      }
+      
       setState(() {
         _isMetricCalculating = false;
-        _averageSpeedMph = metrics.averageSpeedMph;
         _bestSpeedMph = metrics.bestSpeedMph;
-        _consistencyScore = metrics.consistencyScore;
-        _impactClarity = metrics.averageImpactClarity;
         _sweetSpotPercentage = metrics.sweetSpotPercentage;
+        _audioCrispness = latestAudioCrispness;
         _comparisonBefore = metrics.comparisonBefore;
         _comparisonAfter = metrics.comparisonAfter;
       });
+      
+      // 更新服務中的本地指標，供 Data Metrics 和 Analytics 共享
+      _statisticsService.setLocalMetrics(
+        consistencyScore: null, // 不再使用 consistency score
+        bestSpeedMph: metrics.bestSpeedMph,
+        sweetSpotPercentage: metrics.sweetSpotPercentage,
+        audioCrispness: latestAudioCrispness,
+        comparisonBefore: before,
+        comparisonAfter: after,
+      );
+      
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isMetricCalculating = false;
-        _averageSpeedMph = null;
-        _bestSpeedMph = null;
-        _consistencyScore = null;
-        _impactClarity = null;
-        _sweetSpotPercentage = null;
-        _comparisonBefore = null;
-        _comparisonAfter = null;
       });
+      _statisticsService.setLocalMetrics(
+        consistencyScore: null,
+        bestSpeedMph: null,
+        sweetSpotPercentage: null,
+        audioCrispness: null,
+        comparisonBefore: null,
+        comparisonAfter: null,
+      );
     }
   }
 
@@ -1198,6 +1189,7 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => VideoPlayerPage(
           videoPath: entry.filePath,
           avatarPath: _avatarPath,
+          cloudVideoId: entry.cloudVideoId,
         ),
       ),
     );
@@ -1377,38 +1369,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // ---------- 假資料區（調整為歷史資料產生卡片） ----------
-    // 先以時間由新到舊排序，確保影片庫最左側即為最新成果
-    final sortedHistory = List<RecordingHistoryEntry>.from(_recordingHistory)
-      ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
-    // 影片庫僅展示前六筆，避免水平列表超出視覺焦點
-    final displayedHistory = sortedHistory.take(6).toList(growable: false);
-    // 依序套用固定配色，讓卡片易於辨識錄影批次
-    const palette = <Color>[
-      Color(0xFF123B70),
-      Color(0xFF0A5E5A),
-      Color(0xFF4C2A9A),
-      Color(0xFF1E8E5A),
-      Color(0xFF2E8EFF),
-      Color(0xFF8E4AF4),
-    ];
-    // ---------- Analytics 動態字串區 ----------
-    final analyticsStatusLabel = _isMetricCalculating ? '分析中...' : '尚無資料';
-    final analyticsAvgSpeedText = _averageSpeedMph != null
-        ? '${_averageSpeedMph!.toStringAsFixed(1)} MPH'
-        : analyticsStatusLabel;
-    final analyticsBestSpeedText = _bestSpeedMph != null
-        ? '${_bestSpeedMph!.toStringAsFixed(1)} MPH'
-        : analyticsStatusLabel;
-    final analyticsStabilityText = _consistencyScore != null
-        ? '${(_consistencyScore!.clamp(0, 1) * 100).toStringAsFixed(0)} %'
-        : analyticsStatusLabel;
-    final analyticsSweetText = _sweetSpotPercentage != null
-        ? '${_sweetSpotPercentage!.clamp(0, 100).toStringAsFixed(0)} %'
-        : analyticsStatusLabel;
-    final analyticsClarityText = _impactClarity != null
-        ? '${(_impactClarity!.clamp(0, 1) * 100).toStringAsFixed(0)} %'
-        : analyticsStatusLabel;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
@@ -1429,23 +1389,26 @@ class _HomePageState extends State<HomePage> {
               child: const Icon(Icons.golf_course_rounded, color: Colors.white),
             ),
             const SizedBox(width: 16),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _displayName,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF0B2A2E),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _displayName,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF0B2A2E),
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                Text(
-                  _userEmail,
-                  style: theme.textTheme.bodyMedium?.copyWith(color: const Color(0xFF6E7B87)),
-                ),
-              ],
+                  Text(
+                    _userEmail,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: const Color(0xFF6E7B87)),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            const Spacer(),
             IconButton(
               onPressed: () {},
               tooltip: '通知中心',
@@ -1495,20 +1458,64 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      body: SingleChildScrollView(
+      body: StreamBuilder<StatisticsResponse?>(
+        stream: _statisticsService.watchStatistics(),
+        initialData: _statisticsService.statistics,
+        builder: (context, statsSnapshot) {
+          return StreamBuilder<LoadingState>(
+            stream: _statisticsService.watchLoadingState(),
+            initialData: _statisticsService.loadingState,
+            builder: (context, loadingSnapshot) {
+              final backendStats = statsSnapshot.data;
+              final loadingState = loadingSnapshot.data ?? LoadingState(isLoadingStatistics: false, isLoadingLocalMetrics: false);
+              final isLoadingStats = loadingState.isLoading;
+              final analyticsStatusLabel = isLoadingStats ? '載入中...' : '尚無資料';
+              
+              // 使用後端統計數據的最佳速度（來自 peakValue.maximum）
+              final analyticsBestSpeedText = isLoadingStats
+                  ? '載入中...'
+                  : backendStats != null && backendStats.peakValue.maximum > 0
+                      ? '${backendStats.peakValue.maximum.toStringAsFixed(1)} MPH'
+                      : analyticsStatusLabel;
+              
+              // Sweet Spot 使用後端統計數據
+              final analyticsSweetText = isLoadingStats
+                  ? '載入中...'
+                  : backendStats != null
+                      ? '${backendStats.sweetSpotPercentage.toStringAsFixed(0)} %'
+                      : analyticsStatusLabel;
+              
+              // Audio Crispness 使用後端統計數據
+              final analyticsCrispnessText = isLoadingStats
+                  ? '載入中...'
+                  : backendStats != null && backendStats.audioCrispness.average > 0
+                      ? '${backendStats.audioCrispness.average.toStringAsFixed(0)}'
+                      : analyticsStatusLabel;
+
+              // ---------- 假資料區（調整為歷史資料產生卡片） ----------
+              // 先以時間由新到舊排序，確保影片庫最左側即為最新成果
+              final sortedHistory = List<RecordingHistoryEntry>.from(_recordingHistory)
+                ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+              // 影片庫僅展示前六筆，避免水平列表超出視覺焦點
+              final displayedHistory = sortedHistory.take(6).toList(growable: false);
+              // 依序套用固定配色，讓卡片易於辨識錄影批次
+              const palette = <Color>[
+                Color(0xFF123B70),
+                Color(0xFF0A5E5A),
+                Color(0xFF4C2A9A),
+                Color(0xFF1E8E5A),
+                Color(0xFF2E8EFF),
+                Color(0xFF8E4AF4),
+              ];
+
+              return SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _SectionHeader(
               title: 'Data Metrics',
-              actions: [
-                FilledButton.icon(
-                  onPressed: _pickExternalVideoForImport,
-                  icon: const Icon(Icons.file_upload_rounded, size: 18),
-                  label: const Text('匯入影片'),
-                ),
-              ],
+              actions: const [],
             ),
             const SizedBox(height: 16),
             LayoutBuilder(
@@ -1517,25 +1524,29 @@ class _HomePageState extends State<HomePage> {
                 final practiceSubtitle = _practiceCount > 0
                     ? '累積完成 $_practiceCount 次錄影'
                     : '完成錄影後即可累積練習次數';
-                final speedValue = _isMetricCalculating
-                    ? '分析中...'
-                    : _averageSpeedMph != null
-                        ? '${_averageSpeedMph!.toStringAsFixed(1)} MPH'
+                
+                // 使用後端統計數據的最佳速度
+                final speedValue = isLoadingStats
+                    ? '載入中...'
+                    : backendStats != null && backendStats.peakValue.maximum > 0
+                        ? '${backendStats.peakValue.maximum.toStringAsFixed(1)} MPH'
                         : '尚無資料';
-                final speedSubtitle = _isMetricCalculating
-                    ? '正在解析 IMU 感測紀錄'
-                    : _averageSpeedMph != null
-                        ? '依據含 IMU 的錄影推算揮桿速度'
+                final speedSubtitle = isLoadingStats
+                    ? '正在載入全部統計數據'
+                    : backendStats != null && backendStats.peakValue.maximum > 0
+                        ? '全部時間的峰值速度'
                         : '連線 IMU 錄影後即可取得數據';
-                final sweetValue = _isMetricCalculating
-                    ? '分析中...'
-                    : _sweetSpotPercentage != null
-                        ? '${_sweetSpotPercentage!.clamp(0, 100).toStringAsFixed(0)} %'
+                
+                // 使用後端統計數據的甜蜜點命中
+                final sweetValue = isLoadingStats
+                    ? '載入中...'
+                    : backendStats != null
+                        ? '${backendStats.sweetSpotPercentage.toStringAsFixed(0)} %'
                         : '尚無資料';
-                final sweetSubtitle = _isMetricCalculating
-                    ? '比對音訊與震動判斷清脆度'
-                    : _sweetSpotPercentage != null
-                        ? '最近錄影的擊球甜蜜點命中率'
+                final sweetSubtitle = isLoadingStats
+                    ? '正在載入全部統計數據'
+                    : backendStats != null
+                        ? '全部時間的甜蜜點命中率'
                         : '有 IMU 與麥克風資料後顯示';
 
                 final cards = <Widget>[
@@ -1546,7 +1557,7 @@ class _HomePageState extends State<HomePage> {
                     highlightColor: const Color(0xFF1E8E5A),
                   ),
                   _buildStatCard(
-                    title: '平均速度',
+                    title: '最佳速度',
                     value: speedValue,
                     subTitle: speedSubtitle,
                     highlightColor: const Color(0xFF2E8EFF),
@@ -1594,11 +1605,6 @@ class _HomePageState extends State<HomePage> {
             _SectionHeader(
               title: 'Video Library',
               actions: [
-                FilledButton.icon(
-                  onPressed: _pickExternalVideoForImport,
-                  icon: const Icon(Icons.file_upload_rounded, size: 18),
-                  label: const Text('匯入影片'),
-                ),
                 GestureDetector(
                   onTap: () => _onBottomNavTap(3),
                   child: const Text(
@@ -1687,36 +1693,14 @@ class _HomePageState extends State<HomePage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Avg Speed', style: TextStyle(color: Color(0xFF7D8B9A))),
-                            const SizedBox(height: 6),
-                            Text(
-                              analyticsAvgSpeedText,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E8E5A),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
                             const Text('Best Speed', style: TextStyle(color: Color(0xFF7D8B9A))),
                             const SizedBox(height: 6),
                             Text(
                               analyticsBestSpeedText,
                               style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E8E5A),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            const Text('Stability', style: TextStyle(color: Color(0xFF7D8B9A))),
-                            const SizedBox(height: 6),
-                            Text(
-                              analyticsStabilityText,
-                              style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF2E8EFF),
+                                color: Color(0xFF1E8E5A),
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -1731,10 +1715,10 @@ class _HomePageState extends State<HomePage> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Text('Impact Clarity', style: TextStyle(color: Color(0xFF7D8B9A))),
+                            const Text('Audio Crispness', style: TextStyle(color: Color(0xFF7D8B9A))),
                             const SizedBox(height: 6),
                             Text(
-                              analyticsClarityText,
+                              analyticsCrispnessText,
                               style: const TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
@@ -1765,6 +1749,10 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 32),
           ],
         ),
+      );
+            },
+          );
+        },
       ),
       bottomNavigationBar: _buildBottomBar(),
     );
@@ -1877,17 +1865,23 @@ class _MetricsCalculator {
     _ComparisonSnapshot? comparisonBefore;
     if (comparable.isNotEmpty) {
       final latest = comparable.first;
+      final latestCrispValue = latest.entry.audioCrispness;
+      final latestCrispDouble = (latestCrispValue is int) ? (latestCrispValue as int).toDouble() : latestCrispValue as double?;
       comparisonAfter = _ComparisonSnapshot(
         entry: latest.entry,
         speedMph: latest.snapshot!.estimatedSpeedMph,
         impactClarity: latest.snapshot!.impactClarity,
+        audioCrispness: latestCrispDouble,
       );
       if (comparable.length > 1) {
         final previous = comparable[1];
+        final prevCrispValue = previous.entry.audioCrispness;
+        final prevCrispDouble = (prevCrispValue is int) ? (prevCrispValue as int).toDouble() : prevCrispValue as double?;
         comparisonBefore = _ComparisonSnapshot(
           entry: previous.entry,
           speedMph: previous.snapshot!.estimatedSpeedMph,
           impactClarity: previous.snapshot!.impactClarity,
+          audioCrispness: prevCrispDouble,
         );
       }
     }
@@ -2036,11 +2030,13 @@ class _ComparisonSnapshot {
   final RecordingHistoryEntry entry; // 對應的錄影紀錄
   final double? speedMph; // 預估揮桿速度
   final double impactClarity; // 擊球清脆度比例
+  final double? audioCrispness; // 聲音清脆度（0-100）
 
   const _ComparisonSnapshot({
     required this.entry,
     required this.speedMph,
     required this.impactClarity,
+    this.audioCrispness,
   });
 }
 

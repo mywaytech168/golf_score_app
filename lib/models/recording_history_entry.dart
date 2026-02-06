@@ -42,6 +42,76 @@ enum VideoType {
   }
 }
 
+/// 檔案處理狀態枚舉（服務器端的隊列狀態）
+enum ProcessingStatus {
+  /// 準備中
+  ready,
+  /// 排隊中
+  queued,
+  /// 處理中
+  processing,
+  /// 已處理
+  completed,
+  /// 失敗
+  failed,
+  /// 未開始
+  notStarted;
+
+  /// 中文標籤
+  String get label {
+    switch (this) {
+      case ProcessingStatus.ready:
+        return '準備中';
+      case ProcessingStatus.queued:
+        return '排隊中';
+      case ProcessingStatus.processing:
+        return '處理中';
+      case ProcessingStatus.completed:
+        return '✓ 完成';
+      case ProcessingStatus.failed:
+        return '✗ 失敗';
+      case ProcessingStatus.notStarted:
+        return '未開始';
+    }
+  }
+
+  /// 徽章顏色
+  Color get badgeColor {
+    switch (this) {
+      case ProcessingStatus.ready:
+        return const Color(0xFF90CAF9); // 淺藍色
+      case ProcessingStatus.queued:
+        return const Color(0xFFFBC02D); // 黃色
+      case ProcessingStatus.processing:
+        return const Color(0xFF1976D2); // 藍色
+      case ProcessingStatus.completed:
+        return const Color(0xFF388E3C); // 綠色
+      case ProcessingStatus.failed:
+        return const Color(0xFFC62828); // 紅色
+      case ProcessingStatus.notStarted:
+        return const Color(0xFF757575); // 灰色
+    }
+  }
+
+  /// 從服務器狀態字符串轉換
+  static ProcessingStatus fromString(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'ready':
+        return ProcessingStatus.ready;
+      case 'queued':
+        return ProcessingStatus.queued;
+      case 'processing':
+        return ProcessingStatus.processing;
+      case 'completed':
+        return ProcessingStatus.completed;
+      case 'failed':
+        return ProcessingStatus.failed;
+      default:
+        return ProcessingStatus.notStarted;
+    }
+  }
+}
+
 /// 同步狀態枚舉
 enum SyncStatus {
   /// 已同步到雲端
@@ -167,11 +237,39 @@ class RecordingHistoryEntry {
   /// 同步狀態
   final SyncStatus syncStatus;
 
+  /// 服務器處理狀態（隊列狀態）
+  final ProcessingStatus processingStatus;
+
+  /// 服務器處理是否成功
+  final bool? processingSuccess;
+
+  /// 後端返回的主要文件類型（pose_phase_trajectory_video / clip / original）
+  final String? mainFileType;
+
   /// 如果是原始影片，標記是否已被切片（只對 VideoType.original 有效）
   final bool isClipped;
 
   /// 對應的本地檔案路徑（當影片上傳到雲端時，記錄本地檔案的路徑，用於追踪來源）
   final String? sourceLocalFilePath;
+
+  /// 擊球時刻（秒數），用於切片標識
+  final double? hitSecond;
+
+  /// 切片開始秒數
+  final double? startSecond;
+
+  /// 切片結束秒數
+  final double? endSecond;
+
+  /// 軌跡的峰值（對應 imuCsvPaths 中的軌跡）
+  /// 鍵為軌跡標籤（如 'chest'、'right_wrist'），值為峰值
+  final Map<String, double>? peakValues;
+
+  /// 聲音清脆度評分（0-100），來自後端音頻分析
+  final double? audioCrispness;
+
+  /// 是否為好球，來自後端分析（基於多重指標）
+  final bool? goodShot;
 
   const RecordingHistoryEntry({
     required this.filePath,
@@ -188,8 +286,17 @@ class RecordingHistoryEntry {
     this.lastUploadAttempt,
     this.videoType = VideoType.original,
     this.syncStatus = SyncStatus.notSynced,
+    this.processingStatus = ProcessingStatus.notStarted,
+    this.processingSuccess,
+    this.mainFileType,
     this.isClipped = false,
     this.sourceLocalFilePath,
+    this.hitSecond,
+    this.startSecond,
+    this.endSecond,
+    this.peakValues,
+    this.audioCrispness,
+    this.goodShot,
   });
 
   /// 建立更新後的新實例，方便調整時長或其他欄位
@@ -204,12 +311,22 @@ class RecordingHistoryEntry {
     String? thumbnailPath,
     UploadStatus? uploadStatus,
     String? cloudVideoId,
+    bool clearCloudVideoId = false,
     String? uploadError,
     DateTime? lastUploadAttempt,
     VideoType? videoType,
     SyncStatus? syncStatus,
+    ProcessingStatus? processingStatus,
+    bool? processingSuccess,
+    String? mainFileType,
     bool? isClipped,
     String? sourceLocalFilePath,
+    double? hitSecond,
+    double? startSecond,
+    double? endSecond,
+    Map<String, double>? peakValues,
+    double? audioCrispness,
+    bool? goodShot,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -221,13 +338,22 @@ class RecordingHistoryEntry {
       imuCsvPaths: imuCsvPaths ?? this.imuCsvPaths,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       uploadStatus: uploadStatus ?? this.uploadStatus,
-      cloudVideoId: cloudVideoId ?? this.cloudVideoId,
+      cloudVideoId: clearCloudVideoId ? null : (cloudVideoId ?? this.cloudVideoId),
       uploadError: uploadError ?? this.uploadError,
       lastUploadAttempt: lastUploadAttempt ?? this.lastUploadAttempt,
       videoType: videoType ?? this.videoType,
       syncStatus: syncStatus ?? this.syncStatus,
+      processingStatus: processingStatus ?? this.processingStatus,
+      processingSuccess: processingSuccess ?? this.processingSuccess,
+      mainFileType: mainFileType ?? this.mainFileType,
       isClipped: isClipped ?? this.isClipped,
       sourceLocalFilePath: sourceLocalFilePath ?? this.sourceLocalFilePath,
+      hitSecond: hitSecond ?? this.hitSecond,
+      startSecond: startSecond ?? this.startSecond,
+      endSecond: endSecond ?? this.endSecond,
+      peakValues: peakValues ?? this.peakValues,
+      audioCrispness: audioCrispness ?? this.audioCrispness,
+      goodShot: goodShot ?? this.goodShot,
     );
   }
 
@@ -274,8 +400,17 @@ class RecordingHistoryEntry {
       'lastUploadAttempt': lastUploadAttempt?.toIso8601String(),
       'videoType': videoType.name,
       'syncStatus': syncStatus.name,
+      'processingStatus': processingStatus.name,
+      'processingSuccess': processingSuccess,
+      'mainFileType': mainFileType,
       'isClipped': isClipped,
       'sourceLocalFilePath': sourceLocalFilePath,
+      'hitSecond': hitSecond,
+      'startSecond': startSecond,
+      'endSecond': endSecond,
+      'peakValues': peakValues,
+      'audioCrispness': audioCrispness,
+      'goodShot': goodShot,
     };
   }
 
@@ -344,9 +479,33 @@ class RecordingHistoryEntry {
           : null,
       videoType: videoType,
       syncStatus: syncStatus,
+      processingStatus: ProcessingStatus.fromString(json['processingStatus'] as String?),
+      processingSuccess: (json['processingSuccess'] as bool?),
+      mainFileType: (json['mainFileType'] as String?),
       isClipped: (json['isClipped'] as bool?) ?? false,
       sourceLocalFilePath: (json['sourceLocalFilePath'] as String?),
+      hitSecond: (json['hitSecond'] as num?)?.toDouble(),
+      startSecond: (json['startSecond'] as num?)?.toDouble(),
+      endSecond: (json['endSecond'] as num?)?.toDouble(),
+      peakValues: _parsePeakValues(json['peakValues']),
+      audioCrispness: (json['audioCrispness'] as num?)?.toDouble(),
+      goodShot: (json['goodShot'] as bool?),
     );
+  }
+
+  /// 解析峰值 Map，確保類型正確
+  static Map<String, double>? _parsePeakValues(dynamic rawPeakValues) {
+    if (rawPeakValues == null) return null;
+    if (rawPeakValues is! Map) return null;
+    
+    final result = <String, double>{};
+    rawPeakValues.forEach((key, value) {
+      if (value is num) {
+        result[key.toString()] = value.toDouble();
+      }
+    });
+    
+    return result.isEmpty ? null : result;
   }
 
   /// 從 IMU 數據中檢測峰值並返回時間戳

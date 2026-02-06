@@ -184,6 +184,8 @@ void _filterSystemLogs() {
       'scontext=',
       'tcontext=',
       'Reaching hidden api',
+      'W/qdgralloc',
+      'qdgralloc',
     ];
     
     // 如果消息包含屏蔽关键词，则不输出

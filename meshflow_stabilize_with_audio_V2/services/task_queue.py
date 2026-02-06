@@ -634,12 +634,37 @@ class TaskQueue:
                 audio_scoring_result = run_audio_scoring(config=config)
                 step_duration = (datetime.now() - step_start).total_seconds()
                 
-                result_data['steps']['audio_scoring'] = {
-                    'status': 'completed',
-                    'duration': step_duration,
-                    'result': str(audio_scoring_result) if audio_scoring_result is not None else 'No result'
-                }
-                task_logger.info(f"✅ Audio Scoring 完成 ({step_duration:.1f}s)")
+                # 🎯 提取 audio_crispness 和 good_shot
+                audio_crispness = None
+                good_shot = None
+                
+                if isinstance(audio_scoring_result, dict):
+                    audio_crispness = audio_scoring_result.get('audio_crispness')
+                    good_shot = audio_scoring_result.get('good_shot')
+                    
+                    result_data['steps']['audio_scoring'] = {
+                        'status': 'completed',
+                        'duration': step_duration,
+                        'result': 'DataFrame'  # 简化显示
+                    }
+                    
+                    # 将提取的值添加到 audio_analysis 中供回调使用
+                    if 'audio_analysis' not in result_data:
+                        result_data['audio_analysis'] = {}
+                    
+                    result_data['audio_analysis']['audio_crispness'] = audio_crispness
+                    result_data['audio_analysis']['good_shot'] = good_shot
+                    
+                    task_logger.info(f"✅ Audio Scoring 完成 ({step_duration:.1f}s)")
+                    task_logger.info(f"   🎵 audio_crispness: {audio_crispness}")
+                    task_logger.info(f"   ⭐ good_shot: {good_shot}")
+                else:
+                    result_data['steps']['audio_scoring'] = {
+                        'status': 'completed',
+                        'duration': step_duration,
+                        'result': str(audio_scoring_result) if audio_scoring_result is not None else 'No result'
+                    }
+                    task_logger.info(f"✅ Audio Scoring 完成 ({step_duration:.1f}s)")
             except Exception as e:
                 task_logger.error(f"❌ Audio Scoring 失敗: {str(e)}", exc_info=True)
                 result_data['steps']['audio_scoring'] = {'status': 'failed', 'error': str(e)}

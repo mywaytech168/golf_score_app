@@ -3,6 +3,16 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'auth_token_storage.dart';
+import '../models/statistics_response.dart';
+
+/// 授權異常 - 當 API 返回 401 時拋出
+class UnauthorizedException implements Exception {
+  final String message;
+  UnauthorizedException(this.message);
+  
+  @override
+  String toString() => message;
+}
 
 /// 伺服器 API 客戶端
 class VideoServerClient {
@@ -290,11 +300,13 @@ class VideoServerClient {
   /// [videoId]: 伺服器上的視頻 ID (UUID)
   /// [videoFilePath]: 本地視頻檔案路徑
   /// [fileType]: 檔案類型，通常為 'original' 或 'clip'
+  /// [peakValue]: 軌跡的峰值（對應 CSV 檔案）
   Future<Map<String, dynamic>> uploadVideoFile({
     required String videoId,
     required String videoFilePath,
     required String fileType,
     String? sourceLocalFilePath,
+    double? peakValue,
   }) async {
     try {
       debugPrint(
@@ -307,6 +319,9 @@ class VideoServerClient {
       debugPrint('🏷️ 檔案類型: $fileType');
       if (sourceLocalFilePath != null && sourceLocalFilePath.isNotEmpty) {
         debugPrint('💾 來源本地檔案路徑: $sourceLocalFilePath');
+      }
+      if (peakValue != null) {
+        debugPrint('📊 軌跡峰值: $peakValue');
       }
 
       final request = http.MultipartRequest(
@@ -326,6 +341,11 @@ class VideoServerClient {
       // 添加 sourceLocalFilePath（如果提供）
       if (sourceLocalFilePath != null && sourceLocalFilePath.isNotEmpty) {
         request.fields['sourceLocalFilePath'] = sourceLocalFilePath;
+      }
+
+      // 添加峰值（如果提供）
+      if (peakValue != null) {
+        request.fields['peakValue'] = peakValue.toString();
       }
 
       // 添加認證頭
@@ -583,7 +603,8 @@ class VideoServerClient {
         if (status != null) 'status': status,
       });
 
-      final response = await http.get(url);
+      final headers = await _getAuthHeaders();
+      final response = await http.get(url, headers: headers);
 
       if (response.statusCode == 200) {
         return {
@@ -678,10 +699,20 @@ class VideoServerClient {
   /// [name]: 視頻名稱
   /// [type]: 視頻類型 (original 或 clip)
   /// [parentVideoId]: 父視頻 ID（若為切片時使用）
+  /// [hitSecond]: 擊球時刻（秒數）
+  /// [startSecond]: 切片開始秒數
+  /// [endSecond]: 切片結束秒數
   Future<Map<String, dynamic>> createVideo({
     required String name,
     required String type,
     String? parentVideoId,
+    double? hitSecond,
+    double? startSecond,
+    double? endSecond,
+    double? peakValue,
+    bool? goodShot,
+    double? audioCrispness,
+    Map<String, double>? rawPeakValues,
   }) async {
     try {
       final url = Uri.parse('$_baseUrl/api/videos');
@@ -696,6 +727,12 @@ class VideoServerClient {
           'name': name,
           'type': type,
           if (parentVideoId != null) 'parentVideoId': parentVideoId,
+          if (hitSecond != null) 'hitSecond': hitSecond,
+          if (startSecond != null) 'startSecond': startSecond,
+          if (endSecond != null) 'endSecond': endSecond,
+          if (peakValue != null) 'peakValue': peakValue,
+          if (goodShot != null) 'goodShot': goodShot,
+          if (audioCrispness != null) 'audioCrispness': audioCrispness,
         }),
       );
 
@@ -863,11 +900,192 @@ class VideoServerClient {
     }
   }
 
+  /// 解除雲端綁定
+  ///
+  /// [videoId]: 影片 ID
+  /// 返回是否成功解除綁定
+  Future<bool> unbindVideo(String videoId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/videos/$videoId/unbind');
+      
+      debugPrint('════════════════════════════════════════');
+      debugPrint('🔓 解除雲端綁定');
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📍 URL: $url');
+      debugPrint('🎯 VideoId: $videoId');
+
+      final response = await http.post(
+        url,
+        headers: headers,
+      );
+
+      debugPrint('📥 Response Status: ${response.statusCode}');
+      debugPrint('📝 Response: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final result = jsonDecode(response.body);
+        debugPrint('✅ 影片已解除雲端綁定');
+        return result['success'] ?? true;
+      } else {
+        debugPrint('❌ 解除綁定失敗: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ 解除綁定異常: $e');
+      return false;
+    }
+  }
+
+  /// 標記雲端影片為刪除（切片視頻刪除時使用）
+  ///
+  /// [videoId]: 影片 ID
+  /// 返回是否成功標記為刪除
+  Future<bool> markVideoAsDeleted(String videoId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/videos/$videoId/delete');
+      
+      debugPrint('════════════════════════════════════════');
+      debugPrint('🗑️ 標記影片為刪除');
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📍 URL: $url');
+      debugPrint('🎯 VideoId: $videoId');
+
+      final response = await http.post(
+        url,
+        headers: headers,
+      );
+
+      debugPrint('📥 Response Status: ${response.statusCode}');
+      debugPrint('📝 Response: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final result = jsonDecode(response.body);
+        debugPrint('✅ 影片已標記為刪除');
+        return result['success'] ?? true;
+      } else {
+        debugPrint('❌ 標記刪除失敗: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ 標記刪除異常: $e');
+      return false;
+    }
+  }
+
   /// 獲取影片的流式傳輸 URL（用於在線播放）
   ///
   /// [videoId]: 影片 ID
   /// 返回可以直接用於視頻播放的 URL
-  String getVideoStreamUrl(String videoId) {
+  /// 如果提供了 token，會將其作為查詢參數添加
+  Future<String> getVideoStreamUrl(String videoId, {String? token}) async {
+    // 如果沒有提供 token，則嘗試從儲存中獲取
+    token ??= await AuthTokenStorage.instance.getAccessToken();
+    
+    if (token != null && token.isNotEmpty) {
+      return '$_baseUrl/api/videos/$videoId/stream?token=$token';
+    }
+    
+    // 如果沒有 token，返回不帶 token 的 URL（會導致 401）
     return '$_baseUrl/api/videos/$videoId/stream';
+  }
+
+  /// 更新雲端影片的名稱
+  ///
+  /// [videoId]: 影片 ID
+  /// [newName]: 新的影片名稱
+  /// 返回是否成功更新
+  Future<bool> updateVideoName(String videoId, String newName) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/videos/$videoId');
+      
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📝 更新影片名稱');
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📍 URL: $url');
+      debugPrint('🎯 VideoId: $videoId');
+      debugPrint('📛 新名稱: $newName');
+
+      final body = jsonEncode({
+        'name': newName,
+      });
+
+      final response = await http.put(
+        url,
+        headers: {...headers, 'Content-Type': 'application/json'},
+        body: body,
+      );
+
+      debugPrint('📥 Response Status: ${response.statusCode}');
+      debugPrint('📝 Response: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final result = jsonDecode(response.body);
+        debugPrint('✅ 影片名稱已更新');
+        return result['success'] ?? true;
+      } else {
+        debugPrint('❌ 更新名稱失敗: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ 更新名稱異常: $e');
+      return false;
+    }
+  }
+
+  // ============================================================
+  // 統計數據方法
+  // ============================================================
+
+  /// 獲取統計數據
+  /// period: all（全部）、today（今天）、yesterday（昨天）、tomorrow（明天）、date（指定日期）
+  /// date: 當 period 為 date 時，指定日期（格式：2026-02-06）
+  Future<StatisticsResponse?> getStatistics({
+    required String period,
+    String? date,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      
+      var url = Uri.parse('$_baseUrl/api/statistics').replace(
+        queryParameters: {
+          'period': period,
+          if (date != null) 'date': date,
+        },
+      );
+
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📊 獲取統計數據');
+      debugPrint('════════════════════════════════════════');
+      debugPrint('📍 URL: $url');
+      debugPrint('Period: $period' + (date != null ? ', Date: $date' : ''));
+
+      final response = await http.get(url, headers: headers);
+
+      debugPrint('📥 Response Status: ${response.statusCode}');
+      debugPrint('📝 Response: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        final statistics = StatisticsResponse.fromJson(json);
+        debugPrint('✅ 統計數據獲取成功');
+        debugPrint('📊 數據: $statistics');
+        return statistics;
+      } else if (response.statusCode == 401) {
+        debugPrint('❌ 統計數據獲取失敗: ${response.statusCode} - 未授權');
+        throw UnauthorizedException('統計數據獲取失敗: ${response.statusCode}');
+      } else {
+        debugPrint('❌ 統計數據獲取失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) {
+        rethrow; // 重新拋出授權異常
+      }
+      debugPrint('❌ 統計數據異常: $e');
+      return null;
+    }
   }
 }

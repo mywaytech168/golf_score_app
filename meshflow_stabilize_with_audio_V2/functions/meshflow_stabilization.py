@@ -542,53 +542,24 @@ def process_meshflow_stabilization(config: MeshFlowConfig) -> Dict[str, Any]:
     h, w = frames[0].shape[:2]
     print(f"✅ 已讀取視頻：{num_frames} 幀，{fps:.2f} fps，{w}x{h}")
     
-    # 2. 選擇 CPU 或 GPU 版本
-    use_gpu_final = config.use_gpu and check_cuda_available()
-    if config.use_gpu and not use_gpu_final:
-        print("⚠️  CUDA 不可用，降級到 CPU 模式")
+    # 2. 選擇 Cython 加速版本 (推薦用於生產環境)
+    print("🚀 使用 Cython 加速版本")
+    from meshflow_stabilize_cython import MeshFlowStabilizerCython
     
-    if use_gpu_final:
-        # GPU 版本
-        print("🚀 使用 GPU 加速版本")
-        from meshflow_stabilize_gpu_function import MeshFlowStabilizerGPU
-        stabilizer = MeshFlowStabilizerGPU(
-            mesh_row_count=config.mesh_row_count,
-            mesh_col_count=config.mesh_col_count,
-            mesh_outlier_subframe_row_count=config.mesh_outlier_subframe_row_count,
-            mesh_outlier_subframe_col_count=config.mesh_outlier_subframe_col_count,
-            feature_ellipse_row_count=config.feature_ellipse_row_count,
-            feature_ellipse_col_count=config.feature_ellipse_col_count,
-            homography_min_number_corresponding_features=config.homography_min_number_corresponding_features,
-            temporal_smoothing_radius=config.temporal_smoothing_radius,
-            optimization_num_iterations=config.optimization_num_iterations,
-            color_outside_image_area_bgr=config.color_outside_image_area_bgr,
-            visualize=config.visualize,
-            warp_downscale=config.warp_downscale,
-            use_cuda=True,
-            gpu_id=config.gpu_id,
-        )
-    else:
-        # CPU 版本
-        print("⚙️  使用 CPU 版本")
-        script_path = Path(__file__).parent / "meshflow_stabilize_function.py"
-        spec = importlib.util.spec_from_file_location("meshflow_module", script_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        
-        stabilizer = module.MeshFlowStabilizer(
-            mesh_row_count=config.mesh_row_count,
-            mesh_col_count=config.mesh_col_count,
-            mesh_outlier_subframe_row_count=config.mesh_outlier_subframe_row_count,
-            mesh_outlier_subframe_col_count=config.mesh_outlier_subframe_col_count,
-            feature_ellipse_row_count=config.feature_ellipse_row_count,
-            feature_ellipse_col_count=config.feature_ellipse_col_count,
-            homography_min_number_corresponding_features=config.homography_min_number_corresponding_features,
-            temporal_smoothing_radius=config.temporal_smoothing_radius,
-            optimization_num_iterations=config.optimization_num_iterations,
-            color_outside_image_area_bgr=config.color_outside_image_area_bgr,
-            visualize=config.visualize,
-            warp_downscale=config.warp_downscale,
-        )
+    stabilizer = MeshFlowStabilizerCython(
+        mesh_row_count=config.mesh_row_count,
+        mesh_col_count=config.mesh_col_count,
+        mesh_outlier_subframe_row_count=config.mesh_outlier_subframe_row_count,
+        mesh_outlier_subframe_col_count=config.mesh_outlier_subframe_col_count,
+        feature_ellipse_row_count=config.feature_ellipse_row_count,
+        feature_ellipse_col_count=config.feature_ellipse_col_count,
+        homography_min_number_corresponding_features=config.homography_min_number_corresponding_features,
+        temporal_smoothing_radius=config.temporal_smoothing_radius,
+        optimization_num_iterations=config.optimization_num_iterations,
+        color_outside_image_area_bgr=config.color_outside_image_area_bgr,
+        visualize=config.visualize,
+        warp_downscale=config.warp_downscale,
+    )
     
     
     # 4. 計算全片動作估計（一次性，避免重複計算）
@@ -708,7 +679,9 @@ def run_meshflow_stabilization(config: Optional[MeshFlowConfig] = None) -> Dict[
 if __name__ == "__main__":
     # 測試用例
     config = MeshFlowConfig(
-        input_path=r"/data/tekswing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
-        output_path=r"/data/tekswing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
+        #input_path=r"/data/tekswing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
+        #output_path=r"/data/tekswing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
+        input_path=r"//10.1.1.101/TekSwing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
+        output_path=r"//10.1.1.101/TekSwing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
     )
     result = run_meshflow_stabilization(config)

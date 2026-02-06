@@ -31,10 +31,6 @@ import '../widgets/recording_history_sheet.dart';
 import '../services/video_server_client.dart';
 import '../widgets/pose_overlay_painter.dart';
 import 'highlight_preview_page.dart';
-// ---------- MethodChannel for sharing ----------
-const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
-// ---------- Share target enum ----------
-enum _ShareTarget { instagram, facebook, line }
 /// Recording session page - handles camera, audio, and IMU data for recording sessions
 class RecordingSessionPage extends StatefulWidget {
   final List<CameraDescription> cameras; // Available cameras on the device
@@ -437,6 +433,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
       // Run audio analysis on the saved recording
       unawaited(_runAudioAnalysis(entry));
+      
+      // Show upload dialog after recording is saved
+      if (mounted) {
+        _showUploadDialog(entry);
+      }
     } catch (e, stackTrace) {
       debugPrint('[Save] Error during save process: $e');
       debugPrintStack(stackTrace: stackTrace);
@@ -475,6 +476,367 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       Navigator.of(context).pop();
     }
   }
+
+  /// Show upload dialog with video and trajectory upload options
+  void _showUploadDialog(RecordingHistoryEntry entry) {
+    if (!mounted) return;
+    
+    bool isClipped = false; // 用户选择的录影类型
+    bool uploadVideo = true; // 是否上傳影片
+    bool uploadTrajectory = true; // 是否上傳軌跡
+    bool directUpload = true; // 是否直接上傳
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return AlertDialog(
+              title: const Text('上傳設定'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('選擇要上傳的內容:'),
+                    const SizedBox(height: 16),
+                    
+                    // 錄影類型選擇
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '錄影類型',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('完整錄影'),
+                                    leading: Radio<bool>(
+                                      value: false,
+                                      groupValue: isClipped,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          isClipped = value ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('已切割切片'),
+                                    leading: Radio<bool>(
+                                      value: true,
+                                      groupValue: isClipped,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          isClipped = value ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // 上傳內容選擇
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '上傳內容',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            CheckboxListTile(
+                              title: const Text('上傳影片'),
+                              value: uploadVideo,
+                              onChanged: (value) {
+                                setState(() {
+                                  uploadVideo = value ?? true;
+                                });
+                              },
+                            ),
+                            CheckboxListTile(
+                              title: const Text('上傳軌跡'),
+                              value: uploadTrajectory,
+                              onChanged: (value) {
+                                setState(() {
+                                  uploadTrajectory = value ?? true;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // 上傳方式選擇
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '上傳方式',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('稍後上傳'),
+                                    leading: Radio<bool>(
+                                      value: false,
+                                      groupValue: directUpload,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          directUpload = value ?? true;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('直接上傳'),
+                                    leading: Radio<bool>(
+                                      value: true,
+                                      groupValue: directUpload,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          directUpload = value ?? true;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    // 根據選擇進行上傳
+                    if (!directUpload) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('設定已保存，可於錄影歷史頁進行上傳')),
+                      );
+                      return;
+                    }
+                    
+                    if (!uploadVideo && !uploadTrajectory) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('請至少選擇上傳影片或軌跡')),
+                      );
+                      return;
+                    }
+                    
+                    // 執行上傳
+                    if (uploadVideo && uploadTrajectory) {
+                      _uploadRecordingWithBoth(entry, isClipped: isClipped);
+                    } else if (uploadVideo) {
+                      _uploadRecordingWithVideo(entry, isClipped: isClipped);
+                    } else if (uploadTrajectory) {
+                      _uploadRecordingWithTrajectory(entry, isClipped: isClipped);
+                    }
+                  },
+                  child: const Text('確認上傳'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Upload recording with video only
+  Future<void> _uploadRecordingWithVideo(RecordingHistoryEntry entry, {bool isClipped = false}) async {
+    debugPrint('[Upload] Starting video upload for ${entry.filePath} (isClipped: $isClipped)');
+    if (!mounted) return;
+    
+    try {
+      // Get IMU CSV path (use first available one, typically RIGHT_WRIST)
+      final imuCsvPath = entry.imuCsvPaths.values.isNotEmpty 
+          ? entry.imuCsvPaths.values.first 
+          : null;
+      
+      if (imuCsvPath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未找到 IMU 數據')),
+        );
+        return;
+      }
+      
+      // 只有非切片模式才需要分割
+      if (!isClipped) {
+        // Step 1: Split video into clips
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('正在分割影片...')),
+        );
+        
+        debugPrint('[Upload] Splitting video: ${entry.filePath}');
+        final clips = await SwingSplitService.split(
+          videoPath: entry.filePath,
+          imuCsvPath: imuCsvPath,
+        );
+        
+        if (clips.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('未檢測到擊棒')),
+            );
+          }
+          return;
+        }
+        
+        debugPrint('[Upload] Video split complete: ${clips.length} clips found');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✓ 分割完成，共${clips.length}個切片')),
+          );
+        }
+      } else {
+        // 切片模式：直接使用已有的切片
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✓ 已為已切割的切片準備好')),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Upload] Video upload error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('操作失敗: $e')),
+        );
+      }
+    }
+  }
+
+  /// Upload recording with trajectory only
+  Future<void> _uploadRecordingWithTrajectory(RecordingHistoryEntry entry, {bool isClipped = false}) async {
+    debugPrint('[Upload] Starting trajectory upload for ${entry.filePath} (isClipped: $isClipped)');
+    if (!mounted) return;
+    
+    try {
+      // Get all IMU CSV paths
+      final imuCsvPaths = entry.imuCsvPaths;
+      
+      if (imuCsvPaths.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未找到軌跡數據')),
+        );
+        return;
+      }
+      
+      final uploadType = isClipped ? '切片' : '完整錄影';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✓ $uploadType 軌跡數據已準備，共${imuCsvPaths.length}個')),
+      );
+    } catch (e) {
+      debugPrint('[Upload] Trajectory upload error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('操作失敗: $e')),
+        );
+      }
+    }
+  }
+
+  /// Upload recording with both video and trajectory
+  Future<void> _uploadRecordingWithBoth(RecordingHistoryEntry entry, {bool isClipped = false}) async {
+    debugPrint('[Upload] Starting full upload for ${entry.filePath} (isClipped: $isClipped)');
+    if (!mounted) return;
+    
+    try {
+      // Get IMU CSV path (use first available one, typically RIGHT_WRIST)
+      final imuCsvPath = entry.imuCsvPaths.values.isNotEmpty 
+          ? entry.imuCsvPaths.values.first 
+          : null;
+      
+      if (imuCsvPath == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未找到 IMU 數據')),
+        );
+        return;
+      }
+      
+      // 只有非切片模式才需要分割
+      if (!isClipped) {
+        // Step 1: Split video into clips
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('正在分割影片...')),
+        );
+        
+        debugPrint('[Upload] Splitting video: ${entry.filePath}');
+        final clips = await SwingSplitService.split(
+          videoPath: entry.filePath,
+          imuCsvPath: imuCsvPath,
+        );
+        
+        if (clips.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('未檢測到擊棒')),
+            );
+          }
+          return;
+        }
+        
+        debugPrint('[Upload] Video split complete: ${clips.length} clips found');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✓ 已準備影片、軌跡和${clips.length}個切片，稍後可在歷史頁面上傳')),
+          );
+        }
+      } else {
+        // 切片模式：直接使用已有的切片
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✓ 已為切片影片和軌跡數據準備好')),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Upload] Full upload error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('操作失敗: $e')),
+        );
+      }
+    }
+  }
+
   Future<String?> _generateThumbnail(String videoPath) async {
     try {
       final dir = p.dirname(videoPath);
@@ -700,6 +1062,7 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
             builder: (_) => VideoPlayerPage(
               videoPath: entry.filePath,
               avatarPath: widget.userAvatarPath,
+              cloudVideoId: entry.cloudVideoId,
             ),
           ),
         );
@@ -1373,11 +1736,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Duration _playbackPosition = Duration.zero;
   Duration _playbackDuration = Duration.zero;
   static const String _shareMessage = 'Check out my recording on TekSwing!'; // Default share message
-  final TextEditingController _captionController = TextEditingController(); // Controller for the caption text field
   final List<String> _generatedTempFiles = []; // List of temporary files generated during processing
-  bool _attachAvatar = false; // Indicates if the avatar should be attached to the video
   bool _isProcessingShare = false; // Indicates if a share operation is in progress
-  late final bool _avatarSelectable; // Indicates if the avatar can be selected
   bool _isVideoLoading = true; // Indicates if the video is currently loading
   String? _videoLoadError; // Error message if video loading fails
   bool _isTrajectoryRunning = false; // Indicates if trajectory analysis is running
@@ -1392,7 +1752,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   double _effectiveAspectRatio(VideoPlayerController controller) {
-    return 9 / 16; // force portrait container
+    final Size size = controller.value.size;
+    if (size.width == 0 || size.height == 0) return 9 / 16;
+    return size.width / size.height; // Use actual video aspect ratio
   }
 
   String _formatDuration(Duration d) {
@@ -1425,8 +1787,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                       child: FittedBox(
                         fit: BoxFit.contain,
                         child: SizedBox(
-                          width: vh, // swap to keep portrait look as之前
-                          height: vw,
+                          width: vw, // Use correct width
+                          height: vh, // Use correct height
                           child: VideoPlayer(controller),
                         ),
                       ),
@@ -1446,8 +1808,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                     isInlier: (p['isInlier'] ?? p['is_inlier'] ?? 0) as int,
                                   ))
                               .toList(),
-                          // keep painter scale consistent with rendered swap
-                          videoSize: Size(vh, vw),
+                          // Use correct video size
+                          videoSize: Size(vw, vh),
                         ),
                       ),
                   ],
@@ -1510,12 +1872,58 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (_isGeneratingHighlight) return;
     setState(() => _isGeneratingHighlight = true);
     try {
-      final out = await HighlightService.generateHighlight(widget.videoPath, beforeMs: 3000, afterMs: 3000, titleData: {'Name':'Player','Course':'Unknown'});
+      // 判斷是否需要下載雲端影片
+      String videoPathForProcessing = widget.videoPath;
+      
+      debugPrint('[SessionHighlight] cloudVideoId != null: ${widget.cloudVideoId != null}');
+      debugPrint('[SessionHighlight] cloudVideoId.isNotEmpty: ${widget.cloudVideoId?.isNotEmpty ?? "N/A"}');
+      debugPrint('[SessionHighlight] cloudVideoId value: "${widget.cloudVideoId}"');
+      
+      if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
+        // 有雲端影片，先嘗試下載
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在下載雲端影片...')));
+        
+        try {
+          final serverClient = VideoServerClient();
+          final streamUrl = await serverClient.getVideoStreamUrl(widget.cloudVideoId!);
+          
+          // 下載影片到臨時位置
+          final tempDir = await Directory.systemTemp.createTemp('swing_highlight_');
+          final downloadedPath = p.join(tempDir.path, '${widget.cloudVideoId}_downloaded.mp4');
+          
+          debugPrint('[SessionHighlight] 開始從雲端下載影片: $streamUrl -> $downloadedPath');
+          
+          final client = http.Client();
+          final response = await client.get(Uri.parse(streamUrl));
+          
+          if (response.statusCode == 200) {
+            final file = File(downloadedPath);
+            await file.writeAsBytes(response.bodyBytes);
+            videoPathForProcessing = downloadedPath;
+            debugPrint('[SessionHighlight] ✅ 雲端影片已下載: $downloadedPath');
+          } else {
+            debugPrint('[SessionHighlight] ⚠️ 下載失敗 (HTTP ${response.statusCode}), 使用本地影片');
+          }
+          client.close();
+        } catch (e) {
+          debugPrint('[SessionHighlight] ⚠️ 下載雲端影片失敗: $e, 使用本地影片');
+        }
+      }
+      
+      // 檢查影片檔案是否存在
+      final file = File(videoPathForProcessing);
+      if (!await file.exists()) {
+        if (!mounted) return;
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到影片檔案')));
+        return;
+      }
+      
+      final out = await HighlightService.generateHighlight(videoPathForProcessing, beforeMs: 3000, afterMs: 3000, titleData: {'Name':'Player','Course':'Unknown'});
       if (out != null && out.isNotEmpty) {
         if (!mounted) return;
-        debugPrint('[Highlight] generated at: $out');
+        debugPrint('[SessionHighlight] generated at: $out');
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Highlight video generated: $out')));
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: out, avatarPath: widget.avatarPath)));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: out, avatarPath: widget.avatarPath, cloudVideoId: widget.cloudVideoId)));
       } else {
         String? debugText;
         try {
@@ -1526,7 +1934,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         } catch (_) {}
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Highlight generation failed')));
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: widget.videoPath, avatarPath: widget.avatarPath, debugText: debugText)));
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: widget.videoPath, avatarPath: widget.avatarPath, debugText: debugText, cloudVideoId: widget.cloudVideoId)));
         }
       }
     } catch (e) {
@@ -1535,82 +1943,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       if (mounted) setState(() => _isGeneratingHighlight = false);
     }
   }
-  /// Share the recording to the selected target (Instagram, Facebook, LINE)
-  Future<void> _shareToTarget(_ShareTarget target) async {
-    if (_isProcessingShare) {
-      return;
-    }
-    setState(() => _isProcessingShare = true);
-    try {
-      final String? sharePath = await _prepareShareFile();
-      if (!mounted || sharePath == null) {
-        return;
-      }
-      final packageName = switch (target) {
-        _ShareTarget.instagram => 'com.instagram.android',
-        _ShareTarget.facebook => 'com.facebook.katana',
-        _ShareTarget.line => 'jp.naver.line.android',
-      };
-      bool sharedByPackage = false;
-      if (Platform.isAndroid) {
-        try {
-          final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
-            'packageName': packageName,
-            'filePath': sharePath,
-            'mimeType': 'video/*',
-            'text': _shareMessage,
-          });
-          sharedByPackage = result ?? false;
-        } on PlatformException catch (error) {
-          debugPrint('[Share] Android share failed: $error');
-        }
-      }
-      if (!sharedByPackage) {
-        if (mounted && Platform.isAndroid) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Default app not found, using system share')),
-          );
-        }
-        await Share.shareXFiles([XFile(sharePath)], text: _shareMessage);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessingShare = false);
-      }
-    }
-  }
-  Widget _buildShareButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required _ShareTarget target,
-  }) {
-    return Expanded(
-      child: ElevatedButton.icon(
-        onPressed: _isProcessingShare ? null : () => _shareToTarget(target),
-        icon: Icon(icon),
-        label: Text(label),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-        ),
-      ),
-    );
-  }
   @override
   void initState() {
     super.initState();
-    _avatarSelectable = widget.avatarPath != null &&
-        widget.avatarPath!.isNotEmpty &&
-        File(widget.avatarPath!).existsSync();
     unawaited(_initializeVideo());
   }
   @override
   void dispose() {
     _videoController?.removeListener(_handleVideoTick);
     _videoController?.dispose();
-    _captionController.dispose();
     _cleanupTempFiles();
     super.dispose();
   }
@@ -1688,9 +2029,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Future<String?> _resolveVideoUrl() async {
     try {
       // If cloudVideoId is available, prioritize cloud streaming URL
+      debugPrint('[VideoPlayer] cloudVideoId != null: ${widget.cloudVideoId != null}');
+      debugPrint('[VideoPlayer] cloudVideoId.isNotEmpty: ${widget.cloudVideoId?.isNotEmpty ?? "N/A"}');
+      debugPrint('[VideoPlayer] cloudVideoId value: "${widget.cloudVideoId}"');
+      
       if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
         try {
-          final streamUrl = VideoServerClient.instance.getVideoStreamUrl(widget.cloudVideoId!);
+          final streamUrl = await VideoServerClient.instance.getVideoStreamUrl(widget.cloudVideoId!);
           if (streamUrl.isNotEmpty) {
             debugPrint('[VideoPlayer] Using cloud video URL: $streamUrl');
             return streamUrl;
@@ -1769,44 +2114,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     _generatedTempFiles.clear();
   }
-  /// Prepare the video for sharing by processing overlays and captions
+  /// Prepare the video for sharing by processing overlays
   Future<String?> _prepareShareFile() async {
-    final bool wantsAvatar = _attachAvatar;
-    final String trimmedCaption = _captionController.text.trim();
-    final bool wantsCaption = trimmedCaption.isNotEmpty;
-    if (wantsAvatar) {
-      if (!_avatarSelectable || widget.avatarPath == null || !File(widget.avatarPath!).existsSync()) {
-        _showSnack('Avatar not set or file not found');
-        return null;
-      }
-    }
-    String captionToUse = trimmedCaption;
-    bool finalAttachCaption = wantsCaption;
-    try {
-      final List<String> captionParts = [];
-      if (captionToUse.isNotEmpty) captionParts.add(captionToUse);
-      if (_classificationLabel != null && _classificationLabel!.isNotEmpty) {
-        captionParts.add('Label: ${_classificationLabel!}');
-      }
-      if (_classificationFeatures.isNotEmpty) {
-        final rms = _classificationFeatures['rms_dbfs'];
-        final sc = _classificationFeatures['spectral_centroid'];
-        final sh = _classificationFeatures['sharpness_hfxloud'];
-        final featText = 'rms:${rms?.toStringAsFixed(2) ?? '--'} sc:${sc?.toStringAsFixed(1) ?? '--'} sh:${sh?.toStringAsFixed(2) ?? '--'}';
-        captionParts.add(featText);
-        finalAttachCaption = true;
-      }
-      captionToUse = captionParts.join(' \n');
-    } catch (_) {
-      captionToUse = trimmedCaption;
-      finalAttachCaption = wantsCaption;
-    }
     final result = await VideoOverlayProcessor.process(
       inputPath: widget.videoPath,
-      attachAvatar: wantsAvatar,
-      avatarPath: widget.avatarPath,
-      attachCaption: finalAttachCaption,
-      caption: captionToUse,
+      attachAvatar: false,
+      avatarPath: null,
+      attachCaption: false,
+      caption: '',
     );
     if (result == null) {
       _showSnack('Error generating video, please try again later');
@@ -1842,18 +2157,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             final prefs = await SharedPreferences.getInstance();
             final memberId = prefs.getInt('member_id');
             if (memberId != null) {
-              final avgAccel = _classificationFeatures['avg_acceleration'] ??
-                  _classificationFeatures['acc_mag_mean'] ??
-                  summary['avg_acceleration'];
-              final maxAccel = _classificationFeatures['max_acceleration'] ?? summary['max_acceleration'];
+              final audioCrispness = _classificationFeatures['audio_crispness'] ?? 
+                  summary['audio_crispness'] ?? 0.0;
               final payload = {
                 'memberId': memberId,
                 'videoPath': widget.videoPath,
                 'label': label,
-                'avgSpeedMph': summary['avg_speed_mph'] ?? summary['avgSpeedMph'],
-                'maxAcceleration': maxAccel,
-                'avgAcceleration': avgAccel,
                 'csvPath': csvFile.path,
+                'audioCrispness': audioCrispness,
                 'dateTime': DateTime.now().toIso8601String(),
               };
 
@@ -2071,50 +2382,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                       label: const Text('Generate Highlight'),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    value: _attachAvatar,
-                    onChanged: !_avatarSelectable ? null : (value) => setState(() => _attachAvatar = value),
-                    title: const Text('Attach Avatar and Caption'),
-                    subtitle: Text(
-                      !_avatarSelectable ? 'Avatar not selected, attachment disabled' : 'Caption will be displayed at the bottom of the video',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    activeColor: const Color(0xFF1E8E5A),
-                  ),
-                  TextField(
-                    controller: _captionController,
-                    maxLength: 50,
-                    decoration: const InputDecoration(labelText: 'Caption', hintText: 'Enter text to display at the bottom of the video', counterText: ''),
-                  ),
                   if (_isProcessingShare) const LinearProgressIndicator(),
-                  const SizedBox(height: 1),
-                  Row(
-                    children: [
-                      ElevatedButton.icon(onPressed: _reAnalyzeForVideo, icon: const Icon(Icons.refresh), label: const Text('Re-run analysis')),
-                    ],
-                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      ElevatedButton.icon(
-                        onPressed: _isTrajectoryRunning ? null : _runTrajectoryAnalysis,
-                        icon: _isTrajectoryRunning
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.track_changes),
-                        label: const Text('軌跡分析'),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _setDemoTrajectory,
-                        child: const Text('模擬軌跡'),
-                      ),
-                      const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => _FullscreenVideoPage(videoPath: widget.videoPath),
+                              builder: (_) => _FullscreenVideoPage(
+                                videoPath: widget.videoPath,
+                                cloudVideoId: widget.cloudVideoId,
+                              ),
                             ),
                           );
                         },
@@ -2142,16 +2421,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       ],
     ],
   ),
-                  const SizedBox(height: 1),
-                  Row(
-                    children: [
-                      _buildShareButton(icon: Icons.photo_camera, label: 'Instagram', color: const Color(0xFFC13584), target: _ShareTarget.instagram),
-                      const SizedBox(width: 1),
-                      _buildShareButton(icon: Icons.facebook, label: 'Facebook', color: const Color(0xFF1877F2), target: _ShareTarget.facebook),
-                      const SizedBox(width: 1),
-                      _buildShareButton(icon: Icons.chat, label: 'LINE', color: const Color(0xFF00C300), target: _ShareTarget.line),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -2223,7 +2492,11 @@ class _TrajectoryPainter extends CustomPainter {
 
 class _FullscreenVideoPage extends StatefulWidget {
   final String videoPath;
-  const _FullscreenVideoPage({required this.videoPath});
+  final String? cloudVideoId;
+  const _FullscreenVideoPage({
+    required this.videoPath,
+    this.cloudVideoId,
+  });
 
   @override
   State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
@@ -2237,23 +2510,69 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
   @override
   void initState() {
     super.initState();
-    final file = File(widget.videoPath);
-    if (!file.existsSync()) {
-      _error = 'Video not found';
-      _loading = false;
-      return;
-    }
-    _controller = VideoPlayerController.file(file)
-      ..initialize().then((_) {
-        _controller?.setLooping(true);
-        _controller?.play();
-        if (mounted) setState(() => _loading = false);
-      }).catchError((e) {
-        if (mounted) setState(() {
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
+      // Try to get cloud video first if cloudVideoId exists
+      String? videoUrl;
+      
+      debugPrint('[FullscreenVideo] cloudVideoId != null: ${widget.cloudVideoId != null}');
+      debugPrint('[FullscreenVideo] cloudVideoId.isNotEmpty: ${widget.cloudVideoId?.isNotEmpty ?? "N/A"}');
+      debugPrint('[FullscreenVideo] cloudVideoId value: "${widget.cloudVideoId}"');
+      
+      if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
+        try {
+          videoUrl = await VideoServerClient.instance.getVideoStreamUrl(widget.cloudVideoId!);
+          debugPrint('[FullscreenVideo] Got cloud URL: $videoUrl');
+        } catch (e) {
+          debugPrint('[FullscreenVideo] Failed to get cloud URL: $e');
+        }
+      }
+
+      // Fallback to local file if no cloud URL
+      if (videoUrl == null || videoUrl.isEmpty) {
+        final file = File(widget.videoPath);
+        if (!file.existsSync()) {
+          setState(() {
+            _error = 'Video not found';
+            _loading = false;
+          });
+          return;
+        }
+        videoUrl = widget.videoPath;
+      }
+
+      // Create appropriate controller based on URL type
+      VideoPlayerController? controller;
+      if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
+        controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      } else {
+        controller = VideoPlayerController.file(File(videoUrl));
+      }
+
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      controller.setLooping(true);
+      controller.play();
+      
+      setState(() {
+        _controller = controller;
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
           _error = 'Load error: $e';
           _loading = false;
         });
-      });
+      }
+    }
   }
 
   @override
@@ -2280,12 +2599,14 @@ class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
                     minScale: 1.0,
                     maxScale: 4.0,
                     child: AspectRatio(
-                      aspectRatio: 9 / 16, // force portrait container
+                      aspectRatio: _controller!.value.size.width == 0 || _controller!.value.size.height == 0 
+                        ? 9 / 16 
+                        : _controller!.value.size.width / _controller!.value.size.height,
                       child: FittedBox(
                         fit: BoxFit.contain,
                         child: SizedBox(
-                          width: _controller!.value.size.height == 0 ? 1 : _controller!.value.size.height,
-                          height: _controller!.value.size.width == 0 ? 1 : _controller!.value.size.width,
+                          width: _controller!.value.size.width == 0 ? 1 : _controller!.value.size.width,
+                          height: _controller!.value.size.height == 0 ? 1 : _controller!.value.size.height,
                           child: VideoPlayer(_controller!),
                         ),
                       ),

@@ -25,7 +25,7 @@ namespace UploadServer.Models
         public string Name { get; set; }
 
         /// <summary>
-        /// 狀態：pending, uploading, completed, processing, failed
+        /// 狀態：pending, uploading, completed, processing, failed, unbind
         /// </summary>
         public string Status { get; set; } = "pending";
 
@@ -61,24 +61,14 @@ namespace UploadServer.Models
         public double? PeakValue { get; set; }
 
         /// <summary>
-        /// 最大加速度（G）
-        /// </summary>
-        public double? MaxAcceleration { get; set; }
-
-        /// <summary>
-        /// 平均加速度（G）
-        /// </summary>
-        public double? AvgAcceleration { get; set; }
-
-        /// <summary>
         /// 是否好球
         /// </summary>
         public bool? GoodShot { get; set; }
 
         /// <summary>
-        /// 是否壞球
+        /// 聲音清脆度 (0-100)
         /// </summary>
-        public bool? BadShot { get; set; }
+        public double? AudioCrispness { get; set; }
 
         /// <summary>
         /// 影片建立時間

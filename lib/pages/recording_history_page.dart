@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
+import 'package:video_player/video_player.dart';
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
@@ -42,6 +44,264 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
   bool _rebuildScheduled = false; // 避免重複排程 setState 造成框架錯誤
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 外部影片匯入工具
+  bool _isLoadingCloudList = false; // 標記是否正在載入雲端列表
+  Timer? _syncTimer; // 定時器，每 5 秒更新一次列表
+  bool? _selectedGoodShot; // 好球/壞球篩選 - null: 全部, true: 好球, false: 壞球
+
+  @override
+  void initState() {
+    super.initState();
+    // 初始化時從雲端同步錄影列表
+    _syncWithCloudEntries();
+    
+    // 設置定時器，每 5 秒更新一次列表
+    _syncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _syncWithCloudEntries();
+    });
+  }
+
+  @override
+  void dispose() {
+    // 清理定時器
+    _syncTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 從雲端同步錄影列表，與本地進行去重
+  Future<void> _syncWithCloudEntries() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoadingCloudList = true;
+    });
+    
+    try {
+      debugPrint('[歷史頁] 開始從雲端同步錄影列表...');
+      
+      // 檢查是否已登入
+      final isLoggedIn = await AuthTokenStorage.instance.isLoggedIn();
+      if (!isLoggedIn) {
+        debugPrint('[歷史頁] 未登入，跳過雲端同步');
+        setState(() {
+          _isLoadingCloudList = false;
+        });
+        return;
+      }
+      
+      // 從 API 獲取雲端列表
+      final serverClient = VideoServerClient();
+      final cloudListResponse = await serverClient.getVideos(limit: 100); // 獲取最多 100 個視頻
+      
+      if (!cloudListResponse['success']) {
+        final error = cloudListResponse['error'] ?? '未知錯誤';
+        debugPrint('[歷史頁] ⚠️ 獲取雲端列表失敗: $error');
+        
+        // 如果是 401 未授權，返回登入頁
+        if (error.contains('401') || error.contains('未授權')) {
+          debugPrint('[歷史頁] 🔐 檢測到 401 未授權，跳轉到登入頁');
+          
+          if (mounted) {
+            await AuthTokenStorage.instance.clearTokens();
+            Navigator.of(context).pushReplacementNamed('/login');
+          }
+          return;
+        }
+        
+        setState(() {
+          _isLoadingCloudList = false;
+        });
+        return;
+      }
+      
+      // 解析雲端視頻列表
+      // API 可能返回不同格式：直接數組或分頁對象
+      List<dynamic> cloudVideos = [];
+      final responseData = cloudListResponse['data'];
+      
+      if (responseData is List) {
+        cloudVideos = responseData;
+      } else if (responseData is Map) {
+        // 嘗試從常見的分頁字段提取數據
+        if (responseData['videos'] != null && responseData['videos'] is List) {
+          cloudVideos = responseData['videos'];
+        } else if (responseData['items'] != null && responseData['items'] is List) {
+          cloudVideos = responseData['items'];
+        } else if (responseData['data'] != null && responseData['data'] is List) {
+          cloudVideos = responseData['data'];
+        } else {
+          debugPrint('[歷史頁] ⚠️ 無法從雲端數據中提取視頻列表: $responseData');
+          cloudVideos = [];
+        }
+      }
+      
+      debugPrint('[歷史頁] ✅ 從雲端獲取 ${cloudVideos.length} 個視頻');
+      
+      // 與本地列表進行比對去重
+      _mergeCloudAndLocalEntries(cloudVideos);
+      
+      if (mounted) {
+        setState(() {
+          _isLoadingCloudList = false;
+        });
+      }
+      
+      debugPrint('[歷史頁] ✅ 雲端同步完成');
+    } catch (e) {
+      debugPrint('[歷史頁] ❌ 同步失敗: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingCloudList = false;
+        });
+      }
+    }
+  }
+
+  /// 將雲端列表與本地列表進行合併去重
+  /// 策略：如果本地有對應的視頻，則更新為雲端綁定狀態，並根據 mainFileType 判斷視頻類型
+  Future<void> _mergeCloudAndLocalEntries(List<dynamic> cloudVideos) async {
+    debugPrint('[歷史頁] 開始合併雲端和本地列表...');
+    
+    // 構建雲端視頻的映射（使用視頻 ID 作為鍵 - 仅用於精確匹配）
+    final Map<String, dynamic> cloudVideoMap = {};
+    final Set<String> cloudVideoIds = {};
+    
+    for (final video in cloudVideos) {
+      final videoId = video['id']?.toString();
+      final videoName = video['name']?.toString();
+      final mainFileType = video['mainFileType']?.toString() ?? 'original';
+      final queueStatus = video['queueStatus'] as Map<String, dynamic>?;
+      
+      debugPrint('[歷史頁] 雲端視頻: ID=$videoId, Name=$videoName, MainFileType=$mainFileType');
+      if (queueStatus != null) {
+        final status = queueStatus['latestStatus']?.toString() ?? 'notStarted';
+        debugPrint('[歷史頁]   - 處理狀態: $status');
+      }
+      
+      // 僅使用 ID 作為鍵，不添加名稱鍵（禁用名稱匹配）
+      if (videoId != null) {
+        cloudVideoMap[videoId] = video;
+        cloudVideoIds.add(videoId);
+      }
+    }
+    
+    debugPrint('[歷史頁] 雲端視頻映射: ${cloudVideoMap.keys.toList()}');
+    
+    // 遍歷本地列表，使用 cloudVideoId 精確匹配雲端視頻
+    int matchedCount = 0;
+    final Set<String> matchedCloudIds = {};
+    
+    for (int i = 0; i < _entries.length; i++) {
+      final entry = _entries[i];
+      final localFileName = entry.displayTitle;
+      
+      // 使用 cloudVideoId 精確匹配雲端視頻 - 不進行名稱模糊匹配
+      if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
+        if (cloudVideoMap.containsKey(entry.cloudVideoId)) {
+          final cloudVideo = cloudVideoMap[entry.cloudVideoId] as Map<String, dynamic>;
+          
+          debugPrint('[歷史頁] ✓ 本地視頻 \"$localFileName\" 已有雲端綁定: ${entry.cloudVideoId}');
+          matchedCloudIds.add(entry.cloudVideoId!);
+          
+          // 提取處理隊列狀態
+          ProcessingStatus newProcessingStatus = entry.processingStatus;
+          final queueStatus = cloudVideo['queueStatus'] as Map<String, dynamic>?;
+          if (queueStatus != null) {
+            final latestStatus = queueStatus['status']?.toString() ?? 'notStarted';
+            newProcessingStatus = ProcessingStatus.fromString(latestStatus);
+            debugPrint('[歷史頁]   - 更新處理狀態: $latestStatus');
+          }
+          
+          // 已綁定的本地影片保持原有的 videoType，不要根據後端的 mainFileType 改變
+          // 只更新 syncStatus 和 processingStatus，保證數據一致性
+          if (entry.syncStatus != SyncStatus.synced || entry.processingStatus != newProcessingStatus) {
+            _entries[i] = _entries[i].copyWith(
+              syncStatus: SyncStatus.synced,
+              processingStatus: newProcessingStatus,
+            );
+          }
+          
+          if (cloudVideo['goodShot'] != null) {
+            _entries[i] = _entries[i].copyWith(
+              goodShot: cloudVideo['goodShot']
+            );
+          }
+          
+          matchedCount++;
+        } else {
+          debugPrint('[歷史頁] ✗ 本地視頻 \"$localFileName\" 的雲端綁定 ID 不存在: ${entry.cloudVideoId}');
+        }
+      }
+    }
+    
+    // 添加沒有本地匹配的雲端視頻到列表
+    int unmatchedCount = 0;
+    for (final videoId in cloudVideoIds) {
+      if (!matchedCloudIds.contains(videoId)) {
+        final cloudVideo = cloudVideoMap[videoId] as Map<String, dynamic>;
+        final videoName = cloudVideo['name']?.toString() ?? 'Unknown';
+        final mainFileType = cloudVideo['mainFileType']?.toString() ?? 'original';
+        final queueStatus = cloudVideo['queueStatus'] as Map<String, dynamic>?;
+        
+        debugPrint('[歷史頁] 添加未匹配的雲端視頻: ID=$videoId, Name=$videoName');
+        
+        // 根據 mainFileType 判定 videoType
+        VideoType videoType = VideoType.cloudOriginal;
+        if (mainFileType == 'clip') {
+          videoType = VideoType.cloudClip;
+        }
+        
+        // 提取處理狀態
+        ProcessingStatus processingStatus = ProcessingStatus.notStarted;
+        if (queueStatus != null) {
+          final status = queueStatus['status']?.toString() ?? 'notStarted';
+          processingStatus = ProcessingStatus.fromString(status);
+        }
+        
+        // 提取音頻分析數據
+        double? audioCrispness;
+        bool? goodShot;
+        if (cloudVideo['audioCrispness'] != null) {
+          audioCrispness = (cloudVideo['audioCrispness'] as num?)?.toDouble();
+        }
+        if (cloudVideo['goodShot'] != null) {
+          goodShot = cloudVideo['goodShot'] as bool?;
+        }
+        
+        // 創建新的條目
+        final newEntry = RecordingHistoryEntry(
+          filePath: '', // 雲端視頻沒有本地路徑
+          roundIndex: 0,
+          recordedAt: DateTime.now(),
+          durationSeconds: 0,
+          imuConnected: false,
+          customName: videoName,
+          imuCsvPaths: {},
+          thumbnailPath: null,
+          uploadStatus: UploadStatus.uploaded,
+          cloudVideoId: videoId,
+          uploadError: null,
+          lastUploadAttempt: null,
+          videoType: videoType,
+          syncStatus: SyncStatus.synced,
+          processingStatus: processingStatus,
+          processingSuccess: null,
+          mainFileType: mainFileType,
+          isClipped: videoType == VideoType.cloudClip,
+          peakValues: {},
+          audioCrispness: audioCrispness,
+          goodShot: goodShot,
+        );
+        
+        _entries.add(newEntry);
+        unmatchedCount++;
+      }
+    }
+    
+    debugPrint('[歷史頁] 合併完成: 共匹配 $matchedCount 個雲端視頻，添加 $unmatchedCount 個未匹配的雲端視頻');
+    
+    // 保存更新後的本地列表
+    await RecordingHistoryStorage.instance.saveHistory(_entries);
+  }
 
   /// 返回上一頁並帶出更新後的清單
   void _finishWithResult() {
@@ -53,6 +313,106 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   String _getThumbnailPath(String videoFilePath) {
     final withoutExtension = videoFilePath.replaceFirst(RegExp(r'\.[^.]*$'), '');
     return '$withoutExtension.jpg';
+  }
+
+  /// 獲取視頻的時長（秒數）
+  Future<int> _getVideoDuration(String videoPath) async {
+    try {
+      debugPrint('[歷史頁] 正在獲取視頻時長: $videoPath');
+      final controller = VideoPlayerController.file(File(videoPath));
+      await controller.initialize();
+      final duration = controller.value.duration.inSeconds;
+      await controller.dispose();
+      debugPrint('[歷史頁] ✅ 視頻時長: $duration 秒');
+      return duration;
+    } catch (e) {
+      debugPrint('[歷史頁] ⚠️ 獲取視頻時長失敗: $e，使用預設值 0');
+      return 0;
+    }
+  }
+
+  /// 計算 CSV 中各軌跡的峰值（加速度幅度最大值）
+  /// 返回 Map<String, double>，鍵為軌跡標籤（如 'chest', 'right_wrist'），值為該軌跡的峰值
+  Future<Map<String, double>> _calculatePeakValues(Map<String, String> imuCsvPaths) async {
+    final peakValues = <String, double>{};
+    
+    for (final entry in imuCsvPaths.entries) {
+      final label = entry.key; // 'chest' 或 'right_wrist'
+      final csvPath = entry.value;
+      
+      try {
+        final file = File(csvPath);
+        if (!await file.exists()) {
+          debugPrint('[歷史頁] ⚠️ CSV 檔案不存在: $csvPath');
+          continue;
+        }
+
+        debugPrint('[歷史頁] 正在分析 $label 軌跡: $csvPath');
+        
+        // 讀取 CSV 檔案
+        final lines = await file.readAsLines();
+        
+        // 尋找表頭行（包含 ElapsedSec, AccelX, AccelY, AccelZ）
+        int headerIdx = -1;
+        List<String> headers = [];
+        for (int i = 0; i < lines.length && i < 100; i++) {
+          final line = lines[i].trim();
+          if (line.contains('ElapsedSec') && line.contains('AccelX') && 
+              line.contains('AccelY') && line.contains('AccelZ')) {
+            headerIdx = i;
+            headers = line.split(',');
+            break;
+          }
+        }
+
+        if (headerIdx == -1) {
+          debugPrint('[歷史頁] ⚠️ 無法找到 CSV 表頭，跳過 $label');
+          continue;
+        }
+
+        final idxAx = headers.indexOf('AccelX');
+        final idxAy = headers.indexOf('AccelY');
+        final idxAz = headers.indexOf('AccelZ');
+
+        if (idxAx < 0 || idxAy < 0 || idxAz < 0) {
+          debugPrint('[歷史頁] ⚠️ 無法找到加速度欄位，跳過 $label');
+          continue;
+        }
+
+        // 計算加速度幅度的最大值
+        double maxAcceleration = 0;
+        for (int i = headerIdx + 1; i < lines.length; i++) {
+          final line = lines[i].trim();
+          if (line.isEmpty || line.startsWith('Device:') || line.startsWith('Quat')) {
+            continue;
+          }
+
+          final parts = line.split(',');
+          final maxIdx = math.max(idxAx, math.max(idxAy, idxAz));
+          if (parts.length <= maxIdx) {
+            continue;
+          }
+
+          final ax = double.tryParse(parts[idxAx]) ?? 0;
+          final ay = double.tryParse(parts[idxAy]) ?? 0;
+          final az = double.tryParse(parts[idxAz]) ?? 0;
+          
+          // 計算加速度幅度: sqrt(Ax^2 + Ay^2 + Az^2)
+          final magnitude = math.sqrt(ax * ax + ay * ay + az * az);
+          
+          if (magnitude > maxAcceleration) {
+            maxAcceleration = magnitude;
+          }
+        }
+
+        peakValues[label] = maxAcceleration;
+        debugPrint('[歷史頁] 📊 $label 峰值: ${maxAcceleration.toStringAsFixed(2)} G');
+      } catch (e) {
+        debugPrint('[歷史頁] ❌ 計算 $label 峰值失敗: $e');
+      }
+    }
+
+    return peakValues;
   }
 
   /// 為指定的視頻生成縮略圖
@@ -117,13 +477,67 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 找不到對應項目時直接結束
     }
 
+    // 根據視頻類型決定是否調用 API 標記為 delete
+    bool shouldDeleteDirectly = true; // 是否應該直接刪除
+
+    if (entry.videoType == VideoType.cloudClip) {
+      // 雲端切片：直接標記為 delete
+      debugPrint('[歷史頁] 雲端切片刪除，將標記雲端狀態為 delete');
+      shouldDeleteDirectly = false;
+      
+      if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
+        try {
+          final client = VideoServerClient();
+          await client.markVideoAsDeleted(entry.cloudVideoId!);
+          debugPrint('[歷史頁] ✓ 已標記雲端視頻為 delete: ${entry.cloudVideoId}');
+        } catch (e) {
+          debugPrint('[歷史頁] ⚠️ 標記雲端視頻失敗: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('標記雲端視頻失敗: $e')),
+            );
+          }
+          return;
+        }
+      }
+    } else if (entry.videoType == VideoType.localClip) {
+      // 本地切片
+      if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
+        // 有雲端綁定：標記為 delete
+        debugPrint('[歷史頁] 本地切片有雲端綁定，將標記雲端狀態為 delete');
+        shouldDeleteDirectly = false;
+        
+        try {
+          final client = VideoServerClient();
+          await client.markVideoAsDeleted(entry.cloudVideoId!);
+          debugPrint('[歷史頁] ✓ 已標記雲端視頻為 delete: ${entry.cloudVideoId}');
+        } catch (e) {
+          debugPrint('[歷史頁] ⚠️ 標記雲端視頻失敗: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('標記雲端視頻失敗: $e')),
+            );
+          }
+          return;
+        }
+      } else {
+        // 無雲端綁定：直接刪除
+        debugPrint('[歷史頁] 本地切片無雲端綁定，直接刪除');
+        shouldDeleteDirectly = true;
+      }
+    }
+
+    // 移除本地檔案
+    if (shouldDeleteDirectly) {
+      await _removeEntryFiles(entry);
+    }
+
     _entries.removeAt(index); // 先調整資料來源
     if (mounted) {
       debugPrint('[歷史頁] 刪除後立即刷新列表，剩餘 ${_entries.length} 筆');
       setState(() {}); // 通知畫面重新渲染
     }
 
-    await _removeEntryFiles(entry);
     await RecordingHistoryStorage.instance.saveHistory(_entries);
 
     if (!mounted) return;
@@ -160,10 +574,38 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
     if (index == -1) return;
 
+    // 如果有 cloudVideoId，先呼叫後端 API 解除綁定
+    if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
+      try {
+        final client = VideoServerClient();
+        final success = await client.unbindVideo(entry.cloudVideoId!);
+        
+        // 如果失敗，仍然允許解除本地綁定（影片可能已在雲端刪除）
+        if (!success) {
+          debugPrint('[歷史頁] ⚠️ 雲端解除綁定失敗，但繼續本地解除綁定');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('雲端解除綁定失敗，但本地綁定已移除')),
+            );
+          }
+        } else {
+          debugPrint('[歷史頁] ✓ 雲端解除綁定成功');
+        }
+      } catch (e) {
+        debugPrint('[歷史頁] ⚠️ 解除雲端綁定出錯: $e');
+        // 出錯時也繼續本地解除（影片可能已刪除或無權限）
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('雲端已無法存取，本地綁定已移除')),
+          );
+        }
+      }
+    }
+
     // 更新條目：清除雲端相關資訊，重置為未同步狀態
     _entries[index] = _entries[index].copyWith(
       syncStatus: SyncStatus.notSynced,
-      cloudVideoId: null,
+      clearCloudVideoId: true,
     );
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -299,6 +741,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           // 為切片生成縮圖
           final clipThumbnailPath = _getThumbnailPath(r.videoPath);
           
+          // 計算切片的峰值
+          final clipPeakValues = await _calculatePeakValues({'right_wrist': r.csvPath});
+          
           newEntries.add(
             RecordingHistoryEntry(
               filePath: r.videoPath,
@@ -312,6 +757,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
               cloudVideoId: null,
               isClipped: true,
               videoType: VideoType.localClip,
+              peakValues: clipPeakValues.isNotEmpty ? clipPeakValues : null,
             ),
           );
         }
@@ -540,6 +986,33 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
 
+    // 如果有雲端綁定，先更新雲端名稱
+    if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
+      try {
+        final client = VideoServerClient();
+        final displayName = storedName.isEmpty ? defaultTitle : storedName;
+        final success = await client.updateVideoName(entry.cloudVideoId!, displayName);
+        
+        if (success) {
+          debugPrint('[歷史頁] ✓ 已更新雲端影片名稱: $displayName');
+        } else {
+          debugPrint('[歷史頁] ⚠️ 更新雲端名稱失敗，但繼續更新本地');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('本地已更新，但雲端名稱更新失敗')),
+            );
+          }
+        }
+      } catch (e) {
+        debugPrint('[歷史頁] ⚠️ 更新雲端名稱異常: $e，但繼續更新本地');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('本地已更新，但雲端同步失敗: $e')),
+          );
+        }
+      }
+    }
+
     _entries[index] = _entries[index].copyWith(customName: storedName);
     debugPrint('[歷史頁] 更新索引 $index 的名稱為 "$storedName"，準備儲存');
     if (mounted) {
@@ -633,12 +1106,746 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     await _playVideoByPath(entry.filePath, missingFileName: entry.fileName, cloudVideoId: entry.cloudVideoId);
   }
 
+  Future<void> _showRecordingTypeDialog(RecordingHistoryEntry entry) async {
+    if (!mounted) return;
+    
+    bool isClipped = false; // 用戶選擇的錄影類型
+    bool uploadVideo = true; // 是否上傳影片
+    bool uploadTrajectory = true; // 是否上傳軌跡
+    bool directUpload = false; // 是否直接上傳（立即上傳）
+    
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return AlertDialog(
+              title: const Text('上傳設定'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('影片名稱: ${entry.displayTitle}'),
+                    const SizedBox(height: 16),
+                    
+                    // 錄影類型選擇
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '錄影類型',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('完整錄影'),
+                                    leading: Radio<bool>(
+                                      value: false,
+                                      groupValue: isClipped,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          isClipped = value ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('已切割切片'),
+                                    leading: Radio<bool>(
+                                      value: true,
+                                      groupValue: isClipped,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          isClipped = value ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // 上傳內容選擇
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '上傳內容',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            CheckboxListTile(
+                              title: const Text('上傳影片'),
+                              value: uploadVideo,
+                              onChanged: (value) {
+                                setState(() {
+                                  uploadVideo = value ?? true;
+                                });
+                              },
+                            ),
+                            CheckboxListTile(
+                              title: const Text('上傳軌跡'),
+                              value: uploadTrajectory,
+                              onChanged: (value) {
+                                setState(() {
+                                  uploadTrajectory = value ?? true;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // 上傳方式選擇
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '上傳方式',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('稍後上傳'),
+                                    leading: Radio<bool>(
+                                      value: false,
+                                      groupValue: directUpload,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          directUpload = value ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: ListTile(
+                                    title: const Text('直接上傳'),
+                                    leading: Radio<bool>(
+                                      value: true,
+                                      groupValue: directUpload,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          directUpload = value ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    // 根據選擇進行上傳
+                    String uploadType = 'none';
+                    if (uploadVideo && uploadTrajectory) {
+                      uploadType = 'full';
+                    } else if (uploadVideo) {
+                      uploadType = 'video';
+                    } else if (uploadTrajectory) {
+                      uploadType = 'trajectory';
+                    }
+                    
+                    if (uploadType != 'none') {
+                      _uploadEntry(entry, uploadType: uploadType, isClipped: isClipped, directUpload: directUpload);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('請至少選擇上傳影片或軌跡')),
+                      );
+                    }
+                  },
+                  child: const Text('確認上傳'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 影片記錄建檔對話框 - 用於單條記錄
+  Future<void> _showRecordingArchiveDialogForEntry(RecordingHistoryEntry entry) async {
+    await _showRecordingArchiveDialogImpl(entry: entry);
+  }
+
+  /// 影片記錄建檔對話框 - 右上角按鈕，用於建立新記錄
+  Future<void> _showRecordingArchiveDialog() async {
+    await _showRecordingArchiveDialogImpl(forNewEntry: true);
+  }
+
+  /// 影片記錄建檔對話框 - 統一實現
+  Future<void> _showRecordingArchiveDialogImpl({RecordingHistoryEntry? entry, bool forNewEntry = false}) async {
+    if (!mounted) return;
+    
+    bool isClipped = false;
+    String selectedVideoPath = '';
+    String selectedChestCsvPath = '';
+    String selectedRightWristCsvPath = '';
+    
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.video_library_outlined, color: Color(0xFF123B70)),
+                  SizedBox(width: 8),
+                  Text('建立新記錄'),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 影片類型選擇
+                    const Text(
+                      '📹 影片類型',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF123B70),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    isClipped = false;
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: !isClipped ? const Color(0xFFE5EBF5) : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: !isClipped ? const Color(0xFF123B70) : Colors.grey[300]!,
+                                      width: !isClipped ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.videocam_outlined,
+                                        color: !isClipped ? const Color(0xFF123B70) : Colors.grey,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '完整錄影',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          color: !isClipped ? const Color(0xFF123B70) : Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    isClipped = true;
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: isClipped ? const Color(0xFFE5EBF5) : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isClipped ? const Color(0xFF123B70) : Colors.grey[300]!,
+                                      width: isClipped ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.cut,
+                                        color: isClipped ? const Color(0xFF123B70) : Colors.grey,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '已切割片段',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          color: isClipped ? const Color(0xFF123B70) : Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    
+                    // 上傳內容選擇
+                    const Text(
+                      '📁 選擇檔案',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF123B70),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Card(
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 影片檔案區域
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF5F7FA),
+                                border: Border.all(color: const Color(0xFFDCE3E8)),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.movie_outlined, size: 16, color: Color(0xFF6F7B86)),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        '影片 *必填',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF123B70),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (selectedVideoPath.isNotEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFF1E8E5A), width: 1.5),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.check_circle, size: 16, color: Color(0xFF1E8E5A)),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              p.basename(selectedVideoPath),
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 12),
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () {
+                                              setState(() {
+                                                selectedVideoPath = '';
+                                              });
+                                            },
+                                            child: const Icon(Icons.close, size: 16, color: Color(0xFF6F7B86)),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else
+                                    OutlinedButton.icon(
+                                      icon: const Icon(Icons.folder_open_outlined),
+                                      label: const Text('選擇影片'),
+                                      onPressed: () async {
+                                        final result = await FilePicker.platform.pickFiles(
+                                          type: FileType.video,
+                                        );
+                                        if (result != null && result.files.isNotEmpty) {
+                                          setState(() {
+                                            selectedVideoPath = result.files.first.path ?? '';
+                                          });
+                                        }
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
+                            
+                            const SizedBox(height: 10),
+                            
+                            // CHEST 軌跡區域
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF5F7FA),
+                                border: Border.all(color: const Color(0xFFDCE3E8)),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.motion_photos_on_outlined, size: 16, color: Color(0xFF6F7B86)),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'CHEST 軌跡',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF123B70),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (selectedChestCsvPath.isEmpty)
+                                    OutlinedButton.icon(
+                                      icon: const Icon(Icons.folder_open_outlined),
+                                      label: const Text('選擇 CSV'),
+                                      onPressed: () async {
+                                        final result = await FilePicker.platform.pickFiles(
+                                          type: FileType.custom,
+                                          allowedExtensions: ['csv'],
+                                        );
+                                        if (result != null && result.files.isNotEmpty) {
+                                          setState(() {
+                                            selectedChestCsvPath = result.files.first.path ?? '';
+                                          });
+                                        }
+                                      },
+                                    )
+                                  else
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFF1E8E5A), width: 1.5),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.check_circle, size: 16, color: Color(0xFF1E8E5A)),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              p.basename(selectedChestCsvPath),
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 12),
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () {
+                                              setState(() {
+                                                selectedChestCsvPath = '';
+                                              });
+                                            },
+                                            child: const Icon(Icons.close, size: 16, color: Color(0xFF6F7B86)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            
+                            const SizedBox(height: 10),
+                            
+                            // RIGHT WRIST 軌跡區域
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF5F7FA),
+                                border: Border.all(color: const Color(0xFFDCE3E8)),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.motion_photos_on_outlined, size: 16, color: Color(0xFF6F7B86)),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'RIGHT WRIST 軌跡',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF123B70),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (selectedRightWristCsvPath.isEmpty)
+                                    OutlinedButton.icon(
+                                      icon: const Icon(Icons.folder_open_outlined),
+                                      label: const Text('選擇 CSV'),
+                                      onPressed: () async {
+                                        final result = await FilePicker.platform.pickFiles(
+                                          type: FileType.custom,
+                                          allowedExtensions: ['csv'],
+                                        );
+                                        if (result != null && result.files.isNotEmpty) {
+                                          setState(() {
+                                            selectedRightWristCsvPath = result.files.first.path ?? '';
+                                          });
+                                        }
+                                      },
+                                    )
+                                  else
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFF1E8E5A), width: 1.5),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.check_circle, size: 16, color: Color(0xFF1E8E5A)),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              p.basename(selectedRightWristCsvPath),
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 12),
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () {
+                                              setState(() {
+                                                selectedRightWristCsvPath = '';
+                                              });
+                                            },
+                                            child: const Icon(Icons.close, size: 16, color: Color(0xFF6F7B86)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('取消'),
+                ),
+                FilledButton.icon(
+                  icon: const Icon(Icons.add_circle_outline),
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    _createNewRecordingEntry(
+                      isClipped,
+                      selectedVideoPath,
+                      selectedChestCsvPath,
+                      selectedRightWristCsvPath,
+                    );
+                  },
+                  label: const Text('建立記錄'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 建立新的錄影記錄，綁定選定的影片和軌跡
+  Future<void> _createNewRecordingEntry(
+    bool isClipped,
+    String selectedVideoPath,
+    String selectedChestCsvPath,
+    String selectedRightWristCsvPath,
+  ) async {
+    debugPrint('[歷史頁] 開始建立新記錄');
+    debugPrint('📹 選擇影片: $selectedVideoPath');
+    debugPrint('📊 CHEST軌跡: $selectedChestCsvPath');
+    debugPrint('📊 RIGHT WRIST軌跡: $selectedRightWristCsvPath');
+    
+    if (selectedVideoPath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('請選擇影片')),
+      );
+      return;
+    }
+
+    try {
+      final videoFile = File(selectedVideoPath);
+      if (!await videoFile.exists()) {
+        throw Exception('選擇的影片不存在');
+      }
+
+      // 構建 imuCsvPaths（只包含已選擇的軌跡）
+      final Map<String, String> imuCsvPaths = {};
+      if (selectedChestCsvPath.isNotEmpty) {
+        if (!await File(selectedChestCsvPath).exists()) {
+          throw Exception('CHEST軌跡檔案不存在');
+        }
+        imuCsvPaths['chest'] = selectedChestCsvPath;
+      }
+      if (selectedRightWristCsvPath.isNotEmpty) {
+        if (!await File(selectedRightWristCsvPath).exists()) {
+          throw Exception('RIGHT WRIST軌跡檔案不存在');
+        }
+        imuCsvPaths['right_wrist'] = selectedRightWristCsvPath;
+      }
+
+      // 生成縮略圖路徑
+      final thumbnailPath = _getThumbnailPath(selectedVideoPath);
+
+      // 計算新記錄的 roundIndex
+      final int newRoundIndex = _entries.isEmpty
+          ? 1
+          : (_entries.map((e) => e.roundIndex).reduce(math.max) + 1);
+
+      // 自動獲取視頻時長
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('正在分析影片...')),
+      );
+      final durationSeconds = await _getVideoDuration(selectedVideoPath);
+
+      // 自動生成縮略圖
+      debugPrint('[歷史頁] 開始生成縮略圖: $selectedVideoPath');
+      final generatedThumbnailPath = await _generateThumbnailForVideo(selectedVideoPath);
+      final finalThumbnailPath = generatedThumbnailPath ?? thumbnailPath;
+
+      // 計算各軌跡的峰值
+      debugPrint('[歷史頁] 開始計算峰值...');
+      final peakValues = await _calculatePeakValues(imuCsvPaths);
+      debugPrint('[歷史頁] ✅ 峰值計算完成: $peakValues');
+
+      // 建立新的 RecordingHistoryEntry
+      final newEntry = RecordingHistoryEntry(
+        filePath: selectedVideoPath,
+        roundIndex: newRoundIndex,
+        recordedAt: DateTime.now(),
+        durationSeconds: durationSeconds,
+        imuConnected: imuCsvPaths.isNotEmpty,
+        customName: '',
+        imuCsvPaths: imuCsvPaths,
+        thumbnailPath: finalThumbnailPath,
+        cloudVideoId: null,
+        isClipped: isClipped,
+        videoType: VideoType.localClip,
+        peakValues: peakValues.isNotEmpty ? peakValues : null,
+      );
+
+      // 新記錄添加到列表前端
+      _entries.insert(0, newEntry);
+      await RecordingHistoryStorage.instance.saveHistory(_entries);
+
+      if (!mounted) return;
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ 新記錄已建立：${p.basename(selectedVideoPath)}')),
+      );
+
+      debugPrint('[歷史頁] ✅ 新記錄建立成功');
+      debugPrint('[歷史頁] 📋 記錄 ID: ${newEntry.roundIndex}');
+      debugPrint('[歷史頁] 🎬 影片: ${newEntry.filePath}');
+      debugPrint('[歷史頁] 📊 軌跡: ${imuCsvPaths.keys.join(", ")}');
+    } catch (e) {
+      debugPrint('[歷史頁] ❌ 建立記錄失敗: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('建立記錄失敗：$e')),
+      );
+    }
+  }
+
   /// 上傳未同步的錄影
-  Future<void> _uploadEntry(RecordingHistoryEntry entry) async {
+  Future<void> _uploadEntry(RecordingHistoryEntry entry, {
+    String? uploadType, // 'video', 'trajectory', 'full', or null for default
+    bool? isClipped,
+    bool? directUpload,
+  }) async {
     // 只有已同步或正在同步中的才禁止上傳，失败也允许重新上传
     if (entry.syncStatus == SyncStatus.synced || entry.syncStatus == SyncStatus.syncing) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('此影片已同步或正在同步中')),
+      );
+      return;
+    }
+
+    // 如果沒有指定上傳類型，使用預設值（上傳影片和軌跡）
+    uploadType ??= 'full';
+    
+    // 如果選擇稍後上傳，只保存狀態不立即上傳
+    if (directUpload == false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${entry.displayTitle} 已保存上傳設定，稍後可再次點擊上傳按鈕進行上傳')),
       );
       return;
     }
@@ -651,6 +1858,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     debugPrint('📍 檔案路徑: ${entry.filePath}');
     debugPrint('⏰ 錄製時間: ${entry.recordedAt}');
     debugPrint('📊 同步狀態: ${entry.syncStatus}');
+    debugPrint('🎬 上傳類型: $uploadType');
+    debugPrint('📋 是否為切割: ${isClipped ?? false}');
+    debugPrint('⚡ 直接上傳: ${directUpload ?? true}');
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('開始上傳 ${entry.displayTitle}...')),
@@ -708,9 +1918,28 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
       // 1. 在服務器上建立視頻紀錄
       debugPrint('[歷史頁] 步驟 1：建立服務器視頻紀錄');
+      
+      // 從 peakValues 中提取主要的峰值（優先使用 right_wrist，其次 chest，最後任意一個）
+      double? mainPeakValue;
+      if (entry.peakValues != null && entry.peakValues!.isNotEmpty) {
+        if (entry.peakValues!.containsKey('right_wrist')) {
+          mainPeakValue = entry.peakValues!['right_wrist'];
+        } else if (entry.peakValues!.containsKey('chest')) {
+          mainPeakValue = entry.peakValues!['chest'];
+        } else {
+          mainPeakValue = entry.peakValues!.values.first;
+        }
+        debugPrint('📊 提取主要峰值: $mainPeakValue');
+      }
+      
       final createResponse = await serverClient.createVideo(
         name: entry.displayTitle,
         type: 'original',
+        hitSecond: entry.hitSecond,
+        startSecond: entry.startSecond,
+        endSecond: entry.endSecond,
+        peakValue: mainPeakValue,
+        rawPeakValues: entry.peakValues,
       );
 
       if (!createResponse['success']) {
@@ -766,107 +1995,119 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       await RecordingHistoryStorage.instance.saveHistory(_entries);
       debugPrint('[歷史頁] 已將視頻 ID 綁定到本地記錄：cloudVideoId=$videoId');
 
-      // 2. 上傳視頻文件
-      debugPrint('[歷史頁] 步驟 2：上傳視頻文件');
-      debugPrint('📤 正在上傳檔案到伺服器...');
-      debugPrint('🔗 API 端點: /api/videos/$videoId/files');
-      final videoFileType = entry.isClipped ? 'clip' : 'original';
-      final uploadResponse = await serverClient.uploadVideoFile(
-        videoId: videoId,
-        videoFilePath: entry.filePath,
-        fileType: videoFileType,
-        sourceLocalFilePath: entry.filePath,
-      );
-
-      debugPrint('📥 上傳回應: ${uploadResponse['success']}');
-      
-      if (!uploadResponse['success']) {
-        final error = uploadResponse['error'] ?? '未知錯誤';
-        debugPrint('❌ 上傳錯誤: $error');
-        
-        // 如果是 401 未授權，返回登入頁
-        if (error.contains('401') || error.contains('未授權')) {
-          if (!mounted) return;
-          
-          _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
-          if (mounted) {
-            setState(() {});
-          }
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('登入已過期，請重新登入')),
-          );
-          
-          await AuthTokenStorage.instance.clearTokens();
-          Navigator.of(context).pushReplacementNamed('/login');
-          return;
-        }
-        
-        throw Exception('上傳文件失敗：$error');
-      }
-
-      debugPrint('[歷史頁] ✅ 視頻文件上傳成功');
-
-      // 2.5 上傳 CSV 文件（IMU 數據）
-      debugPrint('[歷史頁] 步驟 2.5：上傳 CSV 文件');
-      if (entry.imuCsvPaths.isNotEmpty) {
-        for (final csvEntry in entry.imuCsvPaths.entries) {
-          final csvLabel = csvEntry.key; // e.g., "RIGHT_WRIST", "CHEST"
-          final csvPath = csvEntry.value;
-          
-          if (await File(csvPath).exists()) {
-            debugPrint('📊 上傳 $csvLabel CSV: $csvPath');
-            final csvResponse = await serverClient.uploadVideoFile(
-              videoId: videoId,
-              videoFilePath: csvPath,
-              fileType: csvLabel.toLowerCase(), // 使用 "right_wrist" 或 "chest" 作為檔案類型
-              sourceLocalFilePath: csvPath,
-            );
-
-            if (csvResponse['success']) {
-              debugPrint('[歷史頁] ✅ $csvLabel CSV 上傳成功');
-            } else {
-              debugPrint('[歷史頁] ⚠️ $csvLabel CSV 上傳失敗，但繼續進行');
-            }
-          } else {
-            debugPrint('📊 未找到 $csvLabel CSV: $csvPath，跳過上傳');
-          }
-        }
-      } else {
-        debugPrint('📊 未找到任何 CSV 文件，跳過上傳');
-      }
-
-      // 2.6 上傳縮略圖（如果存在）
-      debugPrint('[歷史頁] 步驟 2.6：上傳縮略圖');
-      // 優先使用本地記錄的 thumbnailPath，如果沒有則試圖生成
-      final storedThumbnailPath = entry.thumbnailPath?.trim() ?? '';
-      final generatedThumbnailPath = _getThumbnailPath(entry.filePath);
-      
-      String? finalThumbnailPath;
-      if (storedThumbnailPath.isNotEmpty && await File(storedThumbnailPath).exists()) {
-        finalThumbnailPath = storedThumbnailPath;
-        debugPrint('📸 使用已記錄的縮略圖: $storedThumbnailPath');
-      } else if (await File(generatedThumbnailPath).exists()) {
-        finalThumbnailPath = generatedThumbnailPath;
-        debugPrint('📸 使用生成的縮略圖路徑: $generatedThumbnailPath');
-      }
-      
-      if (finalThumbnailPath != null && finalThumbnailPath.isNotEmpty) {
-        debugPrint('📸 發現縮略圖: $finalThumbnailPath');
-        final thumbnailResponse = await serverClient.uploadVideoFile(
+      // 2. 上傳視頻文件（除非只上傳軌跡）
+      if (uploadType != 'trajectory') {
+        debugPrint('[歷史頁] 步驟 2：上傳視頻文件');
+        debugPrint('📤 正在上傳檔案到伺服器...');
+        debugPrint('🔗 API 端點: /api/videos/$videoId/files');
+        final videoFileType = entry.isClipped ? 'clip' : 'original';
+        final uploadResponse = await serverClient.uploadVideoFile(
           videoId: videoId,
-          videoFilePath: finalThumbnailPath,
-          fileType: 'thumbnail',
-          sourceLocalFilePath: finalThumbnailPath,
+          videoFilePath: entry.filePath,
+          fileType: videoFileType,
+          sourceLocalFilePath: entry.filePath,
         );
 
-        if (thumbnailResponse['success']) {
-          debugPrint('[歷史頁] ✅ 縮略圖上傳成功');
-        } else {
-          debugPrint('[歷史頁] ⚠️ 縮略圖上傳失敗，但繼續進行');
+        debugPrint('📥 上傳回應: ${uploadResponse['success']}');
+        
+        if (!uploadResponse['success']) {
+          final error = uploadResponse['error'] ?? '未知錯誤';
+          debugPrint('❌ 上傳錯誤: $error');
+          
+          // 如果是 401 未授權，返回登入頁
+          if (error.contains('401') || error.contains('未授權')) {
+            if (!mounted) return;
+            
+            _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
+            if (mounted) {
+              setState(() {});
+            }
+            
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('登入已過期，請重新登入')),
+            );
+            
+            await AuthTokenStorage.instance.clearTokens();
+            Navigator.of(context).pushReplacementNamed('/login');
+            return;
+          }
+          
+          throw Exception('上傳文件失敗：$error');
         }
-      } else {
-        debugPrint('📸 未找到縮略圖，跳過上傳');
+
+        debugPrint('[歷史頁] ✅ 視頻文件上傳成功');
+      }
+
+      // 2.5 上傳 CSV 文件（IMU 數據）（除非只上傳影片）
+      if (uploadType != 'video') {
+        debugPrint('[歷史頁] 步驟 2.5：上傳 CSV 文件');
+        if (entry.imuCsvPaths.isNotEmpty) {
+          for (final csvEntry in entry.imuCsvPaths.entries) {
+            final csvLabel = csvEntry.key; // e.g., "RIGHT_WRIST", "CHEST"
+            final csvPath = csvEntry.value;
+            final peakValue = entry.peakValues?[csvLabel]; // 取得該軌跡的峰值
+            
+            if (await File(csvPath).exists()) {
+              debugPrint('📊 上傳 $csvLabel CSV: $csvPath');
+              if (peakValue != null) {
+                debugPrint('📈 峰值: $peakValue');
+              }
+              
+              final csvResponse = await serverClient.uploadVideoFile(
+                videoId: videoId,
+                videoFilePath: csvPath,
+                fileType: csvLabel.toLowerCase(), // 使用 "right_wrist" 或 "chest" 作為檔案類型
+                sourceLocalFilePath: csvPath,
+                peakValue: peakValue,
+              );
+
+              if (csvResponse['success']) {
+                debugPrint('[歷史頁] ✅ $csvLabel CSV 上傳成功');
+              } else {
+                debugPrint('[歷史頁] ⚠️ $csvLabel CSV 上傳失敗，但繼續進行');
+              }
+            } else {
+              debugPrint('📊 未找到 $csvLabel CSV: $csvPath，跳過上傳');
+            }
+          }
+        } else {
+          debugPrint('📊 未找到任何 CSV 文件，跳過上傳');
+        }
+      }
+
+      // 2.6 上傳縮略圖（如果存在且不只上傳軌跡）
+      if (uploadType != 'trajectory') {
+        debugPrint('[歷史頁] 步驟 2.6：上傳縮略圖');
+        // 優先使用本地記錄的 thumbnailPath，如果沒有則試圖生成
+        final storedThumbnailPath = entry.thumbnailPath?.trim() ?? '';
+        final generatedThumbnailPath = _getThumbnailPath(entry.filePath);
+        
+        String? finalThumbnailPath;
+        if (storedThumbnailPath.isNotEmpty && await File(storedThumbnailPath).exists()) {
+          finalThumbnailPath = storedThumbnailPath;
+          debugPrint('📸 使用已記錄的縮略圖: $storedThumbnailPath');
+        } else if (await File(generatedThumbnailPath).exists()) {
+          finalThumbnailPath = generatedThumbnailPath;
+          debugPrint('📸 使用生成的縮略圖路徑: $generatedThumbnailPath');
+        }
+        
+        if (finalThumbnailPath != null && finalThumbnailPath.isNotEmpty) {
+          debugPrint('📸 發現縮略圖: $finalThumbnailPath');
+          final thumbnailResponse = await serverClient.uploadVideoFile(
+            videoId: videoId,
+            videoFilePath: finalThumbnailPath,
+            fileType: 'thumbnail',
+            sourceLocalFilePath: finalThumbnailPath,
+          );
+
+          if (thumbnailResponse['success']) {
+            debugPrint('[歷史頁] ✅ 縮略圖上傳成功');
+          } else {
+            debugPrint('[歷史頁] ⚠️ 縮略圖上傳失敗，但繼續進行');
+          }
+        } else {
+          debugPrint('📸 未找到縮略圖，跳過上傳');
+        }
       }
 
       // 3. 標記影片上傳完成
@@ -901,12 +2142,59 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
       debugPrint('[歷史頁] ✅ 影片上傳完成標記成功');
 
-      // 4. 更新同步狀態
-      debugPrint('[歷史頁] 步驟 4：保存同步狀態');
-      _entries[entryIndex] = _entries[entryIndex].copyWith(
-        syncStatus: SyncStatus.synced,
-        cloudVideoId: videoId.toString(),
-      );
+      // 4. 從雲端重新獲取最新的視頻元數據和處理狀態
+      debugPrint('[歷史頁] 步驟 4：從雲端重新獲取視頻元數據和處理狀態...');
+      try {
+        final serverClient = VideoServerClient();
+        final videoDetailResponse = await serverClient.getVideoDetail(videoId);
+        
+        if (videoDetailResponse['success']) {
+          final videoDetail = videoDetailResponse['data'] as Map<String, dynamic>;
+          final queueStatus = videoDetail['queueStatus'] as Map<String, dynamic>?;
+          
+          // 更新 processingStatus
+          ProcessingStatus updatedProcessingStatus = ProcessingStatus.notStarted;
+          if (queueStatus != null) {
+            final latestStatus = queueStatus['status']?.toString() ?? 'notStarted';
+            updatedProcessingStatus = ProcessingStatus.fromString(latestStatus);
+            debugPrint('📊 從雲端獲取最新處理狀態: $latestStatus');
+          }
+          
+          // 提取音頻分析數據
+          double? audioCrispness;
+          bool? goodShot;
+          if (videoDetail['audioCrispness'] != null) {
+            audioCrispness = (videoDetail['audioCrispness'] as num?)?.toDouble();
+          }
+          if (videoDetail['goodShot'] != null) {
+            goodShot = videoDetail['goodShot'] as bool?;
+          }
+          
+          // 保存最新的元數據
+          _entries[entryIndex] = _entries[entryIndex].copyWith(
+            syncStatus: SyncStatus.synced,
+            cloudVideoId: videoId.toString(),
+            processingStatus: updatedProcessingStatus,
+            audioCrispness: audioCrispness,
+            goodShot: goodShot,
+          );
+        } else {
+          // 如果無法獲取，仍然保存同步狀態但保留原有的 processingStatus
+          _entries[entryIndex] = _entries[entryIndex].copyWith(
+            syncStatus: SyncStatus.synced,
+            cloudVideoId: videoId.toString(),
+          );
+          debugPrint('⚠️ 無法從雲端獲取最新元數據，但上傳已成功');
+        }
+      } catch (e) {
+        debugPrint('⚠️ 獲取雲端元數據失敗: $e，但上傳已成功');
+        // 即使失敗也繼續，至少保存同步狀態
+        _entries[entryIndex] = _entries[entryIndex].copyWith(
+          syncStatus: SyncStatus.synced,
+          cloudVideoId: videoId.toString(),
+        );
+      }
+      
       await RecordingHistoryStorage.instance.saveHistory(_entries);
       
       if (!mounted) return;
@@ -939,52 +2227,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     }
   }
 
-  /// 透過檔案挑選器匯入外部影片，並加入現有練習歷史清單
-  Future<void> _importExternalVideo() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.video);
-    if (result == null || result.files.single.path == null) {
-      return; // 使用者取消或選取失敗
-    }
-
-    final csvResult = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-      dialogTitle: '選擇對應的 IMU CSV（可略過）',
-    );
-    final String? imuCsvPath = csvResult?.files.single.path;
-
-    final entry = await _videoImporter.importVideo(
-      sourcePath: result.files.single.path!,
-      originalName: result.files.single.name,
-      nextRoundIndex: ExternalVideoImporter.calculateNextRoundIndex(_entries),
-      imuCsvPath: imuCsvPath,
-    );
-
-    if (entry == null) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('匯入影片失敗，請確認檔案是否可讀取。')),
-      );
-      return;
-    }
-
-    _entries.insert(0, entry); // 新增練習置於最前方，方便立即查看
-    if (mounted) {
-      _scheduleRebuild();
-    }
-
-    await RecordingHistoryStorage.instance.saveHistory(_entries);
-
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已匯入 ${entry.displayTitle}，同步加入練習紀錄。')),
-    );
-  }
-
   /// 自外部檔案夾挑選影片後播放，支援檢視非當前清單中的檔案
   Future<void> _pickExternalVideo() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.video);
@@ -992,6 +2234,47 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return;
     }
     await _playVideoByPath(result.files.single.path!);
+  }
+
+  /// 顯示本地影片紀錄的 JSON debug 資訊
+  Future<void> _showDebugJsonInfo() async {
+    if (!mounted) return;
+    
+    try {
+      // 將所有本地紀錄轉換為格式化的 JSON（帶換行和縮進）
+      final jsonList = _entries.map((entry) => entry.toJson()).toList();
+      final jsonString = const JsonEncoder.withIndent('  ').convert(jsonList);
+      
+      if (!mounted) return;
+      
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('本地影片紀錄 (JSON Debug)'),
+          content: SingleChildScrollView(
+            child: SelectableText(
+              jsonString,
+              style: const TextStyle(
+                fontSize: 11,
+                fontFamily: 'Courier',
+                color: Color(0xFF123B70),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('關閉'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('無法顯示 JSON：$e')),
+      );
+    }
   }
 
   /// 實際進行影片播放與檔案檢查的共用方法
@@ -1037,6 +2320,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
+    // 根据选中的过滤条件过滤条目
+    final filteredEntries = _selectedGoodShot == null
+        ? _entries
+        : _entries.where((entry) => entry.goodShot == _selectedGoodShot).toList();
+
     return WillPopScope(
       onWillPop: () async {
         _finishWithResult();
@@ -1051,45 +2339,97 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           ),
           actions: [
             IconButton(
-              onPressed: _importExternalVideo,
-              tooltip: '匯入外部影片',
-              icon: const Icon(Icons.file_upload_rounded),
+              onPressed: _showRecordingArchiveDialog,
+              tooltip: '建立新記錄',
+              icon: const Icon(Icons.add_rounded),
             ),
             IconButton(
               onPressed: _pickExternalVideo,
               tooltip: '開啟其他影片',
               icon: const Icon(Icons.folder_open_rounded),
             ),
+            IconButton(
+              onPressed: _showDebugJsonInfo,
+              tooltip: 'Debug: 本地紀錄 JSON',
+              icon: const Icon(Icons.bug_report_outlined),
+            ),
           ],
         ),
-        body: _entries.isEmpty
-            ? const _EmptyHistoryView()
-            : ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                itemBuilder: (context, index) {
-                  final entry = _entries[index];
-                  return _HistoryTile(
-                    entry: entry,
-                    formattedTime: _formatTimestamp(entry.recordedAt),
-                    onTap: () => _playEntry(entry),
-                    onRename: () => _renameEntry(entry),
-                    onEditDuration: () => _editEntryDuration(entry),
-                    onSplit: () => _splitEntry(entry),
-                    onDelete: () => _deleteEntry(entry),
-                    onUpload: entry.syncStatus == SyncStatus.notSynced || entry.syncStatus == SyncStatus.failed
-                        ? () => _uploadEntry(entry)
-                        : null,
-                    onUnbindCloud: entry.syncStatus == SyncStatus.synced
-                        ? () => _unbindCloudVideo(entry)
-                        : null,
-                    onRerunAnalysis: entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty
-                        ? () => _rerunAnalysisEntry(entry)
-                        : null,
-                  );
-                },
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemCount: _entries.length,
+        body: Column(
+          children: [
+            // 好球/壞球 TAB 選擇器
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    FilterChip(
+                      selected: _selectedGoodShot == null,
+                      label: const Text('全部'),
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() => _selectedGoodShot = null);
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      selected: _selectedGoodShot == true,
+                      label: const Text('好球 ✓'),
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() => _selectedGoodShot = true);
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      selected: _selectedGoodShot == false,
+                      label: const Text('壞球 ✗'),
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() => _selectedGoodShot = false);
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ),
+            ),
+            // 影片列表
+            Expanded(
+              child: filteredEntries.isEmpty
+                  ? const _EmptyHistoryView()
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      itemBuilder: (context, index) {
+                        final entry = filteredEntries[index];
+                        return _HistoryTile(
+                          entry: entry,
+                          formattedTime: _formatTimestamp(entry.recordedAt),
+                          onTap: () => _playEntry(entry),
+                          onRename: () => _renameEntry(entry),
+                          onEditDuration: () => _editEntryDuration(entry),
+                          onSplit: () => _splitEntry(entry),
+                          onDelete: () => _deleteEntry(entry),
+                          onUpload: entry.syncStatus == SyncStatus.notSynced || entry.syncStatus == SyncStatus.failed
+                              ? () => _uploadEntry(entry)
+                              : null,
+                          onUnbindCloud: entry.syncStatus == SyncStatus.synced
+                              ? () => _unbindCloudVideo(entry)
+                              : null,
+                          onRerunAnalysis: entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty
+                              ? () => _rerunAnalysisEntry(entry)
+                              : null,
+                        );
+                      },
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemCount: filteredEntries.length,
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1221,19 +2561,46 @@ class _HistoryTileState extends State<_HistoryTile> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        widget.entry.displayTitle,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF123B70),
+                      // 如果是雲端影片，顯示雲端名稱；否則顯示本地名稱
+                      if (widget.entry.videoType == VideoType.cloudClip)
+                        FutureBuilder<Map<String, dynamic>>(
+                          future: _cloudVideoDetailFuture,
+                          builder: (context, snapshot) {
+                            String displayName = widget.entry.displayTitle;
+                            if (snapshot.hasData && (snapshot.data?['success'] ?? false)) {
+                              final videoDetail = snapshot.data!['data'] as Map<String, dynamic>?;
+                              if (videoDetail != null && videoDetail['name'] != null) {
+                                displayName = videoDetail['name'] as String;
+                              }
+                            }
+                            return Text(
+                              displayName,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF123B70),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        )
+                      else
+                        Text(
+                          widget.entry.displayTitle,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF123B70),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
                       const SizedBox(height: 4),
-                      // 狀態徽章區
-                      Row(
+                      // 狀態徽章區 - 使用 Wrap 以支援標籤換行
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
                         children: [
                           // 同步狀態徽章
                           Container(
@@ -1250,7 +2617,11 @@ class _HistoryTileState extends State<_HistoryTile> {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              widget.entry.syncStatus.label,
+                              // 雲端影片且已同步時，顯示「雲端」；否則顯示同步狀態
+                              (widget.entry.videoType == VideoType.cloudClip &&
+                               widget.entry.syncStatus == SyncStatus.synced)
+                                  ? '☁️ 雲端'
+                                  : widget.entry.syncStatus.label,
                               style: TextStyle(
                                 fontSize: 10,
                                 color: widget.entry.syncStatus.badgeColor,
@@ -1258,7 +2629,30 @@ class _HistoryTileState extends State<_HistoryTile> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 6),
+                          // 處理隊列狀態（已同步時顯示）
+                          if (widget.entry.syncStatus == SyncStatus.synced)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: widget.entry.processingStatus.badgeColor.withAlpha(30),
+                                border: Border.all(
+                                  color: widget.entry.processingStatus.badgeColor,
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                widget.entry.processingStatus.label,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: widget.entry.processingStatus.badgeColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                           // 已切片標記（只對原始影片顯示）
                           if (widget.entry.videoType == VideoType.original &&
                               widget.entry.isClipped)
@@ -1280,6 +2674,60 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: Color(0xFFFF9800),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          // 雲端影片高亮 - 有cloudVideoId時顯示
+                          if (widget.entry.cloudVideoId != null && widget.entry.cloudVideoId!.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2196F3).withAlpha(40),
+                                border: Border.all(
+                                  color: const Color(0xFF2196F3),
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                '☁️ 雲端下載',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF2196F3),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          // 好球/壞球指示器
+                          if (widget.entry.goodShot != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: widget.entry.goodShot == true
+                                    ? const Color(0xFF4CAF50).withAlpha(30)
+                                    : const Color(0xFFF44336).withAlpha(30),
+                                border: Border.all(
+                                  color: widget.entry.goodShot == true
+                                      ? const Color(0xFF4CAF50)
+                                      : const Color(0xFFF44336),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                widget.entry.goodShot == true ? '✓ 好球' : '✗ 壞球',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: widget.entry.goodShot == true
+                                      ? const Color(0xFF4CAF50)
+                                      : const Color(0xFFF44336),
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -1333,24 +2781,23 @@ class _HistoryTileState extends State<_HistoryTile> {
                       value: _HistoryMenuAction.editDuration,
                       child: Text('調整時長'),
                     ),
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.split,
-                      child: Text('自動分片'),
-                    ),
-                    if (widget.onUpload != null)
+                    // 只有本地原始影片才能自動分片，切片影片不顯示此選項
+                    if (!widget.entry.isClipped)
+                      const PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.split,
+                        child: Text('自動分片'),
+                      ),
+                    // 若是雲端切片，不顯示上傳
+                    if (widget.onUpload != null && widget.entry.videoType != VideoType.cloudClip)
                       const PopupMenuItem<_HistoryMenuAction>(
                         value: _HistoryMenuAction.upload,
                         child: Text('上傳到雲端'),
                       ),
-                    if (widget.entry.syncStatus == SyncStatus.synced)
+                    // 若是雲端切片，不顯示移除雲端綁定
+                    if (widget.entry.syncStatus == SyncStatus.synced && widget.entry.videoType != VideoType.cloudClip)
                       const PopupMenuItem<_HistoryMenuAction>(
                         value: _HistoryMenuAction.unbindCloud,
                         child: Text('移除雲端綁定'),
-                      ),
-                    if (widget.entry.cloudVideoId != null && widget.entry.cloudVideoId!.isNotEmpty)
-                      const PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.rerunAnalysis,
-                        child: Text('重新分析'),
                       ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.delete,

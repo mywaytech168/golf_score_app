@@ -784,30 +784,25 @@ def print_scoring_summary(
 # 公開 API
 # ============================================================================
 
-def run_audio_scoring(config: AudioScoringConfig) -> pd.DataFrame:
+def run_audio_scoring(config: AudioScoringConfig) -> Dict[str, Any]:
     """執行音頻評分（公開 API）
     
     根據 audio_analysis 生成的 CSV 檔案進行音頻評分和分類。
+    返回包含 audio_crispness 和 good_shot 的結果字典。
     
     Args:
         config: AudioScoringConfig 配置對象
         
     Returns:
-        評分結果 DataFrame
+        {
+            'audio_crispness': float,  # 音頻清晰度 (0-100)
+            'good_shot': bool,         # 是否為優質擊球
+            'results_df': pd.DataFrame # 詳細評分結果
+        }
         
     Raises:
         FileNotFoundError: 若資料夾不存在
         ValueError: 若配置無效
-        
-    Examples:
-        >>> config = AudioScoringConfig(
-        ...     csv_folder="/path/to/csv",
-        ...     video_root="/path/to/videos",
-        ...     rule_score_per_feature=5.0,
-        ...     good_bad_threshold_features=3,
-        ... )
-        >>> results_df = run_audio_scoring(config)
-        >>> print(f"評分完成，共 {len(results_df)} 筆")
     """
     print("\n" + "="*80)
     print("🎯 開始音頻評分流程...")
@@ -823,23 +818,35 @@ def run_audio_scoring(config: AudioScoringConfig) -> pd.DataFrame:
         
         try:
             results_df.to_csv(config.output_csv, index=False, encoding="utf-8-sig")
-            print(f"  ✅ [第 735 行] 評分結果保存成功")
+            print(f"  ✅ 評分結果保存成功")
         except PermissionError as e:
-            print(f"  ❌ [第 735 行] 保存失敗 (權限拒絕)")
+            print(f"  ❌ 保存失敗 (權限拒絕)")
             print(f"     錯誤消息: {e}")
             print(f"     錯誤信息: 無法寫入到 {config.output_csv}")
             print(f"     可能原因: 網絡共享權限不足或路徑不可寫")
             raise
         except Exception as e:
-            print(f"  ❌ [第 735 行] 保存失敗 (其他錯誤): {e}")
+            print(f"  ❌ 保存失敗 (其他錯誤): {e}")
             raise
+        
+        # 計算音頻清晰度和優質擊球判定
+        audio_crispness = _calculate_audio_crispness(results_df)
+        good_shot = _determine_good_shot(results_df)
+        
+        print(f"\n📊 評分摘要:")
+        print(f"  🎵 音頻清晰度 (audio_crispness): {audio_crispness:.2f}")
+        print(f"  ⭐ 優質擊球 (good_shot): {good_shot}")
         
         # 列印摘要
         print_scoring_summary(config, results_df, stats)
         
         print("\n✅ 音頻評分已完成！")
         
-        return results_df
+        return {
+            'audio_crispness': audio_crispness,
+            'good_shot': good_shot,
+            'results_df': results_df
+        }
         
     except Exception as e:
         print(f"\n❌ 音頻評分失敗：{e}")
@@ -849,6 +856,80 @@ def run_audio_scoring(config: AudioScoringConfig) -> pd.DataFrame:
         raise
 
 
+def _calculate_audio_crispness(results_df: pd.DataFrame) -> float:
+    """計算平均音頻清晰度
+    
+    基於 sharpness_hfxloud（高頻銳度）和 spectral_centroid（頻譜中心）
+    計算整體音頻清晰度評分 (0-100)。
+    
+    Args:
+        results_df: 評分結果 DataFrame
+        
+    Returns:
+        audio_crispness: 清晰度評分 (0-100)
+    """
+    if results_df.empty:
+        return 0.0
+    
+    # 規範化 sharpness_hfxloud (假設範圍 0-1 或 0-100)
+    if 'sharpness_hfxloud' in results_df.columns:
+        sharpness = results_df['sharpness_hfxloud'].mean()
+        if sharpness > 10:  # 如果值大於 10，假設是 0-100 範圍
+            sharpness = sharpness / 100.0
+    else:
+        sharpness = 0.5
+    
+    # 規範化 spectral_centroid (假設範圍 0-20000 Hz)
+    if 'spectral_centroid' in results_df.columns:
+        centroid = results_df['spectral_centroid'].mean()
+        # 規範化到 0-1 (目標範圍 3000-6000 Hz)
+        centroid_norm = min(centroid / 6000.0, 1.0) if centroid > 0 else 0.5
+    else:
+        centroid_norm = 0.5
+    
+    # 規範化 peak_dbfs (假設範圍 -60 到 0)
+    if 'peak_dbfs' in results_df.columns:
+        peak = results_df['peak_dbfs'].mean()
+        # 規範化：-20 dBFS 為最優，越接近 0 越好
+        peak_norm = max(0, min((peak + 20) / 20.0, 1.0)) if peak else 0.5
+    else:
+        peak_norm = 0.5
+    
+    # 加權計算清晰度 (0-100)
+    audio_crispness = (sharpness * 0.4 + centroid_norm * 0.35 + peak_norm * 0.25) * 100.0
+    
+    return round(audio_crispness, 2)
+
+
+def _determine_good_shot(results_df: pd.DataFrame) -> bool:
+    """判定是否為優質擊球
+    
+    基於 good/bad 分類的多數投票結果。
+    
+    Args:
+        results_df: 評分結果 DataFrame
+        
+    Returns:
+        good_shot: True 表示優質擊球，False 表示普通擊球
+    """
+    if results_df.empty:
+        return False
+    
+    if 'pred_goodbad' not in results_df.columns:
+        return False
+    
+    # 計算 good 和 bad 的數量
+    good_count = (results_df['pred_goodbad'] == 'good').sum()
+    bad_count = (results_df['pred_goodbad'] == 'bad').sum()
+    
+    # 多數投票：good 數量 > bad 數量 則判為 good
+    good_shot = good_count > bad_count
+    
+    print(f"  📈 投票結果: good={good_count}, bad={bad_count} → {'優質' if good_shot else '普通'}")
+    
+    return good_shot
+
+
 if __name__ == "__main__":
     # 示例用法
     try:
@@ -856,7 +937,9 @@ if __name__ == "__main__":
             csv_folder=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41",
             video_root=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41",
         )
-        results = run_audio_scoring(config)
+        result = run_audio_scoring(config)
         print(f"\n✅ 成功！結果已保存到 {config.output_csv}")
+        print(f"   audio_crispness: {result['audio_crispness']}")
+        print(f"   good_shot: {result['good_shot']}")
     except Exception as e:
         print(f"❌ 錯誤：{e}")

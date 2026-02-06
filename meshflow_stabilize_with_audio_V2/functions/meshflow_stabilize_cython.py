@@ -115,9 +115,9 @@ class MeshFlowStabilizerCython:
         adaptive_weights_definition=ADAPTIVE_WEIGHTS_DEFINITION_ORIGINAL,
         AUTO_SHAKE_SEGMENT=True,
         SHAKE_SMOOTH_WIN=7,
-        SHAKE_THRESH_K=3.0,
-        SHAKE_PAD_FRAMES=10,
-        SHAKE_MIN_SEG_LEN=12,
+        SHAKE_THRESH_K=4.0,
+        SHAKE_PAD_FRAMES=8,
+        SHAKE_MIN_SEG_LEN=8,
         MANUAL_START=None,
         MANUAL_END=None,
     ):
@@ -785,23 +785,11 @@ def main():
     VIDEO_PATH = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4"
     OUTPUT_PATH = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stab_cython.mp4"
 
-    stabilizer = MeshFlowStabilizerCython(
-        visualize=False,
-        mesh_row_count=16,
-        mesh_col_count=16,
-        temporal_smoothing_radius=10,
-        optimization_num_iterations=80,
-    )
+    stabilizer = MeshFlowStabilizerCython()
 
     result = stabilizer.stabilize_segment_only(
         VIDEO_PATH,
-        OUTPUT_PATH,
-        adaptive_weights_definition=MeshFlowStabilizerCython.ADAPTIVE_WEIGHTS_DEFINITION_ORIGINAL,
-        AUTO_SHAKE_SEGMENT=True,
-        SHAKE_THRESH_K=4.0,
-        SHAKE_PAD_FRAMES=8,
-        SHAKE_MIN_SEG_LEN=8,
-        SHAKE_SMOOTH_WIN=7,
+        OUTPUT_PATH
     )
 
     print("\n=== RESULT ===")

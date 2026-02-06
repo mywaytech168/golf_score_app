@@ -1,13 +1,14 @@
 ﻿import 'package:flutter/material.dart';
+import '../services/video_server_client.dart';
+import '../models/statistics_response.dart';
 
 class TodayInfoSnapshot {
   final int practiceCount;
   final int goodHits;
   final int badHits;
-  final double? averageSpeedMph;
   final double? bestSpeedMph;
-  final double? impactClarity;
   final double? sweetSpotPercentage;
+  final double? audioCrispness;
   final String? goodVideoPath;
   final String? badVideoPath;
 
@@ -15,10 +16,9 @@ class TodayInfoSnapshot {
     required this.practiceCount,
     required this.goodHits,
     required this.badHits,
-    this.averageSpeedMph,
     this.bestSpeedMph,
-    this.impactClarity,
     this.sweetSpotPercentage,
+    this.audioCrispness,
     this.goodVideoPath,
     this.badVideoPath,
   });
@@ -28,10 +28,9 @@ typedef TodayInfoRangeFetcher = Future<TodayInfoSnapshot?> Function(DateTimeRang
 
 class TodayInfoPage extends StatefulWidget {
   final int practiceCount;
-  final double? averageSpeedMph;
   final double? bestSpeedMph;
-  final double? impactClarity;
   final double? sweetSpotPercentage;
+  final double? audioCrispness;
   final int goodHits;
   final int badHits;
   final String? goodVideoPath;
@@ -42,10 +41,9 @@ class TodayInfoPage extends StatefulWidget {
   const TodayInfoPage({
     super.key,
     required this.practiceCount,
-    this.averageSpeedMph,
     this.bestSpeedMph,
-    this.impactClarity,
     this.sweetSpotPercentage,
+    this.audioCrispness,
     required this.goodHits,
     required this.badHits,
     this.goodVideoPath,
@@ -63,27 +61,64 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
   bool _loading = false;
 
   late int _practice;
-  double? _avgSpeed;
   double? _bestSpeed;
-  double? _impact;
   double? _sweetPct;
+  double? _audioCrispness;
   int _good = 0;
   int _bad = 0;
   String? _goodVideo;
   String? _badVideo;
+  
+  // 統計API相關
+  StatisticsResponse? _statistics;
+  String _selectedPeriod = 'today'; // 當前選擇的時間維度
 
   @override
   void initState() {
     super.initState();
     _practice = widget.practiceCount;
-    _avgSpeed = widget.averageSpeedMph;
     _bestSpeed = widget.bestSpeedMph;
-    _impact = widget.impactClarity;
     _sweetPct = widget.sweetSpotPercentage;
+    _audioCrispness = widget.audioCrispness;
     _good = widget.goodHits;
     _bad = widget.badHits;
     _goodVideo = widget.goodVideoPath;
     _badVideo = widget.badVideoPath;
+    
+    // 初始化時載入今天的統計數據
+    _loadStatistics('today');
+  }
+  
+  /// 載入統計數據
+  Future<void> _loadStatistics(String period, {String? date}) async {
+    setState(() => _loading = true);
+    
+    try {
+      final stats = await VideoServerClient.instance.getStatistics(
+        period: period,
+        date: date,
+      );
+      
+      if (mounted && stats != null) {
+        setState(() {
+          _statistics = stats;
+          _selectedPeriod = period;
+          // 從API數據更新本地變量
+          _practice = stats.totalCount;
+          _good = stats.goodShot;
+          _bad = stats.badShot;
+          _sweetPct = stats.sweetSpotPercentage;
+          _bestSpeed = stats.peakValue.average > 0 ? stats.peakValue.average : null;
+          _audioCrispness = stats.audioCrispness.average > 0 ? stats.audioCrispness.average : null;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ 載入統計數據失敗: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   Future<void> _pickRange() async {
@@ -108,10 +143,9 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
             _practice = snap.practiceCount;
             _good = snap.goodHits;
             _bad = snap.badHits;
-            _avgSpeed = snap.averageSpeedMph;
             _bestSpeed = snap.bestSpeedMph;
-            _impact = snap.impactClarity;
             _sweetPct = snap.sweetSpotPercentage;
+            _audioCrispness = snap.audioCrispness;
             _goodVideo = snap.goodVideoPath;
             _badVideo = snap.badVideoPath;
             _loading = false;
@@ -129,8 +163,8 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
     final sweetText = _sweetPct != null
         ? '${_sweetPct!.clamp(0, 100).toStringAsFixed(0)}%'
         : '--';
-    final impactText = _impact != null
-        ? '${(_impact!.clamp(0, 1) * 100).toStringAsFixed(0)}%'
+    final crispnessText = _audioCrispness != null
+        ? '${_audioCrispness!.clamp(0, 100).toStringAsFixed(0)}'
         : '--';
     final rangeLabel = _selectedRange != null
         ? '${_selectedRange!.start.toString().split(' ').first} - ${_selectedRange!.end.toString().split(' ').first}'
@@ -140,6 +174,18 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 時間維度選擇器
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildPeriodButton('全部', 'all'),
+                _buildPeriodButton('昨天', 'yesterday'),
+                _buildPeriodButton('今天', 'today'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -149,25 +195,19 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                   label: Text(rangeLabel),
                 ),
               ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: _pickRange,
-                child: const Text('重新計算'),
-              ),
             ],
           ),
           const SizedBox(height: 12),
           _card(children: [
-            _title('今日概況'),
+            _title('統計概況'),
             const SizedBox(height: 12),
             if (_loading) const LinearProgressIndicator(minHeight: 3),
             _miniStat('練習次數', '$_practice'),
             _miniStat('好球', '$_good'),
             _miniStat('壞球', '$_bad'),
-            _miniStat('平均速度', _avgSpeed != null ? '${_avgSpeed!.toStringAsFixed(1)} mph' : '--'),
             _miniStat('最佳速度', _bestSpeed != null ? '${_bestSpeed!.toStringAsFixed(1)} mph' : '--'),
             _miniStat('甜蜜點命中', sweetText),
-            _miniStat('擊球清脆度', impactText),
+            _miniStat('聲音清脆度', crispnessText),
           ]),
           const SizedBox(height: 16),
           _card(children: [
@@ -178,6 +218,23 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
             _videoSlot(context, label: '今日待改善', path: _badVideo, color: Colors.red),
           ]),
         ],
+      ),
+    );
+  }
+
+  /// 時間維度按鈕
+  Widget _buildPeriodButton(String label, String period) {
+    final isSelected = _selectedPeriod == period;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: FilterChip(
+        selected: isSelected,
+        label: Text(label),
+        onSelected: (selected) {
+          if (selected) {
+            _loadStatistics(period);
+          }
+        },
       ),
     );
   }

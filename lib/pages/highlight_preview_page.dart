@@ -13,7 +13,14 @@ class HighlightPreviewPage extends StatefulWidget {
   final String videoPath;
   final String? avatarPath;
   final String? debugText;
-  const HighlightPreviewPage({super.key, required this.videoPath, this.avatarPath, this.debugText});
+  final String? cloudVideoId;
+  const HighlightPreviewPage({
+    super.key,
+    required this.videoPath,
+    this.avatarPath,
+    this.debugText,
+    this.cloudVideoId,
+  });
 
   @override
   State<HighlightPreviewPage> createState() => _HighlightPreviewPageState();
@@ -21,8 +28,6 @@ class HighlightPreviewPage extends StatefulWidget {
 
 class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   VideoPlayerController? _ctrl;
-  final TextEditingController _captionController = TextEditingController();
-  bool _attachAvatar = false;
   bool _isProcessingShare = false;
   final List<String> _generatedTempFiles = [];
   static const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
@@ -36,7 +41,6 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   @override
   void dispose() {
     _ctrl?.dispose();
-    _captionController.dispose();
     for (final f in _generatedTempFiles) {
       try { File(f).deleteSync(); } catch (_) {}
     }
@@ -46,7 +50,37 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Highlight 預覽')),
+      appBar: AppBar(
+        title: const Text('Highlight 預覽'),
+        // 如果有 cloudVideoId，在AppBar中显示
+        actions: [
+          if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2196F3).withAlpha(30),
+                    border: Border.all(
+                      color: const Color(0xFF2196F3),
+                      width: 1.5,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '☁️ ${widget.cloudVideoId}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF2196F3),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
@@ -56,59 +90,13 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
                   : const CircularProgressIndicator(),
             ),
           ),
-          // share UI: caption, avatar toggle, targeted share buttons and system share
+          // share UI: system share only
           Padding(
             padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _captionController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(border: OutlineInputBorder(), hintText: '說明文字（可選）'),
-                ),
-                const SizedBox(height: 8),
-                if (widget.avatarPath != null && widget.avatarPath!.isNotEmpty && File(widget.avatarPath!).existsSync())
-                  SwitchListTile(
-                    title: const Text('加入頭像'),
-                    value: _attachAvatar,
-                    onChanged: (v) => setState(() => _attachAvatar = v),
-                  ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.camera),
-                        label: const Text('Instagram'),
-                        onPressed: _isProcessingShare ? null : () => _shareToTarget('com.instagram.android'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.facebook),
-                        label: const Text('Facebook'),
-                        onPressed: _isProcessingShare ? null : () => _shareToTarget('com.facebook.katana'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.chat),
-                        label: const Text('Line'),
-                        onPressed: _isProcessingShare ? null : () => _shareToTarget('jp.naver.line.android'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.share),
-                  label: const Text('系統分享'),
-                  onPressed: _isProcessingShare ? null : _shareSystem,
-                ),
-              ],
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.share),
+              label: const Text('系統分享'),
+              onPressed: _isProcessingShare ? null : _shareSystem,
             ),
           )
         ,
@@ -156,55 +144,9 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
     await Share.shareXFiles([XFile(sharePath)], text: '我的揮桿 Highlight');
   }
 
-  Future<void> _shareToTarget(String packageName) async {
-    if (_isProcessingShare) return;
-    setState(() => _isProcessingShare = true);
-    try {
-      final sharePath = await _prepareShareFile();
-      if (sharePath == null) return;
-      bool sharedByPackage = false;
-      if (Platform.isAndroid) {
-        try {
-          final result = await _shareChannel.invokeMethod<bool>('shareToPackage', {
-            'packageName': packageName,
-            'filePath': sharePath,
-            'mimeType': 'video/*',
-            'text': '分享我的 TekSwing 揮桿影片',
-          });
-          sharedByPackage = result ?? false;
-        } on PlatformException catch (_) {}
-      }
-      if (!sharedByPackage) {
-        await Share.shareXFiles([XFile(sharePath)], text: '分享我的 TekSwing 揮桿影片');
-      }
-    } finally {
-      if (mounted) setState(() => _isProcessingShare = false);
-    }
-  }
-
   Future<String?> _prepareShareFile() async {
-    final bool wantsAvatar = _attachAvatar;
-    final String caption = _captionController.text.trim();
-    final bool wantsCaption = caption.isNotEmpty;
-    if (wantsAvatar) {
-      if (widget.avatarPath == null || widget.avatarPath!.isEmpty || !File(widget.avatarPath!).existsSync()) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到個人頭像檔案')));
-        return null;
-      }
-    }
-    final result = await VideoOverlayProcessor.process(
-      inputPath: widget.videoPath,
-      attachAvatar: wantsAvatar,
-      avatarPath: wantsAvatar ? widget.avatarPath : null,
-      attachCaption: wantsCaption,
-      caption: caption,
-    );
-    if (result == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('處理影片失敗')));
-      return null;
-    }
-    if (result != widget.videoPath) _generatedTempFiles.add(result);
-    return result;
+    // 直接返回原影片路径，不進行任何處理
+    return widget.videoPath;
   }
 
   Future<File?> _ensureDebugTempFile() async {

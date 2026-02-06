@@ -45,24 +45,14 @@ namespace UploadServer.DTOs
         public double? PeakValue { get; set; }
 
         /// <summary>
-        /// 最大加速度
-        /// </summary>
-        public double? MaxAcceleration { get; set; }
-
-        /// <summary>
-        /// 平均加速度
-        /// </summary>
-        public double? AvgAcceleration { get; set; }
-
-        /// <summary>
         /// 是否好球
         /// </summary>
         public bool? GoodShot { get; set; }
 
         /// <summary>
-        /// 是否壞球
+        /// 聲音清脆度 (0-100)
         /// </summary>
-        public bool? BadShot { get; set; }
+        public double? AudioCrispness { get; set; }
 
         /// <summary>
         /// 對應的本地檔案路徑（用於追踪檔案來源）
@@ -92,10 +82,8 @@ namespace UploadServer.DTOs
         public double? StartSecond { get; set; }
         public double? EndSecond { get; set; }
         public double? PeakValue { get; set; }
-        public double? MaxAcceleration { get; set; }
-        public double? AvgAcceleration { get; set; }
         public bool? GoodShot { get; set; }
-        public bool? BadShot { get; set; }
+        public double? AudioCrispness { get; set; }
         /// <summary>
         /// 對應的本地檔案路徑（用於追踪檔案來源）
         /// </summary>
@@ -188,5 +176,16 @@ namespace UploadServer.DTOs
         /// 本週切片數
         /// </summary>
         public int WeeklyClips { get; set; }
+    }
+
+    // ============================================================
+    // 更新影片名稱請求
+    // ============================================================
+    public class UpdateVideoNameRequest
+    {
+        /// <summary>
+        /// 影片的新名稱
+        /// </summary>
+        public string Name { get; set; }
     }
 }

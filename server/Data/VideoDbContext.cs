@@ -163,19 +163,12 @@ namespace UploadServer.Data
                     .HasColumnName("peak_value")
                     .HasColumnType("DOUBLE");
 
-                entity.Property(e => e.MaxAcceleration)
-                    .HasColumnName("max_acceleration")
-                    .HasColumnType("DOUBLE");
-
-                entity.Property(e => e.AvgAcceleration)
-                    .HasColumnName("avg_acceleration")
-                    .HasColumnType("DOUBLE");
-
                 entity.Property(e => e.GoodShot)
                     .HasColumnName("good_shot");
 
-                entity.Property(e => e.BadShot)
-                    .HasColumnName("bad_shot");
+                entity.Property(e => e.AudioCrispness)
+                    .HasColumnName("audio_crispness")
+                    .HasColumnType("DOUBLE");
 
                 entity.Property(e => e.CreatedAt)
                     .HasColumnName("created_at")

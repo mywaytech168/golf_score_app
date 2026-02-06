@@ -39,7 +39,14 @@ namespace UploadServer.Services
         public async Task<(bool Success, Video Video, string Error)> CreateVideoAsync(
             string userId,
             string name,
-            string? parentVideoId = null)
+            string? parentVideoId = null,
+            double? hitSecond = null,
+            double? startSecond = null,
+            double? endSecond = null,
+            double? peakValue = null,
+            bool? goodShot = null,
+            double? audioCrispness = null,
+            string? sourceLocalFilePath = null)
         {
             try
             {
@@ -49,12 +56,25 @@ namespace UploadServer.Services
                     UserId = userId,
                     Name = name,
                     ParentVideoId = parentVideoId,
+                    HitSecond = hitSecond,
+                    StartSecond = startSecond,
+                    EndSecond = endSecond,
+                    PeakValue = peakValue,
+                    GoodShot = goodShot,
+                    AudioCrispness = audioCrispness,
                     Status = "pending",
                     CreatedAt = DateTime.Now,
                     UpdatedAt = DateTime.Now,
                 };
 
                 _logger.LogInformation($"✅ Created video: {video.Name} (ID: {video.Id}) for user {userId}");
+                if (hitSecond.HasValue) _logger.LogInformation($"   HitSecond: {hitSecond}");
+                if (startSecond.HasValue) _logger.LogInformation($"   StartSecond: {startSecond}");
+                if (endSecond.HasValue) _logger.LogInformation($"   EndSecond: {endSecond}");
+                if (peakValue.HasValue) _logger.LogInformation($"   PeakValue: {peakValue}");
+                if (goodShot.HasValue) _logger.LogInformation($"   GoodShot: {goodShot}");
+                if (audioCrispness.HasValue) _logger.LogInformation($"   AudioCrispness: {audioCrispness}");
+                
                 return (true, video, null);
             }
             catch (Exception ex)
@@ -66,36 +86,61 @@ namespace UploadServer.Services
 
         /// <summary>
         /// 上傳檔案
+        /// 支援兩種模式：
+        /// 1. 手機端上傳 (saveToStorage=true) - 保存檔案到磁盤
+        /// 2. Python server 上傳 (saveToStorage=false) - 只記錄元數據到數據庫
         /// </summary>
         public async Task<(bool Success, FileModel FileRecord, string Error)> UploadFileAsync(
             string userId,
             string videoId,
             string fileType,
-            IFormFile formFile,
+            IFormFile formFile = null,
             string fileName = null,
-            string sourceLocalFilePath = null)
+            string sourceLocalFilePath = null,
+            bool saveToStorage = false)
         {
             try
             {
-                if (formFile == null || formFile.Length == 0)
-                {
-                    return (false, null, "File is empty");
-                }
-
+                // 如果 formFile 為 null，使用 fileName；否則使用 formFile.FileName
+                string actualFileName = fileName ?? formFile?.FileName ?? $"{fileType}.bin";
+                
                 // 建立目錄結構：/storage/videos/{userId}/{videoId}/
                 var fileDir = System.IO.Path.Combine(_baseUploadDir, userId, videoId);
                 Directory.CreateDirectory(fileDir);
 
-                // 從原始檔名取得副檔名
-                var extension = System.IO.Path.GetExtension(formFile.FileName);
+                // 從檔名取得副檔名
+                var extension = System.IO.Path.GetExtension(actualFileName);
                 // 使用格式：{fileType}.{extension}
-                var actualFileName = $"{fileType}{extension}";
+                if (string.IsNullOrEmpty(extension))
+                {
+                    extension = ".bin";
+                }
+                actualFileName = $"{fileType}{extension}";
                 var filePath = System.IO.Path.Combine(fileDir, actualFileName);
 
-                // 儲存檔案
-                using (var stream = System.IO.File.Create(filePath))
+                // 計算檔案大小
+                long fileSize = formFile?.Length ?? 0;
+
+                // 如果需要保存檔案（手機端上傳），將檔案寫入磁盤
+                if (saveToStorage && formFile != null && formFile.Length > 0)
                 {
-                    await formFile.CopyToAsync(stream);
+                    using (var stream = System.IO.File.Create(filePath))
+                    {
+                        await formFile.CopyToAsync(stream);
+                    }
+                    _logger.LogInformation(
+                        $"✅ 手機端檔案已保存: {actualFileName} (Type: {fileType}) for video {videoId}. " +
+                        $"路徑: {filePath}, 大小: {fileSize} bytes"
+                    );
+                }
+                else
+                {
+                    filePath = sourceLocalFilePath;
+
+                    _logger.LogInformation(
+                        $"✅ Python server 檔案元數據已記錄: {actualFileName} (Type: {fileType}) for video {videoId}. " +
+                        $"路徑: {filePath}, 大小: {fileSize} bytes"
+                    );
                 }
 
                 var fileRecord = new FileModel
@@ -105,18 +150,18 @@ namespace UploadServer.Services
                     Type = fileType,
                     FileName = actualFileName,
                     FilePath = filePath,
-                    FileSize = formFile.Length,
-                    MimeType = formFile.ContentType,
+                    FileSize = fileSize,
+                    MimeType = formFile?.ContentType ?? "application/octet-stream",
                     Status = "completed",
                     CreatedAt = DateTime.Now,
                     CompletedAt = DateTime.Now,
                     SourceLocalFilePath = sourceLocalFilePath
                 };
 
-                _logger.LogInformation(
-                    $"✅ 上傳檔案: {actualFileName} (Type: {fileType}) for video {videoId}. " +
-                    $"路徑: {filePath}, 大小: {formFile.Length} bytes"
-                );
+                if (!string.IsNullOrEmpty(sourceLocalFilePath))
+                {
+                    _logger.LogInformation($"   Source: {sourceLocalFilePath}");
+                }
 
                 return (true, fileRecord, null);
             }

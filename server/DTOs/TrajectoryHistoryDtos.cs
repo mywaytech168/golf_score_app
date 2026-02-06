@@ -73,24 +73,14 @@ namespace UploadServer.DTOs
         public double? PeakValue { get; set; }
 
         /// <summary>
-        /// 最大加速度
-        /// </summary>
-        public double? MaxAcceleration { get; set; }
-
-        /// <summary>
-        /// 平均加速度
-        /// </summary>
-        public double? AvgAcceleration { get; set; }
-
-        /// <summary>
         /// 是否為好球
         /// </summary>
         public bool? GoodShot { get; set; }
 
         /// <summary>
-        /// 是否為壞球
+        /// 聲音清脆度 (0-100)
         /// </summary>
-        public bool? BadShot { get; set; }
+        public double? AudioCrispness { get; set; }
     }
 
     // ============================================================

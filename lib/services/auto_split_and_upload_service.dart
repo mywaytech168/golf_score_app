@@ -107,7 +107,6 @@ class AutoSplitAndUploadService {
       final tag = result.tag.isNotEmpty
           ? result.tag
           : 'swing_${i + 1}';
-
       clips.add({
         'videoPath': result.videoPath,
         'csvPath': result.csvPath,
@@ -118,16 +117,14 @@ class AutoSplitAndUploadService {
           'endSecond': result.endSecond,
           'peakValue': result.peakValue,
           'goodShot': result.goodShot,
-          'badShot': result.badShot,
-          'maxAcceleration': result.maxAcceleration,
-          'avgAcceleration': result.avgAcceleration,
+          'audioCrispness': result.audioCrispness,
         },
       });
 
       debugPrint(
         '📝 隊列項 ${i + 1}/${results.length}: '
         '${result.tag} @ ${result.hitSecond.toStringAsFixed(2)}s '
-        '(${result.goodShot ? "✓" : result.badShot ? "✗" : "⚠"})',
+        '(${result.goodShot ? "✓" : "⚠"})',
       );
     }
 

@@ -7,6 +7,7 @@ using UploadServer.Models;
 using UploadServer.Services;
 using Microsoft.AspNetCore.Http;
 using System.IO;
+using System.Text.Json;
 using FileModel = UploadServer.Models.File;
 
 namespace UploadServer.Controllers
@@ -227,14 +228,57 @@ namespace UploadServer.Controllers
                 //     "audio_analysis": { "status": "completed", "result": { ... } },
                 //     ...
                 //   },
+                //   "audio_analysis": {
+                //     "audio_crispness": 75.5,
+                //     "good_shot": true
+                //   },
                 //   "outputPath": "\\10.1.1.101\TekSwing\videos\{videoId}\..."
                 // }
 
+                // 🔍 DEBUG: 打印完整的 ResultData 結構
+                _logger.LogInformation("════════════════════════════════════════════════════════════");
+                _logger.LogInformation("🔍 DEBUG: ResultData 內容");
+                _logger.LogInformation("════════════════════════════════════════════════════════════");
+                
                 if (callbackData?.ResultData == null)
                 {
                     _logger.LogWarning($"⚠️ 回調數據中沒有 ResultData，跳過文件上傳");
                     return;
                 }
+
+                // 遞迴印出 ResultData 的所有鍵值對
+                foreach (var kvp in callbackData.ResultData)
+                {
+                    _logger.LogInformation($"📌 Key: {kvp.Key}");
+                    
+                    if (kvp.Value is Dictionary<string, object> dictValue)
+                    {
+                        _logger.LogInformation($"   Type: Dictionary<string, object>");
+                        foreach (var innerKvp in dictValue)
+                        {
+                            _logger.LogInformation($"     - {innerKvp.Key}: {innerKvp.Value?.GetType().Name ?? "null"} = {innerKvp.Value?.ToString() ?? "null"}");
+                        }
+                    }
+                    else if (kvp.Value is Dictionary<string, Dictionary<string, object>> nestedDict)
+                    {
+                        _logger.LogInformation($"   Type: Dictionary<string, Dictionary<string, object>>");
+                        foreach (var innerKvp in nestedDict)
+                        {
+                            _logger.LogInformation($"     - {innerKvp.Key}: {innerKvp.Value?.Count ?? 0} 項");
+                            foreach (var deepKvp in innerKvp.Value)
+                            {
+                                _logger.LogInformation($"       • {deepKvp.Key}: {deepKvp.Value?.ToString() ?? "null"}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogInformation($"   Type: {kvp.Value?.GetType().Name ?? "null"}");
+                        _logger.LogInformation($"   Value: {kvp.Value?.ToString() ?? "null"}");
+                    }
+                }
+                
+                _logger.LogInformation("════════════════════════════════════════════════════════════");
 
                 var video = await _context.Videos.FirstOrDefaultAsync(v => v.Id == queueItem.VideoId);
                 if (video == null)
@@ -245,6 +289,137 @@ namespace UploadServer.Controllers
 
                 var userId = video.UserId;
                 var videoId = video.Id;
+
+                // 🎯 解析 audio_crispness 和 good_shot
+                _logger.LogInformation($"🔍 開始解析音頻分析數據...");
+                
+                // 從 ResultData 中提取音頻分析結果
+                if (callbackData.ResultData.TryGetValue("audio_analysis", out var audioAnalysisObj))
+                {
+                    _logger.LogInformation($"   📌 找到 audio_analysis: {audioAnalysisObj?.GetType().Name ?? "null"}");
+                    
+                    try
+                    {
+                        // 支持 Dictionary 和 JsonElement 兩種類型
+                        double? parsedCrispness = null;
+                        bool? parsedGoodShot = null;
+                        
+                        if (audioAnalysisObj is Dictionary<string, object> audioAnalysis)
+                        {
+                            _logger.LogInformation($"   ✅ audio_analysis 是 Dictionary<string, object>，包含 {audioAnalysis.Count} 個鍵");
+                            
+                            // 解析 audio_crispness
+                            if (audioAnalysis.TryGetValue("audio_crispness", out var crispnessObj))
+                            {
+                                _logger.LogInformation($"      📌 audio_crispness: {crispnessObj?.GetType().Name ?? "null"} = {crispnessObj?.ToString() ?? "null"}");
+                                if (double.TryParse(crispnessObj?.ToString(), out var crispness))
+                                {
+                                    parsedCrispness = crispness;
+                                    _logger.LogInformation($"      ✅ 解析成功: {crispness}");
+                                }
+                                else
+                                {
+                                    _logger.LogWarning($"      ❌ 無法將 {crispnessObj} 解析為 double");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"      ⚠️ audio_analysis 中找不到 audio_crispness");
+                            }
+
+                            // 解析 good_shot
+                            if (audioAnalysis.TryGetValue("good_shot", out var goodShotObj))
+                            {
+                                _logger.LogInformation($"      📌 good_shot: {goodShotObj?.GetType().Name ?? "null"} = {goodShotObj?.ToString() ?? "null"}");
+                                if (bool.TryParse(goodShotObj?.ToString(), out var goodShot))
+                                {
+                                    parsedGoodShot = goodShot;
+                                    _logger.LogInformation($"      ✅ 解析成功: {goodShot}");
+                                }
+                                else
+                                {
+                                    _logger.LogWarning($"      ❌ 無法將 {goodShotObj} 解析為 bool");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"      ⚠️ audio_analysis 中找不到 good_shot");
+                            }
+                        }
+                        else if (audioAnalysisObj is JsonElement jsonElement)
+                        {
+                            _logger.LogInformation($"   ✅ audio_analysis 是 JsonElement，嘗試解析...");
+                            
+                            // 解析 audio_crispness 從 JsonElement
+                            if (jsonElement.TryGetProperty("audio_crispness", out var crispnessElem))
+                            {
+                                _logger.LogInformation($"      📌 audio_crispness: {crispnessElem.ValueKind} = {crispnessElem}");
+                                try
+                                {
+                                    parsedCrispness = crispnessElem.GetDouble();
+                                    _logger.LogInformation($"      ✅ 解析成功: {parsedCrispness}");
+                                }
+                                catch (Exception parseEx)
+                                {
+                                    _logger.LogWarning($"      ❌ 無法將 {crispnessElem} 解析為 double: {parseEx.Message}");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"      ⚠️ audio_analysis 中找不到 audio_crispness");
+                            }
+
+                            // 解析 good_shot 從 JsonElement
+                            if (jsonElement.TryGetProperty("good_shot", out var goodShotElem))
+                            {
+                                _logger.LogInformation($"      📌 good_shot: {goodShotElem.ValueKind} = {goodShotElem}");
+                                try
+                                {
+                                    parsedGoodShot = goodShotElem.GetBoolean();
+                                    _logger.LogInformation($"      ✅ 解析成功: {parsedGoodShot}");
+                                }
+                                catch (Exception parseEx)
+                                {
+                                    _logger.LogWarning($"      ❌ 無法將 {goodShotElem} 解析為 bool: {parseEx.Message}");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning($"      ⚠️ audio_analysis 中找不到 good_shot");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"   ⚠️ audio_analysis 不是 Dictionary 或 JsonElement，而是 {audioAnalysisObj?.GetType().Name ?? "null"}");
+                        }
+                        
+                        // 將解析的值分配給 video 對象
+                        if (parsedCrispness.HasValue)
+                        {
+                            video.AudioCrispness = parsedCrispness;
+                        }
+                        if (parsedGoodShot.HasValue)
+                        {
+                            video.GoodShot = parsedGoodShot;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning($"⚠️ 解析音頻分析數據失敗: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning($"   ⚠️ ResultData 中找不到 audio_analysis");
+                }
+
+                // 保存解析結果到資料庫
+                if (video.AudioCrispness.HasValue || video.GoodShot.HasValue)
+                {
+                    _context.Videos.Update(video);
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation($"✅ 已保存視頻元數據: AudioCrispness={video.AudioCrispness}, GoodShot={video.GoodShot}");
+                }
 
                 // 獲取視頻的檔案目錄
                 var videoFiles = await _context.Files

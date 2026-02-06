@@ -373,9 +373,7 @@ class SwingClipUploadManager extends ChangeNotifier {
       'endSecond': item.metadata['endSecond'] ?? 0,
       'peakValue': item.metadata['peakValue'] ?? 0,
       'goodShot': item.metadata['goodShot'] ?? false,
-      'badShot': item.metadata['badShot'] ?? false,
-      'maxAcceleration': item.metadata['maxAcceleration'] ?? 0,
-      'avgAcceleration': item.metadata['avgAcceleration'] ?? 0,
+      'audioCrispness': item.metadata['audioCrispness'] ?? 0.0,
     };
 
     // TODO: 調用後端 API /api/clips/metadata

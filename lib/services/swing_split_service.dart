@@ -19,9 +19,7 @@ class SwingClipResult {
   final String videoPath;
   final String csvPath;
   final bool goodShot;
-  final bool badShot;
-  final double maxAcceleration;
-  final double avgAcceleration;
+  final double audioCrispness;
 
   SwingClipResult({
     required this.tag,
@@ -32,9 +30,7 @@ class SwingClipResult {
     required this.videoPath,
     required this.csvPath,
     required this.goodShot,
-    required this.badShot,
-    required this.maxAcceleration,
-    required this.avgAcceleration,
+    required this.audioCrispness,
   });
 }
 
@@ -163,16 +159,10 @@ class SwingSplitService {
             series.az[j] * series.az[j]);
         windowMag.add(mag);
       }
-      final double maxAccel = windowMag.isEmpty ? 0 : windowMag.reduce(math.max);
-      final double avgAccel =
-          windowMag.isEmpty ? 0 : windowMag.reduce((a, b) => a + b) / windowMag.length;
-      
-      debugPrint('[SWING_SPLIT]   ├─ 加速度統計: 最大=${maxAccel.toStringAsFixed(2)}G, 平均=${avgAccel.toStringAsFixed(2)}G, 樣本數=${windowMag.length}');
       
       final bool goodShot = pk.value > 30.0;
-      final bool badShot = pk.value < 10.0;
       
-      debugPrint('[SWING_SPLIT]   └─ 品質判定: ${goodShot ? "✓ 優秀擊棒" : badShot ? "✗ 不良擊棒" : "⚠ 普通擊棒"}');
+      debugPrint('[SWING_SPLIT]   └─ 品質判定: ${goodShot ? "✓ 優秀擊棒" : "⚠ 普通擊棒"}');
       
       results.add(
         SwingClipResult(
@@ -184,26 +174,18 @@ class SwingSplitService {
           videoPath: clipPath,
           csvPath: clipCsv,
           goodShot: goodShot,
-          badShot: badShot,
-          maxAcceleration: maxAccel,
-          avgAcceleration: avgAccel,
+          audioCrispness: 0.0, // 待後續獲取
         ),
       );
 
       // 將結果同步到後端
       if (memberId != null) {
-        final label = pk.value >= 30
-            ? 'good'
-            : pk.value <= 10
-                ? 'bad'
-                : 'unknown';
+        final label = goodShot ? 'good' : 'unknown';
         final payload = {
           'memberId': memberId,
           'videoPath': clipPath,
           'label': label,
           'avgSpeedMph': null,
-          'maxAcceleration': maxAccel,
-          'avgAcceleration': avgAccel,
           'csvPath': clipCsv,
           'dateTime': DateTime.now().toIso8601String(),
           'extraJson': '{"peak":${pk.value.toStringAsFixed(4)},"hit":${pk.time.toStringAsFixed(4)}}',
@@ -481,11 +463,11 @@ class SwingSplitService {
   static Future<void> _writeSummary(List<SwingClipResult> results, String dst) async {
     debugPrint('[SUMMARY] 生成摘要檔案: $dst');
     final StringBuffer buf = StringBuffer();
-    buf.writeln('hit,t_hit,start_t,end_t,peak_smooth,video_path,csv_path,good_shot,bad_shot,max_acceleration,avg_acceleration');
+    buf.writeln('hit,t_hit,start_t,end_t,peak_smooth,video_path,csv_path,good_shot,audio_crispness');
     
     for (final r in results) {
       buf.writeln(
-          '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)},${r.videoPath},${r.csvPath},${r.goodShot},${r.badShot},${r.maxAcceleration.toStringAsFixed(6)},${r.avgAcceleration.toStringAsFixed(6)}');
+          '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)},${r.videoPath},${r.csvPath},${r.goodShot},${r.audioCrispness.toStringAsFixed(2)}');
     }
     
     try {
