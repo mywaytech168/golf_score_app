@@ -357,7 +357,11 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
       }
       if (targetDir == null) {
         final appDocs = await getApplicationDocumentsDirectory();
-        targetDir = Directory(p.join(appDocs.path, 'Downloads'));
+        // iOS: 直接使用 Documents 目錄，讓檔案在 Files App 中可見
+        // Android: 使用 Downloads 子目錄
+        targetDir = Platform.isIOS 
+            ? appDocs 
+            : Directory(p.join(appDocs.path, 'Downloads'));
       }
       if (!await targetDir.exists()) {
         await targetDir.create(recursive: true);
@@ -491,11 +495,18 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
   // ---------- Audio capture and processing ----------
   /// Start audio capture and processing
   Future<void> _startAudioCapture() async {
-    // Ensure microphone permission is granted before proceeding.
-    if (!await Permission.microphone.request().isGranted) {
-      debugPrint('[AudioCapture] Microphone permission not granted.');
-      throw Exception('Microphone permission not granted.');
+    // iOS: 不使用 permission_handler 檢查麥克風權限，直接嘗試啟動
+    // 系統會自動處理權限請求，如果權限未授予會拋出異常
+    if (!Platform.isIOS) {
+      // Android: 仍然使用 permission_handler
+      if (!await Permission.microphone.request().isGranted) {
+        debugPrint('[AudioCapture] Microphone permission not granted.');
+        throw Exception('Microphone permission not granted.');
+      }
+    } else {
+      debugPrint('[AudioCapture] iOS: 直接啟動錄音，系統會自動處理權限');
     }
+    
     try {
       _receivePort = ReceivePort();
       _isolate = await Isolate.spawn(

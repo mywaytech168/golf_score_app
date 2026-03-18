@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -24,6 +26,29 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>需要藍牙權限以搜尋並連線 IMU 感測裝置。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>需要藍牙權限以維持與 IMU 的穩定連線與資料交換。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>需要使用相機來錄製高爾夫揮桿影片。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>需要定位權限以偵測附近的藍牙 IMU 設備並完成配對。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>需要定位權限以偵測附近的藍牙 IMU 設備並完成配對。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>需要使用麥克風來錄製揮桿聲音。</string>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -41,16 +66,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-        <key>CADisableMinimumFrameDurationOnPhone</key>
-        <true/>
-        <key>UIApplicationSupportsIndirectInputEvents</key>
-        <true/>
-        <!-- 宣告藍牙與定位用途說明，確保 iOS 顯示授權提示與設定頁項目 -->
-        <key>NSBluetoothAlwaysUsageDescription</key>
-        <string>需要藍牙權限以搜尋並連線 IMU 感測裝置。</string>
-        <key>NSBluetoothPeripheralUsageDescription</key>
-        <string>需要藍牙權限以維持與 IMU 的穩定連線與資料交換。</string>
-        <key>NSLocationWhenInUseUsageDescription</key>
-        <string>需要定位權限以偵測附近的藍牙 IMU 設備並完成配對。</string>
 </dict>
 </plist>

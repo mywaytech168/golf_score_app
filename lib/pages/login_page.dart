@@ -3,6 +3,7 @@ import 'dart:io'; // 判斷平台以動態決定權限清單
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // 捕捉平台層級錯誤以便顯示友善訊息
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:google_sign_in/google_sign_in.dart'; // 引入 Google 登入套件以支援第三方登入
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
 import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
@@ -43,6 +44,7 @@ class _LoginPageState extends State<LoginPage> {
         permission: PermissionStatus.denied, // 初始化為未授權，確保提示卡片顯示狀態
     };
     _loadRememberedCredentials(); // 讀取記住我設定，若有資料則自動填入帳號密碼
+    _checkBluetoothState(); // 檢查藍牙狀態
     // 於元件建立後立即排程權限請求，確保第一次進入登入頁面就彈出系統授權視窗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerInitialPermissionRequest();
@@ -58,6 +60,33 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   // ---------- 方法區 ----------
+  /// 檢查藍牙狀態並更新 UI (僅 Android，iOS 會在掃描時自動處理)
+  Future<void> _checkBluetoothState() async {
+    try {
+      // iOS 不支持直接查詢藍牙狀態，只在 Android 上檢查
+      if (Platform.isAndroid) {
+        final state = await FlutterBluePlus.adapterState.first;
+        
+        // 如果藍牙關閉，顯示提示
+        if (mounted && state == BluetoothAdapterState.off) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('請開啟藍牙以使用 IMU 連線功能'),
+              action: SnackBarAction(
+                label: '瞭解',
+                onPressed: () {},
+              ),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+      // iOS 上不需要檢查，因為在實際使用藍牙時系統會自動處理
+    } catch (e) {
+      debugPrint('檢查藍牙狀態失敗: $e');
+    }
+  }
+
   /// 首次進入登入頁面時觸發權限請求，讓使用者立即看到系統彈窗
   Future<void> _triggerInitialPermissionRequest() async {
     if (_hasRequestedInitialPermissions) {
@@ -65,17 +94,59 @@ class _LoginPageState extends State<LoginPage> {
     }
     _hasRequestedInitialPermissions = true;
 
+    // iOS：不在登入時請求權限，讓 flutter_blue_plus 在實際使用時自動請求
+    if (Platform.isIOS) {
+      debugPrint('📱 iOS 平台：跳過預先權限請求，將在使用藍牙時自動請求');
+      return;
+    }
+
+    debugPrint('📱 開始初始權限請求流程');
     await _requestBlePermissions(showDeniedDialog: false); // 首次請求不額外彈說明，僅顯示系統視窗
 
     // 若仍未全部授權則以 SnackBar 提醒並在畫面上顯示提示卡片
     if (mounted && !_arePermissionsAllGranted) {
+      debugPrint('⚠️ 權限未完全授予，顯示提示訊息');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('請允許藍牙與定位權限，以確保 IMU 連線功能可用。'),
-          duration: Duration(seconds: 4),
+        SnackBar(
+          content: const Text('請允許藍牙與定位權限，以確保 IMU 連線功能可用。'),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: '查看狀態',
+            onPressed: () => _showPermissionStatusDialog(),
+          ),
         ),
       );
+    } else {
+      debugPrint('✅ 所有權限已在初始請求中授予');
     }
+  }
+
+  /// 顯示當前權限狀態的對話框（用於調試）
+  void _showPermissionStatusDialog() {
+    final statusText = _permissionStatuses.entries
+        .map((e) => '${_blePermissions[e.key]}: ${e.value}')
+        .join('\n');
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('權限狀態'),
+        content: Text(statusText.isEmpty ? '尚未檢查權限' : statusText),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('關閉'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await openAppSettings();
+            },
+            child: const Text('開啟設定'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 當使用者按下登入按鈕時觸發，先驗證資料再導向首頁
@@ -84,7 +155,14 @@ class _LoginPageState extends State<LoginPage> {
       return; // 若表單驗證失敗則直接結束
     }
 
-    // 登入前先要求使用者授權藍牙與定位權限，確保後續流程正常運作
+    // iOS 不需要預先檢查權限，flutter_blue_plus 會在掃描時自動處理
+    if (Platform.isIOS) {
+      await _persistRememberedCredentials();
+      await _navigateToHome(_emailController.text);
+      return;
+    }
+
+    // Android 登入前先要求使用者授權藍牙與定位權限，確保後續流程正常運作
     final permissionsGranted = await _ensureBlePermissions();
     if (!mounted || !permissionsGranted) {
       return; // 權限未完整授權時暫停導向首頁
@@ -227,11 +305,26 @@ class _LoginPageState extends State<LoginPage> {
   Future<bool> _requestBlePermissions({required bool showDeniedDialog}) async {
     final updatedStatuses = <Permission, PermissionStatus>{};
 
+    debugPrint('===== 開始請求權限 (iOS) =====');
+    debugPrint('需要請求的權限：${_blePermissions.keys.map((p) => p.toString()).join(", ")}');
+
     for (final entry in _blePermissions.entries) {
+      final permission = entry.key;
+      final label = entry.value;
+      
+      // 先檢查當前狀態
+      final currentStatus = await permission.status;
+      debugPrint('權限 $label 當前狀態: $currentStatus');
+      
       // 使用 request() 以觸發系統授權視窗，並紀錄回傳結果
-      final status = await entry.key.request();
-      updatedStatuses[entry.key] = status;
+      final status = await permission.request();
+      debugPrint('權限 $label 請求後狀態: $status');
+      
+      updatedStatuses[permission] = status;
     }
+
+    debugPrint('所有權限請求完成');
+    debugPrint('權限狀態: ${updatedStatuses.map((k, v) => MapEntry(_blePermissions[k], v.toString()))}');
 
     if (!mounted) {
       return false; // 組件已卸載就不再進行後續流程
@@ -242,9 +335,11 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     if (_arePermissionsAllGranted) {
+      debugPrint('✅ 所有權限已授予');
       return true; // 全數授權完成即可繼續
     }
 
+    debugPrint('❌ 部分權限未授予');
     if (showDeniedDialog) {
       await _showPermissionGuideDialog();
     }
@@ -254,32 +349,67 @@ class _LoginPageState extends State<LoginPage> {
 
   /// 顯示權限說明視窗，指引用戶到正確的位置開啟藍牙／附近裝置／定位權限
   Future<void> _showPermissionGuideDialog() async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('需要藍牙與定位權限'),
-          content: const Text(
-            '為了搜尋並連線 IMU 感測裝置，請在系統設定中允許以下權限：\n'
+    final String instructions = Platform.isIOS
+        ? '需要定位權限才能使用藍牙掃描功能：\n\n'
+            '📱 請按照以下步驟操作：\n\n'
+            '1. 點擊下方「開啟設定」按鈕\n'
+            '2. 找到「Golf Score App」\n'
+            '3. 點選「位置」→ 選擇「使用 App 期間」\n'
+            '4. 確認 iPhone 的藍牙已在「控制中心」開啟\n'
+            '5. 返回 App 重新登入\n\n'
+            '💡 提示：iOS 需要定位權限來掃描藍牙設備，\n這是系統要求，不會追蹤你的位置。'
+        : '為了搜尋並連線 IMU 感測裝置，請在系統設定中允許以下權限：\n'
             '1. 進入「應用程式與通知」或「應用管理」。\n'
             '2. 選擇 TekSwing 後開啟「權限」。\n'
             '3. 啟用「附近裝置 / 藍牙」與「定位」權限。\n\n'
-            '若系統未直接顯示藍牙選項，請在權限頁面中尋找「附近裝置」或「位置」並開啟。',
+            '若系統未直接顯示藍牙選項，請在權限頁面中尋找「附近裝置」或「位置」並開啟。';
+    
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false, // 必須點按鈕才能關閉
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              const SizedBox(width: 8),
+              const Text('需要開啟權限'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Text(instructions, style: const TextStyle(fontSize: 15)),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('知道了'),
-            ),
-            TextButton(
-              onPressed: () async {
-                await openAppSettings(); // 開啟系統的應用程式設定頁面
-                if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
-                }
-              },
-              child: const Text('前往設定'),
-            ),
+            if (Platform.isIOS) ...[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('稍後再說'),
+              ),
+              FilledButton.icon(
+                onPressed: () async {
+                  await openAppSettings(); // 開啟系統的應用程式設定頁面
+                  if (Navigator.of(dialogContext).canPop()) {
+                    Navigator.of(dialogContext).pop();
+                  }
+                },
+                icon: const Icon(Icons.settings),
+                label: const Text('開啟設定'),
+              ),
+            ] else ...[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('知道了'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await openAppSettings(); // 開啟系統的應用程式設定頁面
+                  if (Navigator.of(dialogContext).canPop()) {
+                    Navigator.of(dialogContext).pop();
+                  }
+                },
+                child: const Text('前往設定'),
+              ),
+            ],
           ],
         );
       },
@@ -321,8 +451,8 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     if (Platform.isIOS) {
+      // iOS 只需要定位權限，藍牙會在使用 flutter_blue_plus 時自動處理
       return {
-        Permission.bluetooth: '藍牙使用',
         Permission.locationWhenInUse: '定位',
       };
     }

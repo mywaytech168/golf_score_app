@@ -13,12 +13,14 @@ import 'pages/recording_session_page.dart';
 import 'models/recording_history_entry.dart';
 import 'services/imu_data_logger.dart';
 import 'services/recording_history_storage.dart';
+import 'watch_imu.dart';
 
 /// 錄影入口頁面：專責處理藍牙 IMU 配對與引導使用者前往錄影畫面
 class RecorderPage extends StatefulWidget {
   final List<CameraDescription> cameras; // 傳入所有可用鏡頭
   final List<RecordingHistoryEntry> initialHistory; // 外部帶入的歷史紀錄
-  final ValueChanged<List<RecordingHistoryEntry>> onHistoryChanged; // 回傳更新後的歷史資料
+  final ValueChanged<List<RecordingHistoryEntry>>
+      onHistoryChanged; // 回傳更新後的歷史資料
   final String? userAvatarPath; // 首頁傳入的個人頭像路徑，用於分享時覆蓋影片
 
   const RecorderPage({
@@ -34,14 +36,32 @@ class RecorderPage extends StatefulWidget {
 }
 
 /// 定義 IMU 佩戴位置的插槽，方便多裝置管理
-enum _ImuSlotType { rightWrist, chest }
+enum _ImuSlotType { rightWrist, chest, appleWatch }
 
 extension _ImuSlotInfo on _ImuSlotType {
   /// CSV 檔案名稱需使用英文字面固定格式
-  String get csvName => this == _ImuSlotType.rightWrist ? 'RIGHT_WRIST' : 'CHEST';
+  String get csvName {
+    switch (this) {
+      case _ImuSlotType.rightWrist:
+        return 'RIGHT_WRIST';
+      case _ImuSlotType.chest:
+        return 'CHEST';
+      case _ImuSlotType.appleWatch:
+        return 'APPLE_WATCH';
+    }
+  }
 
   /// 顯示於 UI 的中文名稱
-  String get displayLabel => this == _ImuSlotType.rightWrist ? '右手腕 IMU' : '胸前 IMU';
+  String get displayLabel {
+    switch (this) {
+      case _ImuSlotType.rightWrist:
+        return '右手腕 IMU';
+      case _ImuSlotType.chest:
+        return '胸前 IMU';
+      case _ImuSlotType.appleWatch:
+        return 'Apple Watch';
+    }
+  }
 }
 
 class _RecorderPageState extends State<RecorderPage> {
@@ -57,9 +77,12 @@ class _RecorderPageState extends State<RecorderPage> {
 
   // ---------- 狀態變數區 ----------
   StreamSubscription<List<ScanResult>>? _scanSubscription; // 藍牙掃描訂閱
-  StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription; // 藍牙狀態監聽
-  StreamSubscription<BluetoothConnectionState>? _deviceConnectionSubscription; // 裝置連線狀態監聽
-  StreamSubscription<BluetoothConnectionState>? _secondDeviceConnectionSubscription; // 胸前 IMU 連線狀態監聽
+  StreamSubscription<BluetoothAdapterState>?
+      _adapterStateSubscription; // 藍牙狀態監聽
+  StreamSubscription<BluetoothConnectionState>?
+      _deviceConnectionSubscription; // 裝置連線狀態監聽
+  StreamSubscription<BluetoothConnectionState>?
+      _secondDeviceConnectionSubscription; // 胸前 IMU 連線狀態監聽
 
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown; // 目前藍牙狀態
   BluetoothDevice? _foundDevice; // 已搜尋到的目標 IMU 裝置
@@ -98,34 +121,53 @@ class _RecorderPageState extends State<RecorderPage> {
       Guid('7c2b4a96-bf0a-444b-b1cd-559b5e36dd6f'); // 震動馬達服務 UUID
   final Guid _charMotorToggleUuid =
       Guid('ce12d81f-1325-4e02-82f0-c3e4f9896233'); // 震動馬達開關特徵值
-  final Guid _serviceBatteryUuid = Guid('0000180f-0000-1000-8000-00805f9b34fb'); // 電池服務 UUID
-  final Guid _charBatteryLevelUuid = Guid('00002a19-0000-1000-8000-00805f9b34fb'); // 電量百分比
-  final Guid _charBatteryVoltageUuid = Guid('0000f001-0000-1000-8000-00805f9b34fb'); // 電壓
-  final Guid _charBatteryChargeCurrentUuid = Guid('0000f002-0000-1000-8000-00805f9b34fb'); // 充電電流
-  final Guid _charBatteryTemperatureUuid = Guid('0000f003-0000-1000-8000-00805f9b34fb'); // 溫度
-  final Guid _charBatteryRemainingUuid = Guid('0000f004-0000-1000-8000-00805f9b34fb'); // 剩餘電量 mAh
-  final Guid _charBatteryTimeToEmptyUuid = Guid('0000f005-0000-1000-8000-00805f9b34fb'); // 用完時間
-  final Guid _charBatteryTimeToFullUuid = Guid('0000f006-0000-1000-8000-00805f9b34fb'); // 充滿時間
-  final Guid _serviceDeviceInfoUuid = Guid('0000180a-0000-1000-8000-00805f9b34fb'); // 標準裝置資訊服務
-  final Guid _charDeviceModelUuid = Guid('00002a24-0000-1000-8000-00805f9b34fb'); // 型號
-  final Guid _charDeviceSerialUuid = Guid('00002a25-0000-1000-8000-00805f9b34fb'); // 序號
-  final Guid _charFirmwareRevisionUuid = Guid('00002a26-0000-1000-8000-00805f9b34fb'); // 韌體版本
-  final Guid _charHardwareRevisionUuid = Guid('00002a27-0000-1000-8000-00805f9b34fb'); // 硬體版本
-  final Guid _charSoftwareRevisionUuid = Guid('00002a28-0000-1000-8000-00805f9b34fb'); // 軟體版本
-  final Guid _charManufacturerUuid = Guid('00002a29-0000-1000-8000-00805f9b34fb'); // 製造商
+  final Guid _serviceBatteryUuid =
+      Guid('0000180f-0000-1000-8000-00805f9b34fb'); // 電池服務 UUID
+  final Guid _charBatteryLevelUuid =
+      Guid('00002a19-0000-1000-8000-00805f9b34fb'); // 電量百分比
+  final Guid _charBatteryVoltageUuid =
+      Guid('0000f001-0000-1000-8000-00805f9b34fb'); // 電壓
+  final Guid _charBatteryChargeCurrentUuid =
+      Guid('0000f002-0000-1000-8000-00805f9b34fb'); // 充電電流
+  final Guid _charBatteryTemperatureUuid =
+      Guid('0000f003-0000-1000-8000-00805f9b34fb'); // 溫度
+  final Guid _charBatteryRemainingUuid =
+      Guid('0000f004-0000-1000-8000-00805f9b34fb'); // 剩餘電量 mAh
+  final Guid _charBatteryTimeToEmptyUuid =
+      Guid('0000f005-0000-1000-8000-00805f9b34fb'); // 用完時間
+  final Guid _charBatteryTimeToFullUuid =
+      Guid('0000f006-0000-1000-8000-00805f9b34fb'); // 充滿時間
+  final Guid _serviceDeviceInfoUuid =
+      Guid('0000180a-0000-1000-8000-00805f9b34fb'); // 標準裝置資訊服務
+  final Guid _charDeviceModelUuid =
+      Guid('00002a24-0000-1000-8000-00805f9b34fb'); // 型號
+  final Guid _charDeviceSerialUuid =
+      Guid('00002a25-0000-1000-8000-00805f9b34fb'); // 序號
+  final Guid _charFirmwareRevisionUuid =
+      Guid('00002a26-0000-1000-8000-00805f9b34fb'); // 韌體版本
+  final Guid _charHardwareRevisionUuid =
+      Guid('00002a27-0000-1000-8000-00805f9b34fb'); // 硬體版本
+  final Guid _charSoftwareRevisionUuid =
+      Guid('00002a28-0000-1000-8000-00805f9b34fb'); // 軟體版本
+  final Guid _charManufacturerUuid =
+      Guid('00002a29-0000-1000-8000-00805f9b34fb'); // 製造商
   final Guid _serviceDeviceNameUuid =
       Guid('3ab441e7-11f8-4bbc-a004-7716126c8868'); // 自訂裝置名稱服務
   final Guid _charDeviceNameConfigUuid =
       Guid('1b18c3ee-013a-4cb1-9923-95dc798de376'); // 自訂裝置名稱特徵值
-  final Guid _cccdUuid = Guid('00002902-0000-1000-8000-00805f9b34fb'); // 通知控制描述符 UUID
+  final Guid _cccdUuid =
+      Guid('00002902-0000-1000-8000-00805f9b34fb'); // 通知控制描述符 UUID
   final List<StreamSubscription<List<int>>> _notificationSubscriptions =
       []; // 右手腕感測通知訂閱
   final List<StreamSubscription<List<int>>> _secondNotificationSubscriptions =
       []; // 胸前感測通知訂閱
   BluetoothCharacteristic? _linearAccelerationCharacteristic; // 線性加速度特徵引用
-  BluetoothCharacteristic? _gameRotationVectorCharacteristic; // Game Rotation Vector 特徵引用
-  BluetoothCharacteristic? _secondLinearAccelerationCharacteristic; // 胸前線性加速度特徵引用
-  BluetoothCharacteristic? _secondGameRotationVectorCharacteristic; // 胸前 Game Rotation Vector 特徵引用
+  BluetoothCharacteristic?
+      _gameRotationVectorCharacteristic; // Game Rotation Vector 特徵引用
+  BluetoothCharacteristic?
+      _secondLinearAccelerationCharacteristic; // 胸前線性加速度特徵引用
+  BluetoothCharacteristic?
+      _secondGameRotationVectorCharacteristic; // 胸前 Game Rotation Vector 特徵引用
   BluetoothCharacteristic? _buttonNotifyCharacteristic; // 按鈕事件特徵引用（右手腕專用）
   BluetoothCharacteristic? _motorControlCharacteristic; // 右手腕震動馬達控制特徵
   BluetoothCharacteristic? _secondMotorControlCharacteristic; // 胸前震動馬達控制特徵
@@ -144,9 +186,11 @@ class _RecorderPageState extends State<RecorderPage> {
   BluetoothCharacteristic? _manufacturerCharacteristic; // 製造商資訊特徵引用
   BluetoothCharacteristic? _deviceNameCharacteristic; // 自訂裝置名稱特徵引用
   Map<String, dynamic>? _latestLinearAcceleration; // 右手腕線性加速度資料
-  Map<String, dynamic>? _latestGameRotationVector; // 右手腕 Game Rotation Vector 資料
+  Map<String, dynamic>?
+      _latestGameRotationVector; // 右手腕 Game Rotation Vector 資料
   Map<String, dynamic>? _secondLatestLinearAcceleration; // 胸前線性加速度資料
-  Map<String, dynamic>? _secondLatestGameRotationVector; // 胸前 Game Rotation Vector 資料
+  Map<String, dynamic>?
+      _secondLatestGameRotationVector; // 胸前 Game Rotation Vector 資料
   Timer? _gameRotationFallbackTimer; // 右手腕 Game Rotation Vector 補償讀取計時器
   bool _isGameRotationFallbackReading = false; // 避免補償讀取重入
   DateTime? _lastGameRotationUpdate; // 右手腕最近一次 Game Rotation Vector 時間
@@ -182,9 +226,18 @@ class _RecorderPageState extends State<RecorderPage> {
       List<RecordingHistoryEntry>.from(widget.initialHistory); // 累積曾經錄影的檔案資訊
   final _BleOperationQueue _bleOperationQueue =
       _BleOperationQueue(); // 排程 BLE 寫入請求，避免同時寫入造成忙碌錯誤
-  final StreamController<void> _imuButtonController = StreamController<void>.broadcast();
+  final StreamController<void> _imuButtonController =
+      StreamController<void>.broadcast();
   // IMU 按鈕事件廣播器，讓錄影頁面可以同步收到硬體按鈕觸發
   bool _isSessionPageVisible = false; // 是否已顯示錄影頁面，避免重複開啟
+
+  // ---------- Apple Watch IMU 狀態 ----------
+  final WatchImu _watchImu = WatchImu();
+  StreamSubscription<Map<String, dynamic>>? _watchImuSubscription;
+  bool _isWatchConnected = false;
+  bool _isWatchStreaming = false;
+  Map<String, dynamic>? _latestWatchImuData;
+  String _watchConnectionMessage = '尚未連線至 Apple Watch';
 
   // ---------- 生命週期 ----------
   @override
@@ -227,7 +280,8 @@ class _RecorderPageState extends State<RecorderPage> {
         ..clear()
         ..addAll(stored);
     });
-    widget.onHistoryChanged(List<RecordingHistoryEntry>.from(_recordingHistory));
+    widget
+        .onHistoryChanged(List<RecordingHistoryEntry>.from(_recordingHistory));
   }
 
   @override
@@ -236,6 +290,7 @@ class _RecorderPageState extends State<RecorderPage> {
     _adapterStateSubscription?.cancel();
     _deviceConnectionSubscription?.cancel();
     _secondDeviceConnectionSubscription?.cancel();
+    _watchImuSubscription?.cancel(); // 取消 Watch IMU 訂閱
     if (_activeScanStopper != null && !_activeScanStopper!.isCompleted) {
       // 若仍有掃描流程在等待，主動結束避免懸掛 Future
       _activeScanStopper!.complete();
@@ -248,10 +303,76 @@ class _RecorderPageState extends State<RecorderPage> {
     }
     unawaited(_clearImuSession()); // 統一釋放所有藍牙訂閱與特徵引用
     unawaited(_clearSecondImuSession()); // 同步釋放第二顆 IMU 的資源
+    unawaited(_stopWatchImu()); // 停止 Watch IMU
     FlutterBluePlus.stopScan();
     _bleOperationQueue.dispose(); // 中止尚未執行的 BLE 任務，避免頁面離開後仍呼叫底層 API
     _imuButtonController.close(); // 關閉按鈕事件廣播，避免記憶體洩漏
     super.dispose();
+  }
+
+  // ---------- Apple Watch IMU 控制 ----------
+  /// 檢查 Watch 連線狀態
+  Future<void> _checkWatchConnection() async {
+    final reachable = await _watchImu.isWatchReachable();
+    if (!mounted) return;
+    setState(() {
+      _isWatchConnected = reachable;
+      _watchConnectionMessage =
+          reachable ? 'Watch 已連線' : 'Watch 不可達，請確認已開啟 Watch App';
+    });
+  }
+
+  /// 啟動 Watch IMU 串流
+  Future<void> _startWatchImu() async {
+    final success = await _watchImu.startIMU();
+    if (!success) {
+      if (mounted) {
+        setState(() {
+          _watchConnectionMessage = '無法啟動 Watch IMU，請確認 Watch App 已開啟';
+        });
+      }
+      return;
+    }
+
+    _watchImuSubscription?.cancel();
+    _watchImuSubscription = _watchImu.imuStream.listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _latestWatchImuData = data;
+        _isWatchStreaming = true;
+        _isWatchConnected = true;
+        _watchConnectionMessage = 'Watch IMU 串流中';
+      });
+    }, onError: (error) {
+      _logBle('Watch IMU 串流錯誤: $error');
+      if (mounted) {
+        setState(() {
+          _isWatchStreaming = false;
+          _watchConnectionMessage = 'Watch IMU 串流中斷';
+        });
+      }
+    });
+
+    if (mounted) {
+      setState(() {
+        _isWatchStreaming = true;
+        _watchConnectionMessage = 'Watch IMU 串流中';
+      });
+    }
+  }
+
+  /// 停止 Watch IMU 串流
+  Future<void> _stopWatchImu() async {
+    _watchImuSubscription?.cancel();
+    _watchImuSubscription = null;
+    await _watchImu.stopIMU();
+    if (mounted) {
+      setState(() {
+        _isWatchStreaming = false;
+        _latestWatchImuData = null;
+        _watchConnectionMessage = 'Watch IMU 已停止';
+      });
+    }
   }
 
   // ---------- 初始化流程 ----------
@@ -282,15 +403,19 @@ class _RecorderPageState extends State<RecorderPage> {
       });
       _logBle('藍牙狀態變更：$state');
 
-      if (state == BluetoothAdapterState.on && !isImuConnected && !_isScanning && !_isConnecting) {
+      if (state == BluetoothAdapterState.on &&
+          !isImuConnected &&
+          !_isScanning &&
+          !_isConnecting) {
         scanForImu();
       }
     });
 
+    // 在 iOS 上，藍牙狀態可能返回 unknown，這是正常的
     final initialState = await FlutterBluePlus.adapterState.first;
     if (!mounted) return;
     setState(() => _adapterState = initialState);
-    _logBle('取得當前藍牙狀態：$initialState');
+    _logBle('取得當前藍牙狀態：$initialState (iOS 上可能顯示 unknown)');
 
     final connectedDevices = FlutterBluePlus.connectedDevices;
     if (!mounted) return;
@@ -339,6 +464,16 @@ class _RecorderPageState extends State<RecorderPage> {
       }
     }
 
+    // iOS 上即使狀態為 unknown 也嘗試掃描，因為藍牙可能已開啟
+    if (Platform.isIOS &&
+        (initialState == BluetoothAdapterState.unknown ||
+            initialState == BluetoothAdapterState.on)) {
+      _logBle('iOS 平台：開始掃描 IMU 設備');
+      await scanForImu();
+      return;
+    }
+
+    // Android 平台的處理
     if (initialState == BluetoothAdapterState.on) {
       await scanForImu();
     } else {
@@ -350,17 +485,32 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 申請藍牙與定位權限，避免掃描過程被拒
   Future<bool> _requestBluetoothPermissions() async {
+    // iOS 不需要預先請求權限，flutter_blue_plus 會自動處理
+    if (Platform.isIOS) {
+      _logBle('iOS 平台：flutter_blue_plus 會在掃描時自動請求權限');
+      _permissionsReady = true;
+      return true;
+    }
+
     if (_runtimeBlePermissions.isEmpty) {
       _logBle('當前平台無需額外藍牙權限，直接進入掃描流程');
       _permissionsReady = true;
       return true;
     }
 
+    _logBle('===== 錄影頁面請求權限 (${Platform.isIOS ? 'iOS' : 'Android'}) =====');
+    _logBle('需要的權限: ${_runtimeBlePermissions.values.join(", ")}');
+
     bool allGranted = true; // 記錄是否全部授權
 
     for (final entry in _runtimeBlePermissions.entries) {
       final permission = entry.key;
       final label = entry.value;
+
+      // 先檢查當前狀態
+      final currentStatus = await permission.status;
+      _logBle('權限 $label 當前狀態: $currentStatus');
+
       final status = await permission.request();
 
       // 詳細紀錄授權結果，方便在 console 中比對裝置設定
@@ -394,8 +544,8 @@ class _RecorderPageState extends State<RecorderPage> {
     }
 
     if (Platform.isIOS) {
+      // iOS 只需要定位權限，藍牙會在使用 CoreBluetooth 時自動處理
       return {
-        Permission.bluetooth: 'BLUETOOTH',
         Permission.locationWhenInUse: 'LOCATION_WHEN_IN_USE',
       };
     }
@@ -410,19 +560,31 @@ class _RecorderPageState extends State<RecorderPage> {
     if (status.isGranted) {
       return true;
     }
-    return status == PermissionStatus.limited || status == PermissionStatus.provisional;
+    return status == PermissionStatus.limited ||
+        status == PermissionStatus.provisional;
   }
 
   // ---------- 方法區 ----------
   /// 掃描 TekSwing IMU 裝置並更新顯示資訊
   Future<void> scanForImu() async {
-    if (_adapterState != BluetoothAdapterState.on) {
-      // 若藍牙尚未開啟則優先提示，避免重複觸發掃描與錯誤訊息
+    // iOS 上藍牙狀態可能為 unknown，這是正常的，不應該阻止掃描
+    if (!Platform.isIOS && _adapterState != BluetoothAdapterState.on) {
+      // Android：若藍牙尚未開啟則優先提示
       if (!mounted) return;
       setState(() {
         _connectionMessage = '請先開啟藍牙功能後再進行搜尋';
       });
       _logBle('掃描中止：手機藍牙尚未開啟');
+      return;
+    }
+
+    // iOS 上繼續進行，即使狀態為 unknown
+    if (Platform.isIOS && _adapterState == BluetoothAdapterState.off) {
+      if (!mounted) return;
+      setState(() {
+        _connectionMessage = '請先開啟藍牙功能後再進行搜尋';
+      });
+      _logBle('掃描中止：iOS 藍牙已明確關閉');
       return;
     }
 
@@ -523,6 +685,7 @@ class _RecorderPageState extends State<RecorderPage> {
     });
 
     try {
+      _logBle('準備開始藍牙掃描...');
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 12),
         // 依 Nordic Android Library 建議使用低延遲掃描模式以提升連線準備速度
@@ -541,10 +704,26 @@ class _RecorderPageState extends State<RecorderPage> {
       }
     } catch (e, stackTrace) {
       if (!mounted) return;
-      setState(() {
-        _connectionMessage = '無法開始掃描或找不到裝置：$e';
-      });
+
       _logBle('掃描流程例外：$e', error: e, stackTrace: stackTrace);
+
+      String errorMessage = '無法開始掃描：$e';
+
+      // iOS 權限相關錯誤
+      if (Platform.isIOS) {
+        if (e.toString().contains('unauthorized') ||
+            e.toString().contains('permission') ||
+            e.toString().contains('location')) {
+          errorMessage = '需要定位權限才能掃描藍牙設備\n\n'
+              '請到「設定」→「隱私權與安全性」→「定位服務」\n'
+              '找到 Golf Score App 並選擇「使用 App 期間」';
+          _logBle('iOS 定位權限未授予，無法掃描藍牙');
+        }
+      }
+
+      setState(() {
+        _connectionMessage = errorMessage;
+      });
 
       // 針對常見的權限錯誤補充更清楚的提示
       if (e is PlatformException &&
@@ -720,7 +899,8 @@ class _RecorderPageState extends State<RecorderPage> {
     _logBle('啟動退避掃描策略，等待 2 秒後重試');
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted || _isScanning || _isConnecting) {
-      _logBle('退避結束但目前無法重新掃描，mounted=$mounted、isScanning=$_isScanning、isConnecting=$_isConnecting');
+      _logBle(
+          '退避結束但目前無法重新掃描，mounted=$mounted、isScanning=$_isScanning、isConnecting=$_isConnecting');
       return;
     }
     _logBle('重新啟動掃描流程');
@@ -846,11 +1026,14 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 依插槽取得對應的馬達控制特徵，方便共用判斷邏輯
   BluetoothCharacteristic? _motorCharacteristicForSlot(_ImuSlotType slot) =>
-      slot == _ImuSlotType.rightWrist ? _motorControlCharacteristic : _secondMotorControlCharacteristic;
+      slot == _ImuSlotType.rightWrist
+          ? _motorControlCharacteristic
+          : _secondMotorControlCharacteristic;
 
   /// 檢查指定插槽是否仍在執行震動任務，避免重複送出寫入
-  bool _isMotorBusyForSlot(_ImuSlotType slot) =>
-      slot == _ImuSlotType.rightWrist ? _isTriggeringRightMotor : _isTriggeringChestMotor;
+  bool _isMotorBusyForSlot(_ImuSlotType slot) => slot == _ImuSlotType.rightWrist
+      ? _isTriggeringRightMotor
+      : _isTriggeringChestMotor;
 
   /// 更新震動狀態並同步考量元件是否仍掛載，確保不會在 dispose 後 setState
   void _setMotorBusyForSlot(_ImuSlotType slot, bool value) {
@@ -875,7 +1058,8 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 監聽裝置連線狀態，若中斷則重新搜尋
   void _listenConnectionState(BluetoothDevice device) {
     _deviceConnectionSubscription?.cancel();
-    _deviceConnectionSubscription = device.connectionState.listen((state) async {
+    _deviceConnectionSubscription =
+        device.connectionState.listen((state) async {
       if (!mounted) return;
 
       if (state == BluetoothConnectionState.connected) {
@@ -913,7 +1097,8 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 監聽胸前 IMU 的連線狀態
   void _listenSecondConnectionState(BluetoothDevice device) {
     _secondDeviceConnectionSubscription?.cancel();
-    _secondDeviceConnectionSubscription = device.connectionState.listen((state) async {
+    _secondDeviceConnectionSubscription =
+        device.connectionState.listen((state) async {
       if (!mounted) return;
 
       if (state == BluetoothConnectionState.connected) {
@@ -1273,7 +1458,8 @@ class _RecorderPageState extends State<RecorderPage> {
       if (attempt < maxAttempts - 1) {
         final baseDelay = requireLongDelay ? 700 : 400;
         final delay = Duration(milliseconds: baseDelay * (attempt + 1));
-        _logBle('通知啟用失敗，${delay.inMilliseconds}ms 後重試：${characteristic.uuid.str}');
+        _logBle(
+            '通知啟用失敗，${delay.inMilliseconds}ms 後重試：${characteristic.uuid.str}');
         await Future.delayed(delay);
       }
     }
@@ -1290,8 +1476,9 @@ class _RecorderPageState extends State<RecorderPage> {
     List<StreamSubscription<List<int>>>? targetSubscriptions,
     void Function(String message)? onErrorMessage,
   }) async {
-    bool shouldListen =
-        listenToUpdates && (characteristic.properties.notify || characteristic.properties.indicate);
+    bool shouldListen = listenToUpdates &&
+        (characteristic.properties.notify ||
+            characteristic.properties.indicate);
 
     if (shouldListen) {
       try {
@@ -1300,16 +1487,16 @@ class _RecorderPageState extends State<RecorderPage> {
           // 仍強制嘗試開啟通知，避免因缺少 CCCD 而錯失資料
           _logBle('特徵 ${characteristic.uuid.str} 未附帶描述符，改以直接開啟通知');
         } else {
-          final hasCccd =
-              characteristic.descriptors.any((descriptor) => descriptor.uuid == _cccdUuid);
+          final hasCccd = characteristic.descriptors
+              .any((descriptor) => descriptor.uuid == _cccdUuid);
           if (!hasCccd) {
             // ---------- 找不到 CCCD ----------
             // 仍嘗試開啟通知，同時輸出除錯資訊方便排查韌體設定
-      _logBle('裝置未回傳 CCCD，改以直接開啟通知：${characteristic.uuid.str}');
-      }
-    }
+            _logBle('裝置未回傳 CCCD，改以直接開啟通知：${characteristic.uuid.str}');
+          }
+        }
 
-    if (!characteristic.isNotifying) {
+        if (!characteristic.isNotifying) {
           // ---------- 尚未啟用通知，交給重試機制處理 ----------
           shouldListen = await _enableNotificationWithRetry(characteristic);
         } else {
@@ -1352,7 +1539,8 @@ class _RecorderPageState extends State<RecorderPage> {
         _logBle('已讀取初始值：${characteristic.uuid.str}，長度：${value.length}');
       } catch (error, stackTrace) {
         // 初始讀取失敗時暫不處理，等待後續通知補上資料
-        _logBle('初始讀取失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
+        _logBle('初始讀取失敗：${characteristic.uuid.str}，原因：$error',
+            error: error, stackTrace: stackTrace);
       }
     }
     return shouldListen;
@@ -1375,7 +1563,8 @@ class _RecorderPageState extends State<RecorderPage> {
             _logBle('胸前 IMU 綁定線性加速度特徵：${characteristic.uuid.str}');
           } else if (characteristic.uuid == _charGameRotationVectorUuid) {
             _secondGameRotationVectorCharacteristic = characteristic;
-            _logBle('胸前 IMU 綁定 Game Rotation Vector 特徵：${characteristic.uuid.str}');
+            _logBle(
+                '胸前 IMU 綁定 Game Rotation Vector 特徵：${characteristic.uuid.str}');
           }
         }
       } else if (service.uuid == _serviceMotorUuid) {
@@ -1432,7 +1621,8 @@ class _RecorderPageState extends State<RecorderPage> {
           try {
             final value = await rotationCharacteristic.read();
             if (value.isNotEmpty) {
-              _handleGameRotationVectorPacket(rotationCharacteristic.remoteId.str, value);
+              _handleGameRotationVectorPacket(
+                  rotationCharacteristic.remoteId.str, value);
             }
           } catch (error) {
             _logBle('胸前 IMU 補償讀取失敗：$error');
@@ -1521,7 +1711,8 @@ class _RecorderPageState extends State<RecorderPage> {
           lastSeq == seq &&
           lastTimestamp == timestamp;
       if (isDuplicate) {
-        _logBle('[$slotLabel] Game Rotation Vector 收到重複封包：seq=$seq、timestamp=$timestamp，略過寫入與顯示');
+        _logBle(
+            '[$slotLabel] Game Rotation Vector 收到重複封包：seq=$seq、timestamp=$timestamp，略過寫入與顯示');
         offset += chunkSize;
         continue;
       }
@@ -1595,7 +1786,8 @@ class _RecorderPageState extends State<RecorderPage> {
       }
 
       final lastUpdate = _lastGameRotationUpdate;
-      if (lastUpdate != null && DateTime.now().difference(lastUpdate) < interval) {
+      if (lastUpdate != null &&
+          DateTime.now().difference(lastUpdate) < interval) {
         return; // 最近已有資料更新，無需補償讀取
       }
 
@@ -1619,7 +1811,8 @@ class _RecorderPageState extends State<RecorderPage> {
           _logBle('Game Rotation Vector 補償讀取回傳空陣列，等待下次機會');
         }
       } catch (error, stackTrace) {
-        _logBle('Game Rotation Vector 補償讀取失敗：$error', error: error, stackTrace: stackTrace);
+        _logBle('Game Rotation Vector 補償讀取失敗：$error',
+            error: error, stackTrace: stackTrace);
         // 若裝置明確回報禁止讀取，立即停止補償流程避免持續拋錯
         if (error is FlutterBluePlusException) {
           // 某些平台可能不會回傳錯誤字串，因此先進行空值處理後再比對內容
@@ -1693,11 +1886,16 @@ class _RecorderPageState extends State<RecorderPage> {
     final rawJ = _readInt16At(data, offset + 10);
     final rawK = _readInt16At(data, offset + 12);
     final rawReal = _readInt16At(data, offset + 14);
-    if (timestamp == null || rawI == null || rawJ == null || rawK == null || rawReal == null) {
+    if (timestamp == null ||
+        rawI == null ||
+        rawJ == null ||
+        rawK == null ||
+        rawReal == null) {
       return null;
     }
 
-    const double qpScaling = 1.0 / 16384.0; // ---------- Q14 固定小數點轉浮點 ----------
+    const double qpScaling =
+        1.0 / 16384.0; // ---------- Q14 固定小數點轉浮點 ----------
     final double i = rawI * qpScaling;
     final double j = rawJ * qpScaling;
     final double k = rawK * qpScaling;
@@ -1854,7 +2052,8 @@ class _RecorderPageState extends State<RecorderPage> {
     final temperature = _readUint32At(value, 0);
     if (temperature == null || !mounted) return;
     setState(() {
-      _batteryTemperatureText = '${(temperature / 100.0).toStringAsFixed(1)} °C';
+      _batteryTemperatureText =
+          '${(temperature / 100.0).toStringAsFixed(1)} °C';
     });
   }
 
@@ -1930,7 +2129,8 @@ class _RecorderPageState extends State<RecorderPage> {
       _logBle('成功讀取字串特徵：${characteristic.uuid.str}，內容：$text');
     } catch (error, stackTrace) {
       // 裝置若暫時無法讀取字串則忽略錯誤
-      _logBle('讀取字串特徵失敗：${characteristic.uuid.str}，原因：$error', error: error, stackTrace: stackTrace);
+      _logBle('讀取字串特徵失敗：${characteristic.uuid.str}，原因：$error',
+          error: error, stackTrace: stackTrace);
     }
   }
 
@@ -1963,8 +2163,10 @@ class _RecorderPageState extends State<RecorderPage> {
     _setMotorBusyForSlot(slot, true);
 
     final bool supportsWriteWithResponse = characteristic.properties.write;
-    final bool supportsWriteWithoutResponse = characteristic.properties.writeWithoutResponse;
-    final bool useWithoutResponse = !supportsWriteWithResponse && supportsWriteWithoutResponse;
+    final bool supportsWriteWithoutResponse =
+        characteristic.properties.writeWithoutResponse;
+    final bool useWithoutResponse =
+        !supportsWriteWithResponse && supportsWriteWithoutResponse;
 
     try {
       await _bleOperationQueue.enqueue(() async {
@@ -1987,11 +2189,13 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 判斷目前是否已建立右手腕 IMU 連線
   bool get isPrimaryImuConnected =>
-      _connectedDevice != null && _connectionState == BluetoothConnectionState.connected;
+      _connectedDevice != null &&
+      _connectionState == BluetoothConnectionState.connected;
 
   /// 判斷目前是否已建立胸前 IMU 連線
   bool get isChestImuConnected =>
-      _secondDevice != null && _secondConnectionState == BluetoothConnectionState.connected;
+      _secondDevice != null &&
+      _secondConnectionState == BluetoothConnectionState.connected;
 
   /// 只要任一 IMU 已連線即視為可搭配錄影
   bool get isImuConnected => isPrimaryImuConnected || isChestImuConnected;
@@ -2005,7 +2209,9 @@ class _RecorderPageState extends State<RecorderPage> {
       _secondDevice != null && _secondDevice!.remoteId.str == deviceId;
 
   DateTime? _getLastRotationUpdate(String deviceId) =>
-      _isPrimaryDevice(deviceId) ? _lastGameRotationUpdate : (_isChestDevice(deviceId) ? _secondLastGameRotationUpdate : null);
+      _isPrimaryDevice(deviceId)
+          ? _lastGameRotationUpdate
+          : (_isChestDevice(deviceId) ? _secondLastGameRotationUpdate : null);
 
   void _setLastRotationUpdate(String deviceId, DateTime? value) {
     if (_isPrimaryDevice(deviceId)) {
@@ -2015,8 +2221,9 @@ class _RecorderPageState extends State<RecorderPage> {
     }
   }
 
-  int? _getLastRotationSeq(String deviceId) =>
-      _isPrimaryDevice(deviceId) ? _lastGameRotationSeq : (_isChestDevice(deviceId) ? _secondLastGameRotationSeq : null);
+  int? _getLastRotationSeq(String deviceId) => _isPrimaryDevice(deviceId)
+      ? _lastGameRotationSeq
+      : (_isChestDevice(deviceId) ? _secondLastGameRotationSeq : null);
 
   void _setLastRotationSeq(String deviceId, int? value) {
     if (_isPrimaryDevice(deviceId)) {
@@ -2049,7 +2256,8 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 判斷服務列表是否包含 TekSwing IMU 相關 UUID
   bool _containsImuService(List<BluetoothService> services) {
     for (final service in services) {
-      if (service.uuid == _serviceBno086Uuid || service.uuid == _nordicUartServiceUuid) {
+      if (service.uuid == _serviceBno086Uuid ||
+          service.uuid == _nordicUartServiceUuid) {
         return true;
       }
     }
@@ -2060,7 +2268,8 @@ class _RecorderPageState extends State<RecorderPage> {
   bool _isImuAdvertisement(AdvertisementData data) {
     // 以服務 UUID 為主進行比對，避免依賴容易變動的名稱
     final serviceUuids = data.serviceUuids;
-    if (serviceUuids.contains(_serviceBno086Uuid) || serviceUuids.contains(_nordicUartServiceUuid)) {
+    if (serviceUuids.contains(_serviceBno086Uuid) ||
+        serviceUuids.contains(_nordicUartServiceUuid)) {
       return true;
     }
 
@@ -2075,7 +2284,8 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   /// 切換至錄影專用頁面，讓錄影與配對流程分離
-  Future<void> _openRecordingSession({bool triggeredByImuButton = false}) async {
+  Future<void> _openRecordingSession(
+      {bool triggeredByImuButton = false}) async {
     if (_isOpeningSession) return; // 避免重複點擊快速開啟多個頁面
 
     if (widget.cameras.isEmpty) {
@@ -2088,8 +2298,8 @@ class _RecorderPageState extends State<RecorderPage> {
 
     setState(() => _isOpeningSession = true);
 
-  // Always use current stored settings and do not prompt for parameters.
-  final int rounds = _selectedRounds;
+    // Always use current stored settings and do not prompt for parameters.
+    final int rounds = _selectedRounds;
 
     List<RecordingHistoryEntry>? historyFromSession;
     _isSessionPageVisible = true; // 標記錄影頁面已開啟，後續按鈕事件直接轉交
@@ -2133,7 +2343,6 @@ class _RecorderPageState extends State<RecorderPage> {
     setState(() => _isOpeningSession = false);
   }
 
-
   /// 共用的資訊列樣式，左側顯示圖示右側呈現標題與描述
   Widget _buildInfoRow(
     IconData icon,
@@ -2161,13 +2370,15 @@ class _RecorderPageState extends State<RecorderPage> {
               const SizedBox(height: 2),
               Text(
                 value,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.3),
+                style: const TextStyle(
+                    fontSize: 13, color: Color(0xFF465A71), height: 1.3),
               ),
               if (subtitle != null) ...[
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF9AA8B6)),
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF9AA8B6)),
                 ),
               ],
             ],
@@ -2187,7 +2398,8 @@ class _RecorderPageState extends State<RecorderPage> {
       buttonDetails.add('連擊 ${_buttonClickTimes!} 次');
     }
     if (_buttonEventCode != null) {
-      buttonDetails.add('代碼 0x${_buttonEventCode!.toRadixString(16).padLeft(2, '0')}');
+      buttonDetails
+          .add('代碼 0x${_buttonEventCode!.toRadixString(16).padLeft(2, '0')}');
     }
     if (_lastButtonEventTime != null) {
       buttonDetails.add('最近 ${_formatTimeOfDay(_lastButtonEventTime!)}');
@@ -2200,8 +2412,10 @@ class _RecorderPageState extends State<RecorderPage> {
         title: primaryTitle,
         headerIcon: Icons.sports_golf,
         buttonStatus: _buttonStatusText,
-        buttonSubtitle: buttonDetails.isEmpty ? null : buttonDetails.join(' · '),
-        linearSummary: _formatLinearAccelerationSummary(_latestLinearAcceleration),
+        buttonSubtitle:
+            buttonDetails.isEmpty ? null : buttonDetails.join(' · '),
+        linearSummary:
+            _formatLinearAccelerationSummary(_latestLinearAcceleration),
         linearMeta: _formatThreeAxisMeta(_latestLinearAcceleration),
         rotationSummary: _formatRotationSummary(_latestGameRotationVector),
         rotationMeta: _formatRotationMeta(_latestGameRotationVector),
@@ -2209,8 +2423,9 @@ class _RecorderPageState extends State<RecorderPage> {
     );
 
     // ---------- 胸前 IMU ----------
-    final bool hasChestData =
-        _secondLatestLinearAcceleration != null || _secondLatestGameRotationVector != null || isChestImuConnected;
+    final bool hasChestData = _secondLatestLinearAcceleration != null ||
+        _secondLatestGameRotationVector != null ||
+        isChestImuConnected;
     if (hasChestData) {
       final String chestTitle =
           _secondDevice != null ? _resolveDeviceName(_secondDevice!) : '胸前 IMU';
@@ -2221,12 +2436,20 @@ class _RecorderPageState extends State<RecorderPage> {
           headerIcon: Icons.accessibility_new,
           buttonStatus: null,
           buttonSubtitle: null,
-          linearSummary: _formatLinearAccelerationSummary(_secondLatestLinearAcceleration),
+          linearSummary:
+              _formatLinearAccelerationSummary(_secondLatestLinearAcceleration),
           linearMeta: _formatThreeAxisMeta(_secondLatestLinearAcceleration),
-          rotationSummary: _formatRotationSummary(_secondLatestGameRotationVector),
+          rotationSummary:
+              _formatRotationSummary(_secondLatestGameRotationVector),
           rotationMeta: _formatRotationMeta(_secondLatestGameRotationVector),
         ),
       );
+    }
+
+    // ---------- Apple Watch IMU ----------
+    if (_isWatchStreaming && _latestWatchImuData != null) {
+      groups.add(const SizedBox(height: 14));
+      groups.add(_buildWatchSensorDataGroup());
     }
 
     return Column(
@@ -2284,10 +2507,12 @@ class _RecorderPageState extends State<RecorderPage> {
           ),
           const SizedBox(height: 10),
           if (buttonStatus != null) ...[
-            _buildInfoRow(Icons.smart_button, '按鈕事件', buttonStatus, subtitle: buttonSubtitle),
+            _buildInfoRow(Icons.smart_button, '按鈕事件', buttonStatus,
+                subtitle: buttonSubtitle),
             const SizedBox(height: 10),
           ],
-          _buildInfoRow(Icons.trending_up, '線性加速度', linearSummary, subtitle: linearMeta),
+          _buildInfoRow(Icons.trending_up, '線性加速度', linearSummary,
+              subtitle: linearMeta),
           const SizedBox(height: 10),
           _buildInfoRow(
             Icons.threed_rotation,
@@ -2295,6 +2520,78 @@ class _RecorderPageState extends State<RecorderPage> {
             rotationSummary,
             subtitle: rotationMeta,
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Apple Watch IMU 感測資料卡片
+  Widget _buildWatchSensorDataGroup() {
+    final data = _latestWatchImuData;
+    if (data == null) {
+      return const SizedBox.shrink();
+    }
+
+    // 解析加速度 (Watch 發送的 key: ax, ay, az)
+    final double accelX = (data['ax'] as num?)?.toDouble() ?? 0.0;
+    final double accelY = (data['ay'] as num?)?.toDouble() ?? 0.0;
+    final double accelZ = (data['az'] as num?)?.toDouble() ?? 0.0;
+    final double accelMag =
+        (accelX * accelX + accelY * accelY + accelZ * accelZ);
+    final String accelSummary = '${accelMag.toStringAsFixed(2)} g²';
+    final String accelMeta =
+        'X: ${accelX.toStringAsFixed(3)}, Y: ${accelY.toStringAsFixed(3)}, Z: ${accelZ.toStringAsFixed(3)} g';
+
+    // 解析陀螺儀 (Watch 發送的 key: gx, gy, gz)
+    final double gyroX = (data['gx'] as num?)?.toDouble() ?? 0.0;
+    final double gyroY = (data['gy'] as num?)?.toDouble() ?? 0.0;
+    final double gyroZ = (data['gz'] as num?)?.toDouble() ?? 0.0;
+    final String gyroSummary = '旋轉角速度';
+    final String gyroMeta =
+        'X: ${gyroX.toStringAsFixed(3)}, Y: ${gyroY.toStringAsFixed(3)}, Z: ${gyroZ.toStringAsFixed(3)} rad/s';
+
+    // 解析姿態
+    final double pitch = (data['pitch'] as num?)?.toDouble() ?? 0.0;
+    final double roll = (data['roll'] as num?)?.toDouble() ?? 0.0;
+    final double yaw = (data['yaw'] as num?)?.toDouble() ?? 0.0;
+    final String attitudeSummary = '姿態角度';
+    final String attitudeMeta =
+        'Pitch: ${(pitch * 180 / 3.14159).toStringAsFixed(1)}°, Roll: ${(roll * 180 / 3.14159).toStringAsFixed(1)}°, Yaw: ${(yaw * 180 / 3.14159).toStringAsFixed(1)}°';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFFCC80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.watch, color: Color(0xFFFF6B6B)),
+              SizedBox(width: 8),
+              Text(
+                'Apple Watch',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFFF6B6B),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _buildInfoRow(Icons.trending_up, '加速度', accelSummary,
+              subtitle: accelMeta),
+          const SizedBox(height: 10),
+          _buildInfoRow(Icons.rotate_right, '陀螺儀', gyroSummary,
+              subtitle: gyroMeta),
+          const SizedBox(height: 10),
+          _buildInfoRow(Icons.threed_rotation, '姿態', attitudeSummary,
+              subtitle: attitudeMeta),
         ],
       ),
     );
@@ -2318,15 +2615,18 @@ class _RecorderPageState extends State<RecorderPage> {
         const SizedBox(height: 10),
         _buildInfoRow(Icons.bolt, '電壓', _batteryVoltageText ?? '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.flash_on, '充電電流', _batteryChargeCurrentText ?? '--'),
+        _buildInfoRow(
+            Icons.flash_on, '充電電流', _batteryChargeCurrentText ?? '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.thermostat, '電池溫度', _batteryTemperatureText ?? '--'),
+        _buildInfoRow(
+            Icons.thermostat, '電池溫度', _batteryTemperatureText ?? '--'),
         const SizedBox(height: 10),
         _buildInfoRow(Icons.storage, '剩餘電量', _batteryRemainingText ?? '--'),
         const SizedBox(height: 10),
         _buildInfoRow(Icons.timer, '使用時間預估', _batteryTimeToEmptyText ?? '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.hourglass_bottom, '充滿所需時間', _batteryTimeToFullText ?? '--'),
+        _buildInfoRow(
+            Icons.hourglass_bottom, '充滿所需時間', _batteryTimeToFullText ?? '--'),
       ],
     );
   }
@@ -2345,19 +2645,30 @@ class _RecorderPageState extends State<RecorderPage> {
           ),
         ),
         const SizedBox(height: 8),
-        _buildInfoRow(Icons.badge, '自訂名稱', _customDeviceName?.isNotEmpty == true ? _customDeviceName! : '--'),
+        _buildInfoRow(Icons.badge, '自訂名稱',
+            _customDeviceName?.isNotEmpty == true ? _customDeviceName! : '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.device_hub, '裝置型號', _deviceModelName?.isNotEmpty == true ? _deviceModelName! : '--'),
+        _buildInfoRow(Icons.device_hub, '裝置型號',
+            _deviceModelName?.isNotEmpty == true ? _deviceModelName! : '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.confirmation_number, '序號', _deviceSerialNumber?.isNotEmpty == true ? _deviceSerialNumber! : '--'),
+        _buildInfoRow(
+            Icons.confirmation_number,
+            '序號',
+            _deviceSerialNumber?.isNotEmpty == true
+                ? _deviceSerialNumber!
+                : '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.system_update, '韌體版本', _firmwareRevision?.isNotEmpty == true ? _firmwareRevision! : '--'),
+        _buildInfoRow(Icons.system_update, '韌體版本',
+            _firmwareRevision?.isNotEmpty == true ? _firmwareRevision! : '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.memory, '硬體版本', _hardwareRevision?.isNotEmpty == true ? _hardwareRevision! : '--'),
+        _buildInfoRow(Icons.memory, '硬體版本',
+            _hardwareRevision?.isNotEmpty == true ? _hardwareRevision! : '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.code, '軟體版本', _softwareRevision?.isNotEmpty == true ? _softwareRevision! : '--'),
+        _buildInfoRow(Icons.code, '軟體版本',
+            _softwareRevision?.isNotEmpty == true ? _softwareRevision! : '--'),
         const SizedBox(height: 10),
-        _buildInfoRow(Icons.factory, '製造商', _manufacturerName?.isNotEmpty == true ? _manufacturerName! : '--'),
+        _buildInfoRow(Icons.factory, '製造商',
+            _manufacturerName?.isNotEmpty == true ? _manufacturerName! : '--'),
       ],
     );
   }
@@ -2409,7 +2720,8 @@ class _RecorderPageState extends State<RecorderPage> {
           spacing: 12,
           runSpacing: 12,
           children: [
-            if (primaryAvailable) _buildMotorTestButton(_ImuSlotType.rightWrist),
+            if (primaryAvailable)
+              _buildMotorTestButton(_ImuSlotType.rightWrist),
             if (chestAvailable) _buildMotorTestButton(_ImuSlotType.chest),
           ],
         ),
@@ -2517,23 +2829,27 @@ class _RecorderPageState extends State<RecorderPage> {
     final String primarySignal =
         _lastRssi != null ? '訊號 ${_lastRssi} dBm' : '訊號偵測中';
     final String batteryOverview = _batteryLevelText ?? '電量讀取中';
-    final String firmwareOverview =
-        (_firmwareRevision?.isNotEmpty == true) ? _firmwareRevision! : '韌體資訊更新中';
+    final String firmwareOverview = (_firmwareRevision?.isNotEmpty == true)
+        ? _firmwareRevision!
+        : '韌體資訊更新中';
 
     final bool chestConnected = isChestImuConnected;
-    final String chestTitle = chestConnected
-        ? _resolveDeviceName(_secondDevice!)
-        : '胸前 IMU';
+    final String chestTitle =
+        chestConnected ? _resolveDeviceName(_secondDevice!) : '胸前 IMU';
     final String chestDetail = chestConnected ? '資料串流中' : '等待綁定';
-    final bool anyConnected = primaryConnected || chestConnected;
+    final bool watchStreaming = _isWatchStreaming;
+    final bool anyConnected =
+        primaryConnected || chestConnected || watchStreaming;
     final bool allSlotsConnected = primaryConnected && chestConnected;
     final bool showScanSection = !allSlotsConnected;
 
     // 根據目前配對狀態決定提示文字與顏色，協助使用者理解下一步
     final String readinessText;
     final Color readinessColor;
-    if (allSlotsConnected) {
-      readinessText = '兩顆 IMU 已完成配對，可立即開始錄影流程。';
+    if (allSlotsConnected || watchStreaming) {
+      readinessText = watchStreaming
+          ? 'Apple Watch IMU 串流中，可開始錄影。'
+          : '兩顆 IMU 已完成配對，可立即開始錄影流程。';
       readinessColor = const Color(0xFF1E8E5A);
     } else if (anyConnected) {
       readinessText = '已連線至少一顆 IMU，仍可透過重新搜尋綁定另一顆裝置。';
@@ -2550,7 +2866,8 @@ class _RecorderPageState extends State<RecorderPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 14, offset: Offset(0, 6)),
+          BoxShadow(
+              color: Colors.black12, blurRadius: 14, offset: Offset(0, 6)),
         ],
       ),
       child: Column(
@@ -2587,9 +2904,11 @@ class _RecorderPageState extends State<RecorderPage> {
                       slot: _ImuSlotType.rightWrist,
                       title: primaryTitle,
                       statusText: _connectionMessage,
-                      detailText: '電量 $batteryOverview · $firmwareOverview · $primarySignal',
+                      detailText:
+                          '電量 $batteryOverview · $firmwareOverview · $primarySignal',
                       connected: primaryConnected,
-                      onConnectPressed: (_isConnecting || (!primaryConnected && !hasCandidate))
+                      onConnectPressed: (_isConnecting ||
+                              (!primaryConnected && !hasCandidate))
                           ? null
                           : () => connectToImu(slot: _ImuSlotType.rightWrist),
                     ),
@@ -2600,9 +2919,14 @@ class _RecorderPageState extends State<RecorderPage> {
                       statusText: _chestConnectionMessage,
                       detailText: chestDetail,
                       connected: chestConnected,
-                      onConnectPressed:
-                          _isConnecting ? null : () => connectToImu(slot: _ImuSlotType.chest),
+                      onConnectPressed: _isConnecting
+                          ? null
+                          : () => connectToImu(slot: _ImuSlotType.chest),
                     ),
+                    if (Platform.isIOS) ...[
+                      const SizedBox(height: 14),
+                      _buildWatchImuSlotRow(),
+                    ],
                   ],
                 ),
               ),
@@ -2623,7 +2947,8 @@ class _RecorderPageState extends State<RecorderPage> {
                 ),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Color(0xFF123B70)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2640,7 +2965,8 @@ class _RecorderPageState extends State<RecorderPage> {
             const SizedBox(height: 20),
             _buildScanCandidatesSection(),
           ],
-          if (anyConnected) ...[
+          // 藍牙 IMU 連線時顯示完整資訊
+          if (primaryConnected || chestConnected) ...[
             const SizedBox(height: 20),
             const Divider(),
             const SizedBox(height: 16),
@@ -2652,8 +2978,37 @@ class _RecorderPageState extends State<RecorderPage> {
             const SizedBox(height: 20),
             _buildMotorControlSection(),
           ],
+          // Watch IMU 串流時單獨顯示 Watch 感測資料
+          if (_isWatchStreaming &&
+              _latestWatchImuData != null &&
+              !primaryConnected &&
+              !chestConnected) ...[
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 16),
+            _buildWatchSensorDataSection(),
+          ],
         ],
       ),
+    );
+  }
+
+  /// 單獨顯示 Watch IMU 感測資料區塊
+  Widget _buildWatchSensorDataSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '感測資料',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF123B70),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _buildWatchSensorDataGroup(),
+      ],
     );
   }
 
@@ -2665,9 +3020,11 @@ class _RecorderPageState extends State<RecorderPage> {
     required bool connected,
     required VoidCallback? onConnectPressed,
   }) {
-    final Color statusColor = connected ? const Color(0xFF1E8E5A) : const Color(0xFF7D8B9A);
-    final IconData icon =
-        slot == _ImuSlotType.rightWrist ? Icons.sports_golf : Icons.accessibility_new;
+    final Color statusColor =
+        connected ? const Color(0xFF1E8E5A) : const Color(0xFF7D8B9A);
+    final IconData icon = slot == _ImuSlotType.rightWrist
+        ? Icons.sports_golf
+        : Icons.accessibility_new;
     final List<Color> gradientColors = slot == _ImuSlotType.rightWrist
         ? const [Color(0xFF123B70), Color(0xFF1E8E5A)]
         : const [Color(0xFF6A1B9A), Color(0xFF26A69A)];
@@ -2709,7 +3066,10 @@ class _RecorderPageState extends State<RecorderPage> {
               const SizedBox(height: 6),
               Text(
                 statusText,
-                style: TextStyle(fontSize: 13, color: statusColor, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    fontSize: 13,
+                    color: statusColor,
+                    fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 4),
               Text(
@@ -2726,25 +3086,32 @@ class _RecorderPageState extends State<RecorderPage> {
             FilledButton(
               onPressed: onConnectPressed,
               style: FilledButton.styleFrom(
-                backgroundColor: connected ? const Color(0xFF1E8E5A) : const Color(0xFF123B70),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                backgroundColor: connected
+                    ? const Color(0xFF1E8E5A)
+                    : const Color(0xFF123B70),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18)),
               ),
               child: _isConnecting && onConnectPressed == null
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white),
                     )
                   : Text(
                       buttonText,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.bold),
                     ),
             ),
             if (motorAvailable) ...[
               const SizedBox(height: 8),
               TextButton.icon(
-                onPressed: motorBusy ? null : () => _triggerMotorPulseForSlot(slot),
+                onPressed:
+                    motorBusy ? null : () => _triggerMotorPulseForSlot(slot),
                 icon: const Icon(Icons.vibration, size: 18),
                 label: Text(motorBusy ? '震動中…' : '震動識別'),
                 style: TextButton.styleFrom(
@@ -2755,6 +3122,227 @@ class _RecorderPageState extends State<RecorderPage> {
           ],
         ),
       ],
+    );
+  }
+
+  /// 建構 Apple Watch IMU 連線列，僅在 iOS 上顯示
+  Widget _buildWatchImuSlotRow() {
+    final bool connected = _isWatchConnected;
+    final bool streaming = _isWatchStreaming;
+    final Color statusColor = streaming
+        ? const Color(0xFF1E8E5A)
+        : (connected ? const Color(0xFF123B70) : const Color(0xFF7D8B9A));
+    final String detailText = streaming
+        ? '加速度/陀螺儀/姿態 串流中'
+        : (connected ? '已連線，等待啟動' : '請開啟 Watch App');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFFF6B6B), Color(0xFFFF8E53)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: const Icon(Icons.watch, color: Colors.white, size: 34),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Apple Watch',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1E1E1E),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _watchConnectionMessage,
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: statusColor,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    detailText,
+                    style:
+                        const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FilledButton(
+                  onPressed: streaming
+                      ? _stopWatchImu
+                      : () async {
+                          await _checkWatchConnection();
+                          if (_isWatchConnected) {
+                            await _startWatchImu();
+                          }
+                        },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: streaming
+                        ? const Color(0xFFE53935)
+                        : const Color(0xFFFF6B6B),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18)),
+                  ),
+                  child: Text(
+                    streaming ? '停止串流' : (connected ? '開始串流' : '連線 Watch'),
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        // 串流時顯示即時 IMU 數據
+        if (streaming && _latestWatchImuData != null) ...[
+          const SizedBox(height: 12),
+          _buildWatchImuLiveData(),
+        ],
+      ],
+    );
+  }
+
+  /// 顯示 Watch IMU 即時數據
+  Widget _buildWatchImuLiveData() {
+    final data = _latestWatchImuData;
+    if (data == null) return const SizedBox.shrink();
+
+    // 解析加速度
+    final double ax = (data['ax'] as num?)?.toDouble() ?? 0.0;
+    final double ay = (data['ay'] as num?)?.toDouble() ?? 0.0;
+    final double az = (data['az'] as num?)?.toDouble() ?? 0.0;
+
+    // 解析陀螺儀
+    final double gx = (data['gx'] as num?)?.toDouble() ?? 0.0;
+    final double gy = (data['gy'] as num?)?.toDouble() ?? 0.0;
+    final double gz = (data['gz'] as num?)?.toDouble() ?? 0.0;
+
+    // 解析姿態
+    final double pitch = (data['pitch'] as num?)?.toDouble() ?? 0.0;
+    final double roll = (data['roll'] as num?)?.toDouble() ?? 0.0;
+    final double yaw = (data['yaw'] as num?)?.toDouble() ?? 0.0;
+
+    // 弧度轉角度
+    final double pitchDeg = pitch * 180 / 3.14159;
+    final double rollDeg = roll * 180 / 3.14159;
+    final double yawDeg = yaw * 180 / 3.14159;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFE082)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 加速度
+          Row(
+            children: [
+              const Icon(Icons.speed, size: 16, color: Color(0xFFFF6B6B)),
+              const SizedBox(width: 6),
+              const Text(
+                '加速度 ',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF5D4037),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'X: ${ax.toStringAsFixed(3)}  Y: ${ay.toStringAsFixed(3)}  Z: ${az.toStringAsFixed(3)} g',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Color(0xFF795548),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // 陀螺儀
+          Row(
+            children: [
+              const Icon(Icons.rotate_right,
+                  size: 16, color: Color(0xFFFF8E53)),
+              const SizedBox(width: 6),
+              const Text(
+                '陀螺儀 ',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF5D4037),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'X: ${gx.toStringAsFixed(3)}  Y: ${gy.toStringAsFixed(3)}  Z: ${gz.toStringAsFixed(3)} rad/s',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Color(0xFF795548),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // 姿態
+          Row(
+            children: [
+              const Icon(Icons.threed_rotation,
+                  size: 16, color: Color(0xFFFFB74D)),
+              const SizedBox(width: 6),
+              const Text(
+                '姿態角 ',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF5D4037),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'P: ${pitchDeg.toStringAsFixed(1)}°  R: ${rollDeg.toStringAsFixed(1)}°  Y: ${yawDeg.toStringAsFixed(1)}°',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Color(0xFF795548),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -2805,15 +3393,13 @@ class _RecorderPageState extends State<RecorderPage> {
 
   /// 建構單一掃描結果卡片，提供裝置資訊與選擇按鈕
   Widget _buildScanCandidateTile(_ImuScanCandidate candidate) {
-    final bool isSelected =
-        _foundDevice?.remoteId == candidate.device.remoteId;
+    final bool isSelected = _foundDevice?.remoteId == candidate.device.remoteId;
     final bool matchesService = candidate.matchesImuService;
     final Color borderColor = isSelected
         ? const Color(0xFF123B70)
         : (matchesService ? const Color(0xFF1E8E5A) : const Color(0xFFE1E8F0));
-    final Color iconColor = matchesService
-        ? const Color(0xFF1E8E5A)
-        : const Color(0xFF7D8B9A);
+    final Color iconColor =
+        matchesService ? const Color(0xFF1E8E5A) : const Color(0xFF7D8B9A);
     final bool isPrimaryAssigned =
         _connectedDevice?.remoteId == candidate.device.remoteId;
     final bool isChestAssigned =
@@ -2850,12 +3436,14 @@ class _RecorderPageState extends State<RecorderPage> {
                 const SizedBox(height: 4),
                 Text(
                   '${matchesService ? '含 IMU 服務' : '未標示 IMU 服務'} · RSSI ${candidate.rssi} dBm',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF7D8B9A)),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '最後出現：${_formatTimeOfDay(candidate.lastSeen)}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF9AA8B6)),
+                  style:
+                      const TextStyle(fontSize: 11, color: Color(0xFF9AA8B6)),
                 ),
               ],
             ),
@@ -2915,17 +3503,20 @@ class _RecorderPageState extends State<RecorderPage> {
           SizedBox(height: 12),
           Text(
             '開始錄影後會跳轉至新的錄影畫面，錄影畫面專注於鏡頭預覽、倒數與波形，避免與 IMU 配對資訊混在一起。',
-            style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
+            style:
+                TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
           ),
           SizedBox(height: 8),
           Text(
             '若尚未連線 IMU，新的錄影畫面仍可啟動純錄影模式，稍後可再返回此頁重新配對。',
-            style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
+            style:
+                TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
           ),
           SizedBox(height: 8),
           Text(
             '錄影完成後的歷史影片已移至首頁的「錄影歷史」按鈕中，方便集中管理。',
-            style: TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
+            style:
+                TextStyle(fontSize: 13, color: Color(0xFF465A71), height: 1.4),
           ),
         ],
       ),
@@ -2963,12 +3554,14 @@ class _RecorderPageState extends State<RecorderPage> {
                     _isOpeningSession ? null : () => _openRecordingSession(),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18)),
                   backgroundColor: const Color(0xFF123B70),
                 ),
                 child: Text(
                   isImuConnected ? '進入錄影畫面' : '進入錄影畫面（純錄影）',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
