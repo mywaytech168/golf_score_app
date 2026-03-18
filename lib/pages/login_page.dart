@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'dart:io'; // 判斷平台以動態決定權限清單
 
 import 'package:camera/camera.dart';
@@ -5,9 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // 捕捉平台層級錯誤以便顯示友善訊息
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:google_sign_in/google_sign_in.dart'; // 引入 Google 登入套件以支援第三方登入
+import 'package:http/http.dart' as http; // 引入 HTTP 套件以支援 API 呼叫
 import 'package:permission_handler/permission_handler.dart'; // 引入權限處理套件以於登入前檢查授權
 import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
 
+import '../services/video_server_client.dart';
 import 'home_page.dart';
 
 /// 登入頁面提供使用者輸入帳號密碼後進入首頁
@@ -34,6 +39,8 @@ class _LoginPageState extends State<LoginPage> {
   late final Map<Permission, String> _blePermissions; // 依照平台動態產生的權限顯示名稱
   Map<Permission, PermissionStatus> _permissionStatuses = {}; // 儲存各項權限授權狀態
   bool _isGoogleSigningIn = false; // 控制 Google 登入的載入狀態以避免重複觸發
+  bool _isGuestSigningIn = false; // 控制訪客登入的載入狀態以避免重複觸發
+  bool _isLoading = false; // 控制登入按鈕的載入狀態以避免重複觸發
 
   @override
   void initState() {
@@ -152,9 +159,10 @@ class _LoginPageState extends State<LoginPage> {
   /// 當使用者按下登入按鈕時觸發，先驗證資料再導向首頁
   Future<void> _handleLogin() async {
     if (!(_formKey.currentState?.validate() ?? false)) {
-      return; // 若表單驗證失敗則直接結束
+      return;
     }
 
+<<<<<<< HEAD
     // iOS 不需要預先檢查權限，flutter_blue_plus 會在掃描時自動處理
     if (Platform.isIOS) {
       await _persistRememberedCredentials();
@@ -166,12 +174,69 @@ class _LoginPageState extends State<LoginPage> {
     final permissionsGranted = await _ensureBlePermissions();
     if (!mounted || !permissionsGranted) {
       return; // 權限未完整授權時暫停導向首頁
+=======
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('https://tekswing.api.atk.tw/api/auth/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': _emailController.text,
+              'password': _passwordController.text,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        
+        // 保存 JWT token 和用戶信息
+        final prefs = await SharedPreferences.getInstance();
+        
+        if (responseData is Map && responseData.containsKey('token')) {
+          await prefs.setString('jwt_token', responseData['token']);
+        }
+        
+        if (responseData is Map && responseData.containsKey('refreshToken')) {
+          await prefs.setString('refresh_token', responseData['refreshToken']);
+        }
+        
+        if (responseData is Map && responseData['user'] is Map) {
+          final user = responseData['user'];
+          if (user['id'] != null) {
+            await prefs.setString('user_id', user['id'].toString());
+          }
+          if (user['email'] != null) {
+            await prefs.setString('user_email', user['email']);
+          }
+          if (user['displayName'] != null) {
+            await prefs.setString('user_name', user['displayName']);
+          }
+        }
+        
+        await _persistRememberedCredentials();
+        if (mounted) {
+          _showLoginResultSnackBar('登入成功！');
+          // 導向首頁
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      } else if (response.statusCode == 401) {
+        _showLoginResultSnackBar('登入失敗：電子郵件或密碼錯誤', isError: true);
+      } else {
+        _showLoginResultSnackBar('登入失敗：${response.body}', isError: true);
+      }
+    } on TimeoutException {
+      _showLoginResultSnackBar('伺服器回應逾時，請稍後再試', isError: true);
+    } catch (e) {
+      _showLoginResultSnackBar('無法連接伺服器：$e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+>>>>>>> 00fbbe244e2f3778851c4634334111c8e914a987
     }
-
-    await _persistRememberedCredentials(); // 根據記住我設定保存或清除登入資訊
-
-    // 權限與驗證皆通過後才導向首頁並帶入鏡頭資訊
-    await _navigateToHome(_emailController.text); // 透過共用方法導向首頁並帶入信箱
   }
 
   /// 載入記住我狀態與帳號密碼，協助使用者快速登入
@@ -210,7 +275,7 @@ class _LoginPageState extends State<LoginPage> {
     await prefs.remove(_rememberedPasswordKey);
   }
 
-  /// 以 Google 登入 TekSwing，整合第三方帳戶並統一權限流程
+  /// 以 Google 登入，整合第三方帳戶
   Future<void> _handleGoogleLogin() async {
     if (_isGoogleSigningIn) {
       return; // 若已有請求進行中則略過避免重複觸發
@@ -221,29 +286,122 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      final googleSignIn = GoogleSignIn(scopes: const ['email']); // 只需取得信箱資訊即可識別使用者
-      final account = await googleSignIn.signIn();
+      // 先登出以強制顯示帳戶選擇器
+      final googleSignIn = GoogleSignIn(
+        clientId: '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com',
+        scopes: const ['email', 'profile'],
+      );
+      
+      await googleSignIn.signOut();
 
-      if (account == null) {
+      // 觸發 Google 登入流程
+      final googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) {
         _showLoginResultSnackBar('已取消 Google 登入流程');
         return;
       }
 
-      final permissionsGranted = await _ensureBlePermissions(); // 社群登入仍需裝置權限才能使用核心功能
-      if (!mounted || !permissionsGranted) {
+      // 獲取使用者詳細資訊
+      final googleAuth = await googleUser.authentication;
+
+      // 驗證 IdToken
+      if (googleAuth.idToken == null) {
+        _showLoginResultSnackBar('無法取得 Google IdToken', isError: true);
         return;
       }
 
-      await _navigateToHome(account.email);
-      _showLoginResultSnackBar('Google 登入成功，歡迎回來！');
+      // 發送到後端進行驗證
+      debugPrint('📤 發送到後端進行驗證...');
+      final response = await VideoServerClient().loginWithGoogle(
+        idToken: googleAuth.idToken!,
+        email: googleUser.email,
+        displayName: googleUser.displayName,
+        avatarUrl: googleUser.photoUrl,
+      );
+
+      debugPrint('📥 後端回應: $response');
+
+      if (response['success'] == true || response.containsKey('token')) {
+        // 保存 JWT token 和用戶信息
+        final prefs = await SharedPreferences.getInstance();
+
+        if (response['token'] != null) {
+          await prefs.setString('jwt_token', response['token']);
+        }
+
+        if (response['refreshToken'] != null) {
+          await prefs.setString('refresh_token', response['refreshToken']);
+        }
+
+        final user = response['user'];
+        if (user is Map) {
+          if (user['id'] != null) {
+            await prefs.setString('user_id', user['id'].toString());
+          }
+          if (user['email'] != null) {
+            await prefs.setString('user_email', user['email']);
+          }
+          if (user['displayName'] != null) {
+            await prefs.setString('user_name', user['displayName']);
+          }
+        }
+
+        if (mounted) {
+          _showLoginResultSnackBar('Google 登入成功，歡迎回來！');
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      } else {
+        final errorMsg = response['message'] ?? 'Google 登入失敗';
+        _showLoginResultSnackBar(errorMsg, isError: true);
+      }
     } on PlatformException catch (error) {
-      _showLoginResultSnackBar('Google 登入失敗：${error.message ?? '請稍後再試'}', isError: true);
-    } catch (_) {
-      _showLoginResultSnackBar('Google 登入失敗，請稍後再試。', isError: true);
+      debugPrint('❌ Google 登入失敗: ${error.code} - ${error.message}');
+      _showLoginResultSnackBar(
+        'Google 登入失敗：${error.message ?? '請稍後再試'}',
+        isError: true,
+      );
+    } catch (e) {
+      debugPrint('❌ Google 登入異常: $e');
+      _showLoginResultSnackBar('Google 登入失敗：$e', isError: true);
     } finally {
       if (mounted) {
         setState(() {
           _isGoogleSigningIn = false;
+        });
+      }
+    }
+  }
+
+  /// 以訪客身分進入 TekSwing，跳過帳號驗證但仍需檢查裝置權限
+  Future<void> _handleGuestLogin() async {
+    if (_isGuestSigningIn) {
+      return; // 若已有請求進行中則略過避免重複觸發
+    }
+
+    setState(() {
+      _isGuestSigningIn = true;
+    });
+
+    try {
+      final permissionsGranted = await _ensureBlePermissions(); // 訪客模式仍需藍牙權限以使用 IMU 連線功能
+      if (!mounted || !permissionsGranted) {
+        return;
+      }
+
+      // 將訪客標識保存到本地儲存，供後續頁面判斷是否為訪客模式
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_guest', true);
+      await prefs.remove('member_id'); // 訪客模式不需要保存會員 ID
+
+      await _navigateToHome('guest@local');
+      _showLoginResultSnackBar('以訪客身分進入，歡迎使用 TekSwing！');
+    } catch (_) {
+      _showLoginResultSnackBar('訪客登入失敗，請稍後再試。', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGuestSigningIn = false;
         });
       }
     }
@@ -264,23 +422,22 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// 共用的導向首頁流程，集中管理導航邏輯
+    /// ?????????? email
   Future<void> _navigateToHome(String email) async {
     if (!mounted) {
-      return; // 確認組件仍存在以避免 Navigator 錯誤
+      return;
     }
 
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => HomePage(
-          userEmail: email,
           cameras: widget.cameras,
         ),
       ),
     );
   }
 
-  /// 使用者切換記住我選項時立即同步本地儲存，避免殘留敏感資訊
-  Future<void> _onRememberMeChanged(bool value) async {
+Future<void> _onRememberMeChanged(bool value) async {
     setState(() {
       _rememberMe = value;
     });
@@ -610,10 +767,11 @@ class _LoginPageState extends State<LoginPage> {
                             ],
                           ),
                           const SizedBox(height: 12),
+                          /// 更新登入按鈕以顯示載入指示器
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: () => _handleLogin(), // 透過匿名函式呼叫非同步登入流程
+                              onPressed: _isLoading ? null : () => _handleLogin(), // 禁用按鈕於載入中
                               style: ElevatedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 backgroundColor: const Color(0xFF1E8E5A),
@@ -621,7 +779,16 @@ class _LoginPageState extends State<LoginPage> {
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                               ),
-                              child: const Text('登入 TekSwing'),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('登入 TekSwing'),
                             ),
                           ),
                           const SizedBox(height: 18),
@@ -684,7 +851,7 @@ class _LoginPageState extends State<LoginPage> {
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton(
-                              onPressed: () {},
+                              onPressed: _isGuestSigningIn ? null : _handleGuestLogin,
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 side: const BorderSide(color: Color(0xFF1E8E5A)),
@@ -692,7 +859,25 @@ class _LoginPageState extends State<LoginPage> {
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                               ),
-                              child: const Text('以訪客身分瀏覽'),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_isGuestSigningIn)
+                                    const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Color(0xFF1E8E5A),
+                                      ),
+                                    )
+                                  else
+                                    const Icon(Icons.visibility, size: 24),
+                                  const SizedBox(width: 8),
+                                  Text(_isGuestSigningIn ? '訪客登入中...' : '以訪客身分瀏覽'),
+                                ],
+                              ),
                             ),
                           ),
                         ],

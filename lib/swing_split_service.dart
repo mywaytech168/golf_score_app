@@ -1,9 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'models/hits_summary.dart';
 
 /// Result for each detected swing clip.
 class SwingClipResult {
@@ -24,12 +25,42 @@ class SwingClipResult {
     required this.videoPath,
     required this.csvPath,
   });
+
+  /// 转换为 HitsSummary 对象
+  HitsSummary toHitsSummary({String? detectFrom}) {
+    return HitsSummary(
+      hit: tag,
+      tHit: hitSecond,
+      startT: startSecond,
+      endT: endSecond,
+      peakSmooth: peakValue,
+      detectFrom: detectFrom,
+    );
+  }
+}
+
+/// 摆球分割结果，包含所有切片和摆球摘要
+class SwingSplitResultWithSummary {
+  /// 所有生成的切片
+  final List<SwingClipResult> clips;
+
+  /// 摆球摘要列表
+  final List<HitsSummary> hitsSummary;
+
+  /// 摘要 CSV 文件路径
+  final String summaryPath;
+
+  const SwingSplitResultWithSummary({
+    required this.clips,
+    required this.hitsSummary,
+    required this.summaryPath,
+  });
 }
 
 /// In-app swing splitter: parses IMU CSV, detects peaks, and slices video/CSV via ffmpeg.
 class SwingSplitService {
   static const double _defaultWindowBefore = 3.0;
-  static const double _defaultWindowAfter = 1.0;
+  static const double _defaultWindowAfter = 3.0;  // 改为 3.0 与 Python 版本保持一致
   static const double _defaultSmoothWinSec = 0.05;
   static const double _defaultThreshG = 20.0;
   static const double _defaultMinInterval = 1.0;
@@ -49,6 +80,7 @@ class SwingSplitService {
     double? prominenceG,
     String outDirName = _defaultOutDirName,
     bool forceSar1 = true,
+    String? detectFrom,
   }) async {
     final File csvFile = File(imuCsvPath);
     final File videoFile = File(videoPath);
@@ -111,9 +143,62 @@ class SwingSplitService {
     }
 
     // also write summary CSV
-    await _writeSummary(results, p.join(outDir.path, 'hits_summary.csv'));
+    await _writeSummary(results, p.join(outDir.path, 'hits_summary.csv'), detectFrom);
 
     return results;
+  }
+
+  /// 带摆球摘要的分割，返回包含摘要信息的结果
+  static Future<SwingSplitResultWithSummary> splitWithSummary({
+    required String videoPath,
+    required String imuCsvPath,
+    double windowBeforeSec = _defaultWindowBefore,
+    double windowAfterSec = _defaultWindowAfter,
+    double smoothWinSec = _defaultSmoothWinSec,
+    double threshG = _defaultThreshG,
+    double minIntervalSec = _defaultMinInterval,
+    double? prominenceG,
+    String outDirName = _defaultOutDirName,
+    bool forceSar1 = true,
+    String? detectFrom,
+  }) async {
+    final clips = await split(
+      videoPath: videoPath,
+      imuCsvPath: imuCsvPath,
+      windowBeforeSec: windowBeforeSec,
+      windowAfterSec: windowAfterSec,
+      smoothWinSec: smoothWinSec,
+      threshG: threshG,
+      minIntervalSec: minIntervalSec,
+      prominenceG: prominenceG,
+      outDirName: outDirName,
+      forceSar1: forceSar1,
+      detectFrom: detectFrom,
+    );
+
+    // 读取 hits_summary.csv 并转换为 HitsSummary 对象
+    final summaryPath = p.join(p.dirname(clips.isEmpty ? videoPath : clips.first.videoPath), outDirName, 'hits_summary.csv');
+    final hitsSummary = <HitsSummary>[];
+    
+    if (await File(summaryPath).exists()) {
+      final lines = await File(summaryPath).readAsLines();
+      // 跳过header
+      for (int i = 1; i < lines.length; i++) {
+        if (lines[i].trim().isNotEmpty) {
+          try {
+            hitsSummary.add(HitsSummary.fromCsvLine(lines[i]));
+          } catch (e) {
+            debugPrint('Failed to parse hit summary line: ${lines[i]}, error: $e');
+          }
+        }
+      }
+    }
+
+    return SwingSplitResultWithSummary(
+      clips: clips,
+      hitsSummary: hitsSummary,
+      summaryPath: summaryPath,
+    );
   }
 
   static Future<_ImuSeries> _loadImu(File csvFile) async {
@@ -278,12 +363,24 @@ class SwingSplitService {
     await File(dst).writeAsString(buf.toString());
   }
 
-  static Future<void> _writeSummary(List<SwingClipResult> results, String dst) async {
+  static Future<void> _writeSummary(
+    List<SwingClipResult> results,
+    String dst, [
+    String? detectFrom,
+  ]) async {
     final StringBuffer buf = StringBuffer();
-    buf.writeln('hit,t_hit,start_t,end_t,peak_smooth,video_path,csv_path');
-    for (final r in results) {
-      buf.writeln(
-          '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)},${r.videoPath},${r.csvPath}');
+    if (detectFrom != null && detectFrom.isNotEmpty) {
+      buf.writeln('hit,t_hit,start_t,end_t,peak_smooth,detect_from');
+      for (final r in results) {
+        buf.writeln(
+            '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)},$detectFrom');
+      }
+    } else {
+      buf.writeln('hit,t_hit,start_t,end_t,peak_smooth');
+      for (final r in results) {
+        buf.writeln(
+            '${r.tag},${r.hitSecond.toStringAsFixed(6)},${r.startSecond.toStringAsFixed(6)},${r.endSecond.toStringAsFixed(6)},${r.peakValue.toStringAsFixed(6)}');
+      }
     }
     await File(dst).writeAsString(buf.toString());
   }

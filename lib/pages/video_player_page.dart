@@ -2,8 +2,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'package:http/http.dart' as http;
 
 import '../services/highlight_service.dart';
+import '../services/auth_token_storage.dart';
+import '../services/video_server_client.dart';
 
 const double _portraitAspect = 16/ 9; // force a portrait container regardless of source video
 
@@ -28,10 +33,16 @@ Widget _buildVideoBox(VideoPlayerController controller) {
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
-  const VideoPlayerPage({super.key, required this.videoPath, this.avatarPath});
+  const VideoPlayerPage({
+    super.key,
+    required this.videoPath,
+    this.avatarPath,
+    this.cloudVideoId,
+  });
 
   final String videoPath;
   final String? avatarPath;
+  final String? cloudVideoId; // 云端视频 ID（如果有的话）
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -41,7 +52,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   VideoPlayerController? _controller;
   Future<void>? _initializeFuture;
   bool _isAnalyzing = false;
+  bool _isTrajectoryRunning = false;
   String? _errorMessage;
+  Map<String, dynamic>? _trajectoryResult;
 
   @override
   void initState() {
@@ -50,6 +63,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   void _initController() {
+    // 如果有云端视频 ID，优先使用云端版本
+    if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
+      debugPrint('[播放器] 检测到云端视频 ID，优先使用云端版本');
+      _initCloudController();
+    } else {
+      debugPrint('[播放器] 使用本地视频文件');
+      _initLocalController();
+    }
+  }
+
+  /// 初始化本地视频播放器
+  void _initLocalController() {
     final file = File(widget.videoPath);
     if (!file.existsSync()) {
       setState(() => _errorMessage = 'Video file not found.');
@@ -66,6 +91,45 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     });
   }
 
+  /// 初始化云端视频播放器
+  void _initCloudController() async {
+    try {
+      // 获取访问令牌
+      final token = await AuthTokenStorage.instance.getAccessToken();
+      if (token == null) {
+        setState(() => _errorMessage = 'Please login to play cloud videos');
+        return;
+      }
+
+      // 构建云端视频流 URL，使用查询参数传递 token
+      const String baseUrl = 'https://tekswing.api.atk.tw';
+      final streamUrl = '$baseUrl/api/videos/${widget.cloudVideoId}/stream?token=$token';
+      
+      debugPrint('[播放器] 云端视频流 URL: $streamUrl（token已添加）');
+
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(streamUrl),
+      );
+      
+      _controller = controller;
+      _initializeFuture = controller.initialize().then((_) {
+        debugPrint('[播放器] 云端视频初始化成功');
+        controller.setLooping(true);
+        controller.play();
+        setState(() {});
+      }).catchError((e) {
+        debugPrint('[播放器] 云端视频初始化失败: $e');
+        // 如果云端加载失败，回退到本地版本
+        setState(() => _errorMessage = 'Failed to load cloud video: $e. Falling back to local version.');
+        _initLocalController();
+      });
+    } catch (e) {
+      debugPrint('[播放器] 云端视频初始化异常: $e');
+      setState(() => _errorMessage = 'Error loading cloud video: $e');
+      _initLocalController();
+    }
+  }
+
   @override
   void dispose() {
     _controller?.dispose();
@@ -75,17 +139,104 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Future<void> _generateHighlight() async {
     if (_isAnalyzing) return;
     setState(() => _isAnalyzing = true);
+    
     try {
-      final out = await HighlightService.generateHighlight(widget.videoPath,
-          beforeMs: 3000, afterMs: 3000, titleData: {'Name': 'Player', 'Course': 'Unknown'});
+      // 判斷是否需要下載雲端影片
+      String videoPathForProcessing = widget.videoPath;
+      
+      _showSnack('[播放器] cloudVideoId != null: ${widget.cloudVideoId != null}');
+      _showSnack('[播放器] cloudVideoId.isNotEmpty: ${widget.cloudVideoId?.isNotEmpty ?? "N/A"}');
+      _showSnack('[播放器] cloudVideoId value: "${widget.cloudVideoId}"');
+      if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
+        // 有雲端影片，先嘗試下載
+        _showSnack('正在下載雲端影片...');
+        
+        try {
+          final serverClient = VideoServerClient();
+          final streamUrl = await serverClient.getVideoStreamUrl(widget.cloudVideoId!);
+          
+          // 下載影片到臨時位置
+          final tempDir = await Directory.systemTemp.createTemp('swing_highlight_');
+          final downloadedPath = p.join(tempDir.path, '${widget.cloudVideoId}_downloaded.mp4');
+          
+          debugPrint('[播放器] 開始從雲端下載影片: $streamUrl -> $downloadedPath');
+          
+          final client = http.Client();
+          final response = await client.get(Uri.parse(streamUrl));
+          
+          if (response.statusCode == 200) {
+            final file = File(downloadedPath);
+            await file.writeAsBytes(response.bodyBytes);
+            videoPathForProcessing = downloadedPath;
+            debugPrint('[播放器] ✅ 雲端影片已下載: $downloadedPath');
+          } else {
+            debugPrint('[播放器] ⚠️ 下載失敗 (HTTP ${response.statusCode}), 使用本地影片');
+          }
+          client.close();
+        } catch (e) {
+          debugPrint('[播放器] ⚠️ 下載雲端影片失敗: $e, 使用本地影片');
+        }
+      }
+      
+      // 檢查影片檔案是否存在
+      final file = File(videoPathForProcessing);
+      if (!await file.exists()) {
+        if (!mounted) return;
+        _showSnack('找不到影片檔案');
+        return;
+      }
+      
+      final out = await HighlightService.generateHighlight(
+        videoPathForProcessing,
+        beforeMs: 3000,
+        afterMs: 3000,
+        titleData: {'Name': 'Player', 'Course': 'Unknown'},
+      );
+      
       if (!mounted) return;
       if (out != null && out.isNotEmpty) {
-        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => HighlightPreviewPage(videoPath: out)));
+        debugPrint('[播放器] ✅ Highlight 已生成: $out');
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => HighlightPreviewPage(
+              videoPath: out,
+              cloudVideoId: widget.cloudVideoId,
+            ),
+          ),
+        );
       } else {
         _showSnack('Highlight failed.');
       }
+    } catch (e) {
+      debugPrint('[播放器] ❌ 生成 Highlight 時發生錯誤: $e');
+      if (!mounted) return;
+      _showSnack('生成 Highlight 失敗: $e');
     } finally {
       if (mounted) setState(() => _isAnalyzing = false);
+    }
+  }
+
+  Future<void> _runTrajectoryAnalysis() async {
+    if (_isTrajectoryRunning) return;
+    setState(() => _isTrajectoryRunning = true);
+    const channel = MethodChannel('com.example.golf_score_app/trajectory');
+    try {
+      final res = await channel.invokeMethod<Map>('analyzeTrajectory', {
+        'videoPath': widget.videoPath,
+      });
+      if (!mounted) return;
+      if (res != null) {
+        setState(() => _trajectoryResult = res.cast<String, dynamic>());
+        _showSnack('軌跡分析完成');
+      } else {
+        _showSnack('沒有收到軌跡結果');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('軌跡分析失敗: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isTrajectoryRunning = false);
     }
   }
 
@@ -101,11 +252,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
       appBar: AppBar(
         title: const Text('Video Review'),
         actions: [
-          IconButton(
-            tooltip: 'Generate Highlight',
-            onPressed: _isAnalyzing ? null : _generateHighlight,
-            icon: const Icon(Icons.movie_creation_outlined),
-          ),
           if (widget.avatarPath != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -128,16 +274,33 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         return Column(
                           children: [
                             _buildVideoBox(controller),
+                            const SizedBox(height: 16),
+                            // Generate Highlight 按鈕
+                            SizedBox(
+                              width: 200,
+                              child: ElevatedButton.icon(
+                                onPressed: _isAnalyzing ? null : _generateHighlight,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.deepOrange,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                                icon: _isAnalyzing
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        ),
+                                      )
+                                    : const Icon(Icons.movie_creation_outlined),
+                                label: const Text('生成 Highlight'),
+                              ),
+                            ),
                             const SizedBox(height: 12),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                ElevatedButton.icon(
-                                  onPressed: _isAnalyzing ? null : _generateHighlight,
-                                  icon: const Icon(Icons.movie),
-                                  label: const Text('Generate Highlight'),
-                                ),
-                                const SizedBox(width: 12),
                                 ElevatedButton.icon(
                                   onPressed: () {
                                     if (controller.value.isPlaying) {
@@ -150,8 +313,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                   icon: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
                                   label: const Text('Play/Pause'),
                                 ),
+                                const SizedBox(width: 12),
+                                ElevatedButton.icon(
+                                  onPressed: _isTrajectoryRunning ? null : _runTrajectoryAnalysis,
+                                  icon: _isTrajectoryRunning
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.track_changes),
+                                  label: const Text('軌跡分析'),
+                                ),
                               ],
                             ),
+                            if (_trajectoryResult != null) ...[
+                              const SizedBox(height: 12),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: Text(
+                                  '軌跡結果：$_trajectoryResult',
+                                  style: const TextStyle(fontSize: 12, color: Colors.black87),
+                                ),
+                              ),
+                            ],
                           ],
                         );
                       }
@@ -186,8 +371,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
 /// Simple preview page for a generated highlight clip
 class HighlightPreviewPage extends StatefulWidget {
-  const HighlightPreviewPage({super.key, required this.videoPath});
+  const HighlightPreviewPage({
+    super.key,
+    required this.videoPath,
+    this.cloudVideoId,
+  });
   final String videoPath;
+  final String? cloudVideoId;
 
   @override
   State<HighlightPreviewPage> createState() => _HighlightPreviewPageState();
@@ -216,7 +406,37 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   Widget build(BuildContext context) {
     final controller = _ctrl;
     return Scaffold(
-      appBar: AppBar(title: const Text('Preview Highlight')),
+      appBar: AppBar(
+        title: const Text('Preview Highlight'),
+        // 如果有 cloudVideoId，在AppBar中显示
+        actions: [
+          if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2196F3).withAlpha(30),
+                    border: Border.all(
+                      color: const Color(0xFF2196F3),
+                      width: 1.5,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '☁️ ${widget.cloudVideoId}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF2196F3),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
       body: Center(
         child: controller == null || !controller.value.isInitialized
             ? const CircularProgressIndicator()

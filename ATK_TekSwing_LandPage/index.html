@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TekSwing 高爾夫 AI 揮桿分析裝置</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-background"></div>
+        <div class="container">
+            <div class="logo">
+                <div class="logo-icon">
+                    <img src="images/logo-device.png" alt="TekSwing Logo" class="logo-image">
+                </div>
+                <h1 class="logo-text">TekSwing</h1>
+            </div>
+            
+            <div class="hero-content">
+                <h2 class="hero-title">TekSwing 高爾夫 AI 揮桿分析裝置</h2>
+                <p class="hero-subtitle">穿戴式 IMU ＋ 多模態 AI 分析，讓每一次揮桿更接近甜蜜點</p>
+                <p class="hero-description">即時同步 IMU、影像、聲音，分解上桿、下桿、擊球、收桿四階段，提供專業級數據回饋。</p>
+                
+                <div class="hero-buttons">
+                    <a href="download.apk" class="btn btn-primary" download>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        下載 APK
+                    </a>
+                    <a href="https://www.youtube.com/" class="btn btn-outline" target="_blank" rel="noopener noreferrer">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        觀看 Demo
+                    </a>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="hero-images">
+                    <img src="images/app-mockup.png" alt="App Screen 1" class="hero-img">
+                    <img src="images/side-device.png" alt="App Screen 2" class="hero-img">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- IMU Hardware Section -->
+    <section class="section section-imu">
+        <div class="container">
+            <div class="section-content">
+                <div class="section-text">
+                    <span class="section-tag tag-hardware">HARDWARE</span>
+                    <h3 class="section-title">穿戴式 IMU 感測裝置</h3>
+                    <p class="section-description">9 軸 IMU、藍牙 5.0、三原色指示燈與充電倉設計，專為高爾夫揮桿動作量測打造。</p>
+                    
+                    <ul class="feature-list">
+                        <li>• 三軸加速度計 + 三軸陀螺儀 + 三軸磁力儀</li>
+                        <li>• 藍牙 5 代低延遲傳輸，長按啟動 / 關閉設備，雙擊快速關閉藍牙</li>
+                        <li>• 三原色指示燈：開機、配對成功、低電量一目了然</li>
+                        <li>• 原型機與 3D 列印外殼完成後，可直接評估量產成本與機構優化</li>
+                    </ul>
+                </div>
+                
+                <div class="section-visual">
+                    <div class="imu-illustration">
+                        <img src="images/hardware-chip.png" alt="IMU Device" class="imu-device-img">
+                        <p class="illustration-caption">9 軸 IMU 核心模組示意</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- AI Multimodal Section -->
+    <section class="section section-multimodal">
+        <div class="container">
+            <span class="section-tag tag-ai">AI ENGINE</span>
+            <h3 class="section-title">多模態揮桿辨識模型</h3>
+            <p class="section-description">結合 IMU、影像與音訊三種訊號，精準分解揮桿四階段，並偵測擊球甜蜜點。</p>
+            
+            <div class="multi-col-grid">
+                <div class="multi-col-card">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </div>
+                    <h4 class="card-title">甜蜜點擊球聲音辨識</h4>
+                    <ul class="card-list">
+                        <li>• 聲音特徵分類庫</li>
+                        <li>• 擊球聲準確率 > 95%</li>
+                        <li>• 可排除環境雜訊、只抓球桿擊球瞬間</li>
+                    </ul>
+                </div>
+                
+                <div class="multi-col-card">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/>
+                        </svg>
+                    </div>
+                    <h4 class="card-title">揮桿四階段動作分類</h4>
+                    <ul class="card-list">
+                        <li>• 上桿、下桿、擊球、收桿動作辨識</li>
+                        <li>• 模型平均辨識率 > 95%</li>
+                        <li>• 由教練與研發團隊人工標註資料訓練</li>
+                    </ul>
+                </div>
+                
+                <div class="multi-col-card">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+                        </svg>
+                    </div>
+                    <h4 class="card-title">跨模態時間同步</h4>
+                    <ul class="card-list">
+                        <li>• IMU × 影像 × 音訊三者時間對齊</li>
+                        <li>• 同步延遲 < 500ms</li>
+                        <li>• 建立 500+ 筆有效標註揮桿事件</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="multimodal-visuals">
+                <img src="images/feature-icon.png" alt="AI Analysis" class="multimodal-img">
+                <img src="images/hardware-chip.png" alt="Data Visualization" class="multimodal-img">
+            </div>
+        </div>
+    </section>
+
+    <!-- Mobile App Section -->
+    <section class="section section-app">
+        <div class="container">
+            <div class="section-content">
+                <div class="section-text">
+                    <span class="section-tag tag-app">MOBILE APP</span>
+                    <h3 class="section-title">TekSwing App：即時分析、回放與建議</h3>
+                    <p class="section-description">透過 Android App 即時顯示揮桿數據、自動剪輯影片並給出 AI 建議，支援訂閱制分級功能。</p>
+                    
+                    <ul class="feature-list">
+                        <li>• 即時顯示揮桿軌跡、角速度與節奏</li>
+                        <li>• 自動剪輯擊球片段，適合分享與回放練習</li>
+                        <li>• AI 文字建議：節奏、揮桿路徑、穩定度改善方向</li>
+                        <li>• 訂閱機制設計：一般 / 高階會員，解鎖進階分析與雲端紀錄</li>
+                    </ul>
+                </div>
+                
+                <div class="section-visual">
+                    <div class="app-mockup">
+                        <img src="images/app-mockup.png" alt="TekSwing App Interface" class="app-screenshot">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Business Section -->
+    <section class="section section-business">
+        <div class="container">
+            <span class="section-tag tag-market">MARKET READY</span>
+            <h3 class="section-title">商業驗證與專利佈局</h3>
+            <p class="section-description">與高爾夫教學單位合作驗證實際場域需求，並規劃專利佈局，為商品化做好準備。</p>
+            
+            <div class="biz-cols">
+                <div class="biz-card">
+                    <div class="biz-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
+                        </svg>
+                    </div>
+                    <h4 class="biz-title">場域合作與需求驗證</h4>
+                    <ul class="card-list">
+                        <li>• 與高爾夫學院及練習場合作實測</li>
+                        <li>• 收集教練與學員對數據指標的實際需求</li>
+                    </ul>
+                </div>
+                
+                <div class="biz-card">
+                    <div class="biz-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/>
+                        </svg>
+                    </div>
+                    <h4 class="biz-title">專利初稿與技術佈局</h4>
+                    <ul class="card-list">
+                        <li>• 針對多模態揮桿分析與裝置提出發明 / 新型專利</li>
+                        <li>• 保護演算法流程與硬體整合架構</li>
+                    </ul>
+                </div>
+                
+                <div class="biz-card">
+                    <div class="biz-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+                        </svg>
+                    </div>
+                    <h4 class="biz-title">活動與問卷</h4>
+                    <ul class="card-list">
+                        <li>• 韌體下載連結與功能介紹</li>
+                        <li>• 問卷或試用活動</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="section section-cta">
+        <div class="container">
+            <div class="cta-content">
+                <h3 class="cta-title">準備好用 TekSwing 重新檢視你的揮桿了嗎？</h3>
+                <p class="cta-description">下載 App、配對 IMU，一次揮桿就能看到完整數據與 AI 建議。無論你是教練、學員或自練球友，都能從數據中找到下一步的進步方向。</p>
+                
+                <div class="cta-buttons">
+                    <a href="#" class="btn btn-outline btn-large">預約場域體驗</a>
+                </div>
+                
+                <div class="contact-info">
+                    <p>聯絡我們: service@atk.tw</p>
+                    <p>桃園市中壢區中大路300號CAIC 228室</p>
+                    <p>www.atk.tw</p>
+                    <img src="images/company_logo.png" alt="ATK Company Logo" class="contact-logo">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <img src="images/logo-device.png" alt="ATK Corporation" class="footer-logo">
+            <p>© 2025 TekSwing. All rights reserved. | copyright@ ATK .corp 2025</p>
+        </div>
+    </footer>
+</body>
+</html>

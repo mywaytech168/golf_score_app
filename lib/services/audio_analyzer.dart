@@ -25,11 +25,11 @@ class AudioFeatures {
 
   Map<String, double> toMap() {
     final m = <String, double>{
-      'rms_dbfs': rmsDbfs,
+      'rms_dbfs': rmsDbfs, // Corrected typo from rmsDbFs
       'spectral_centroid': spectralCentroid,
       'sharpness_hfxloud': sharpnessHfxLoud,
       'highband_amp': highbandAmp,
-      'peak_dbfs': peakDbfs,
+      'peak_dbfs': peakDbfs, // Corrected typo from peakDbFs
     };
     m.addAll(bandPeaks);
     return m;
@@ -209,4 +209,64 @@ Map<String, dynamic> loadReferenceStats(String csvPath) {
     mu[k]=mean; sd[k]=sqrt(max(variance, _eps));
   }
   return {'mu':mu, 'sd':sd};
+}
+
+// Rule-based scoring for audio features
+Map<String, dynamic> ruleBasedScore(AudioFeatures features, Map<String, Map<String, double>> intervals, double perFeatureScore) {
+  double totalScore = 0.0;
+  Map<String, bool> passes = {};
+
+  intervals.forEach((feature, cfg) {
+    double value;
+    if (feature == 'highband_amp') {
+      value = ((features.bandPeaks['band_2k_3k_peak_amp'] ?? 0.0) + (features.bandPeaks['band_3k_4k_peak_amp'] ?? 0.0)) / 2.0;
+    } else {
+      value = features.toMap()[feature] ?? double.nan;
+    }
+
+    double low = cfg['low'] ?? double.negativeInfinity;
+    double high = cfg['high'] ?? double.infinity;
+    double weight = cfg['weight'] ?? 1.0;
+
+    bool passed = !value.isNaN && value >= low && value <= high;
+    if (passed) {
+      totalScore += perFeatureScore * weight;
+    }
+    passes[feature] = passed;
+  });
+
+  return {'totalScore': totalScore, 'passes': passes};
+}
+
+// Classify audio features as good or bad
+String classifyAudioFeatures(AudioFeatures features, Map<String, Map<String, double>> intervals, double perFeatureScore, double thresholdScore) {
+  final result = ruleBasedScore(features, intervals, perFeatureScore);
+  return result['totalScore'] >= thresholdScore ? 'good' : 'bad';
+}
+
+// Process CSV rows and classify
+List<Map<String, dynamic>> processCsvRows(List<Map<String, String>> rows, Map<String, Map<String, double>> intervals, double perFeatureScore, double thresholdScore) {
+  List<Map<String, dynamic>> results = [];
+
+  for (final row in rows) {
+    final features = AudioFeatures(
+      rmsDbfs: double.tryParse(row['rms_dbfs'] ?? '0') ?? 0.0,
+      spectralCentroid: double.tryParse(row['spectral_centroid'] ?? '0') ?? 0.0,
+      sharpnessHfxLoud: double.tryParse(row['sharpness_hfxloud'] ?? '0') ?? 0.0,
+      highbandAmp: 0.0, // Calculated later
+      peakDbfs: double.tryParse(row['peak_dbfs'] ?? '0') ?? 0.0,
+      bandPeaks: {
+        'band_2k_3k_peak_amp': double.tryParse(row['band_2k_3k_peak_amp'] ?? '0') ?? 0.0,
+        'band_3k_4k_peak_amp': double.tryParse(row['band_3k_4k_peak_amp'] ?? '0') ?? 0.0,
+      },
+    );
+
+    final classification = classifyAudioFeatures(features, intervals, perFeatureScore, thresholdScore);
+    results.add({
+      'features': features.toMap(),
+      'classification': classification,
+    });
+  }
+
+  return results;
 }
