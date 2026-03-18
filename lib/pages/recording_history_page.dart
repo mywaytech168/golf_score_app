@@ -24,6 +24,28 @@ import 'recording_session_page.dart';
 /// 列表操作選項
 enum _HistoryMenuAction { rename, editDuration, delete, split, upload, unbindCloud, rerunAnalysis }
 
+/// 排序選項
+enum _SortBy {
+  /// 按時間排序（最新優先）
+  date,
+  /// 按最佳速度（峰值）排序（最高優先）
+  peakValue,
+  /// 按聲音清脆度排序（最高優先）
+  audioCrispness;
+
+  /// 中文標籤
+  String get label {
+    switch (this) {
+      case _SortBy.date:
+        return '時間';
+      case _SortBy.peakValue:
+        return '最佳速度';
+      case _SortBy.audioCrispness:
+        return '聲音清脆度';
+    }
+  }
+}
+
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
   final List<RecordingHistoryEntry> entries; // 外部帶入的歷史資料清單
@@ -47,6 +69,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   bool _isLoadingCloudList = false; // 標記是否正在載入雲端列表
   Timer? _syncTimer; // 定時器，每 5 秒更新一次列表
   bool? _selectedGoodShot; // 好球/壞球篩選 - null: 全部, true: 好球, false: 壞球
+  _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
 
   @override
   void initState() {
@@ -2317,13 +2340,75 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     );
   }
 
+  /// 根據排序選項對條目進行排序
+  List<RecordingHistoryEntry> _sortEntries(List<RecordingHistoryEntry> entries) {
+    final sorted = List<RecordingHistoryEntry>.from(entries);
+    
+    switch (_sortBy) {
+      case _SortBy.date:
+        // 按時間排序（最新優先）
+        sorted.sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+        break;
+      
+      case _SortBy.peakValue:
+        // 按最佳速度排序（最高優先）
+        sorted.sort((a, b) {
+          // 取得每個條目的最高峰值
+          final maxPeakA = _getMaxPeakValue(a);
+          final maxPeakB = _getMaxPeakValue(b);
+          
+          // 如果都沒有數據，則按時間排序
+          if (maxPeakA == null && maxPeakB == null) {
+            return b.recordedAt.compareTo(a.recordedAt);
+          }
+          
+          // 如果只有一個有數據，有數據的排前面
+          if (maxPeakA == null) return 1;
+          if (maxPeakB == null) return -1;
+          
+          // 都有數據的話，較高的排前面
+          return maxPeakB.compareTo(maxPeakA);
+        });
+        break;
+      
+      case _SortBy.audioCrispness:
+        // 按聲音清脆度排序（最高優先）
+        sorted.sort((a, b) {
+          final crispnessA = a.audioCrispness ?? -1;
+          final crispnessB = b.audioCrispness ?? -1;
+          
+          // 如果都沒有數據，則按時間排序
+          if (crispnessA == -1 && crispnessB == -1) {
+            return b.recordedAt.compareTo(a.recordedAt);
+          }
+          
+          // 較高的排前面
+          return crispnessB.compareTo(crispnessA);
+        });
+        break;
+    }
+    
+    return sorted;
+  }
+
+  /// 從 peakValues Map 中獲取最高峰值
+  double? _getMaxPeakValue(RecordingHistoryEntry entry) {
+    if (entry.peakValues == null || entry.peakValues!.isEmpty) {
+      return null;
+    }
+    return entry.peakValues!.values.reduce((a, b) => a > b ? a : b);
+  }
+
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
     // 根据选中的过滤条件过滤条目
-    final filteredEntries = _selectedGoodShot == null
+    var filteredEntries = _selectedGoodShot == null
         ? _entries
         : _entries.where((entry) => entry.goodShot == _selectedGoodShot).toList();
+    
+    // 應用排序
+    filteredEntries = _sortEntries(filteredEntries);
 
     return WillPopScope(
       onWillPop: () async {
@@ -2393,6 +2478,42 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                         }
                       },
                     ),
+                  ],
+                ),
+              ),
+            ),
+            // 排序選擇器
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    const Text(
+                      '排序: ',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      selected: _sortBy == _SortBy.date,
+                      label: const Text('時間'),
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() => _sortBy = _SortBy.date);
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      selected: _sortBy == _SortBy.peakValue,
+                      label: const Text('最佳速度 🎯'),
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() => _sortBy = _SortBy.peakValue);
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8)
                   ],
                 ),
               ),
@@ -2526,6 +2647,14 @@ class _HistoryTileState extends State<_HistoryTile> {
         'data': null,
       });
     }
+  }
+
+  /// 從 peakValues Map 中獲取最高峰值
+  double? _getMaxPeakValue(RecordingHistoryEntry entry) {
+    if (entry.peakValues == null || entry.peakValues!.isEmpty) {
+      return null;
+    }
+    return entry.peakValues!.values.reduce((a, b) => a > b ? a : b);
   }
 
   @override
@@ -2834,7 +2963,31 @@ class _HistoryTileState extends State<_HistoryTile> {
               ],
             ),
             const SizedBox(height: 6),
-            // 第三行：影片類型和檔名
+            // 第三行：最佳速度和聲音清脆度
+            if (widget.entry.peakValues != null && widget.entry.peakValues!.isNotEmpty || widget.entry.audioCrispness != null)
+              Row(
+                children: [
+                  if (widget.entry.peakValues != null && widget.entry.peakValues!.isNotEmpty) ...[
+                    const Icon(Icons.trending_up, size: 14, color: Color(0xFF1976D2)),
+                    const SizedBox(width: 4),
+                    Text(
+                      '速度: ${_getMaxPeakValue(widget.entry)?.toStringAsFixed(1) ?? 'N/A'}',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF1976D2), fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(width: 16),
+                  ],
+                  if (widget.entry.audioCrispness != null) ...[
+                    const Icon(Icons.music_note, size: 14, color: Color(0xFFFF6F00)),
+                    const SizedBox(width: 4),
+                    Text(
+                      '清脆度: ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFFFF6F00), fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ],
+              ),
+            const SizedBox(height: 6),
+            // 第四行：影片類型和檔名
             Text(
               '${widget.entry.videoType.icon} ${widget.entry.videoType.label}',
               style: const TextStyle(fontSize: 12, color: Color(0xFF9AA6B2)),
