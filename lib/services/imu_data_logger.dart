@@ -23,6 +23,9 @@ class ImuDataLogger {
   /// 最多允許同時寫入的裝置數量（依需求限制為 2 台）。
   static const int _maxDevices = 2;
 
+  /// Watch IMU 的固定裝置 ID
+  static const String watchDeviceId = 'apple_watch_imu';
+
   /// 登記成功連線的藍牙裝置，後續啟動錄影時會建立對應 CSV。
   void registerDevice(
     BluetoothDevice device, {
@@ -36,6 +39,27 @@ class ImuDataLogger {
       slotAlias: slotAlias,
       connectedAt: DateTime.now(),
     );
+  }
+
+  /// 登記 Apple Watch IMU 裝置
+  void registerWatchDevice({
+    String displayName = 'Apple Watch',
+    String slotAlias = 'watch',
+  }) {
+    _devices[watchDeviceId] = _ImuDeviceInfo(
+      deviceId: watchDeviceId,
+      displayName: displayName,
+      slotAlias: slotAlias,
+      connectedAt: DateTime.now(),
+    );
+    debugPrint('✅ Watch IMU 已註冊為 IMU 資料來源');
+  }
+
+  /// 取消註冊 Watch IMU 裝置
+  void unregisterWatchDevice() {
+    _devices.remove(watchDeviceId);
+    _activeLogs.remove(watchDeviceId)?.dispose(deleteFile: true);
+    debugPrint('⚠️ Watch IMU 已從 IMU 資料來源移除');
   }
 
   /// 連線斷開時移除裝置資訊，避免後續繼續寫入失效檔案。
@@ -88,14 +112,26 @@ class ImuDataLogger {
       // ---------- CSV 檔頭區 ----------
       // 若為首次建立檔案，補上格式宣告行，模擬參考專案中的 saveToCSVFile_V3 行為。
       if (!existed) {
-        sink.writeln('CODI_RAW_V1');
+        // Watch IMU 使用不同的格式
+        if (info.deviceId == watchDeviceId) {
+          sink.writeln('WATCH_IMU_V1');
+        } else {
+          sink.writeln('CODI_RAW_V1');
+        }
       } else {
         // 續寫時額外加上空行分隔不同錄影輪次的資料。
         sink.writeln();
       }
-      // 先寫入裝置名稱方便離線處理鎖定目標裝置，接著依指定順序輸出四元數與線性加速度欄位。
+      // 先寫入裝置名稱方便離線處理鎖定目標裝置
       sink.writeln('Device:${info.displayName}');
-      sink.writeln('ElapsedSec,QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
+      
+      // Watch IMU 使用不同的欄位格式
+      if (info.deviceId == watchDeviceId) {
+        sink.writeln('ElapsedSec,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Pitch,Roll,Yaw');
+      } else {
+        // 藍牙 IMU 使用四元數與線性加速度欄位
+        sink.writeln('ElapsedSec,QuatI,QuatJ,QuatK,QuatW,AccelX,AccelY,AccelZ');
+      }
 
       _activeLogs[info.deviceId] = _ActiveImuLog(
         alias: alias,
@@ -129,6 +165,57 @@ class ImuDataLogger {
     // ---------- Game Rotation Vector 入隊 ----------
     log.rotationQueue.add(Map<String, dynamic>.from(sample));
     _drainSynchronizedSamples(log);
+  }
+
+  /// 記錄 Watch IMU 數據（加速度、陀螺儀、姿態）
+  /// 
+  /// Watch 數據格式：
+  /// - ax, ay, az: 加速度 (g)
+  /// - gx, gy, gz: 陀螺儀 (rad/s)
+  /// - pitch, roll, yaw: 姿態角度 (radians)
+  void logWatchImuData(Map<String, dynamic> data) {
+    final log = _activeLogs[watchDeviceId];
+    if (log == null) {
+      // Watch 未註冊或錄影未開始
+      return;
+    }
+
+    // 直接寫入 Watch IMU 數據，不需要等待配對
+    _writeWatchSample(log, data);
+  }
+
+  /// 寫入 Watch IMU 單列資料
+  void _writeWatchSample(_ActiveImuLog log, Map<String, dynamic> data) {
+    if (log.isClosed) {
+      debugPrint('⚠️ Attempted to write to a closed Watch IMU log sink.');
+      return;
+    }
+
+    // 計算經過時間
+    final nowUs = DateTime.now().microsecondsSinceEpoch;
+    _roundStartClockUs ??= nowUs;
+    final wallClockElapsedUs = nowUs - _roundStartClockUs!;
+    final wallClockElapsedSeconds =
+        wallClockElapsedUs >= 0 ? wallClockElapsedUs / 1e6 : 0.0;
+    final safeElapsed = wallClockElapsedSeconds.isFinite
+        ? wallClockElapsedSeconds
+        : 0.0;
+
+    // Watch 數據格式：
+    // ElapsedSec, AccelX, AccelY, AccelZ, GyroX, GyroY, GyroZ, Pitch, Roll, Yaw
+    final values = <String>[
+      safeElapsed.toStringAsFixed(6),
+      _formatNumeric(data['ax']),
+      _formatNumeric(data['ay']),
+      _formatNumeric(data['az']),
+      _formatNumeric(data['gx']),
+      _formatNumeric(data['gy']),
+      _formatNumeric(data['gz']),
+      _formatNumeric(data['pitch']),
+      _formatNumeric(data['roll']),
+      _formatNumeric(data['yaw']),
+    ];
+    log.sink.writeln(values.join(','));
   }
 
   /// 結束目前錄影輪次，關閉檔案並回傳裝置對應的 CSV 路徑。

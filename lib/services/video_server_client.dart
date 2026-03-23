@@ -29,6 +29,11 @@ class VideoServerClient {
 
   VideoServerClient._internal();
 
+  /// 是否正在刷新 token（防止重複刷新）
+  bool _isRefreshing = false;
+  /// 等待刷新完成的 Completer 列表
+  final List<Completer<bool>> _refreshWaiters = [];
+
   /// 獲取認證請求頭
   Future<Map<String, String>> _getAuthHeaders() async {
     final token = await AuthTokenStorage.instance.getAccessToken();
@@ -44,6 +49,77 @@ class VideoServerClient {
     return {
       if (token != null) 'Authorization': 'Bearer $token',
     };
+  }
+
+  /// 嘗試自動刷新 Token
+  /// 返回 true 表示刷新成功，false 表示失敗（需要重新登入）
+  Future<bool> _tryRefreshToken() async {
+    // 如果已經在刷新中，等待刷新完成
+    if (_isRefreshing) {
+      final completer = Completer<bool>();
+      _refreshWaiters.add(completer);
+      return completer.future;
+    }
+
+    _isRefreshing = true;
+    debugPrint('🔄 嘗試自動刷新 Token...');
+
+    try {
+      final refreshTokenValue = await AuthTokenStorage.instance.getRefreshToken();
+      
+      if (refreshTokenValue == null || refreshTokenValue.isEmpty) {
+        debugPrint('❌ 沒有可用的 Refresh Token');
+        return false;
+      }
+
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/auth/refresh-token'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'refreshToken': refreshTokenValue,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        
+        // 檢查是否有新的 token
+        if (result['data'] != null && result['data']['accessToken'] != null) {
+          await AuthTokenStorage.instance.saveTokens(
+            accessToken: result['data']['accessToken'],
+            refreshToken: result['data']['refreshToken'],
+            userId: result['data']['userId'] ?? await AuthTokenStorage.instance.getUserId() ?? '',
+            userEmail: result['data']['email'],
+          );
+          debugPrint('✅ Token 刷新成功');
+          
+          // 通知所有等待者刷新成功
+          for (final waiter in _refreshWaiters) {
+            waiter.complete(true);
+          }
+          _refreshWaiters.clear();
+          return true;
+        }
+      }
+      
+      debugPrint('❌ Token 刷新失敗: ${response.statusCode}');
+      // 通知所有等待者刷新失敗
+      for (final waiter in _refreshWaiters) {
+        waiter.complete(false);
+      }
+      _refreshWaiters.clear();
+      return false;
+    } catch (e) {
+      debugPrint('❌ Token 刷新異常: $e');
+      // 通知所有等待者刷新失敗
+      for (final waiter in _refreshWaiters) {
+        waiter.complete(false);
+      }
+      _refreshWaiters.clear();
+      return false;
+    } finally {
+      _isRefreshing = false;
+    }
   }
 
   // ============================================================
@@ -1042,9 +1118,12 @@ class VideoServerClient {
   /// 獲取統計數據
   /// period: all（全部）、today（今天）、yesterday（昨天）、tomorrow（明天）、date（指定日期）
   /// date: 當 period 為 date 時，指定日期（格式：2026-02-06）
+  /// 
+  /// 如果遇到 401 錯誤，會自動嘗試刷新 Token 並重試一次
   Future<StatisticsResponse?> getStatistics({
     required String period,
     String? date,
+    bool isRetry = false,
   }) async {
     try {
       final headers = await _getAuthHeaders();
@@ -1074,7 +1153,19 @@ class VideoServerClient {
         debugPrint('📊 數據: $statistics');
         return statistics;
       } else if (response.statusCode == 401) {
-        debugPrint('❌ 統計數據獲取失敗: ${response.statusCode} - 未授權');
+        debugPrint('⚠️ 統計數據獲取失敗: ${response.statusCode} - 未授權');
+        
+        // 如果不是重試，嘗試刷新 Token 並重試
+        if (!isRetry) {
+          debugPrint('🔄 嘗試刷新 Token 並重試...');
+          final refreshSuccess = await _tryRefreshToken();
+          if (refreshSuccess) {
+            debugPrint('✅ Token 刷新成功，重新獲取統計數據...');
+            return getStatistics(period: period, date: date, isRetry: true);
+          }
+        }
+        
+        debugPrint('❌ Token 刷新失敗或重試後仍失敗，拋出未授權異常');
         throw UnauthorizedException('統計數據獲取失敗: ${response.statusCode}');
       } else {
         debugPrint('❌ 統計數據獲取失敗: ${response.statusCode}');

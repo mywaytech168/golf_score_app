@@ -1,11 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-<<<<<<< HEAD
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'dart:io';
-=======
 import 'dart:developer' as developer;
->>>>>>> 00fbbe244e2f3778851c4634334111c8e914a987
 
 import 'services/auth_token_storage.dart';
 import 'pages/login_page.dart';

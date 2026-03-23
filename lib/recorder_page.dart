@@ -334,9 +334,19 @@ class _RecorderPageState extends State<RecorderPage> {
       return;
     }
 
+    // 註冊 Watch IMU 到資料記錄器，讓它在錄影時生成 CSV
+    ImuDataLogger.instance.registerWatchDevice(
+      displayName: 'Apple Watch',
+      slotAlias: 'watch',
+    );
+
     _watchImuSubscription?.cancel();
     _watchImuSubscription = _watchImu.imuStream.listen((data) {
       if (!mounted) return;
+      
+      // 記錄 Watch IMU 數據到 CSV（如果正在錄影）
+      ImuDataLogger.instance.logWatchImuData(data);
+      
       setState(() {
         _latestWatchImuData = data;
         _isWatchStreaming = true;
@@ -366,6 +376,10 @@ class _RecorderPageState extends State<RecorderPage> {
     _watchImuSubscription?.cancel();
     _watchImuSubscription = null;
     await _watchImu.stopIMU();
+    
+    // 取消註冊 Watch IMU，停止記錄數據
+    ImuDataLogger.instance.unregisterWatchDevice();
+    
     if (mounted) {
       setState(() {
         _isWatchStreaming = false;
