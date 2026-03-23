@@ -1,6 +1,7 @@
 import AVFoundation
 import Flutter
 import UIKit
+import WatchConnectivity
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -13,11 +14,102 @@ import UIKit
     if let controller = window?.rootViewController as? FlutterViewController {
       setupKeepScreenChannel(messenger: controller.binaryMessenger)
       setupAudioExtractorChannel(messenger: controller.binaryMessenger)
+      setupWatchChannel(messenger: controller.binaryMessenger)
     }
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
+  private func setupWatchChannel(messenger: FlutterBinaryMessenger) {
+    // EventChannel 接收 Watch IMU 數據
+    let eventChannel = FlutterEventChannel(name: "watch_imu_stream", binaryMessenger: messenger)
+    
+    // MethodChannel 發送指令給 Watch
+    let methodChannel = FlutterMethodChannel(name: "watch_imu_control", binaryMessenger: messenger)
+    
+    if #available(iOS 15.0, *) {
+      let handler = WatchStreamHandler()
+      eventChannel.setStreamHandler(handler)
+      
+      methodChannel.setMethodCallHandler { call, result in
+        switch call.method {
+        case "startIMU":
+          handler.sendCommandToWatch(command: "start")
+          result(true)
+        case "stopIMU":
+          handler.sendCommandToWatch(command: "stop")
+          result(true)
+        case "isWatchReachable":
+          result(handler.session.isReachable)
+        case "isWatchAppInstalled":
+          result(handler.session.isWatchAppInstalled)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+  }
+}
+
+@available(iOS 15.0, *)
+class WatchStreamHandler: NSObject, FlutterStreamHandler, WCSessionDelegate {
+  var sink: FlutterEventSink?
+  let session: WCSession
+
+  override init() {
+    if WCSession.isSupported() {
+      session = WCSession.default
+    } else {
+      fatalError("WCSession not supported")
+    }
+    super.init()
+    session.delegate = self
+    session.activate()
+  }
+  
+  func sendCommandToWatch(command: String) {
+    guard session.isReachable else {
+      print("Watch not reachable")
+      return
+    }
+    session.sendMessage(["command": command], replyHandler: nil) { error in
+      print("Send command error: \(error.localizedDescription)")
+    }
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    sink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    sink = nil
+    return nil
+  }
+
+  func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+    // no-op
+  }
+
+  func sessionDidBecomeInactive(_ session: WCSession) {
+    // no-op
+  }
+
+  func sessionDidDeactivate(_ session: WCSession) {
+    session.activate()
+  }
+
+  func session(_ session: WCSession, didReceiveMessage message: [String : Any]) {
+    DispatchQueue.main.async { [weak self] in
+      guard let sink = self?.sink else { return }
+      sink(message)
+    }
+  }
+}
+
+// Removed duplicate extension
+
+private extension AppDelegate {
   private func setupKeepScreenChannel(messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(
       name: "keep_screen_on_channel",
@@ -87,13 +179,19 @@ import UIKit
       throw NSError(domain: "AudioExtractor", code: -1, userInfo: [NSLocalizedDescriptionKey: "影片中找不到音訊軌道"])
     }
 
-    var sampleRate = 44100
-    var channels = 1
-    if let desc = track.formatDescriptions.first as? CMAudioFormatDescription,
-       let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)?.pointee {
-      sampleRate = Int(asbd.mSampleRate)
-      channels = Int(asbd.mChannelsPerFrame)
-    }
+      var sampleRate = 44100
+      var channels = 1
+
+      if let desc = track.formatDescriptions.first {
+        let formatDesc = desc as! CMFormatDescription
+        if CMFormatDescriptionGetMediaType(formatDesc) == kCMMediaType_Audio {
+          if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee {
+            sampleRate = Int(asbd.mSampleRate)
+            channels = Int(asbd.mChannelsPerFrame)
+          }
+        }
+      }
+
 
     let outputSettings: [String: Any] = [
       AVFormatIDKey: kAudioFormatLinearPCM,

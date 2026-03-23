@@ -12,6 +12,22 @@ public class AudioCapture {
     public func setup() throws -> Bool {
     let audioSession = AVAudioSession.sharedInstance()
     
+    // First, request microphone permission explicitly
+    var permissionGranted = false
+    let semaphore = DispatchSemaphore(value: 0)
+    
+    audioSession.requestRecordPermission { granted in
+        permissionGranted = granted
+        semaphore.signal()
+    }
+    
+    semaphore.wait()
+    
+    guard permissionGranted else {
+        print("❌ Microphone permission not granted.")
+        throw NSError(domain: "AudioCapture", code: -2, userInfo: [NSLocalizedDescriptionKey: "Microphone permission not granted"])
+    }
+    
     do {
         // Ensure the audio category is correctly set
         try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers])
@@ -28,7 +44,7 @@ public class AudioCapture {
             return false
         }
 
-        print("✅ Audio session successfully activated.")
+        print("✅ Audio session successfully activated with microphone permission.")
         return true
     } catch {
         print("❌ Failed to activate AudioSession: \(error.localizedDescription)")
