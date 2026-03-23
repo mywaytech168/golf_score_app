@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/recording_history_entry.dart';
 import 'recording_history_storage.dart';
-import 'video_server_client.dart';
 
 /// 管理錄影上傳的狀態與同步邏輯
 /// 
@@ -12,7 +11,6 @@ import 'video_server_client.dart';
 /// 4. 通知上層 UI 狀態變化
 class RecordingUploadManager extends ChangeNotifier {
   final RecordingHistoryStorage _storage;
-  final VideoServerClient _serverClient;
 
   /// 當前各錄影的上傳狀態（filePath -> UploadStatus）
   final Map<String, UploadStatus> _uploadStates = {};
@@ -30,9 +28,7 @@ class RecordingUploadManager extends ChangeNotifier {
 
   RecordingUploadManager({
     required RecordingHistoryStorage storage,
-    required VideoServerClient serverClient,
-  })  : _storage = storage,
-        _serverClient = serverClient;
+  })  : _storage = storage;
 
   /// 初始化上傳狀態（從儲存區讀取）
   Future<void> initialize() async {
@@ -78,11 +74,16 @@ class RecordingUploadManager extends ChangeNotifier {
       // 更新本地紀錄
       final updatedEntry = entry.copyWith(
         uploadStatus: UploadStatus.uploaded,
-        cloudVideoId: serverId,
+        cloudVideoId: serverId.toString(),
         lastUploadAttempt: DateTime.now(),
       );
 
-      await _storage.saveEntry(updatedEntry);
+      // 保存更新後的紀錄
+      final allEntries = await _storage.loadHistory();
+      final updatedEntries = allEntries
+          .map((e) => e.filePath == updatedEntry.filePath ? updatedEntry : e)
+          .toList();
+      await _storage.saveHistory(updatedEntries);
       _updateUploadState(filePath, UploadStatus.uploaded);
 
       debugPrint('✅ 上傳成功: $filePath -> serverId=$serverId');
@@ -98,7 +99,12 @@ class RecordingUploadManager extends ChangeNotifier {
         lastUploadAttempt: DateTime.now(),
       );
 
-      await _storage.saveEntry(updatedEntry);
+      // 保存更新後的紀錄
+      final allEntries = await _storage.loadHistory();
+      final updatedEntries = allEntries
+          .map((e) => e.filePath == updatedEntry.filePath ? updatedEntry : e)
+          .toList();
+      await _storage.saveHistory(updatedEntries);
       _updateUploadState(filePath, UploadStatus.failed);
 
       return null;
@@ -175,7 +181,11 @@ class RecordingUploadManager extends ChangeNotifier {
 
   /// 刪除本地錄影
   Future<void> deleteRecording(RecordingHistoryEntry entry) async {
-    await _storage.removeEntry(entry.filePath);
+    final allEntries = await _storage.loadHistory();
+    final remainingEntries = allEntries
+        .where((e) => e.filePath != entry.filePath)
+        .toList();
+    await _storage.saveHistory(remainingEntries);
     _uploadStates.remove(entry.filePath);
     notifyListeners();
     debugPrint('🗑️ 已刪除錄影: ${entry.filePath}');
@@ -184,7 +194,11 @@ class RecordingUploadManager extends ChangeNotifier {
   /// 刪除已上傳的錄影（本地副本）
   Future<void> deleteCloudRecording(RecordingHistoryEntry entry) async {
     // TODO: 調用後端 API 刪除雲端副本
-    await _storage.removeEntry(entry.filePath);
+    final allEntries = await _storage.loadHistory();
+    final remainingEntries = allEntries
+        .where((e) => e.filePath != entry.filePath)
+        .toList();
+    await _storage.saveHistory(remainingEntries);
     _uploadStates.remove(entry.filePath);
     notifyListeners();
     debugPrint('☁️ 已刪除雲端錄影: ${entry.filePath}');
@@ -201,12 +215,6 @@ class RecordingUploadManager extends ChangeNotifier {
   /// 更新上傳狀態
   void _updateUploadState(String filePath, UploadStatus status) {
     _uploadStates[filePath] = status;
-    notifyListeners();
-  }
-
-  /// 更新上傳進度
-  void _updateUploadProgress(String filePath, double progress) {
-    _uploadProgress[filePath] = progress.clamp(0.0, 1.0);
     notifyListeners();
   }
 }

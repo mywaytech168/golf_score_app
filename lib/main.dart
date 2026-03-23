@@ -1,8 +1,11 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'dart:developer' as developer;
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'services/auth_token_storage.dart';
+import 'services/ad_service.dart';
+import 'services/purchase_service.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
 
@@ -12,6 +15,17 @@ Future<void> main() async {
   
   // 先初始化 Flutter 綁定，避免在呼叫可用鏡頭前發生錯誤
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 初始化 Google Mobile Ads
+  await MobileAds.instance.initialize();
+  
+  // 初始化購買服務
+  final purchaseService = PurchaseService();
+  await purchaseService.initialize();
+  
+  // 預加載廣告
+  AdService.loadInterstitialAd();
+  AdService.loadRewardedAd();
 
   List<CameraDescription> cameras = const <CameraDescription>[];
   String? cameraError;

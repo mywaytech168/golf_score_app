@@ -5,7 +5,7 @@ import '../services/video_server_client.dart';
 
 /// 簡化版登入頁面 - 支持本地帳號和 Google OAuth
 class SimpleLoginPage extends StatefulWidget {
-  const SimpleLoginPage({Key key}) : super(key: key);
+  const SimpleLoginPage({super.key});
 
   @override
   State<SimpleLoginPage> createState() => _SimpleLoginPageState();

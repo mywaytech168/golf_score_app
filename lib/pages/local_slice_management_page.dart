@@ -70,7 +70,7 @@ class _LocalSliceManagementPageState extends State<LocalSliceManagementPage> {
   /// 同步伺服器狀態
   Future<void> _syncServerStatus() async {
     try {
-      final response = await _serverClient.getVideos(userId: widget.userId);
+      final response = await _serverClient.getVideos();
       if (!response['success']) return;
 
       final serverVideos = response['data']['data'] as List;
@@ -78,7 +78,7 @@ class _LocalSliceManagementPageState extends State<LocalSliceManagementPage> {
       // 比對本地和伺服器狀態，更新本地記錄
       for (final serverVideo in serverVideos) {
         if (serverVideo['slices'] is List) {
-          for (final serverSlice in serverVideo['slices']) {
+          for (final _ in serverVideo['slices']) {
             // 根據伺服器返回的 server_id 更新本地狀態
             // 這裡需要實現匹配邏輯
           }

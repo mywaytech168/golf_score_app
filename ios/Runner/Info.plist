@@ -52,5 +52,25 @@
         <string>需要藍牙權限以維持與 IMU 的穩定連線與資料交換。</string>
         <key>NSLocationWhenInUseUsageDescription</key>
         <string>需要定位權限以偵測附近的藍牙 IMU 設備並完成配對。</string>
+        <!-- Google Sign-In 配置 -->
+        <key>CFBundleURLTypes</key>
+        <array>
+            <!-- 您的 iOS URL Scheme (需要替換為您的實際值) -->
+            <dict>
+                <key>CFBundleTypeRole</key>
+                <string>Editor</string>
+                <key>CFBundleURLName</key>
+                <string>com.example.golfScoreApp</string>
+                <key>CFBundleURLSchemes</key>
+                <array>
+                    <!-- 格式: com.googleusercontent.apps.[您的Client ID] -->
+                    <!-- 例如: com.googleusercontent.apps.446697241300-your-ios-id.apps.googleusercontent.com -->
+                    <string>com.googleusercontent.apps.446697241300</string>
+                </array>
+            </dict>
+        </array>
+        <!-- Google Sign-In Client ID -->
+        <key>GIDClientID</key>
+        <string>446697241300-your-ios-client-id.apps.googleusercontent.com</string>
 </dict>
 </plist>

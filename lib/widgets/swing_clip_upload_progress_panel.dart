@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../services/swing_clip_upload_manager.dart';
+import '../models/recording_history_entry.dart';
 
 /// 切片上傳進度面板 UI 組件
 /// 
@@ -34,7 +34,6 @@ class SwingClipUploadProgressPanel extends StatelessWidget {
         final stats = uploadManager.getStatistics();
         final current = uploadManager.currentItem;
         final isUploading = uploadManager.isUploading;
-        final isPaused = uploadManager.isPaused;
 
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -276,7 +275,6 @@ class SwingClipUploadProgressPanel extends StatelessWidget {
     BuildContext context,
     Map<String, dynamic> stats,
   ) {
-    final theme = Theme.of(context);
     final local = stats['local'] as int? ?? 0;
     final uploading = stats['uploading'] as int? ?? 0;
     final uploaded = stats['uploaded'] as int? ?? 0;

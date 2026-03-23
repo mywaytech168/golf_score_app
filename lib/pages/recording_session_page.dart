@@ -19,6 +19,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/recording_history_entry.dart';
+import '../services/purchase_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/highlight_service.dart';
 import '../services/imu_data_logger.dart';
@@ -28,6 +29,7 @@ import '../services/swing_split_service.dart';
 import '../services/video_overlay_processor.dart';
 import '../services/pose_estimator_service.dart';
 import '../widgets/recording_history_sheet.dart';
+import '../widgets/ad_check_dialog.dart';
 import '../services/video_server_client.dart';
 import '../widgets/pose_overlay_painter.dart';
 import 'highlight_preview_page.dart';
@@ -1056,16 +1058,50 @@ class _RecordingSessionPageState extends State<RecordingSessionPage> {
     showRecordingHistorySheet(
       context: context,
       entries: _recordedRuns,
-      onPlayEntry: (entry) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => VideoPlayerPage(
-              videoPath: entry.filePath,
-              avatarPath: widget.userAvatarPath,
-              cloudVideoId: entry.cloudVideoId,
-            ),
-          ),
-        );
+      onPlayEntry: (entry) async {
+        // 檢查廣告和購買狀態
+        final purchaseService = PurchaseService();
+        await purchaseService.initialize();
+        
+        if (!context.mounted) return;
+        
+        // 檢查用戶是否是高級用戶
+        final isPremium = await purchaseService.isPremiumUser();
+        
+        if (isPremium) {
+          // 高級用戶直接播放
+          if (context.mounted) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => VideoPlayerPage(
+                  videoPath: entry.filePath,
+                  avatarPath: widget.userAvatarPath,
+                  cloudVideoId: entry.cloudVideoId,
+                ),
+              ),
+            );
+          }
+        } else {
+          // 非高級用戶顯示廣告檢查對話框
+          if (context.mounted) {
+            showAdCheckDialog(
+              context,
+              onContinue: () {
+                // 廣告看完或已購買，現在播放視頻
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => VideoPlayerPage(
+                      videoPath: entry.filePath,
+                      avatarPath: widget.userAvatarPath,
+                      cloudVideoId: entry.cloudVideoId,
+                    ),
+                  ),
+                );
+              },
+              purchaseService: purchaseService,
+            );
+          }
+        }
       },
     );
   }
