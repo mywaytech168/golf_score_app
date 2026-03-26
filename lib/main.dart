@@ -2,12 +2,13 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'dart:io';
-import 'dart:developer' as developer;
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'services/auth_token_storage.dart';
 import 'services/ad_service.dart';
 import 'services/purchase_service.dart';
+import 'services/in_app_purchase_service.dart';
+import 'services/daily_ad_manager.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
 
@@ -21,9 +22,16 @@ Future<void> main() async {
   // 初始化 Google Mobile Ads
   await MobileAds.instance.initialize();
   
+  // 初始化應用內購買服務
+  await InAppPurchaseService.initialize();
+  
   // 初始化購買服務
   final purchaseService = PurchaseService();
   await purchaseService.initialize();
+  
+  // 初始化每日廣告管理
+  final adManager = DailyAdManager();
+  await adManager.initialize();
   
   // 預加載廣告
   AdService.loadInterstitialAd();

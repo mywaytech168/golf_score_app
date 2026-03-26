@@ -117,18 +117,26 @@ class AdService {
     if (_isRewardedAdReady) {
       bool rewarded = false;
       
-      await _rewardedAd.show(
-        onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
-          rewarded = true;
-          print('用戶獲得獎勵: ${reward.amount} ${reward.type}');
-        },
-      );
+      try {
+        await _rewardedAd.show(
+          onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
+            rewarded = true;
+            print('用戶獲得獎勵: ${reward.amount} ${reward.type}');
+          },
+        );
+      } catch (e) {
+        print('顯示廣告時出錯: $e');
+        return true; // 如果廣告顯示失敗，允許用戶繼續
+      }
+      
+      // 廣告顯示後，等待一小段時間確保 onUserEarnedReward 被觸發
+      await Future.delayed(const Duration(milliseconds: 500));
       
       return rewarded;
     } else {
-      print('獎勵廣告還未準備好');
+      print('獎勵廣告還未準備好，允許用戶繼續（可能是測試環境）');
       loadRewardedAd();
-      return false;
+      return true; // 廣告未準備好時允許用戶繼續（這樣可以測試其他功能）
     }
   }
   

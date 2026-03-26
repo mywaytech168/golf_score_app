@@ -20,8 +20,11 @@ import '../services/user_profile_storage.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
+import '../services/purchase_service.dart';
+import '../services/daily_ad_manager.dart';
+import '../widgets/purchase_test_panel.dart';
 import 'recording_history_page.dart';
-import 'recording_session_page.dart';
+import 'video_player_page.dart' as video_player;
 import 'profile_edit_page.dart';
 import 'today_info_page.dart';
 import 'upgrade_page.dart';
@@ -59,6 +62,9 @@ class _HomePageState extends State<HomePage> {
   // 統計服務相關
   late final StatisticsService _statisticsService = StatisticsService();
   
+  // 購買服務相關
+  late final PurchaseService _purchaseService = PurchaseService();
+  
   String _formatDurationShort(int seconds) {
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
     final s = (seconds % 60).toString().padLeft(2, '0');
@@ -72,8 +78,20 @@ class _HomePageState extends State<HomePage> {
     _loadInitialHistory();
     // 初始化統計服務並加載後端和本地數據
     _initializeStatistics();
+    // 初始化購買服務
+    _initializePurchaseService();
     // 首頁不進行云端和本地視頻的匹配，只顯示本地列表
     // 云端同步由 recording_history_page 統一處理
+  }
+
+  /// 初始化購買服務
+  Future<void> _initializePurchaseService() async {
+    try {
+      await _purchaseService.initialize();
+      debugPrint('✅ [購買服務] 已初始化');
+    } catch (e) {
+      debugPrint('❌ [購買服務] 初始化失敗: $e');
+    }
   }
 
   @override
@@ -1186,7 +1204,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => VideoPlayerPage(
+        builder: (_) => video_player.VideoPlayerPage(
           videoPath: entry.filePath,
           avatarPath: _avatarPath,
           cloudVideoId: entry.cloudVideoId,
@@ -1414,6 +1432,30 @@ class _HomePageState extends State<HomePage> {
               tooltip: '通知中心',
               icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0B2A2E)),
             ),
+            if (kDebugMode)
+              IconButton(
+                onPressed: () => showPurchaseTestPanel(
+                  context,
+                  purchaseService: _purchaseService,
+                ),
+                tooltip: '🧪 購買測試',
+                icon: const Icon(Icons.bug_report, color: Colors.orange),
+              ),
+            if (kDebugMode)
+              IconButton(
+                onPressed: () async {
+                  final adManager = DailyAdManager();
+                  await adManager.initialize();
+                  await adManager.resetAdUsage();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('✅ 廣告使用狀態已重置')),
+                    );
+                  }
+                },
+                tooltip: '🔄 重置廣告',
+                icon: const Icon(Icons.refresh, color: Colors.blue),
+              ),
             const SizedBox(width: 12),
             IconButton(
               onPressed: _logout,

@@ -13,6 +13,8 @@ import 'pages/recording_session_page.dart';
 import 'models/recording_history_entry.dart';
 import 'services/imu_data_logger.dart';
 import 'services/recording_history_storage.dart';
+import 'services/purchase_service.dart';
+import 'widgets/ad_check_dialog.dart';
 import 'watch_imu.dart';
 
 /// 錄影入口頁面：專責處理藍牙 IMU 配對與引導使用者前往錄影畫面
@@ -2300,6 +2302,53 @@ class _RecorderPageState extends State<RecorderPage> {
   /// 切換至錄影專用頁面，讓錄影與配對流程分離
   Future<void> _openRecordingSession(
       {bool triggeredByImuButton = false}) async {
+    if (_isOpeningSession) return; // 避免重複點擊快速開啟多個頁面
+
+    debugPrint('🎬 [錄影] _openRecordingSession 被觸發');
+
+    if (widget.cameras.isEmpty) {
+      if (!mounted) return;
+      debugPrint('❌ [錄影] 沒有可用鏡頭');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('沒有可用鏡頭，無法開始錄影。')),
+      );
+      return;
+    }
+
+    // 顯示廣告檢查對話框
+    if (!mounted) {
+      debugPrint('❌ [錄影] widget 已卸載');
+      return;
+    }
+    
+    debugPrint('📱 [錄影] 初始化 PurchaseService...');
+    final purchaseService = PurchaseService();
+    await purchaseService.initialize();
+    
+    final isPremium = await purchaseService.isPremiumUser();
+    debugPrint('👤 [錄影] 用戶是否為高級用戶: $isPremium');
+    
+    // 【開發/測試】如果需要測試廣告，可以清除高級狀態
+    // await purchaseService.debugClearPremiumStatus();
+    
+    debugPrint('🎯 [錄影] 顯示廣告檢查對話框...');
+    if (context.mounted) {
+      showAdCheckDialog(
+        context,
+        onContinue: () async {
+          debugPrint('✅ [錄影] 用戶已確認廣告，準備進入錄影...');
+          await _proceedWithRecordingSession(triggeredByImuButton);
+        },
+        purchaseService: purchaseService,
+        forceShowAd: false, // 改成 true 強制顯示廣告（用於測試）
+      );
+    } else {
+      debugPrint('❌ [錄影] 無法顯示對話框 - context 已卸載');
+    }
+  }
+
+  /// 實際開始錄影會話的邏輯（在廣告檢查後執行）
+  Future<void> _proceedWithRecordingSession(bool triggeredByImuButton) async {
     if (_isOpeningSession) return; // 避免重複點擊快速開啟多個頁面
 
     if (widget.cameras.isEmpty) {

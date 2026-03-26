@@ -13,6 +13,7 @@ import 'package:permission_handler/permission_handler.dart'; // 引入權限處�
 import 'package:shared_preferences/shared_preferences.dart'; // 引入本地儲存套件以保存「記住我」資料
 
 import '../services/video_server_client.dart';
+import '../services/auth_token_storage.dart';
 import 'home_page.dart';
 
 /// 登入頁面提供使用者輸入帳號密碼後進入首頁
@@ -306,7 +307,7 @@ class _LoginPageState extends State<LoginPage> {
       
       // 發送到後端進行驗證 - 使用真實後端
       final response = await http.post(
-        Uri.parse('https://tekswing.api.atk.tw/api/auth/google'),
+        Uri.parse('https://tekswing.api.atk.tw/api/auth/google-login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'idToken': googleAuth.idToken,
@@ -317,42 +318,105 @@ class _LoginPageState extends State<LoginPage> {
       ).timeout(const Duration(seconds: 8));
 
       debugPrint('📥 後端回應狀態碼: ${response.statusCode}');
+      debugPrint('📝 原始響應: ${response.body}');
+      debugPrint('� 響應 Headers: ${response.headers}');
 
       if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
+        late final Map<String, dynamic> responseData;
+        try {
+          responseData = jsonDecode(response.body);
+          debugPrint('📋 解析後的響應數據: $responseData');
+        } catch (e) {
+          debugPrint('❌ 響應 JSON 解析失敗: $e');
+          _showLoginResultSnackBar('Google 登入失敗：無效的後端響應', isError: true);
+          return;
+        }
         
-        // 保存 JWT token 和用戶信息
-        final prefs = await SharedPreferences.getInstance();
-
-        if (responseData is Map && responseData.containsKey('token')) {
-          await prefs.setString('jwt_token', responseData['token']);
+        // 嘗試多種可能的字段名稱
+        String? token;
+        String? refreshToken;
+        String? userId;
+        String? userEmail;
+        String? displayName;
+        
+        if (responseData.containsKey('token')) {
+          token = responseData['token'];
+          debugPrint('✅ 找到 token: ${token?.substring(0, 20)}...');
+        } else if (responseData.containsKey('accessToken')) {
+          token = responseData['accessToken'];
+          debugPrint('✅ 找到 accessToken: ${token?.substring(0, 20)}...');
+        } else if (responseData.containsKey('data') && responseData['data'] is Map) {
+          final data = responseData['data'] as Map;
+          if (data.containsKey('token')) {
+            token = data['token'];
+            debugPrint('✅ 從 data 中找到 token: ${token?.substring(0, 20)}...');
+          } else if (data.containsKey('accessToken')) {
+            token = data['accessToken'];
+            debugPrint('✅ 從 data 中找到 accessToken: ${token?.substring(0, 20)}...');
+          }
+        }
+        
+        if (responseData.containsKey('refreshToken')) {
+          refreshToken = responseData['refreshToken'];
+          debugPrint('✅ 找到 refreshToken');
+        } else if (responseData.containsKey('data') && responseData['data'] is Map) {
+          final data = responseData['data'] as Map;
+          if (data.containsKey('refreshToken')) {
+            refreshToken = data['refreshToken'];
+            debugPrint('✅ 從 data 中找到 refreshToken');
+          }
         }
 
-        if (responseData is Map && responseData.containsKey('refreshToken')) {
-          await prefs.setString('refresh_token', responseData['refreshToken']);
+        // 如果找不到 token，顯示錯誤
+        if (token == null || token.isEmpty) {
+          debugPrint('❌ 後端響應中找不到有效的 Token');
+          debugPrint('📝 響應內容: $responseData');
+          _showLoginResultSnackBar('Google 登入失敗：後端未返回認證令牌', isError: true);
+          return;
         }
 
-        final user = responseData['user'];
+        // 提取用戶信息
+        final user = responseData['user'] ?? (responseData.containsKey('data') ? responseData['data']['user'] : null);
         if (user is Map) {
-          if (user['id'] != null) {
-            await prefs.setString('user_id', user['id'].toString());
-          }
-          if (user['email'] != null) {
-            await prefs.setString('user_email', user['email']);
-          }
-          if (user['displayName'] != null) {
-            await prefs.setString('user_name', user['displayName']);
-          }
+          userId = user['id']?.toString();
+          userEmail = user['email'];
+          displayName = user['displayName'];
+        }
+        
+        // 使用 AuthTokenStorage 保存 Token（而不是直接使用 SharedPreferences）
+        debugPrint('💾 正在通過 AuthTokenStorage 保存 Token...');
+        await AuthTokenStorage.instance.saveTokens(
+          accessToken: token,
+          refreshToken: refreshToken,
+          userId: userId ?? googleUser.email, // 如果沒有 userId，使用 Google 郵箱作為 fallback
+          userEmail: userEmail ?? googleUser.email,
+        );
+        debugPrint('💾 已保存 Token 到 AuthTokenStorage');
+        debugPrint('💾 已保存用戶郵箱: ${userEmail ?? googleUser.email}');
+        if (displayName != null) {
+          debugPrint('💾 已保存用戶名稱: $displayName');
         }
 
         // 清除訪客標識
+        final prefs = await SharedPreferences.getInstance();
         await prefs.remove('is_guest');
 
         if (mounted) {
           _showLoginResultSnackBar('Google 登入成功，歡迎回來！');
+          
+          // Android 登入後也需要檢查權限，iOS 則直接進入首頁
+          if (Platform.isAndroid) {
+            final permissionsGranted = await _ensureBlePermissions();
+            if (!mounted || !permissionsGranted) {
+              return; // 權限未完整授權時暫停導向首頁
+            }
+          }
+          
           await _navigateToHome(googleUser.email);
         }
       } else {
+        debugPrint('❌ Google 登入失敗，狀態碼: ${response.statusCode}');
+        debugPrint('❌ 錯誤響應: ${response.body}');
         final errorMsg = jsonDecode(response.body)['message'] ?? 'Google 登入失敗';
         _showLoginResultSnackBar(errorMsg, isError: true);
       }
@@ -466,7 +530,8 @@ Future<void> _onRememberMeChanged(bool value) async {
   Future<bool> _requestBlePermissions({required bool showDeniedDialog}) async {
     final updatedStatuses = <Permission, PermissionStatus>{};
 
-    debugPrint('===== 開始請求權限 (iOS) =====');
+    final platformName = Platform.isIOS ? 'iOS' : (Platform.isAndroid ? 'Android' : 'Unknown');
+    debugPrint('===== 開始請求權限 ($platformName) =====');
     debugPrint('需要請求的權限：${_blePermissions.keys.map((p) => p.toString()).join(", ")}');
 
     for (final entry in _blePermissions.entries) {
