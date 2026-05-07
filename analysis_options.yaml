@@ -13,6 +13,14 @@ analyzer:
   exclude:
     - local_plugins/** # 排除本地套件與範例，避免分析失敗
     - flutter_ignore_plugin/** # 排除忽略套件，避免分析無意義程式碼
+    # Exclude camerawesome carousel conflict files
+    - .dart_tool/flutter_gen/**
+    - .packages
+  errors:
+    # Ignore carousel import conflicts from camerawesome dependency
+    ambiguous_import: ignore
+  ignore_patterns:
+    - lib/generated_plugin_registrant.dart
 
 linter:
   # The lint rules applied to this project can be customized in the

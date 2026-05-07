@@ -154,16 +154,8 @@ String _buildSubtitle(RecordingHistoryEntry entry) {
     ..write(_formatTimestamp(entry.recordedAt))
     ..write(' · ')
     ..write('${entry.durationSeconds}\u0020秒')
-    ..write(' · ')
-    ..write(entry.modeLabel)
     ..write('\n')
     ..write(entry.fileName);
-  if (entry.hasImuCsv) {
-    buffer
-      ..write('\n')
-      ..write('IMU CSV：')
-      ..write(entry.csvFileNames.join(', '));
-  }
   return buffer.toString();
 }
 

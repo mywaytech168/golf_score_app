@@ -21,6 +21,8 @@ buildscript {
     repositories {
         google()
         mavenCentral()
+        maven(url = "https://jcenter.bintray.com/")
+        maven(url = "https://github.com/Canardoux/flutter_sound/raw/master/bin/flutter_sound_core")
     }
 
     dependencies {

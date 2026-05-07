@@ -19,7 +19,7 @@ import '../services/video_server_client.dart';
 import '../services/swing_split_service.dart';
 import '../services/hits_summary_storage.dart';
 import '../widgets/hits_summary_widget.dart';
-import 'recording_session_page.dart';
+import 'video_player_page.dart';
 
 /// 列表操作選項
 enum _HistoryMenuAction { rename, editDuration, delete, split, upload, unbindCloud, rerunAnalysis }
@@ -66,264 +66,18 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
   bool _rebuildScheduled = false; // 避免重複排程 setState 造成框架錯誤
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 外部影片匯入工具
-  bool _isLoadingCloudList = false; // 標記是否正在載入雲端列表
-  Timer? _syncTimer; // 定時器，每 5 秒更新一次列表
   bool? _selectedGoodShot; // 好球/壞球篩選 - null: 全部, true: 好球, false: 壞球
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
 
   @override
   void initState() {
     super.initState();
-    // 初始化時從雲端同步錄影列表
-    _syncWithCloudEntries();
-    
-    // 設置定時器，每 5 秒更新一次列表
-    _syncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _syncWithCloudEntries();
-    });
+    // 雲端同步已禁用
   }
 
   @override
   void dispose() {
-    // 清理定時器
-    _syncTimer?.cancel();
     super.dispose();
-  }
-
-  /// 從雲端同步錄影列表，與本地進行去重
-  Future<void> _syncWithCloudEntries() async {
-    if (!mounted) return;
-    
-    setState(() {
-      _isLoadingCloudList = true;
-    });
-    
-    try {
-      debugPrint('[歷史頁] 開始從雲端同步錄影列表...');
-      
-      // 檢查是否已登入
-      final isLoggedIn = await AuthTokenStorage.instance.isLoggedIn();
-      if (!isLoggedIn) {
-        debugPrint('[歷史頁] 未登入，跳過雲端同步');
-        setState(() {
-          _isLoadingCloudList = false;
-        });
-        return;
-      }
-      
-      // 從 API 獲取雲端列表
-      final serverClient = VideoServerClient();
-      final cloudListResponse = await serverClient.getVideos(limit: 100); // 獲取最多 100 個視頻
-      
-      if (!cloudListResponse['success']) {
-        final error = cloudListResponse['error'] ?? '未知錯誤';
-        debugPrint('[歷史頁] ⚠️ 獲取雲端列表失敗: $error');
-        
-        // 如果是 401 未授權，返回登入頁
-        if (error.contains('401') || error.contains('未授權')) {
-          debugPrint('[歷史頁] 🔐 檢測到 401 未授權，跳轉到登入頁');
-          
-          if (mounted) {
-            await AuthTokenStorage.instance.clearTokens();
-            Navigator.of(context).pushReplacementNamed('/login');
-          }
-          return;
-        }
-        
-        setState(() {
-          _isLoadingCloudList = false;
-        });
-        return;
-      }
-      
-      // 解析雲端視頻列表
-      // API 可能返回不同格式：直接數組或分頁對象
-      List<dynamic> cloudVideos = [];
-      final responseData = cloudListResponse['data'];
-      
-      if (responseData is List) {
-        cloudVideos = responseData;
-      } else if (responseData is Map) {
-        // 嘗試從常見的分頁字段提取數據
-        if (responseData['videos'] != null && responseData['videos'] is List) {
-          cloudVideos = responseData['videos'];
-        } else if (responseData['items'] != null && responseData['items'] is List) {
-          cloudVideos = responseData['items'];
-        } else if (responseData['data'] != null && responseData['data'] is List) {
-          cloudVideos = responseData['data'];
-        } else {
-          debugPrint('[歷史頁] ⚠️ 無法從雲端數據中提取視頻列表: $responseData');
-          cloudVideos = [];
-        }
-      }
-      
-      debugPrint('[歷史頁] ✅ 從雲端獲取 ${cloudVideos.length} 個視頻');
-      
-      // 與本地列表進行比對去重
-      _mergeCloudAndLocalEntries(cloudVideos);
-      
-      if (mounted) {
-        setState(() {
-          _isLoadingCloudList = false;
-        });
-      }
-      
-      debugPrint('[歷史頁] ✅ 雲端同步完成');
-    } catch (e) {
-      debugPrint('[歷史頁] ❌ 同步失敗: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingCloudList = false;
-        });
-      }
-    }
-  }
-
-  /// 將雲端列表與本地列表進行合併去重
-  /// 策略：如果本地有對應的視頻，則更新為雲端綁定狀態，並根據 mainFileType 判斷視頻類型
-  Future<void> _mergeCloudAndLocalEntries(List<dynamic> cloudVideos) async {
-    debugPrint('[歷史頁] 開始合併雲端和本地列表...');
-    
-    // 構建雲端視頻的映射（使用視頻 ID 作為鍵 - 仅用於精確匹配）
-    final Map<String, dynamic> cloudVideoMap = {};
-    final Set<String> cloudVideoIds = {};
-    
-    for (final video in cloudVideos) {
-      final videoId = video['id']?.toString();
-      final videoName = video['name']?.toString();
-      final mainFileType = video['mainFileType']?.toString() ?? 'original';
-      final queueStatus = video['queueStatus'] as Map<String, dynamic>?;
-      
-      debugPrint('[歷史頁] 雲端視頻: ID=$videoId, Name=$videoName, MainFileType=$mainFileType');
-      if (queueStatus != null) {
-        final status = queueStatus['latestStatus']?.toString() ?? 'notStarted';
-        debugPrint('[歷史頁]   - 處理狀態: $status');
-      }
-      
-      // 僅使用 ID 作為鍵，不添加名稱鍵（禁用名稱匹配）
-      if (videoId != null) {
-        cloudVideoMap[videoId] = video;
-        cloudVideoIds.add(videoId);
-      }
-    }
-    
-    debugPrint('[歷史頁] 雲端視頻映射: ${cloudVideoMap.keys.toList()}');
-    
-    // 遍歷本地列表，使用 cloudVideoId 精確匹配雲端視頻
-    int matchedCount = 0;
-    final Set<String> matchedCloudIds = {};
-    
-    for (int i = 0; i < _entries.length; i++) {
-      final entry = _entries[i];
-      final localFileName = entry.displayTitle;
-      
-      // 使用 cloudVideoId 精確匹配雲端視頻 - 不進行名稱模糊匹配
-      if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
-        if (cloudVideoMap.containsKey(entry.cloudVideoId)) {
-          final cloudVideo = cloudVideoMap[entry.cloudVideoId] as Map<String, dynamic>;
-          
-          debugPrint('[歷史頁] ✓ 本地視頻 \"$localFileName\" 已有雲端綁定: ${entry.cloudVideoId}');
-          matchedCloudIds.add(entry.cloudVideoId!);
-          
-          // 提取處理隊列狀態
-          ProcessingStatus newProcessingStatus = entry.processingStatus;
-          final queueStatus = cloudVideo['queueStatus'] as Map<String, dynamic>?;
-          if (queueStatus != null) {
-            final latestStatus = queueStatus['status']?.toString() ?? 'notStarted';
-            newProcessingStatus = ProcessingStatus.fromString(latestStatus);
-            debugPrint('[歷史頁]   - 更新處理狀態: $latestStatus');
-          }
-          
-          // 已綁定的本地影片保持原有的 videoType，不要根據後端的 mainFileType 改變
-          // 只更新 syncStatus 和 processingStatus，保證數據一致性
-          if (entry.syncStatus != SyncStatus.synced || entry.processingStatus != newProcessingStatus) {
-            _entries[i] = _entries[i].copyWith(
-              syncStatus: SyncStatus.synced,
-              processingStatus: newProcessingStatus,
-            );
-          }
-          
-          if (cloudVideo['goodShot'] != null) {
-            _entries[i] = _entries[i].copyWith(
-              goodShot: cloudVideo['goodShot']
-            );
-          }
-          
-          matchedCount++;
-        } else {
-          debugPrint('[歷史頁] ✗ 本地視頻 \"$localFileName\" 的雲端綁定 ID 不存在: ${entry.cloudVideoId}');
-        }
-      }
-    }
-    
-    // 添加沒有本地匹配的雲端視頻到列表
-    int unmatchedCount = 0;
-    for (final videoId in cloudVideoIds) {
-      if (!matchedCloudIds.contains(videoId)) {
-        final cloudVideo = cloudVideoMap[videoId] as Map<String, dynamic>;
-        final videoName = cloudVideo['name']?.toString() ?? 'Unknown';
-        final mainFileType = cloudVideo['mainFileType']?.toString() ?? 'original';
-        final queueStatus = cloudVideo['queueStatus'] as Map<String, dynamic>?;
-        
-        debugPrint('[歷史頁] 添加未匹配的雲端視頻: ID=$videoId, Name=$videoName');
-        
-        // 根據 mainFileType 判定 videoType
-        VideoType videoType = VideoType.cloudOriginal;
-        if (mainFileType == 'clip') {
-          videoType = VideoType.cloudClip;
-        }
-        
-        // 提取處理狀態
-        ProcessingStatus processingStatus = ProcessingStatus.notStarted;
-        if (queueStatus != null) {
-          final status = queueStatus['status']?.toString() ?? 'notStarted';
-          processingStatus = ProcessingStatus.fromString(status);
-        }
-        
-        // 提取音頻分析數據
-        double? audioCrispness;
-        bool? goodShot;
-        if (cloudVideo['audioCrispness'] != null) {
-          audioCrispness = (cloudVideo['audioCrispness'] as num?)?.toDouble();
-        }
-        if (cloudVideo['goodShot'] != null) {
-          goodShot = cloudVideo['goodShot'] as bool?;
-        }
-        
-        // 創建新的條目
-        final newEntry = RecordingHistoryEntry(
-          filePath: '', // 雲端視頻沒有本地路徑
-          roundIndex: 0,
-          recordedAt: DateTime.now(),
-          durationSeconds: 0,
-          imuConnected: false,
-          customName: videoName,
-          imuCsvPaths: {},
-          thumbnailPath: null,
-          uploadStatus: UploadStatus.uploaded,
-          cloudVideoId: videoId,
-          uploadError: null,
-          lastUploadAttempt: null,
-          videoType: videoType,
-          syncStatus: SyncStatus.synced,
-          processingStatus: processingStatus,
-          processingSuccess: null,
-          mainFileType: mainFileType,
-          isClipped: videoType == VideoType.cloudClip,
-          peakValues: {},
-          audioCrispness: audioCrispness,
-          goodShot: goodShot,
-        );
-        
-        _entries.add(newEntry);
-        unmatchedCount++;
-      }
-    }
-    
-    debugPrint('[歷史頁] 合併完成: 共匹配 $matchedCount 個雲端視頻，添加 $unmatchedCount 個未匹配的雲端視頻');
-    
-    // 保存更新後的本地列表
-    await RecordingHistoryStorage.instance.saveHistory(_entries);
   }
 
   /// 返回上一頁並帶出更新後的清單
@@ -709,14 +463,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   }
 
   Future<void> _splitEntry(RecordingHistoryEntry entry) async {
-    final String? csvPath = entry.imuCsvPaths.isNotEmpty
-        ? entry.imuCsvPaths.values.first
-        : null;
-    if (csvPath == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到 IMU CSV，無法分片')));
-      return;
-    }
+    // IMU CSV 分片功能已移除
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('分片功能已移除')));
     final String outDir = p.join(p.dirname(entry.filePath), 'cut_${entry.roundIndex}');
     // 顯示簡易等待動畫，避免使用者誤以為卡住
     void hideLoading() {
@@ -739,12 +488,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       ),
     );
     try {
-      // 使用 split 獲取分割結果
-      final results = await SwingSplitService.split(
-        videoPath: entry.filePath,
-        imuCsvPath: csvPath,
-        outDirName: p.basename(outDir),
-      );
+      // IMU CSV 分片功能已移除
+      final List<SwingClipResult> results = [];
+      if (false) {
+        // Swing split disabled - IMU data not collected
+      }
       
       // 構建 hits_summary.csv 路徑（與 split 中 _writeSummary 的路徑保持一致）
       final hitsSummaryPath = results.isNotEmpty
@@ -765,7 +513,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           final clipThumbnailPath = _getThumbnailPath(r.videoPath);
           
           // 計算切片的峰值
-          final clipPeakValues = await _calculatePeakValues({'right_wrist': r.csvPath});
+          final clipPeakValues = <String, double>{};
           
           newEntries.add(
             RecordingHistoryEntry(
@@ -773,14 +521,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
               roundIndex: baseIndex + i,
               recordedAt: DateTime.now(),
               durationSeconds: duration,
-              imuConnected: true,
               customName: '${entry.displayTitle}_${r.tag}',
-              imuCsvPaths: {'right_wrist': r.csvPath},
               thumbnailPath: clipThumbnailPath,
               cloudVideoId: null,
               isClipped: true,
               videoType: VideoType.localClip,
-              peakValues: clipPeakValues.isNotEmpty ? clipPeakValues : null,
             ),
           );
         }
@@ -1098,18 +843,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         }
       } catch (_) {
         // 縮圖刪除失敗無須打斷主流程
-      }
-    }
-
-    for (final path in entry.imuCsvPaths.values) {
-      if (path.isEmpty) continue;
-      try {
-        final csvFile = File(path);
-        if (await csvFile.exists()) {
-          await csvFile.delete();
-        }
-      } catch (_) {
-        // 單筆刪除失敗不影響整體
       }
     }
   }
@@ -1803,25 +1536,17 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       final generatedThumbnailPath = await _generateThumbnailForVideo(selectedVideoPath);
       final finalThumbnailPath = generatedThumbnailPath ?? thumbnailPath;
 
-      // 計算各軌跡的峰值
-      debugPrint('[歷史頁] 開始計算峰值...');
-      final peakValues = await _calculatePeakValues(imuCsvPaths);
-      debugPrint('[歷史頁] ✅ 峰值計算完成: $peakValues');
-
       // 建立新的 RecordingHistoryEntry
       final newEntry = RecordingHistoryEntry(
         filePath: selectedVideoPath,
         roundIndex: newRoundIndex,
         recordedAt: DateTime.now(),
         durationSeconds: durationSeconds,
-        imuConnected: imuCsvPaths.isNotEmpty,
         customName: '',
-        imuCsvPaths: imuCsvPaths,
         thumbnailPath: finalThumbnailPath,
         cloudVideoId: null,
         isClipped: isClipped,
         videoType: VideoType.localClip,
-        peakValues: peakValues.isNotEmpty ? peakValues : null,
       );
 
       // 新記錄添加到列表前端
@@ -1942,18 +1667,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       // 1. 在服務器上建立視頻紀錄
       debugPrint('[歷史頁] 步驟 1：建立服務器視頻紀錄');
       
-      // 從 peakValues 中提取主要的峰值（優先使用 right_wrist，其次 chest，最後任意一個）
-      double? mainPeakValue;
-      if (entry.peakValues != null && entry.peakValues!.isNotEmpty) {
-        if (entry.peakValues!.containsKey('right_wrist')) {
-          mainPeakValue = entry.peakValues!['right_wrist'];
-        } else if (entry.peakValues!.containsKey('chest')) {
-          mainPeakValue = entry.peakValues!['chest'];
-        } else {
-          mainPeakValue = entry.peakValues!.values.first;
-        }
-        debugPrint('📊 提取主要峰值: $mainPeakValue');
-      }
+      // Peak value extraction removed - IMU data no longer collected
+      double? mainPeakValue = null;
       
       final createResponse = await serverClient.createVideo(
         name: entry.displayTitle,
@@ -1961,8 +1676,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         hitSecond: entry.hitSecond,
         startSecond: entry.startSecond,
         endSecond: entry.endSecond,
-        peakValue: mainPeakValue,
-        rawPeakValues: entry.peakValues,
+        peakValue: null,
+        rawPeakValues: null,
       );
 
       if (!createResponse['success']) {
@@ -2063,39 +1778,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
       // 2.5 上傳 CSV 文件（IMU 數據）（除非只上傳影片）
       if (uploadType != 'video') {
-        debugPrint('[歷史頁] 步驟 2.5：上傳 CSV 文件');
-        if (entry.imuCsvPaths.isNotEmpty) {
-          for (final csvEntry in entry.imuCsvPaths.entries) {
-            final csvLabel = csvEntry.key; // e.g., "RIGHT_WRIST", "CHEST"
-            final csvPath = csvEntry.value;
-            final peakValue = entry.peakValues?[csvLabel]; // 取得該軌跡的峰值
-            
-            if (await File(csvPath).exists()) {
-              debugPrint('📊 上傳 $csvLabel CSV: $csvPath');
-              if (peakValue != null) {
-                debugPrint('📈 峰值: $peakValue');
-              }
-              
-              final csvResponse = await serverClient.uploadVideoFile(
-                videoId: videoId,
-                videoFilePath: csvPath,
-                fileType: csvLabel.toLowerCase(), // 使用 "right_wrist" 或 "chest" 作為檔案類型
-                sourceLocalFilePath: csvPath,
-                peakValue: peakValue,
-              );
-
-              if (csvResponse['success']) {
-                debugPrint('[歷史頁] ✅ $csvLabel CSV 上傳成功');
-              } else {
-                debugPrint('[歷史頁] ⚠️ $csvLabel CSV 上傳失敗，但繼續進行');
-              }
-            } else {
-              debugPrint('📊 未找到 $csvLabel CSV: $csvPath，跳過上傳');
-            }
-          }
-        } else {
-          debugPrint('📊 未找到任何 CSV 文件，跳過上傳');
-        }
+        debugPrint('[歷史頁] 步驟 2.5：CSV 文件上傳已禁用');
       }
 
       // 2.6 上傳縮略圖（如果存在且不只上傳軌跡）
@@ -2393,10 +2076,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 從 peakValues Map 中獲取最高峰值
   double? _getMaxPeakValue(RecordingHistoryEntry entry) {
-    if (entry.peakValues == null || entry.peakValues!.isEmpty) {
-      return null;
-    }
-    return entry.peakValues!.values.reduce((a, b) => a > b ? a : b);
+    return null;
   }
 
   // ---------- 畫面建構 ----------
@@ -2651,10 +2331,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   /// 從 peakValues Map 中獲取最高峰值
   double? _getMaxPeakValue(RecordingHistoryEntry entry) {
-    if (entry.peakValues == null || entry.peakValues!.isEmpty) {
-      return null;
-    }
-    return entry.peakValues!.values.reduce((a, b) => a > b ? a : b);
+    return null;
   }
 
   @override
@@ -2943,7 +2620,7 @@ class _HistoryTileState extends State<_HistoryTile> {
               children: [
                 Expanded(
                   child: Text(
-                    '${widget.formattedTime} · ${widget.entry.durationSeconds} 秒 · ${widget.entry.modeLabel}',
+                    '${widget.formattedTime} · ${widget.entry.durationSeconds} 秒',
                     style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -2964,10 +2641,10 @@ class _HistoryTileState extends State<_HistoryTile> {
             ),
             const SizedBox(height: 6),
             // 第三行：最佳速度和聲音清脆度
-            if (widget.entry.peakValues != null && widget.entry.peakValues!.isNotEmpty || widget.entry.audioCrispness != null)
+            if (false || widget.entry.audioCrispness != null)
               Row(
                 children: [
-                  if (widget.entry.peakValues != null && widget.entry.peakValues!.isNotEmpty) ...[
+                  if (false) ...[
                     const Icon(Icons.trending_up, size: 14, color: Color(0xFF1976D2)),
                     const SizedBox(width: 4),
                     Text(
@@ -2999,10 +2676,10 @@ class _HistoryTileState extends State<_HistoryTile> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            if (widget.entry.hasImuCsv) ...[
+            if (false) ...[
               const SizedBox(height: 6),
               Text(
-                'IMU CSV：${widget.entry.csvFileNames.join(', ')}',
+                'IMU CSV：(Not Available)',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF4F5D75)),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

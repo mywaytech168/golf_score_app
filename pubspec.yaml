@@ -30,7 +30,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  camera: ^0.10.5+9
+  camerawesome: ^2.5.0
+  google_mlkit_pose_detection: ^0.12.0
+  csv: ^6.0.0
   flutter_audio_capture:
     path: ./flutter_audio_capture-1.1.11
   permission_handler: ^12.0.1
@@ -76,6 +78,7 @@ dev_dependencies:
 
 dependency_overrides:
   tflite_flutter: 0.11.0
+  rxdart: ^0.28.0
   file_picker_macos:
     path: flutter_ignore_plugin/file_picker_macos
   file_picker_linux:
@@ -96,7 +99,7 @@ flutter:
   assets:
     - assets/sounds/1.mp3
     - assets/overlays/stance_overlay.png
-    - assets/models/movenet_singlepose_lightning.tflite
+    - assets/overlays/golf png.png
     - assets/audio/audio_class_stats.json
   # To add assets to your application, add an assets section, like this:
   # assets:

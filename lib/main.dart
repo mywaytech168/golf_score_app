@@ -1,6 +1,6 @@
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:provider/provider.dart';
 import 'dart:io';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -10,7 +10,13 @@ import 'services/purchase_service.dart';
 import 'services/in_app_purchase_service.dart';
 import 'services/daily_ad_manager.dart';
 import 'pages/login_page.dart';
-import 'pages/home_page.dart';
+import 'pages/main_shell_page.dart';
+import 'providers/auth_provider.dart';
+import 'providers/user_provider.dart';
+import 'providers/statistics_provider.dart';
+import 'providers/recording_provider.dart';
+import 'providers/video_provider.dart';
+import 'providers/app_state_provider.dart';
 
 Future<void> main() async {
   // 屏蔽系统噪音日志
@@ -37,14 +43,8 @@ Future<void> main() async {
   AdService.loadInterstitialAd();
   AdService.loadRewardedAd();
 
-  List<CameraDescription> cameras = const <CameraDescription>[];
-  String? cameraError;
-
-  try {
-    cameras = await availableCameras();
-  } catch (error) {
-    cameraError = '無法初始化相機：$error';
-  }
+  // 相機初始化已由 camerawesome 在運行時處理
+  // List<CameraDescription> cameras = const <CameraDescription>[];
 
   // iOS 藍牙初始化
   if (Platform.isIOS) {
@@ -56,78 +56,64 @@ Future<void> main() async {
     }
   }
 
-  runApp(MyApp(
-    initialCameras: cameras,
-    initialCameraError: cameraError,
-  ));
+  runApp(const MyApp());
 }
 
-/// 應用程式入口：維持 StatefulWidget 以便在相機初始化失敗時允許重新嘗試
+/// 應用程式入口
 class MyApp extends StatefulWidget {
-  final List<CameraDescription> initialCameras; // 啟動階段取得的鏡頭清單
-  final String? initialCameraError; // 啟動時的錯誤訊息
-
-  const MyApp({
-    super.key,
-    required this.initialCameras,
-    this.initialCameraError,
-  });
+  const MyApp({super.key});
 
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
-  // ---------- 狀態管理區 ----------
-  late List<CameraDescription> _cameras; // 最新的鏡頭清單
-  String? _cameraError; // 最近一次的錯誤資訊
-  bool _isLoading = false; // 控制是否顯示載入指示
-
   @override
   void initState() {
     super.initState();
-    _cameras = widget.initialCameras;
-    _cameraError = widget.initialCameraError;
   }
 
   // ---------- 方法區 ----------
-  /// 重新嘗試載入鏡頭，於使用者按下重新整理時呼叫
-  Future<void> _reloadCameras() async {
-    setState(() {
-      _isLoading = true;
-      _cameraError = null;
-    });
-
-    try {
-      final cameras = await availableCameras();
-      if (!mounted) return;
-      setState(() {
-        _cameras = cameras;
-        _isLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _cameraError = '無法初始化相機：$error';
-        _isLoading = false;
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Golf Score App',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E8E5A)),
-        scaffoldBackgroundColor: const Color(0xFFF5F7FB),
-        useMaterial3: true,
+    return MultiProvider(
+      providers: [
+        // 全局狀態
+        ChangeNotifierProvider(create: (_) => AppStateProvider()),
+        
+        // 認證
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        
+        // 使用者資料
+        ChangeNotifierProvider(create: (_) => UserProvider()),
+        
+        // 統計數據
+        ChangeNotifierProvider(create: (_) => StatisticsProvider()),
+        
+        // 錄制
+        ChangeNotifierProvider(create: (_) => RecordingProvider()),
+        
+        // 視頻播放
+        ChangeNotifierProvider(create: (_) => VideoProvider()),
+      ],
+      child: Consumer<AppStateProvider>(
+        builder: (context, appState, _) {
+          return MaterialApp(
+            title: 'Golf Score App',
+            theme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E8E5A)),
+              scaffoldBackgroundColor: const Color(0xFFF5F7FB),
+              useMaterial3: true,
+            ),
+            home: _buildHome(),
+            routes: {
+              '/home': (context) => const MainShellPage(),
+              '/login': (context) => const LoginPage(),
+            },
+          );
+        },
       ),
-      home: _buildHome(),
-      routes: {
-        '/home': (context) => HomePage(cameras: _cameras),
-        '/login': (context) => LoginPage(cameras: _cameras),
-      },
     );
   }
 
@@ -142,43 +128,12 @@ class _MyAppState extends State<MyApp> {
           );
         }
 
-        if (_isLoading) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        if (_cameraError != null) {
-          return Scaffold(
-            body: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _cameraError!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 16, color: Colors.redAccent),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: _reloadCameras,
-                      child: const Text('重新嘗試'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }
-
         // 如果有登入token，進入首頁；否則進入登錄頁
         if (snapshot.data == true) {
-          return HomePage(cameras: _cameras);
+          return const MainShellPage();
         }
 
-        return LoginPage(cameras: _cameras);
+        return const LoginPage();
       },
     );
   }

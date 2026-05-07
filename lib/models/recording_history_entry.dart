@@ -207,14 +207,8 @@ class RecordingHistoryEntry {
   /// 本輪錄影的設定秒數，供提示與說明使用
   final int durationSeconds;
 
-  /// 是否在錄影當下有連線 IMU，可用於顯示模式標籤
-  final bool imuConnected;
-
   /// 允許使用者自訂的影片名稱，空字串視為未命名
   final String? customName;
-
-  /// 對應本輪錄影的 IMU 原始資料 CSV 清單（deviceId -> 路徑）
-  final Map<String, String> imuCsvPaths;
 
   /// 影片縮圖的完整路徑，供首頁與歷史頁顯示預覽畫面
   final String? thumbnailPath;
@@ -261,9 +255,7 @@ class RecordingHistoryEntry {
   /// 切片結束秒數
   final double? endSecond;
 
-  /// 軌跡的峰值（對應 imuCsvPaths 中的軌跡）
-  /// 鍵為軌跡標籤（如 'chest'、'right_wrist'），值為峰值
-  final Map<String, double>? peakValues;
+
 
   /// 聲音清脆度評分（0-100），來自後端音頻分析
   final double? audioCrispness;
@@ -276,9 +268,7 @@ class RecordingHistoryEntry {
     required this.roundIndex,
     required this.recordedAt,
     required this.durationSeconds,
-    required this.imuConnected,
     this.customName,
-    this.imuCsvPaths = const {},
     this.thumbnailPath,
     this.uploadStatus = UploadStatus.local,
     this.cloudVideoId,
@@ -294,7 +284,6 @@ class RecordingHistoryEntry {
     this.hitSecond,
     this.startSecond,
     this.endSecond,
-    this.peakValues,
     this.audioCrispness,
     this.goodShot,
   });
@@ -305,9 +294,7 @@ class RecordingHistoryEntry {
     int? roundIndex,
     DateTime? recordedAt,
     int? durationSeconds,
-    bool? imuConnected,
     String? customName,
-    Map<String, String>? imuCsvPaths,
     String? thumbnailPath,
     UploadStatus? uploadStatus,
     String? cloudVideoId,
@@ -324,7 +311,6 @@ class RecordingHistoryEntry {
     double? hitSecond,
     double? startSecond,
     double? endSecond,
-    Map<String, double>? peakValues,
     double? audioCrispness,
     bool? goodShot,
   }) {
@@ -333,9 +319,7 @@ class RecordingHistoryEntry {
       roundIndex: roundIndex ?? this.roundIndex,
       recordedAt: recordedAt ?? this.recordedAt,
       durationSeconds: durationSeconds ?? this.durationSeconds,
-      imuConnected: imuConnected ?? this.imuConnected,
       customName: customName ?? this.customName,
-      imuCsvPaths: imuCsvPaths ?? this.imuCsvPaths,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       uploadStatus: uploadStatus ?? this.uploadStatus,
       cloudVideoId: clearCloudVideoId ? null : (cloudVideoId ?? this.cloudVideoId),
@@ -351,7 +335,6 @@ class RecordingHistoryEntry {
       hitSecond: hitSecond ?? this.hitSecond,
       startSecond: startSecond ?? this.startSecond,
       endSecond: endSecond ?? this.endSecond,
-      peakValues: peakValues ?? this.peakValues,
       audioCrispness: audioCrispness ?? this.audioCrispness,
       goodShot: goodShot ?? this.goodShot,
     );
@@ -366,22 +349,13 @@ class RecordingHistoryEntry {
   return '第 ${roundIndex} 輪錄影';
   }
 
-  /// 依據是否連線 IMU 回傳中文標籤，顯示當時的錄影模式
-  String get modeLabel => imuConnected ? '含 IMU 資料' : '純錄影';
-
   /// 取得檔案名稱，透過正規式切割避免不同系統分隔符差異
   String get fileName {
     final segments = filePath.split(RegExp(r'[\\/]'));
     return segments.isNotEmpty ? segments.last : filePath;
   }
 
-  /// 回傳所有 CSV 檔名，方便列表顯示或除錯
-  List<String> get csvFileNames => imuCsvPaths.values
-      .map((path) => path.split(RegExp(r'[\\/]')).last)
-      .toList();
 
-  /// 是否有對應的感測資料可供下載
-  bool get hasImuCsv => imuCsvPaths.isNotEmpty;
 
   /// 將資料轉為 JSON，方便持久化儲存與還原
   Map<String, dynamic> toJson() {
@@ -390,9 +364,7 @@ class RecordingHistoryEntry {
       'roundIndex': roundIndex,
       'recordedAt': recordedAt.toIso8601String(),
       'durationSeconds': durationSeconds,
-      'imuConnected': imuConnected,
       'customName': customName,
-      'imuCsvPaths': imuCsvPaths,
       'thumbnailPath': thumbnailPath,
       'uploadStatus': uploadStatus.name,
       'cloudVideoId': cloudVideoId,
@@ -408,7 +380,6 @@ class RecordingHistoryEntry {
       'hitSecond': hitSecond,
       'startSecond': startSecond,
       'endSecond': endSecond,
-      'peakValues': peakValues,
       'audioCrispness': audioCrispness,
       'goodShot': goodShot,
     };
@@ -416,14 +387,6 @@ class RecordingHistoryEntry {
 
   /// 從 JSON 還原歷史紀錄，並對缺漏欄位提供預設值
   factory RecordingHistoryEntry.fromJson(Map<String, dynamic> json) {
-    final rawCsv = json['imuCsvPaths'];
-    final parsedCsv = <String, String>{};
-    if (rawCsv is Map) {
-      // 將任何型別的鍵值轉為字串，避免類型不一致導致轉換失敗
-      rawCsv.forEach((key, value) {
-        parsedCsv[key.toString()] = value?.toString() ?? '';
-      });
-    }
 
     final rawThumbnail = (json['thumbnailPath'] as String?)?.trim();
     
@@ -466,9 +429,7 @@ class RecordingHistoryEntry {
       recordedAt: DateTime.tryParse(json['recordedAt'] as String? ?? '') ??
           DateTime.now(),
       durationSeconds: (json['durationSeconds'] as int?) ?? 0,
-      imuConnected: (json['imuConnected'] as bool?) ?? false,
       customName: (json['customName'] as String?) ?? '',
-      imuCsvPaths: parsedCsv,
       thumbnailPath:
           rawThumbnail == null || rawThumbnail.isEmpty ? null : rawThumbnail,
       uploadStatus: uploadStatus,
@@ -487,47 +448,8 @@ class RecordingHistoryEntry {
       hitSecond: (json['hitSecond'] as num?)?.toDouble(),
       startSecond: (json['startSecond'] as num?)?.toDouble(),
       endSecond: (json['endSecond'] as num?)?.toDouble(),
-      peakValues: _parsePeakValues(json['peakValues']),
       audioCrispness: (json['audioCrispness'] as num?)?.toDouble(),
       goodShot: (json['goodShot'] as bool?),
     );
-  }
-
-  /// 解析峰值 Map，確保類型正確
-  static Map<String, double>? _parsePeakValues(dynamic rawPeakValues) {
-    if (rawPeakValues == null) return null;
-    if (rawPeakValues is! Map) return null;
-    
-    final result = <String, double>{};
-    rawPeakValues.forEach((key, value) {
-      if (value is num) {
-        result[key.toString()] = value.toDouble();
-      }
-    });
-    
-    return result.isEmpty ? null : result;
-  }
-
-  /// 從 IMU 數據中檢測峰值並返回時間戳
-  List<int> detectPeaksFromImuData(String csvPath) {
-    final peaks = <int>[];
-
-    try {
-      final lines = File(csvPath).readAsLinesSync();
-      for (var i = 1; i < lines.length; i++) {
-        final columns = lines[i].split(',');
-        final timestamp = int.parse(columns[0]);
-        final value = double.parse(columns[1]);
-
-        // 偵測峰值邏輯（簡化版）
-        if (value > 1.0) {
-          peaks.add(timestamp);
-        }
-      }
-    } catch (e) {
-      debugPrint('Error parsing IMU data: $e');
-    }
-
-    return peaks;
   }
 }

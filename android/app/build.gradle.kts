@@ -20,6 +20,13 @@ android {
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
+    repositories {
+        google()
+        mavenCentral()
+        maven(url = "https://jcenter.bintray.com/")
+        maven(url = "https://github.com/Canardoux/flutter_sound/raw/master/bin/flutter_sound_core")
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
