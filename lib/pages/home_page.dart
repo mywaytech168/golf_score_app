@@ -12,7 +12,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
-import '../recorder_page.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import '../services/user_profile_storage.dart';
@@ -25,8 +24,6 @@ import '../widgets/purchase_test_panel.dart';
 import 'recording_history_page.dart';
 import 'video_player_page.dart' as video_player;
 import 'profile_edit_page.dart';
-import 'today_info_page.dart';
-import 'upgrade_page.dart';
 
 /// 錄影卡片支援的操作種類
 enum _HistoryAction { rename, editDuration, delete }
@@ -41,7 +38,6 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   // ---------- 狀態管理區 ----------
-  int _currentIndex = 2; // 底部導覽預設聚焦在 Quick Start
   final List<RecordingHistoryEntry> _recordingHistory = []; // 首頁內部維護的錄影紀錄
   bool _isHistoryLoading = true; // 控制歷史載入狀態，避免 UI 閃爍
   int _practiceCount = 0; // 累積練習次數
@@ -946,57 +942,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 處理底部導覽點擊，依據不同索引執行對應導覽
-  void _onBottomNavTap(int index) {
-    if (index == 1) {
-      final practice = _practiceCount;
-      final sweetPct = (_sweetSpotPercentage ?? 0).clamp(0, 100);
-      final goodHits = practice > 0 ? (practice * sweetPct / 100).round() : 0;
-      final badHits = math.max(practice - goodHits, 0);
-
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => TodayInfoPage(
-            practiceCount: practice,
-            bestSpeedMph: _bestSpeedMph,
-            sweetSpotPercentage: sweetPct.toDouble(),
-            audioCrispness: _audioCrispness,
-            goodHits: goodHits,
-            badHits: badHits,
-            goodVideoPath: null,
-            badVideoPath: null,
-          ),
-        ),
-      );
-      setState(() => _currentIndex = index);
-      return;
-    }
-    if (index == 2) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => RecorderPage(
-            initialHistory: _recordingHistory,
-            onHistoryChanged: _handleHistoryUpdated,
-            userAvatarPath: _avatarPath,
-          ),
-        ),
-      );
-      return;
-    }
-    if (index == 3) {
-      // 點選 Data Metrics 時直接導向錄影歷史頁，方便快速檢視過往紀錄
-      unawaited(_openRecordingHistoryPage());
-      setState(() => _currentIndex = index);
-      return;
-    }
-    if (index == 4) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const UpgradePage()),
-      );
-      setState(() => _currentIndex = index);
-      return;
-    }
-  }
 
   /// 透過檔案挑選器挑選影片後匯入，提供 Data Metrics 與 Video Library 共同呼叫
   Future<void> _pickExternalVideoForImport() async {
@@ -1377,51 +1322,6 @@ class _HomePageState extends State<HomePage> {
           );
         },
       ),
-      // 注意：bottomNavigationBar 現在由 MainShellPage 管理，保持持久化
-      // 移除此處的 bottomNavigationBar 以避免重複和衝突
-    );
-  }
-
-  /// 自訂底部導覽列，模擬設計稿中的項目並保留 Quick Start 強調樣式
-  Widget _buildBottomBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _BottomNavItem(
-            icon: Icons.home_rounded,
-            label: 'Home',
-            isActive: _currentIndex == 0,
-            onTap: () => _onBottomNavTap(0),
-          ),
-          _BottomNavItem(
-            icon: Icons.calendar_today_rounded,
-            label: 'Today',
-            isActive: _currentIndex == 1,
-            onTap: () => _onBottomNavTap(1),
-          ),
-          _QuickStartNavItem(
-            onTap: () => _onBottomNavTap(2),
-          ),
-          _BottomNavItem(
-            icon: Icons.bar_chart_rounded,
-            label: 'Metrics',
-            isActive: _currentIndex == 3,
-            onTap: () => _onBottomNavTap(3),
-          ),
-          _BottomNavItem(
-            icon: Icons.workspace_premium_rounded,
-            label: 'Upgrade',
-            isActive: _currentIndex == 4,
-            onTap: () => _onBottomNavTap(4),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1567,77 +1467,6 @@ class _RadarChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _RadarChartPainter oldDelegate) => !listEquals(oldDelegate.values, values);
 }
 
-/// 一般底部導覽按鈕元件
-class _BottomNavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _BottomNavItem({
-    required this.icon,
-    required this.label,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: isActive ? const Color(0xFF1E8E5A) : const Color(0xFF7D8B9A)),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: isActive ? const Color(0xFF1E8E5A) : const Color(0xFF7D8B9A),
-              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 快速開始按鈕獨立元件，採用圓形浮起樣式凸顯互動焦點
-class _QuickStartNavItem extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _QuickStartNavItem({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 70,
-        height: 70,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          color: Color(0xFF1E8E5A),
-          boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 6))],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.flash_on_rounded, color: Colors.white),
-            SizedBox(height: 4),
-            Text(
-              'Quick\nStart',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// 區塊標題元件，集中管理標題與右側操作按鈕
 class _SectionHeader extends StatelessWidget {
