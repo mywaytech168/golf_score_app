@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
 import 'mlkit_utils.dart';
@@ -19,6 +20,8 @@ typedef RecordCompleteCallback = void Function({
   required String videoPath,
   required String csvPath,
   required String audioPath,
+  required int durationSeconds,
+  required String? thumbnailPath,
 });
 
 class RecordScreen extends StatefulWidget {
@@ -203,19 +206,38 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _finishRecording() async {
+    final duration = _elapsed.inSeconds.clamp(1, 86400);
     if (mounted) setState(() {
       _isRecording = false;
       _poses = [];
     });
     try {
       await _csvWriter?.flush();
+      final thumbnailPath = await _generateThumbnail(_videoPath);
       widget.onComplete?.call(
         videoPath: _videoPath,
         csvPath: _csvPath,
-        audioPath: '', // 音訊已內嵌於影片中
+        audioPath: '',
+        durationSeconds: duration,
+        thumbnailPath: thumbnailPath,
       );
     } catch (e) {
       debugPrint('[RecordScreen] finishRecording error: $e');
+    }
+  }
+
+  Future<String?> _generateThumbnail(String videoPath) async {
+    try {
+      final sessionDir = File(videoPath).parent.path;
+      return await vt.VideoThumbnail.thumbnailFile(
+        video: videoPath,
+        thumbnailPath: sessionDir,
+        imageFormat: vt.ImageFormat.JPEG,
+        quality: 75,
+      );
+    } catch (e) {
+      debugPrint('[RecordScreen] thumbnail error: $e');
+      return null;
     }
   }
 
@@ -294,10 +316,13 @@ class _RecordScreenState extends State<RecordScreen> {
       final testCsvPath = p.join(testDir.path, 'pose_landmarks.csv');
       await PoseCsvWriter(testCsvPath).flush(); // 只寫 header
 
+      final thumbnailPath = await _generateThumbnail(testVideoPath);
       widget.onComplete?.call(
         videoPath: testVideoPath,
         csvPath: testCsvPath,
         audioPath: '',
+        durationSeconds: _selectedTestVideo!.durationSeconds.clamp(1, 86400),
+        thumbnailPath: thumbnailPath,
       );
 
       if (mounted) Navigator.pop(context);

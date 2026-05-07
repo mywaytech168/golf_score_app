@@ -118,7 +118,13 @@ class _MainShellPageState extends State<MainShellPage> {
   }
 
   /// 處理錄製完成時的回調
-  Future<void> _handleRecordingComplete(String videoPath, String csvPath, String audioPath) async {
+  Future<void> _handleRecordingComplete(
+    String videoPath,
+    String csvPath,
+    String audioPath, {
+    required int durationSeconds,
+    required String? thumbnailPath,
+  }) async {
     try {
       // 更新本地歷史記錄
       final existing = await RecordingHistoryStorage.instance.loadHistory();
@@ -127,8 +133,8 @@ class _MainShellPageState extends State<MainShellPage> {
         filePath: videoPath,
         roundIndex: existing.length + 1,
         recordedAt: timestamp,
-        durationSeconds: 0, // 會在 record_screen.dart 中計算
-        thumbnailPath: null,
+        durationSeconds: durationSeconds,
+        thumbnailPath: thumbnailPath,
         cloudVideoId: null,
       );
       
@@ -172,8 +178,20 @@ class _MainShellPageState extends State<MainShellPage> {
           
           // 第 2 頁：骨架推論錄影頁
           RecordScreen(
-            onComplete: ({required videoPath, required csvPath, required audioPath}) {
-              _handleRecordingComplete(videoPath, csvPath, audioPath);
+            onComplete: ({
+              required videoPath,
+              required csvPath,
+              required audioPath,
+              required durationSeconds,
+              required thumbnailPath,
+            }) {
+              _handleRecordingComplete(
+                videoPath,
+                csvPath,
+                audioPath,
+                durationSeconds: durationSeconds,
+                thumbnailPath: thumbnailPath,
+              );
             },
           ),
           

@@ -13,7 +13,7 @@ class RecordingHistoryStorage {
   /// 提供單例呼叫，避免重複建立檔案 IO 資源
   static final RecordingHistoryStorage instance = RecordingHistoryStorage._();
 
-  static const String _folderName = 'imu_records'; // 與影片、CSV 相同的資料夾
+  static const String _folderName = 'golf_recordings'; // 與影片、CSV 相同的資料夾
   static const String _fileName = 'recording_history.json'; // 歷史紀錄檔案名稱
 
   /// 讀取歷史紀錄，失敗時回傳空陣列避免打斷 UI
