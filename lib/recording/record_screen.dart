@@ -203,7 +203,10 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _finishRecording() async {
-    if (mounted) setState(() => _isRecording = false);
+    if (mounted) setState(() {
+      _isRecording = false;
+      _poses = [];
+    });
     try {
       await _csvWriter?.flush();
       widget.onComplete?.call(
