@@ -1,24 +1,38 @@
 import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 
-/// Extension to convert AnalysisImage to InputImage for MLKit
-/// Compatible with camerawesome 2.5.0 and google_mlkit_commons 0.8.1
+/// 將 camerawesome 的 AnalysisImage 轉換為 Google ML Kit 的 InputImage
+/// 支援 Android (NV21) 與 iOS (BGRA8888) 兩種格式
 extension AnalysisImageToInputImage on AnalysisImage {
-  /// Converts AnalysisImage from camerawesome to InputImage for Google MLKit
-  InputImage toInputImage() {
-    // camerawesome 2.5.0 AnalysisImage has direct properties
-    final metadata = InputImageMetadata(
-      size: Size(width.toDouble(), height.toDouble()),
-      rotation: InputImageRotation.rotation0deg,
-      format: InputImageFormat.nv21,
-      bytesPerRow: width,
-    );
-
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: metadata,
+  InputImage? toInputImage() {
+    return when(
+      nv21: (img) => InputImage.fromBytes(
+        bytes: img.bytes,
+        metadata: InputImageMetadata(
+          size: img.size,
+          rotation: _toMlKitRotation(img.rotation),
+          format: InputImageFormat.nv21,
+          bytesPerRow: img.width,
+        ),
+      ),
+      bgra8888: (img) => InputImage.fromBytes(
+        bytes: img.bytes,
+        metadata: InputImageMetadata(
+          size: img.size,
+          rotation: _toMlKitRotation(img.rotation),
+          format: InputImageFormat.bgra8888,
+          bytesPerRow: img.width * 4,
+        ),
+      ),
     );
   }
 }
 
-
+InputImageRotation _toMlKitRotation(InputAnalysisImageRotation r) {
+  return switch (r) {
+    InputAnalysisImageRotation.rotation0deg => InputImageRotation.rotation0deg,
+    InputAnalysisImageRotation.rotation90deg => InputImageRotation.rotation90deg,
+    InputAnalysisImageRotation.rotation180deg => InputImageRotation.rotation180deg,
+    InputAnalysisImageRotation.rotation270deg => InputImageRotation.rotation270deg,
+  };
+}

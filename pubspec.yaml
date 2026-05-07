@@ -32,6 +32,7 @@ dependencies:
     sdk: flutter
   camerawesome: ^2.5.0
   google_mlkit_pose_detection: ^0.12.0
+  google_mlkit_commons: ^0.8.0
   csv: ^6.0.0
   flutter_audio_capture:
     path: ./flutter_audio_capture-1.1.11

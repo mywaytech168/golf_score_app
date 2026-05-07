@@ -222,6 +222,7 @@ class _RecordScreenState extends State<RecordScreen> {
     _isPoseProcessing = true;
     try {
       final inputImage = image.toInputImage();
+      if (inputImage == null) return;
       final poses = await _poseService.detect(inputImage);
       if (!mounted) return;
 
