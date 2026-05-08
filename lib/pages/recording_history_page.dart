@@ -672,6 +672,8 @@ class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<SwingHit>> _swingHitsFuture;
   bool _isDetecting = false;
 
+  bool get _isLongVideo => widget.entry.durationSeconds > 5;
+
   @override
   void initState() {
     super.initState();
@@ -801,6 +803,35 @@ class _HistoryTileState extends State<_HistoryTile> {
                         spacing: 6,
                         runSpacing: 4,
                         children: [
+                          // 長/短影片標記
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _isLongVideo
+                                  ? const Color(0xFF1565C0).withAlpha(25)
+                                  : const Color(0xFF757575).withAlpha(25),
+                              border: Border.all(
+                                color: _isLongVideo
+                                    ? const Color(0xFF1565C0)
+                                    : const Color(0xFF757575),
+                                width: 1,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              _isLongVideo ? '🎬 長影片' : '⚡ 短影片',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: _isLongVideo
+                                    ? const Color(0xFF1565C0)
+                                    : const Color(0xFF757575),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
                           // 已切片標記（只對原始影片顯示）
                           if (widget.entry.videoType == VideoType.original &&
                               widget.entry.isClipped)
@@ -889,27 +920,28 @@ class _HistoryTileState extends State<_HistoryTile> {
                       value: _HistoryMenuAction.rename,
                       child: Text('重新命名'),
                     ),
-                    PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.detectHits,
-                      child: Row(
-                        children: [
-                          Text(
-                            _isDetecting ? '偵測中...' : '偵測擊球',
-                            style: TextStyle(
-                              color: _isDetecting ? Colors.grey : null,
+                    if (_isLongVideo)
+                      PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.detectHits,
+                        child: Row(
+                          children: [
+                            Text(
+                              _isDetecting ? '偵測中...' : '偵測擊球',
+                              style: TextStyle(
+                                color: _isDetecting ? Colors.grey : null,
+                              ),
                             ),
-                          ),
-                          if (_isDetecting) ...[
-                            const SizedBox(width: 8),
-                            const SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
+                            if (_isDetecting) ...[
+                              const SizedBox(width: 8),
+                              const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.delete,
                       child: Text('刪除影片'),
@@ -998,38 +1030,39 @@ class _HistoryTileState extends State<_HistoryTile> {
                 );
               },
             ),
-            // 擊球偵測列表
-            if (_isDetecting)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      '正在偵測擊球...',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                    ),
-                  ],
+            // 擊球偵測列表（僅長影片顯示）
+            if (_isLongVideo)
+              if (_isDetecting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        '正在偵測擊球...',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                FutureBuilder<List<SwingHit>>(
+                  future: _swingHitsFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return _SwingHitsPanel(
+                      hits: snapshot.data!,
+                      videoPath: widget.entry.filePath,
+                    );
+                  },
                 ),
-              )
-            else
-              FutureBuilder<List<SwingHit>>(
-                future: _swingHitsFuture,
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  return _SwingHitsPanel(
-                    hits: snapshot.data!,
-                    videoPath: widget.entry.filePath,
-                  );
-                },
-              ),
           ],
         ),
       ),
