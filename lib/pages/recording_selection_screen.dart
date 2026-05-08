@@ -111,6 +111,13 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
       return;
     }
 
+    // 通過時長限制，通知使用者
+    if (!mounted) return;
+    _showNotification(
+      message: '✅ 影片時長 $durationSec 秒，符合 2 分鐘限制',
+      type: NotificationType.selected,
+    );
+
     await _importExternalVideo(
       path: path,
       fileName: fileName,
