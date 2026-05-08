@@ -27,19 +27,19 @@ class SwingImpactDetector {
 
   // ── 峰值偵測共用參數 ──────────────────────────────────────────────────────
   static const double peakDistanceSec = 0.45;
-  static const double intersectToleranceSec = 0.50;
+  static const double intersectToleranceSec = 0.40;
 
-  // ── 速度訊號參數 ──────────────────────────────────────────────────────────
-  static const int _speedMedianK = 7;
-  static const int _speedSmoothW = 7;
-  static const int _speedBaselineK = 121;
+  // ── 速度訊號參數（原版校準 ~30fps，Dart 取幀 ~15fps，kernel 縮小一半）──────
+  static const int _speedMedianK = 5;
+  static const int _speedSmoothW = 5;
+  static const int _speedBaselineK = 61;
   static const double _speedHeightPct = 92.0;
   static const double _speedMinHeight = 0.8;
   static const double _speedPromScale = 2.5;
 
-  // ── 音頻訊號參數 ──────────────────────────────────────────────────────────
-  static const int _audioMedianK = 9;
-  static const int _audioSmoothW = 9;
+  // ── 音頻訊號參數（同上，縮小一半）────────────────────────────────────────
+  static const int _audioMedianK = 5;
+  static const int _audioSmoothW = 5;
   static const int _audioBaselineK = 71;
   static const double _audioHeightPct = 90.0;
   static const double _audioMinHeight = 0.04;
