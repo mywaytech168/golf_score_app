@@ -1,16 +1,12 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
-import 'package:http/http.dart' as http;
 
 import '../services/highlight_service.dart';
-import '../services/auth_token_storage.dart';
-import '../services/video_server_client.dart';
 
-const double _portraitAspect = 16/ 9; // force a portrait container regardless of source video
+const double _portraitAspect = 16 / 9; // force a portrait container regardless of source video
 
 Widget _buildVideoBox(VideoPlayerController controller) {
   final Size s = controller.value.size;
@@ -23,7 +19,7 @@ Widget _buildVideoBox(VideoPlayerController controller) {
         fit: BoxFit.contain,
         child: SizedBox(
           width: vw,
-          height:vh ,
+          height: vh,
           child: VideoPlayer(controller),
         ),
       ),
@@ -37,12 +33,12 @@ class VideoPlayerPage extends StatefulWidget {
     super.key,
     required this.videoPath,
     this.avatarPath,
-    this.cloudVideoId,
+    this.startPosition,
   });
 
   final String videoPath;
   final String? avatarPath;
-  final String? cloudVideoId; // 云端视频 ID（如果有的话）
+  final Duration? startPosition; // 初始播放位置（用於擊球跳轉）
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -63,14 +59,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   }
 
   void _initController() {
-    // 如果有云端视频 ID，优先使用云端版本
-    if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
-      debugPrint('[播放器] 检测到云端视频 ID，优先使用云端版本');
-      _initCloudController();
-    } else {
-      debugPrint('[播放器] 使用本地视频文件');
-      _initLocalController();
-    }
+    _initLocalController();
   }
 
   /// 初始化本地视频播放器
@@ -82,52 +71,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     }
     final controller = VideoPlayerController.file(file);
     _controller = controller;
-    _initializeFuture = controller.initialize().then((_) {
+    _initializeFuture = controller.initialize().then((_) async {
       controller.setLooping(true);
+      if (widget.startPosition != null) {
+        await controller.seekTo(widget.startPosition!);
+      }
       controller.play();
       setState(() {});
     }).catchError((e) {
       setState(() => _errorMessage = 'Unable to play: $e');
     });
-  }
-
-  /// 初始化云端视频播放器
-  void _initCloudController() async {
-    try {
-      // 获取访问令牌
-      final token = await AuthTokenStorage.instance.getAccessToken();
-      if (token == null) {
-        setState(() => _errorMessage = 'Please login to play cloud videos');
-        return;
-      }
-
-      // 构建云端视频流 URL，使用查询参数传递 token
-      const String baseUrl = 'https://tekswing.api.atk.tw';
-      final streamUrl = '$baseUrl/api/videos/${widget.cloudVideoId}/stream?token=$token';
-      
-      debugPrint('[播放器] 云端视频流 URL: $streamUrl（token已添加）');
-
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(streamUrl),
-      );
-      
-      _controller = controller;
-      _initializeFuture = controller.initialize().then((_) {
-        debugPrint('[播放器] 云端视频初始化成功');
-        controller.setLooping(true);
-        controller.play();
-        setState(() {});
-      }).catchError((e) {
-        debugPrint('[播放器] 云端视频初始化失败: $e');
-        // 如果云端加载失败，回退到本地版本
-        setState(() => _errorMessage = 'Failed to load cloud video: $e. Falling back to local version.');
-        _initLocalController();
-      });
-    } catch (e) {
-      debugPrint('[播放器] 云端视频初始化异常: $e');
-      setState(() => _errorMessage = 'Error loading cloud video: $e');
-      _initLocalController();
-    }
   }
 
   @override
@@ -139,69 +92,29 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Future<void> _generateHighlight() async {
     if (_isAnalyzing) return;
     setState(() => _isAnalyzing = true);
-    
+
     try {
-      // 判斷是否需要下載雲端影片
-      String videoPathForProcessing = widget.videoPath;
-      
-      _showSnack('[播放器] cloudVideoId != null: ${widget.cloudVideoId != null}');
-      _showSnack('[播放器] cloudVideoId.isNotEmpty: ${widget.cloudVideoId?.isNotEmpty ?? "N/A"}');
-      _showSnack('[播放器] cloudVideoId value: "${widget.cloudVideoId}"');
-      if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty) {
-        // 有雲端影片，先嘗試下載
-        _showSnack('正在下載雲端影片...');
-        
-        try {
-          final serverClient = VideoServerClient();
-          final streamUrl = await serverClient.getVideoStreamUrl(widget.cloudVideoId!);
-          
-          // 下載影片到臨時位置
-          final tempDir = await Directory.systemTemp.createTemp('swing_highlight_');
-          final downloadedPath = p.join(tempDir.path, '${widget.cloudVideoId}_downloaded.mp4');
-          
-          debugPrint('[播放器] 開始從雲端下載影片: $streamUrl -> $downloadedPath');
-          
-          final client = http.Client();
-          final response = await client.get(Uri.parse(streamUrl));
-          
-          if (response.statusCode == 200) {
-            final file = File(downloadedPath);
-            await file.writeAsBytes(response.bodyBytes);
-            videoPathForProcessing = downloadedPath;
-            debugPrint('[播放器] ✅ 雲端影片已下載: $downloadedPath');
-          } else {
-            debugPrint('[播放器] ⚠️ 下載失敗 (HTTP ${response.statusCode}), 使用本地影片');
-          }
-          client.close();
-        } catch (e) {
-          debugPrint('[播放器] ⚠️ 下載雲端影片失敗: $e, 使用本地影片');
-        }
-      }
-      
       // 檢查影片檔案是否存在
-      final file = File(videoPathForProcessing);
+      final file = File(widget.videoPath);
       if (!await file.exists()) {
         if (!mounted) return;
         _showSnack('找不到影片檔案');
         return;
       }
-      
+
       final out = await HighlightService.generateHighlight(
-        videoPathForProcessing,
+        widget.videoPath,
         beforeMs: 3000,
         afterMs: 3000,
         titleData: {'Name': 'Player', 'Course': 'Unknown'},
       );
-      
+
       if (!mounted) return;
       if (out != null && out.isNotEmpty) {
         debugPrint('[播放器] ✅ Highlight 已生成: $out');
         await Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => HighlightPreviewPage(
-              videoPath: out,
-              cloudVideoId: widget.cloudVideoId,
-            ),
+            builder: (_) => HighlightPreviewPage(videoPath: out),
           ),
         );
       } else {
@@ -270,7 +183,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                 : FutureBuilder<void>(
                     future: _initializeFuture,
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.done && controller.value.isInitialized) {
+                      if (snapshot.connectionState == ConnectionState.done &&
+                          controller.value.isInitialized) {
                         return Column(
                           children: [
                             _buildVideoBox(controller),
@@ -290,7 +204,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                         height: 20,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
                                     : const Icon(Icons.movie_creation_outlined),
@@ -310,12 +225,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                                     }
                                     setState(() {});
                                   },
-                                  icon: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
+                                  icon: Icon(controller.value.isPlaying
+                                      ? Icons.pause
+                                      : Icons.play_arrow),
                                   label: const Text('Play/Pause'),
                                 ),
                                 const SizedBox(width: 12),
                                 ElevatedButton.icon(
-                                  onPressed: _isTrajectoryRunning ? null : _runTrajectoryAnalysis,
+                                  onPressed:
+                                      _isTrajectoryRunning ? null : _runTrajectoryAnalysis,
                                   icon: _isTrajectoryRunning
                                       ? const SizedBox(
                                           width: 18,
@@ -363,7 +281,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   }
                 });
               },
-              child: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
+              child:
+                  Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
             ),
     );
   }
@@ -374,10 +293,8 @@ class HighlightPreviewPage extends StatefulWidget {
   const HighlightPreviewPage({
     super.key,
     required this.videoPath,
-    this.cloudVideoId,
   });
   final String videoPath;
-  final String? cloudVideoId;
 
   @override
   State<HighlightPreviewPage> createState() => _HighlightPreviewPageState();
@@ -408,34 +325,6 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Preview Highlight'),
-        // 如果有 cloudVideoId，在AppBar中显示
-        actions: [
-          if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2196F3).withAlpha(30),
-                    border: Border.all(
-                      color: const Color(0xFF2196F3),
-                      width: 1.5,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '☁️ ${widget.cloudVideoId}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF2196F3),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
       body: Center(
         child: controller == null || !controller.value.isInitialized

@@ -13,13 +13,11 @@ class HighlightPreviewPage extends StatefulWidget {
   final String videoPath;
   final String? avatarPath;
   final String? debugText;
-  final String? cloudVideoId;
   const HighlightPreviewPage({
     super.key,
     required this.videoPath,
     this.avatarPath,
     this.debugText,
-    this.cloudVideoId,
   });
 
   @override
@@ -52,34 +50,6 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Highlight 預覽'),
-        // 如果有 cloudVideoId，在AppBar中显示
-        actions: [
-          if (widget.cloudVideoId != null && widget.cloudVideoId!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2196F3).withAlpha(30),
-                    border: Border.all(
-                      color: const Color(0xFF2196F3),
-                      width: 1.5,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '☁️ ${widget.cloudVideoId}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF2196F3),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
       body: Column(
         children: [

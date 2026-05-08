@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:provider/provider.dart';
-import 'dart:io';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'services/auth_token_storage.dart';
@@ -45,16 +43,6 @@ Future<void> main() async {
 
   // 相機初始化已由 camerawesome 在運行時處理
   // List<CameraDescription> cameras = const <CameraDescription>[];
-
-  // iOS 藍牙初始化
-  if (Platform.isIOS) {
-    try {
-      // 監聽藍牙狀態，確保藍牙服務已啟動
-      FlutterBluePlus.setLogLevel(LogLevel.info, color: true);
-    } catch (e) {
-      debugPrint('藍牙初始化錯誤: $e');
-    }
-  }
 
   runApp(const MyApp());
 }

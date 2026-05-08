@@ -11,12 +11,11 @@ class DeviceCapability {
 
     try {
       _cachedResult = await CameraCharacteristics
-          .isVideoRecordingAndImageAnalysisSupported(Sensors.back);
+          .isVideoRecordingAndImageAnalysisSupported(SensorPosition.back);
       debugPrint('[DeviceCapability] 並行支持: $_cachedResult');
       return _cachedResult!;
     } catch (e) {
       debugPrint('[DeviceCapability] 檢查失敗 (預設允許): $e');
-      // 若檢查失敗，預設為 true（某些舊裝置可能不支援檢查 API）
       _cachedResult = true;
       return _cachedResult!;
     }

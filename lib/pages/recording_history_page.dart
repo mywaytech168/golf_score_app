@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -12,17 +13,15 @@ import 'package:video_player/video_player.dart';
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
-import 'external_video_importer_local.dart';
+import '../models/swing_hit.dart';
 import '../services/recording_history_storage.dart';
-import '../services/auth_token_storage.dart';
-import '../services/video_server_client.dart';
-import '../services/swing_split_service.dart';
 import '../services/hits_summary_storage.dart';
+import '../services/swing_impact_detector.dart';
 import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, editDuration, delete, split, upload, unbindCloud, rerunAnalysis }
+enum _HistoryMenuAction { rename, detectHits, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -62,17 +61,25 @@ class RecordingHistoryPage extends StatefulWidget {
 }
 
 class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
-  late final List<RecordingHistoryEntry> _entries =
-      List<RecordingHistoryEntry>.from(widget.entries); // 本地複製一份資料避免直接修改來源
+  List<RecordingHistoryEntry> _entries = [];
+  bool _isLoading = true;
   bool _rebuildScheduled = false; // 避免重複排程 setState 造成框架錯誤
-  final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 外部影片匯入工具
   bool? _selectedGoodShot; // 好球/壞球篩選 - null: 全部, true: 好球, false: 壞球
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
 
   @override
   void initState() {
     super.initState();
-    // 雲端同步已禁用
+    _loadFromStorage();
+  }
+
+  Future<void> _loadFromStorage() async {
+    final loaded = await RecordingHistoryStorage.instance.loadHistory();
+    if (!mounted) return;
+    setState(() {
+      _entries = loaded;
+      _isLoading = false;
+    });
   }
 
   @override
@@ -106,90 +113,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       debugPrint('[歷史頁] ⚠️ 獲取視頻時長失敗: $e，使用預設值 0');
       return 0;
     }
-  }
-
-  /// 計算 CSV 中各軌跡的峰值（加速度幅度最大值）
-  /// 返回 Map<String, double>，鍵為軌跡標籤（如 'chest', 'right_wrist'），值為該軌跡的峰值
-  Future<Map<String, double>> _calculatePeakValues(Map<String, String> imuCsvPaths) async {
-    final peakValues = <String, double>{};
-    
-    for (final entry in imuCsvPaths.entries) {
-      final label = entry.key; // 'chest' 或 'right_wrist'
-      final csvPath = entry.value;
-      
-      try {
-        final file = File(csvPath);
-        if (!await file.exists()) {
-          debugPrint('[歷史頁] ⚠️ CSV 檔案不存在: $csvPath');
-          continue;
-        }
-
-        debugPrint('[歷史頁] 正在分析 $label 軌跡: $csvPath');
-        
-        // 讀取 CSV 檔案
-        final lines = await file.readAsLines();
-        
-        // 尋找表頭行（包含 ElapsedSec, AccelX, AccelY, AccelZ）
-        int headerIdx = -1;
-        List<String> headers = [];
-        for (int i = 0; i < lines.length && i < 100; i++) {
-          final line = lines[i].trim();
-          if (line.contains('ElapsedSec') && line.contains('AccelX') && 
-              line.contains('AccelY') && line.contains('AccelZ')) {
-            headerIdx = i;
-            headers = line.split(',');
-            break;
-          }
-        }
-
-        if (headerIdx == -1) {
-          debugPrint('[歷史頁] ⚠️ 無法找到 CSV 表頭，跳過 $label');
-          continue;
-        }
-
-        final idxAx = headers.indexOf('AccelX');
-        final idxAy = headers.indexOf('AccelY');
-        final idxAz = headers.indexOf('AccelZ');
-
-        if (idxAx < 0 || idxAy < 0 || idxAz < 0) {
-          debugPrint('[歷史頁] ⚠️ 無法找到加速度欄位，跳過 $label');
-          continue;
-        }
-
-        // 計算加速度幅度的最大值
-        double maxAcceleration = 0;
-        for (int i = headerIdx + 1; i < lines.length; i++) {
-          final line = lines[i].trim();
-          if (line.isEmpty || line.startsWith('Device:') || line.startsWith('Quat')) {
-            continue;
-          }
-
-          final parts = line.split(',');
-          final maxIdx = math.max(idxAx, math.max(idxAy, idxAz));
-          if (parts.length <= maxIdx) {
-            continue;
-          }
-
-          final ax = double.tryParse(parts[idxAx]) ?? 0;
-          final ay = double.tryParse(parts[idxAy]) ?? 0;
-          final az = double.tryParse(parts[idxAz]) ?? 0;
-          
-          // 計算加速度幅度: sqrt(Ax^2 + Ay^2 + Az^2)
-          final magnitude = math.sqrt(ax * ax + ay * ay + az * az);
-          
-          if (magnitude > maxAcceleration) {
-            maxAcceleration = magnitude;
-          }
-        }
-
-        peakValues[label] = maxAcceleration;
-        debugPrint('[歷史頁] 📊 $label 峰值: ${maxAcceleration.toStringAsFixed(2)} G');
-      } catch (e) {
-        debugPrint('[歷史頁] ❌ 計算 $label 峰值失敗: $e');
-      }
-    }
-
-    return peakValues;
   }
 
   /// 為指定的視頻生成縮略圖
@@ -254,60 +177,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 找不到對應項目時直接結束
     }
 
-    // 根據視頻類型決定是否調用 API 標記為 delete
-    bool shouldDeleteDirectly = true; // 是否應該直接刪除
-
-    if (entry.videoType == VideoType.cloudClip) {
-      // 雲端切片：直接標記為 delete
-      debugPrint('[歷史頁] 雲端切片刪除，將標記雲端狀態為 delete');
-      shouldDeleteDirectly = false;
-      
-      if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
-        try {
-          final client = VideoServerClient();
-          await client.markVideoAsDeleted(entry.cloudVideoId!);
-          debugPrint('[歷史頁] ✓ 已標記雲端視頻為 delete: ${entry.cloudVideoId}');
-        } catch (e) {
-          debugPrint('[歷史頁] ⚠️ 標記雲端視頻失敗: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('標記雲端視頻失敗: $e')),
-            );
-          }
-          return;
-        }
-      }
-    } else if (entry.videoType == VideoType.localClip) {
-      // 本地切片
-      if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
-        // 有雲端綁定：標記為 delete
-        debugPrint('[歷史頁] 本地切片有雲端綁定，將標記雲端狀態為 delete');
-        shouldDeleteDirectly = false;
-        
-        try {
-          final client = VideoServerClient();
-          await client.markVideoAsDeleted(entry.cloudVideoId!);
-          debugPrint('[歷史頁] ✓ 已標記雲端視頻為 delete: ${entry.cloudVideoId}');
-        } catch (e) {
-          debugPrint('[歷史頁] ⚠️ 標記雲端視頻失敗: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('標記雲端視頻失敗: $e')),
-            );
-          }
-          return;
-        }
-      } else {
-        // 無雲端綁定：直接刪除
-        debugPrint('[歷史頁] 本地切片無雲端綁定，直接刪除');
-        shouldDeleteDirectly = true;
-      }
-    }
-
     // 移除本地檔案
-    if (shouldDeleteDirectly) {
-      await _removeEntryFiles(entry);
-    }
+    await _removeEntryFiles(entry);
 
     _entries.removeAt(index); // 先調整資料來源
     if (mounted) {
@@ -324,358 +195,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   }
 
 
-  /// 移除影片與雲端的綁定，將狀態重置為未同步
-  Future<void> _unbindCloudVideo(RecordingHistoryEntry entry) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('確認移除雲端綁定'),
-        content: const Text('這將解除影片與雲端的連接，但不會刪除雲端檔案。解除後可以重新上傳為新的影片。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('移除綁定'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    final index = _entries.indexWhere((item) =>
-        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
-    if (index == -1) return;
-
-    // 如果有 cloudVideoId，先呼叫後端 API 解除綁定
-    if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
-      try {
-        final client = VideoServerClient();
-        final success = await client.unbindVideo(entry.cloudVideoId!);
-        
-        // 如果失敗，仍然允許解除本地綁定（影片可能已在雲端刪除）
-        if (!success) {
-          debugPrint('[歷史頁] ⚠️ 雲端解除綁定失敗，但繼續本地解除綁定');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('雲端解除綁定失敗，但本地綁定已移除')),
-            );
-          }
-        } else {
-          debugPrint('[歷史頁] ✓ 雲端解除綁定成功');
-        }
-      } catch (e) {
-        debugPrint('[歷史頁] ⚠️ 解除雲端綁定出錯: $e');
-        // 出錯時也繼續本地解除（影片可能已刪除或無權限）
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('雲端已無法存取，本地綁定已移除')),
-          );
-        }
-      }
-    }
-
-    // 更新條目：清除雲端相關資訊，重置為未同步狀態
-    _entries[index] = _entries[index].copyWith(
-      syncStatus: SyncStatus.notSynced,
-      clearCloudVideoId: true,
-    );
-
-    await RecordingHistoryStorage.instance.saveHistory(_entries);
-    
-    if (mounted) {
-      setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已移除 ${entry.displayTitle} 的雲端綁定')),
-      );
-    }
-  }
-
-  /// 重新分析影片 (Re-run Analysis)
-  /// 呼叫後端 API 重新排隊分析該影片
-  Future<void> _rerunAnalysisEntry(RecordingHistoryEntry entry) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('重新分析影片'),
-        content: Text('確定要重新分析「${entry.displayTitle}」嗎？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('重新分析'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    if (!mounted) return;
-
-    // 顯示載入中的提示
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('正在重新分析 ${entry.displayTitle}...')),
-    );
-
-    try {
-      // 檢查影片是否已上傳到雲端
-      if (entry.cloudVideoId == null || entry.cloudVideoId!.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('影片尚未上傳到雲端，請先上傳')),
-        );
-        return;
-      }
-
-      // 呼叫後端 API 重新分析
-      final serverClient = VideoServerClient();
-      final response = await serverClient.rerunAnalysis(entry.cloudVideoId!);
-
-      if (!mounted) return;
-
-      if (response['success'] ?? false) {
-        debugPrint('[歷史頁] ✅ 重新分析已排隊');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已重新分析 ${entry.displayTitle}，請稍後查看結果')),
-        );
-      } else {
-        final error = response['error'] ?? '未知錯誤';
-        debugPrint('[歷史頁] ❌ 重新分析失敗：$error');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('重新分析失敗：$error')),
-        );
-      }
-    } catch (e) {
-      debugPrint('[歷史頁] ❌ 重新分析異常：$e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('重新分析失敗：$e')),
-      );
-    }
-  }
-
-  Future<void> _splitEntry(RecordingHistoryEntry entry) async {
-    // IMU CSV 分片功能已移除
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('分片功能已移除')));
-    final String outDir = p.join(p.dirname(entry.filePath), 'cut_${entry.roundIndex}');
-    // 顯示簡易等待動畫，避免使用者誤以為卡住
-    void hideLoading() {
-      if (Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-    }
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 12),
-            Text('自動分片進行中，請稍候...'),
-          ],
-        ),
-      ),
-    );
-    try {
-      // IMU CSV 分片功能已移除
-      final List<SwingClipResult> results = [];
-      if (false) {
-        // Swing split disabled - IMU data not collected
-      }
-      
-      // 構建 hits_summary.csv 路徑（與 split 中 _writeSummary 的路徑保持一致）
-      final hitsSummaryPath = results.isNotEmpty
-          ? p.join(p.dirname(results.first.videoPath), 'hits_summary.csv')
-          : p.join(outDir, 'hits_summary.csv');
-      
-      hideLoading();
-      if (results.isNotEmpty) {
-        final int baseIndex = _entries.isEmpty
-            ? 1
-            : (_entries.map((e) => e.roundIndex).reduce(math.max) + 1);
-        final List<RecordingHistoryEntry> newEntries = [];
-        for (int i = 0; i < results.length; i++) {
-          final r = results[i];
-          final duration = (r.endSecond - r.startSecond).round().clamp(0, 24 * 60 * 60);
-          
-          // 為切片生成縮圖
-          final clipThumbnailPath = _getThumbnailPath(r.videoPath);
-          
-          // 計算切片的峰值
-          final clipPeakValues = <String, double>{};
-          
-          newEntries.add(
-            RecordingHistoryEntry(
-              filePath: r.videoPath,
-              roundIndex: baseIndex + i,
-              recordedAt: DateTime.now(),
-              durationSeconds: duration,
-              customName: '${entry.displayTitle}_${r.tag}',
-              thumbnailPath: clipThumbnailPath,
-              cloudVideoId: null,
-              isClipped: true,
-              videoType: VideoType.localClip,
-            ),
-          );
-        }
-        _entries.insertAll(0, newEntries);
-        await RecordingHistoryStorage.instance.saveHistory(_entries);
-        if (mounted) {
-          setState(() {});
-        }
-        
-        // 為每個切片生成縮略圖
-        debugPrint('[歷史頁] 開始為 ${newEntries.length} 個切片生成縮略圖');
-        for (int i = 0; i < newEntries.length; i++) {
-          final clipEntry = newEntries[i];
-          debugPrint('[歷史頁] 正在為第 $i 個切片生成縮略圖: ${clipEntry.filePath}');
-          
-          // 實際生成縮略圖文件
-          final generatedThumbnailPath = await _generateThumbnailForVideo(clipEntry.filePath);
-          
-          if (generatedThumbnailPath != null && generatedThumbnailPath.isNotEmpty) {
-            // 更新本地記錄中的縮略圖路徑
-            _entries[i] = _entries[i].copyWith(thumbnailPath: generatedThumbnailPath);
-            debugPrint('[歷史頁] ✅ 第 $i 個切片的縮略圖已生成: $generatedThumbnailPath');
-          } else {
-            debugPrint('[歷史頁] ⚠️ 第 $i 個切片的縮略圖生成失敗');
-          }
-        }
-        await RecordingHistoryStorage.instance.saveHistory(_entries);
-        
-        // 自動上傳每個切片
-        debugPrint('[歷史頁] 開始自動上傳 ${newEntries.length} 個切片');
-        for (final clipEntry in newEntries) {
-          debugPrint('[歷史頁] 正在上傳切片: ${clipEntry.customName}');
-          await _uploadEntry(clipEntry);
-        }
-        
-        // 上傳 hits_summary 到原始視頻
-        debugPrint('[歷史頁] 準備上傳摆球摘要到原始視頻');
-        if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
-          debugPrint('[歷史頁] 原始視頻 ID: ${entry.cloudVideoId}');
-          try {
-            final uploadResult = await VideoServerClient().uploadHitsSummary(
-              videoId: entry.cloudVideoId!,
-              hitsSummaryCsvPath: hitsSummaryPath,
-            );
-            
-            if (uploadResult['success'] == true) {
-              debugPrint('[歷史頁] ✅ 摆球摘要上傳成功到原始視頻');
-            } else {
-              debugPrint('[歷史頁] ⚠️ 摆球摘要上傳失敗: ${uploadResult['error']}');
-            }
-          } catch (e) {
-            debugPrint('[歷史頁] ⚠️ 摆球摘要上傳異常: $e');
-          }
-        } else {
-          debugPrint('[歷史頁] ℹ️ 原始視頻尚未上傳到雲端，摆球摘要將在視頻同步後再上傳');
-        }
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分片完成：${results.length} 段')));
-    } catch (e) {
-      hideLoading();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分片失敗：$e')));
-    }
-  }
-
-  /// 顯示輸入框調整秒數並更新記錄
-  Future<void> _editEntryDuration(RecordingHistoryEntry entry) async {
-    debugPrint('[歷史頁] 準備調整影片時長：${entry.fileName} 當前秒數=${entry.durationSeconds}');
-    String tempValue = entry.durationSeconds.toString(); // 暫存輸入內容，避免控制器重複使用
-    final formKey = GlobalKey<FormState>();
-    final newDuration = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('調整影片時長'),
-          content: Form(
-            key: formKey,
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            child: TextFormField(
-              initialValue: tempValue,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '秒數',
-                helperText: '輸入影片實際秒數（正整數）',
-              ),
-              onChanged: (value) => tempValue = value,
-              validator: (value) {
-                final trimmed = value?.trim() ?? '';
-                final parsed = int.tryParse(trimmed);
-                if (parsed == null || parsed <= 0) {
-                  return '請輸入大於 0 的秒數';
-                }
-                return null;
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final isValid = formKey.currentState?.validate() ?? false;
-                if (!isValid) {
-                  return;
-                }
-                final parsed = int.parse(tempValue.trim());
-                Navigator.of(dialogContext).pop(parsed);
-              },
-              child: const Text('儲存'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (!mounted || newDuration == null) {
-      debugPrint('[歷史頁] 調整時長流程取消或頁面已卸載');
-      return;
-    }
-
-    final index = _entries.indexWhere((item) =>
-        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
-    if (index == -1) {
-      debugPrint('[歷史頁] 找不到對應紀錄，無法更新時長');
-      return;
-    }
-
-    if (_entries[index].durationSeconds == newDuration) {
-      debugPrint('[歷史頁] 秒數未變更（$newDuration 秒），略過更新');
-      return; // 秒數未變更時略過更新
-    }
-
-    _entries[index] = _entries[index].copyWith(durationSeconds: newDuration);
-    debugPrint('[歷史頁] 更新索引 $index 的時長為 $newDuration 秒，準備儲存');
-    if (mounted) {
-      debugPrint('[歷史頁] 調整秒數後重繪列表');
-      _scheduleRebuild(); // 透過佇列化的排程避免與對話框動畫衝突
-    }
-
-    await RecordingHistoryStorage.instance.saveHistory(_entries);
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已更新 ${entry.displayTitle} 為 $newDuration 秒')),
-    );
-  }
 
   /// 提供重新命名功能，讓使用者快速辨識影片
   Future<void> _renameEntry(RecordingHistoryEntry entry) async {
@@ -753,33 +272,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     }
 
     final defaultTitle = entry.copyWith(customName: '').displayTitle;
-
-    // 如果有雲端綁定，先更新雲端名稱
-    if (entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty) {
-      try {
-        final client = VideoServerClient();
-        final displayName = storedName.isEmpty ? defaultTitle : storedName;
-        final success = await client.updateVideoName(entry.cloudVideoId!, displayName);
-        
-        if (success) {
-          debugPrint('[歷史頁] ✓ 已更新雲端影片名稱: $displayName');
-        } else {
-          debugPrint('[歷史頁] ⚠️ 更新雲端名稱失敗，但繼續更新本地');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('本地已更新，但雲端名稱更新失敗')),
-            );
-          }
-        }
-      } catch (e) {
-        debugPrint('[歷史頁] ⚠️ 更新雲端名稱異常: $e，但繼續更新本地');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('本地已更新，但雲端同步失敗: $e')),
-          );
-        }
-      }
-    }
 
     _entries[index] = _entries[index].copyWith(customName: storedName);
     debugPrint('[歷史頁] 更新索引 $index 的名稱為 "$storedName"，準備儲存');
@@ -859,218 +351,16 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 嘗試播放指定的錄影紀錄，並在檔案遺失時提示使用者
   Future<void> _playEntry(RecordingHistoryEntry entry) async {
-    await _playVideoByPath(entry.filePath, missingFileName: entry.fileName, cloudVideoId: entry.cloudVideoId);
-  }
-
-  Future<void> _showRecordingTypeDialog(RecordingHistoryEntry entry) async {
-    if (!mounted) return;
-    
-    bool isClipped = false; // 用戶選擇的錄影類型
-    bool uploadVideo = true; // 是否上傳影片
-    bool uploadTrajectory = true; // 是否上傳軌跡
-    bool directUpload = false; // 是否直接上傳（立即上傳）
-    
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            return AlertDialog(
-              title: const Text('上傳設定'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('影片名稱: ${entry.displayTitle}'),
-                    const SizedBox(height: 16),
-                    
-                    // 錄影類型選擇
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              '錄影類型',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ListTile(
-                                    title: const Text('完整錄影'),
-                                    leading: Radio<bool>(
-                                      value: false,
-                                      groupValue: isClipped,
-                                      onChanged: (value) {
-                                        setState(() {
-                                          isClipped = value ?? false;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: ListTile(
-                                    title: const Text('已切割切片'),
-                                    leading: Radio<bool>(
-                                      value: true,
-                                      groupValue: isClipped,
-                                      onChanged: (value) {
-                                        setState(() {
-                                          isClipped = value ?? false;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    
-                    // 上傳內容選擇
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              '上傳內容',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            CheckboxListTile(
-                              title: const Text('上傳影片'),
-                              value: uploadVideo,
-                              onChanged: (value) {
-                                setState(() {
-                                  uploadVideo = value ?? true;
-                                });
-                              },
-                            ),
-                            CheckboxListTile(
-                              title: const Text('上傳軌跡'),
-                              value: uploadTrajectory,
-                              onChanged: (value) {
-                                setState(() {
-                                  uploadTrajectory = value ?? true;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    
-                    // 上傳方式選擇
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              '上傳方式',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ListTile(
-                                    title: const Text('稍後上傳'),
-                                    leading: Radio<bool>(
-                                      value: false,
-                                      groupValue: directUpload,
-                                      onChanged: (value) {
-                                        setState(() {
-                                          directUpload = value ?? false;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: ListTile(
-                                    title: const Text('直接上傳'),
-                                    leading: Radio<bool>(
-                                      value: true,
-                                      groupValue: directUpload,
-                                      onChanged: (value) {
-                                        setState(() {
-                                          directUpload = value ?? false;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    // 根據選擇進行上傳
-                    String uploadType = 'none';
-                    if (uploadVideo && uploadTrajectory) {
-                      uploadType = 'full';
-                    } else if (uploadVideo) {
-                      uploadType = 'video';
-                    } else if (uploadTrajectory) {
-                      uploadType = 'trajectory';
-                    }
-                    
-                    if (uploadType != 'none') {
-                      _uploadEntry(entry, uploadType: uploadType, isClipped: isClipped, directUpload: directUpload);
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('請至少選擇上傳影片或軌跡')),
-                      );
-                    }
-                  },
-                  child: const Text('確認上傳'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /// 影片記錄建檔對話框 - 用於單條記錄
-  Future<void> _showRecordingArchiveDialogForEntry(RecordingHistoryEntry entry) async {
-    await _showRecordingArchiveDialogImpl(entry: entry);
+    await _playVideoByPath(entry.filePath, missingFileName: entry.fileName);
   }
 
   /// 影片記錄建檔對話框 - 右上角按鈕，用於建立新記錄
   Future<void> _showRecordingArchiveDialog() async {
-    await _showRecordingArchiveDialogImpl(forNewEntry: true);
+    await _showRecordingArchiveDialogImpl();
   }
 
   /// 影片記錄建檔對話框 - 統一實現
-  Future<void> _showRecordingArchiveDialogImpl({RecordingHistoryEntry? entry, bool forNewEntry = false}) async {
+  Future<void> _showRecordingArchiveDialogImpl() async {
     if (!mounted) return;
     
     bool isClipped = false;
@@ -1502,21 +792,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         throw Exception('選擇的影片不存在');
       }
 
-      // 構建 imuCsvPaths（只包含已選擇的軌跡）
-      final Map<String, String> imuCsvPaths = {};
-      if (selectedChestCsvPath.isNotEmpty) {
-        if (!await File(selectedChestCsvPath).exists()) {
-          throw Exception('CHEST軌跡檔案不存在');
-        }
-        imuCsvPaths['chest'] = selectedChestCsvPath;
-      }
-      if (selectedRightWristCsvPath.isNotEmpty) {
-        if (!await File(selectedRightWristCsvPath).exists()) {
-          throw Exception('RIGHT WRIST軌跡檔案不存在');
-        }
-        imuCsvPaths['right_wrist'] = selectedRightWristCsvPath;
-      }
-
       // 生成縮略圖路徑
       final thumbnailPath = _getThumbnailPath(selectedVideoPath);
 
@@ -1544,7 +819,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         durationSeconds: durationSeconds,
         customName: '',
         thumbnailPath: finalThumbnailPath,
-        cloudVideoId: null,
         isClipped: isClipped,
         videoType: VideoType.localClip,
       );
@@ -1563,372 +837,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       debugPrint('[歷史頁] ✅ 新記錄建立成功');
       debugPrint('[歷史頁] 📋 記錄 ID: ${newEntry.roundIndex}');
       debugPrint('[歷史頁] 🎬 影片: ${newEntry.filePath}');
-      debugPrint('[歷史頁] 📊 軌跡: ${imuCsvPaths.keys.join(", ")}');
     } catch (e) {
       debugPrint('[歷史頁] ❌ 建立記錄失敗: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('建立記錄失敗：$e')),
-      );
-    }
-  }
-
-  /// 上傳未同步的錄影
-  Future<void> _uploadEntry(RecordingHistoryEntry entry, {
-    String? uploadType, // 'video', 'trajectory', 'full', or null for default
-    bool? isClipped,
-    bool? directUpload,
-  }) async {
-    // 只有已同步或正在同步中的才禁止上傳，失败也允许重新上传
-    if (entry.syncStatus == SyncStatus.synced || entry.syncStatus == SyncStatus.syncing) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('此影片已同步或正在同步中')),
-      );
-      return;
-    }
-
-    // 如果沒有指定上傳類型，使用預設值（上傳影片和軌跡）
-    uploadType ??= 'full';
-    
-    // 如果選擇稍後上傳，只保存狀態不立即上傳
-    if (directUpload == false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${entry.displayTitle} 已保存上傳設定，稍後可再次點擊上傳按鈕進行上傳')),
-      );
-      return;
-    }
-
-    debugPrint('═══════════════════════════════════════════════════════════');
-    debugPrint('[歷史頁] 開始上傳流程');
-    debugPrint('═══════════════════════════════════════════════════════════');
-    debugPrint('📹 影片名稱: ${entry.displayTitle}');
-    debugPrint('📂 檔案名稱: ${entry.fileName}');
-    debugPrint('📍 檔案路徑: ${entry.filePath}');
-    debugPrint('⏰ 錄製時間: ${entry.recordedAt}');
-    debugPrint('📊 同步狀態: ${entry.syncStatus}');
-    debugPrint('🎬 上傳類型: $uploadType');
-    debugPrint('📋 是否為切割: ${isClipped ?? false}');
-    debugPrint('⚡ 直接上傳: ${directUpload ?? true}');
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('開始上傳 ${entry.displayTitle}...')),
-    );
-
-    // 更新同步狀態為 syncing
-    final int entryIndex = _entries.indexWhere((e) =>
-        e.filePath == entry.filePath && e.recordedAt == entry.recordedAt);
-    if (entryIndex == -1) return;
-
-    _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.syncing);
-    if (mounted) {
-      setState(() {});
-    }
-
-    try {
-      // 檢查用戶是否已登入
-      debugPrint('[歷史頁] 檢查登入狀態...');
-      final isLoggedIn = await AuthTokenStorage.instance.isLoggedIn();
-      final userId = await AuthTokenStorage.instance.getUserId();
-      debugPrint('✅ 登入狀態: $isLoggedIn');
-      debugPrint('👤 用戶 ID: $userId');
-      
-      if (!isLoggedIn) {
-        // 導航到登入頁面
-        if (!mounted) return;
-        
-        _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
-        if (mounted) {
-          setState(() {});
-        }
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('請登入後重試上傳')),
-        );
-        
-        Navigator.of(context).pushReplacementNamed('/login');
-        return;
-      }
-
-      // 檢查文件是否存在
-      debugPrint('[歷史頁] 檢查本地檔案...');
-      final file = File(entry.filePath);
-      final exists = await file.exists();
-      debugPrint('📂 檔案存在: $exists');
-      
-      if (!exists) {
-        throw Exception('視頻文件不存在：${entry.filePath}');
-      }
-
-      final fileSize = await file.length();
-      debugPrint('💾 檔案大小: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
-
-      final serverClient = VideoServerClient();
-
-      // 1. 在服務器上建立視頻紀錄
-      debugPrint('[歷史頁] 步驟 1：建立服務器視頻紀錄');
-      
-      // Peak value extraction removed - IMU data no longer collected
-      double? mainPeakValue = null;
-      
-      final createResponse = await serverClient.createVideo(
-        name: entry.displayTitle,
-        type: 'original',
-        hitSecond: entry.hitSecond,
-        startSecond: entry.startSecond,
-        endSecond: entry.endSecond,
-        peakValue: null,
-        rawPeakValues: null,
-      );
-
-      if (!createResponse['success']) {
-        final error = createResponse['error'] ?? '未知錯誤';
-        
-        // 如果是 401 未授權，返回登入頁
-        if (error.contains('401') || error.contains('未授權') || error.contains('無效的用戶身份')) {
-          if (!mounted) return;
-          
-          _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
-          if (mounted) {
-            setState(() {});
-          }
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('登入已過期，請重新登入')),
-          );
-          
-          await AuthTokenStorage.instance.clearTokens();
-          Navigator.of(context).pushReplacementNamed('/login');
-          return;
-        }
-        
-        throw Exception('建立視頻失敗：$error');
-      }
-
-      // 從響應中提取視頻 ID
-      // VideoServerClient 返回結構: { success: true, data: {...parsed json...} }
-      // 而伺服器 API 的 JSON 返回結構: { success: true, video: { id: "...", ... } }
-      var videoId;
-      
-      final data = createResponse['data'];
-      if (data is Map) {
-        // 直接取 data['video']['id'] 或 data['id']
-        if (data['video'] != null) {
-          videoId = data['video']['id'];
-        } else {
-          videoId = data['id'];
-        }
-      }
-      
-      if (videoId == null || videoId.toString().isEmpty) {
-        debugPrint('[歷史頁] DEBUG 回應: $createResponse');
-        throw Exception('無法從服務器回應取得視頻 ID');
-      }
-
-      debugPrint('[歷史頁] ✅ 視頻紀錄建立成功，ID: $videoId');
-
-      // 立即將 videoId 綁定到本地記錄（用於追踪和恢復）
-      _entries[entryIndex] = _entries[entryIndex].copyWith(
-        cloudVideoId: videoId,
-      );
-      await RecordingHistoryStorage.instance.saveHistory(_entries);
-      debugPrint('[歷史頁] 已將視頻 ID 綁定到本地記錄：cloudVideoId=$videoId');
-
-      // 2. 上傳視頻文件（除非只上傳軌跡）
-      if (uploadType != 'trajectory') {
-        debugPrint('[歷史頁] 步驟 2：上傳視頻文件');
-        debugPrint('📤 正在上傳檔案到伺服器...');
-        debugPrint('🔗 API 端點: /api/videos/$videoId/files');
-        final videoFileType = entry.isClipped ? 'clip' : 'original';
-        final uploadResponse = await serverClient.uploadVideoFile(
-          videoId: videoId,
-          videoFilePath: entry.filePath,
-          fileType: videoFileType,
-          sourceLocalFilePath: entry.filePath,
-        );
-
-        debugPrint('📥 上傳回應: ${uploadResponse['success']}');
-        
-        if (!uploadResponse['success']) {
-          final error = uploadResponse['error'] ?? '未知錯誤';
-          debugPrint('❌ 上傳錯誤: $error');
-          
-          // 如果是 401 未授權，返回登入頁
-          if (error.contains('401') || error.contains('未授權')) {
-            if (!mounted) return;
-            
-            _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
-            if (mounted) {
-              setState(() {});
-            }
-            
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('登入已過期，請重新登入')),
-            );
-            
-            await AuthTokenStorage.instance.clearTokens();
-            Navigator.of(context).pushReplacementNamed('/login');
-            return;
-          }
-          
-          throw Exception('上傳文件失敗：$error');
-        }
-
-        debugPrint('[歷史頁] ✅ 視頻文件上傳成功');
-      }
-
-      // 2.5 上傳 CSV 文件（IMU 數據）（除非只上傳影片）
-      if (uploadType != 'video') {
-        debugPrint('[歷史頁] 步驟 2.5：CSV 文件上傳已禁用');
-      }
-
-      // 2.6 上傳縮略圖（如果存在且不只上傳軌跡）
-      if (uploadType != 'trajectory') {
-        debugPrint('[歷史頁] 步驟 2.6：上傳縮略圖');
-        // 優先使用本地記錄的 thumbnailPath，如果沒有則試圖生成
-        final storedThumbnailPath = entry.thumbnailPath?.trim() ?? '';
-        final generatedThumbnailPath = _getThumbnailPath(entry.filePath);
-        
-        String? finalThumbnailPath;
-        if (storedThumbnailPath.isNotEmpty && await File(storedThumbnailPath).exists()) {
-          finalThumbnailPath = storedThumbnailPath;
-          debugPrint('📸 使用已記錄的縮略圖: $storedThumbnailPath');
-        } else if (await File(generatedThumbnailPath).exists()) {
-          finalThumbnailPath = generatedThumbnailPath;
-          debugPrint('📸 使用生成的縮略圖路徑: $generatedThumbnailPath');
-        }
-        
-        if (finalThumbnailPath != null && finalThumbnailPath.isNotEmpty) {
-          debugPrint('📸 發現縮略圖: $finalThumbnailPath');
-          final thumbnailResponse = await serverClient.uploadVideoFile(
-            videoId: videoId,
-            videoFilePath: finalThumbnailPath,
-            fileType: 'thumbnail',
-            sourceLocalFilePath: finalThumbnailPath,
-          );
-
-          if (thumbnailResponse['success']) {
-            debugPrint('[歷史頁] ✅ 縮略圖上傳成功');
-          } else {
-            debugPrint('[歷史頁] ⚠️ 縮略圖上傳失敗，但繼續進行');
-          }
-        } else {
-          debugPrint('📸 未找到縮略圖，跳過上傳');
-        }
-      }
-
-      // 3. 標記影片上傳完成
-      debugPrint('[歷史頁] 步驟 3：標記上傳完成');
-      final completeResponse = await serverClient.markVideoUploadComplete(
-        videoId: videoId,
-      );
-
-      if (!completeResponse['success']) {
-        final error = completeResponse['error'] ?? '未知錯誤';
-        debugPrint('❌ 標記完成失敗: $error');
-        
-        if (error.contains('401') || error.contains('未授權')) {
-          if (!mounted) return;
-          
-          _entries[entryIndex] = entry.copyWith(syncStatus: SyncStatus.notSynced);
-          if (mounted) {
-            setState(() {});
-          }
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('登入已過期，請重新登入')),
-          );
-          
-          await AuthTokenStorage.instance.clearTokens();
-          Navigator.of(context).pushReplacementNamed('/login');
-          return;
-        }
-        
-        throw Exception('標記上傳完成失敗：$error');
-      }
-
-      debugPrint('[歷史頁] ✅ 影片上傳完成標記成功');
-
-      // 4. 從雲端重新獲取最新的視頻元數據和處理狀態
-      debugPrint('[歷史頁] 步驟 4：從雲端重新獲取視頻元數據和處理狀態...');
-      try {
-        final serverClient = VideoServerClient();
-        final videoDetailResponse = await serverClient.getVideoDetail(videoId);
-        
-        if (videoDetailResponse['success']) {
-          final videoDetail = videoDetailResponse['data'] as Map<String, dynamic>;
-          final queueStatus = videoDetail['queueStatus'] as Map<String, dynamic>?;
-          
-          // 更新 processingStatus
-          ProcessingStatus updatedProcessingStatus = ProcessingStatus.notStarted;
-          if (queueStatus != null) {
-            final latestStatus = queueStatus['status']?.toString() ?? 'notStarted';
-            updatedProcessingStatus = ProcessingStatus.fromString(latestStatus);
-            debugPrint('📊 從雲端獲取最新處理狀態: $latestStatus');
-          }
-          
-          // 提取音頻分析數據
-          double? audioCrispness;
-          bool? goodShot;
-          if (videoDetail['audioCrispness'] != null) {
-            audioCrispness = (videoDetail['audioCrispness'] as num?)?.toDouble();
-          }
-          if (videoDetail['goodShot'] != null) {
-            goodShot = videoDetail['goodShot'] as bool?;
-          }
-          
-          // 保存最新的元數據
-          _entries[entryIndex] = _entries[entryIndex].copyWith(
-            syncStatus: SyncStatus.synced,
-            cloudVideoId: videoId.toString(),
-            processingStatus: updatedProcessingStatus,
-            audioCrispness: audioCrispness,
-            goodShot: goodShot,
-          );
-        } else {
-          // 如果無法獲取，仍然保存同步狀態但保留原有的 processingStatus
-          _entries[entryIndex] = _entries[entryIndex].copyWith(
-            syncStatus: SyncStatus.synced,
-            cloudVideoId: videoId.toString(),
-          );
-          debugPrint('⚠️ 無法從雲端獲取最新元數據，但上傳已成功');
-        }
-      } catch (e) {
-        debugPrint('⚠️ 獲取雲端元數據失敗: $e，但上傳已成功');
-        // 即使失敗也繼續，至少保存同步狀態
-        _entries[entryIndex] = _entries[entryIndex].copyWith(
-          syncStatus: SyncStatus.synced,
-          cloudVideoId: videoId.toString(),
-        );
-      }
-      
-      await RecordingHistoryStorage.instance.saveHistory(_entries);
-      
-      if (!mounted) return;
-      setState(() {});
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${entry.displayTitle} 上傳成功')),
-      );
-
-      debugPrint('[歷史頁] ✅ 上傳流程完成');
-      debugPrint('═══════════════════════════════════════════════════════════');
-    } catch (e) {
-      debugPrint('═══════════════════════════════════════════════════════════');
-      debugPrint('[歷史頁] ❌ 上傳失敗: $e');
-      debugPrint('📋 堆棧追蹤:');
-      debugPrint(e.toString());
-      debugPrint('═══════════════════════════════════════════════════════════');
-      
-      _entries[entryIndex] = _entries[entryIndex].copyWith(
-        syncStatus: SyncStatus.failed,
-        uploadError: e.toString(),
-      );
-      if (mounted) {
-        setState(() {});
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('上傳失敗：$e')),
       );
     }
   }
@@ -1984,24 +897,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   }
 
   /// 實際進行影片播放與檔案檢查的共用方法
-  Future<void> _playVideoByPath(String path, {String? missingFileName, String? cloudVideoId}) async {
-    // 如果有云端视频 ID，直接使用云端版本，不检查本地文件
-    if (cloudVideoId != null && cloudVideoId.isNotEmpty) {
-      debugPrint('[歷史頁] 優先使用雲端視頻：$cloudVideoId');
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => VideoPlayerPage(
-            videoPath: path,
-            avatarPath: widget.userAvatarPath,
-            cloudVideoId: cloudVideoId,
-          ),
-        ),
-      );
-      return;
-    }
-
-    // 没有云端版本，检查本地文件
+  Future<void> _playVideoByPath(String path, {String? missingFileName}) async {
+    // 检查本地文件
     final file = File(path);
     if (!await file.exists()) {
       if (!mounted) return;
@@ -2082,11 +979,18 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('錄影歷史')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     // 根据选中的过滤条件过滤条目
     var filteredEntries = _selectedGoodShot == null
         ? _entries
         : _entries.where((entry) => entry.goodShot == _selectedGoodShot).toList();
-    
+
     // 應用排序
     filteredEntries = _sortEntries(filteredEntries);
 
@@ -2211,18 +1115,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           formattedTime: _formatTimestamp(entry.recordedAt),
                           onTap: () => _playEntry(entry),
                           onRename: () => _renameEntry(entry),
-                          onEditDuration: () => _editEntryDuration(entry),
-                          onSplit: () => _splitEntry(entry),
                           onDelete: () => _deleteEntry(entry),
-                          onUpload: entry.syncStatus == SyncStatus.notSynced || entry.syncStatus == SyncStatus.failed
-                              ? () => _uploadEntry(entry)
-                              : null,
-                          onUnbindCloud: entry.syncStatus == SyncStatus.synced
-                              ? () => _unbindCloudVideo(entry)
-                              : null,
-                          onRerunAnalysis: entry.cloudVideoId != null && entry.cloudVideoId!.isNotEmpty
-                              ? () => _rerunAnalysisEntry(entry)
-                              : null,
                         );
                       },
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -2269,24 +1162,14 @@ class _HistoryTile extends StatefulWidget {
   final String formattedTime; // 已轉換好的顯示時間
   final VoidCallback onTap; // 點擊後的播放行為
   final VoidCallback onRename; // 重新命名影片
-  final VoidCallback onEditDuration; // 調整影片時長
-  final VoidCallback onSplit; // 自動分片
   final VoidCallback onDelete; // 刪除影片紀錄
-  final VoidCallback? onUpload; // 上傳影片（未同步時可用）
-  final VoidCallback? onUnbindCloud; // 移除雲端綁定（已同步時可用）
-  final VoidCallback? onRerunAnalysis; // 重新分析影片
 
   const _HistoryTile({
     required this.entry,
     required this.formattedTime,
     required this.onTap,
     required this.onRename,
-    required this.onEditDuration,
-    required this.onSplit,
     required this.onDelete,
-    this.onUpload,
-    this.onUnbindCloud,
-    this.onRerunAnalysis,
   });
 
   @override
@@ -2295,13 +1178,14 @@ class _HistoryTile extends StatefulWidget {
 
 class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
-  late Future<Map<String, dynamic>> _cloudVideoDetailFuture;
+  late Future<List<SwingHit>> _swingHitsFuture;
+  bool _isDetecting = false;
 
   @override
   void initState() {
     super.initState();
     _loadHitsSummary();
-    _loadCloudVideoDetail();
+    _swingHitsFuture = SwingHit.loadFromSession(p.dirname(widget.entry.filePath));
   }
 
   void _loadHitsSummary() {
@@ -2314,24 +1198,58 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
-  /// 如果有云端绑定，从云端获取视频详细信息
-  void _loadCloudVideoDetail() {
-    if (widget.entry.cloudVideoId != null && widget.entry.cloudVideoId!.isNotEmpty) {
-      debugPrint('[歷史磚] 加載雲端視頻詳情: ${widget.entry.cloudVideoId}');
-      final serverClient = VideoServerClient();
-      _cloudVideoDetailFuture = serverClient.getVideoDetail(widget.entry.cloudVideoId!);
-    } else {
-      // 如果沒有雲端綁定，返回空的 Future
-      _cloudVideoDetailFuture = Future.value({
-        'success': false,
-        'data': null,
-      });
-    }
-  }
+  /// 執行擊球偵測：讀取 pose CSV 與可選音頻 PCM，
+  /// 呼叫 SwingImpactDetector，將結果存入 hits.json 並刷新面板。
+  Future<void> _runDetection() async {
+    if (_isDetecting) return;
+    setState(() => _isDetecting = true);
 
-  /// 從 peakValues Map 中獲取最高峰值
-  double? _getMaxPeakValue(RecordingHistoryEntry entry) {
-    return null;
+    try {
+      final sessionDir = p.dirname(widget.entry.filePath);
+      final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
+
+      // 嘗試讀取原始 float32 PCM（若存在）
+      List<double> audioPcm = [];
+      const int sampleRate = 44100;
+      final pcmFile = File(p.join(sessionDir, 'audio.pcm'));
+      if (await pcmFile.exists()) {
+        final bytes = await pcmFile.readAsBytes();
+        final byteData = bytes.buffer.asByteData();
+        audioPcm = List<double>.generate(
+          bytes.length ~/ 4,
+          (i) => byteData.getFloat32(i * 4, Endian.little),
+        );
+      }
+
+      final hits = await SwingImpactDetector.detect(
+        csvPath: csvPath,
+        audioPcm: audioPcm,
+        audioSampleRate: sampleRate,
+      );
+
+      await SwingHit.saveToSession(sessionDir, hits);
+
+      if (!mounted) return;
+      setState(() {
+        _swingHitsFuture = Future.value(hits);
+        _isDetecting = false;
+      });
+
+      final msg = hits.isEmpty ? '未偵測到擊球（請確認 pose CSV 資料）' : '偵測到 ${hits.length} 次擊球 ✅';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
+    } catch (e) {
+      debugPrint('[偵測擊球] 錯誤: $e');
+      if (!mounted) return;
+      setState(() => _isDetecting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('偵測失敗: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -2367,98 +1285,22 @@ class _HistoryTileState extends State<_HistoryTile> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // 如果是雲端影片，顯示雲端名稱；否則顯示本地名稱
-                      if (widget.entry.videoType == VideoType.cloudClip)
-                        FutureBuilder<Map<String, dynamic>>(
-                          future: _cloudVideoDetailFuture,
-                          builder: (context, snapshot) {
-                            String displayName = widget.entry.displayTitle;
-                            if (snapshot.hasData && (snapshot.data?['success'] ?? false)) {
-                              final videoDetail = snapshot.data!['data'] as Map<String, dynamic>?;
-                              if (videoDetail != null && videoDetail['name'] != null) {
-                                displayName = videoDetail['name'] as String;
-                              }
-                            }
-                            return Text(
-                              displayName,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF123B70),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            );
-                          },
-                        )
-                      else
-                        Text(
-                          widget.entry.displayTitle,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF123B70),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      Text(
+                        widget.entry.displayTitle,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF123B70),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       const SizedBox(height: 4),
                       // 狀態徽章區 - 使用 Wrap 以支援標籤換行
                       Wrap(
                         spacing: 6,
                         runSpacing: 4,
                         children: [
-                          // 同步狀態徽章
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: widget.entry.syncStatus.badgeColor.withAlpha(30),
-                              border: Border.all(
-                                color: widget.entry.syncStatus.badgeColor,
-                                width: 1,
-                              ),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              // 雲端影片且已同步時，顯示「雲端」；否則顯示同步狀態
-                              (widget.entry.videoType == VideoType.cloudClip &&
-                               widget.entry.syncStatus == SyncStatus.synced)
-                                  ? '☁️ 雲端'
-                                  : widget.entry.syncStatus.label,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: widget.entry.syncStatus.badgeColor,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          // 處理隊列狀態（已同步時顯示）
-                          if (widget.entry.syncStatus == SyncStatus.synced)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: widget.entry.processingStatus.badgeColor.withAlpha(30),
-                                border: Border.all(
-                                  color: widget.entry.processingStatus.badgeColor,
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                widget.entry.processingStatus.label,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: widget.entry.processingStatus.badgeColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
                           // 已切片標記（只對原始影片顯示）
                           if (widget.entry.videoType == VideoType.original &&
                               widget.entry.isClipped)
@@ -2481,30 +1323,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                                   fontSize: 10,
                                   color: Color(0xFFFF9800),
                                   fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          // 雲端影片高亮 - 有cloudVideoId時顯示
-                          if (widget.entry.cloudVideoId != null && widget.entry.cloudVideoId!.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2196F3).withAlpha(40),
-                                border: Border.all(
-                                  color: const Color(0xFF2196F3),
-                                  width: 1.5,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                '☁️ 雲端下載',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF2196F3),
-                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ),
@@ -2557,23 +1375,11 @@ class _HistoryTileState extends State<_HistoryTile> {
                         case _HistoryMenuAction.rename:
                           widget.onRename();
                           break;
-                        case _HistoryMenuAction.editDuration:
-                          widget.onEditDuration();
-                          break;
-                        case _HistoryMenuAction.split:
-                          widget.onSplit();
-                          break;
-                        case _HistoryMenuAction.upload:
-                          widget.onUpload?.call();
+                        case _HistoryMenuAction.detectHits:
+                          _runDetection();
                           break;
                         case _HistoryMenuAction.delete:
                           widget.onDelete();
-                          break;
-                        case _HistoryMenuAction.unbindCloud:
-                          widget.onUnbindCloud?.call();
-                          break;
-                        case _HistoryMenuAction.rerunAnalysis:
-                          widget.onRerunAnalysis?.call();
                           break;
                       }
                     });
@@ -2583,28 +1389,33 @@ class _HistoryTileState extends State<_HistoryTile> {
                       value: _HistoryMenuAction.rename,
                       child: Text('重新命名'),
                     ),
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.editDuration,
-                      child: Text('調整時長'),
+                    PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.detectHits,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.sports_golf,
+                            size: 18,
+                            color: _isDetecting ? Colors.grey : const Color(0xFF1E8E5A),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isDetecting ? '偵測中...' : '偵測擊球',
+                            style: TextStyle(
+                              color: _isDetecting ? Colors.grey : null,
+                            ),
+                          ),
+                          if (_isDetecting) ...[
+                            const SizedBox(width: 8),
+                            const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
-                    // 只有本地原始影片才能自動分片，切片影片不顯示此選項
-                    if (!widget.entry.isClipped)
-                      const PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.split,
-                        child: Text('自動分片'),
-                      ),
-                    // 若是雲端切片，不顯示上傳
-                    if (widget.onUpload != null && widget.entry.videoType != VideoType.cloudClip)
-                      const PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.upload,
-                        child: Text('上傳到雲端'),
-                      ),
-                    // 若是雲端切片，不顯示移除雲端綁定
-                    if (widget.entry.syncStatus == SyncStatus.synced && widget.entry.videoType != VideoType.cloudClip)
-                      const PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.unbindCloud,
-                        child: Text('移除雲端綁定'),
-                      ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.delete,
                       child: Text('刪除影片'),
@@ -2640,27 +1451,16 @@ class _HistoryTileState extends State<_HistoryTile> {
               ],
             ),
             const SizedBox(height: 6),
-            // 第三行：最佳速度和聲音清脆度
-            if (false || widget.entry.audioCrispness != null)
+            // 第三行：聲音清脆度
+            if (widget.entry.audioCrispness != null)
               Row(
                 children: [
-                  if (false) ...[
-                    const Icon(Icons.trending_up, size: 14, color: Color(0xFF1976D2)),
-                    const SizedBox(width: 4),
-                    Text(
-                      '速度: ${_getMaxPeakValue(widget.entry)?.toStringAsFixed(1) ?? 'N/A'}',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF1976D2), fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(width: 16),
-                  ],
-                  if (widget.entry.audioCrispness != null) ...[
-                    const Icon(Icons.music_note, size: 14, color: Color(0xFFFF6F00)),
-                    const SizedBox(width: 4),
-                    Text(
-                      '清脆度: ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFFFF6F00), fontWeight: FontWeight.w500),
-                    ),
-                  ],
+                  const Icon(Icons.music_note, size: 14, color: Color(0xFFFF6F00)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '清脆度: ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFFFF6F00), fontWeight: FontWeight.w500),
+                  ),
                 ],
               ),
             const SizedBox(height: 6),
@@ -2676,15 +1476,6 @@ class _HistoryTileState extends State<_HistoryTile> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            if (false) ...[
-              const SizedBox(height: 6),
-              Text(
-                'IMU CSV：(Not Available)',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF4F5D75)),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
             // 摆球摘要展开面板
             const SizedBox(height: 12),
             FutureBuilder<List<HitsSummary>>(
@@ -2713,146 +1504,143 @@ class _HistoryTileState extends State<_HistoryTile> {
                 );
               },
             ),
-            // 云端處理隊列狀態顯示
-            if (widget.entry.cloudVideoId != null && widget.entry.cloudVideoId!.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              FutureBuilder<Map<String, dynamic>>(
-                future: _cloudVideoDetailFuture,
+            // 擊球偵測列表
+            if (_isDetecting)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      '正在偵測擊球...',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                    ),
+                  ],
+                ),
+              )
+            else
+              FutureBuilder<List<SwingHit>>(
+                future: _swingHitsFuture,
                 builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8.0),
-                      child: SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-
-                  if (!snapshot.hasData || !(snapshot.data?['success'] ?? false)) {
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return const SizedBox.shrink();
                   }
-
-                  final videoDetail = snapshot.data!['data'] as Map<String, dynamic>?;
-                  if (videoDetail == null) {
-                    return const SizedBox.shrink();
-                  }
-
-                  // 提取隊列狀態信息
-                  final queueStatus = videoDetail['queueStatus'] as Map<String, dynamic>?;
-                  if (queueStatus == null) {
-                    return const SizedBox.shrink();
-                  }
-
-                  final total = queueStatus['total'] as int? ?? 0;
-                  final pending = queueStatus['pending'] as int? ?? 0;
-                  final processing = queueStatus['processing'] as int? ?? 0;
-                  final completed = queueStatus['completed'] as int? ?? 0;
-                  final failed = queueStatus['failed'] as int? ?? 0;
-                  final latestStatus = queueStatus['latestStatus'] as String? ?? 'unknown';
-
-                  // 如果沒有隊列項目則不顯示
-                  if (total == 0) {
-                    return const SizedBox.shrink();
-                  }
-
-                  // 根據狀態顯示不同的標籤
-                  Color statusColor;
-                  String statusLabel;
-                  IconData statusIcon;
-
-                  switch (latestStatus) {
-                    case 'completed':
-                      statusColor = const Color(0xFF1E8E5A);
-                      statusLabel = '已完成';
-                      statusIcon = Icons.check_circle;
-                      break;
-                    case 'processing':
-                      statusColor = const Color(0xFFF59E0B);
-                      statusLabel = '處理中';
-                      statusIcon = Icons.hourglass_bottom;
-                      break;
-                    case 'queued':
-                      statusColor = const Color(0xFF3B82F6);
-                      statusLabel = '排隊中';
-                      statusIcon = Icons.schedule;
-                      break;
-                    case 'failed':
-                      statusColor = const Color(0xFFEF4444);
-                      statusLabel = '已失敗';
-                      statusIcon = Icons.error;
-                      break;
-                    default:
-                      statusColor = const Color(0xFF6F7B86);
-                      statusLabel = '未知';
-                      statusIcon = Icons.info;
-                  }
-
-                  return Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: statusColor.withOpacity(0.3)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(statusIcon, color: statusColor, size: 16),
-                            const SizedBox(width: 8),
-                            Text(
-                              '雲端處理狀態：$statusLabel',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: statusColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            if (completed > 0) ...[
-                              Text(
-                                '✅ 已完成 $completed',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFF1E8E5A)),
-                              ),
-                              const SizedBox(width: 12),
-                            ],
-                            if (processing > 0) ...[
-                              Text(
-                                '⏳ 處理中 $processing',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFFF59E0B)),
-                              ),
-                              const SizedBox(width: 12),
-                            ],
-                            if (pending > 0) ...[
-                              Text(
-                                '⏳ 排隊 $pending',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFF3B82F6)),
-                              ),
-                              const SizedBox(width: 12),
-                            ],
-                            if (failed > 0) ...[
-                              Text(
-                                '❌ 失敗 $failed',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFFEF4444)),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
+                  return _SwingHitsPanel(
+                    hits: snapshot.data!,
+                    videoPath: widget.entry.filePath,
                   );
                 },
               ),
-            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 擊球偵測列表面板：可收合，每筆顯示時間範圍與跳轉播放按鈕
+class _SwingHitsPanel extends StatelessWidget {
+  final List<SwingHit> hits;
+  final String videoPath;
+
+  const _SwingHitsPanel({required this.hits, required this.videoPath});
+
+  String _fmtSec(double sec) {
+    final m = sec ~/ 60;
+    final s = (sec % 60).toStringAsFixed(1);
+    return m > 0 ? '$m:${s.padLeft(4, '0')}' : '${s}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: Row(
+          children: [
+            const Icon(Icons.sports_golf, size: 16, color: Color(0xFF1E8E5A)),
+            const SizedBox(width: 6),
+            Text(
+              '偵測到 ${hits.length} 次擊球',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1E8E5A),
+              ),
+            ),
+          ],
+        ),
+        children: [
+          const Divider(height: 1),
+          ...hits.map((hit) => _HitRow(hit: hit, videoPath: videoPath, fmtSec: _fmtSec)),
+        ],
+      ),
+    );
+  }
+}
+
+class _HitRow extends StatelessWidget {
+  final SwingHit hit;
+  final String videoPath;
+  final String Function(double) fmtSec;
+
+  const _HitRow({required this.hit, required this.videoPath, required this.fmtSec});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E8E5A).withAlpha(25),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '${hit.hitIndex}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E8E5A),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${fmtSec(hit.startSec)} – ${fmtSec(hit.endSec)}  ·  撞擊 ${fmtSec(hit.hitSec)}',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF4F5D75)),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.play_circle_outline, size: 22, color: Color(0xFF1976D2)),
+            tooltip: '從擊球點播放',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => VideoPlayerPage(
+                    videoPath: videoPath,
+                    startPosition: hit.startDuration,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

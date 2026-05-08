@@ -46,7 +46,6 @@ final Directory videoDir = await getTemporaryDirectory();
       durationSeconds: durationSeconds,
       customName: sanitizedName,
       thumbnailPath: null,
-      cloudVideoId: null,
     );
   }
 

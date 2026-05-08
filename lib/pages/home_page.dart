@@ -26,7 +26,7 @@ import 'video_player_page.dart' as video_player;
 import 'profile_edit_page.dart';
 
 /// 錄影卡片支援的操作種類
-enum _HistoryAction { rename, editDuration, delete }
+enum _HistoryAction { rename, delete }
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
@@ -836,88 +836,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 顯示秒數輸入框，更新影片時長資訊
-  Future<void> _editHistoryDuration(RecordingHistoryEntry entry) async {
-    debugPrint('[首頁歷史] 準備調整影片時長：${entry.fileName} 當前秒數=${entry.durationSeconds}');
-    String tempValue = entry.durationSeconds.toString(); // 以字串暫存輸入內容
-    final formKey = GlobalKey<FormState>();
-    final newDuration = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('調整影片時長'),
-          content: Form(
-            key: formKey,
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            child: TextFormField(
-              initialValue: tempValue,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '秒數',
-                helperText: '輸入影片實際秒數（正整數）',
-              ),
-              onChanged: (value) => tempValue = value,
-              validator: (value) {
-                final trimmed = value?.trim() ?? '';
-                final parsed = int.tryParse(trimmed);
-                if (parsed == null || parsed <= 0) {
-                  return '請輸入大於 0 的秒數';
-                }
-                return null;
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final isValid = formKey.currentState?.validate() ?? false;
-                if (!isValid) {
-                  return; // 驗證失敗時不關閉視窗
-                }
-                final parsed = int.parse(tempValue.trim());
-                Navigator.of(dialogContext).pop(parsed);
-              },
-              child: const Text('儲存'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (!mounted || newDuration == null) {
-      debugPrint('[首頁歷史] 調整時長流程取消或頁面已卸載');
-      return; // 使用者取消或未輸入
-    }
-
-    if (newDuration == entry.durationSeconds) {
-      debugPrint('[首頁歷史] 秒數未變更（$newDuration 秒），略過更新');
-      return; // 秒數未變更時不進行後續處理
-    }
-
-    final updatedEntries = List<RecordingHistoryEntry>.from(_recordingHistory);
-    final targetIndex = updatedEntries.indexWhere((item) =>
-        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
-    if (targetIndex == -1) {
-      debugPrint('[首頁歷史] 找不到對應紀錄，無法更新時長');
-      return; // 未找到對應項目
-    }
-
-    updatedEntries[targetIndex] =
-        updatedEntries[targetIndex].copyWith(durationSeconds: newDuration);
-    debugPrint('[首頁歷史] 更新索引 $targetIndex 的時長為 $newDuration 秒，準備立即寫回狀態');
-    await _applyHistoryState(updatedEntries);
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已更新 ${entry.displayTitle} 的時長為 $newDuration 秒')),
-    );
-  }
-
   /// 移除影片與 CSV 實體檔案，避免資料殘留
   Future<void> _deleteEntryFiles(RecordingHistoryEntry entry) async {
     try {
@@ -1161,7 +1079,6 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => video_player.VideoPlayerPage(
           videoPath: entry.filePath,
           avatarPath: _avatarPath,
-          cloudVideoId: entry.cloudVideoId,
         ),
       ),
     );

@@ -37,6 +37,15 @@ class _MainShellPageState extends State<MainShellPage> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    final entries = await RecordingHistoryStorage.instance.loadHistory();
+    if (!mounted) return;
+    setState(() => _recordingHistory
+      ..clear()
+      ..addAll(entries));
   }
 
   @override
@@ -124,6 +133,7 @@ class _MainShellPageState extends State<MainShellPage> {
     String audioPath, {
     required int durationSeconds,
     required String? thumbnailPath,
+    required String? audioLabel,
   }) async {
     try {
       // 更新本地歷史記錄
@@ -135,7 +145,7 @@ class _MainShellPageState extends State<MainShellPage> {
         recordedAt: timestamp,
         durationSeconds: durationSeconds,
         thumbnailPath: thumbnailPath,
-        cloudVideoId: null,
+        audioLabel: audioLabel,
       );
       
       final updated = <RecordingHistoryEntry>[entry, ...existing];
@@ -184,6 +194,7 @@ class _MainShellPageState extends State<MainShellPage> {
               required audioPath,
               required durationSeconds,
               required thumbnailPath,
+              required audioLabel,
             }) {
               _handleRecordingComplete(
                 videoPath,
@@ -191,6 +202,7 @@ class _MainShellPageState extends State<MainShellPage> {
                 audioPath,
                 durationSeconds: durationSeconds,
                 thumbnailPath: thumbnailPath,
+                audioLabel: audioLabel,
               );
             },
           ),
