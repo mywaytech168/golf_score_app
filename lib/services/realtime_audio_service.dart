@@ -43,6 +43,18 @@ class RealtimeAudioService {
   /// 取得錄製期間的原始 PCM 樣本（stopAndAnalyze 之後仍可讀取）
   List<double> get rawSamples => List.unmodifiable(_samples);
 
+  /// 停止錄音（只停止，不分析）
+  Future<void> stop() async {
+    if (!_isActive) return;
+    _isActive = false;
+
+    try {
+      await _capture.stop();
+    } catch (e) {
+      debugPrint('[Audio] stop error: $e');
+    }
+  }
+
   /// 停止錄音並分析，回傳評分標籤（Pro / Sweet / Keep going!）
   Future<String?> stopAndAnalyze() async {
     if (!_isActive) return null;

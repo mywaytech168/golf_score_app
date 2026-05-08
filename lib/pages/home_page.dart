@@ -948,7 +948,7 @@ class _HomePageState extends State<HomePage> {
     await _applyHistoryState(regenerated ?? entries);
   }
 
-  /// 重新計算首頁儀表板指標，將 IMU CSV 中的線性加速度與旋轉資訊轉為練習洞察
+  /// 重新計算首頁儀表板指標，基於錄製歷史的音頻分析與擊球檢測結果
   /// 並將計算結果存儲到 StatisticsService 中供 Data Metrics 和 Analytics 使用
   Future<void> _refreshDashboardMetrics() async {
     final snapshot = List<RecordingHistoryEntry>.from(_recordingHistory);
