@@ -11,6 +11,7 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
 import '../services/realtime_audio_service.dart';
+import '../services/video_analysis_service.dart';
 import 'mlkit_utils.dart';
 import 'pose_csv_writer.dart';
 import 'pose_detector_service.dart';
@@ -357,6 +358,40 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _completeTestMode() async {
     if (_selectedTestVideo == null) return;
+
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('影片分析中', style: TextStyle(color: Colors.white)),
+          content: ValueListenableBuilder<(double, String)>(
+            valueListenable: progressNotifier,
+            builder: (_, val, __) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: val.$1,
+                  backgroundColor: Colors.grey[700],
+                  color: Colors.green,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  val.$2,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
     try {
       final dir = await getApplicationDocumentsDirectory();
       final testId = 'test_${DateTime.now().millisecondsSinceEpoch}';
@@ -366,14 +401,21 @@ class _RecordScreenState extends State<RecordScreen> {
       final testVideoPath = p.join(testDir.path, 'swing.mp4');
       await File(_selectedTestVideo!.filePath).copy(testVideoPath);
 
-      final testCsvPath = p.join(testDir.path, 'pose_landmarks.csv');
-      await PoseCsvWriter(testCsvPath).flush(); // 只寫 header
+      final result = await VideoAnalysisService().analyze(
+        videoPath: testVideoPath,
+        sessionDir: testDir.path,
+        durationSeconds: _selectedTestVideo!.durationSeconds.clamp(1, 86400),
+        onProgress: (prog, label) => progressNotifier.value = (prog, label),
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context);
 
       final thumbnailPath = await _generateThumbnail(testVideoPath);
       widget.onComplete?.call(
         videoPath: testVideoPath,
-        csvPath: testCsvPath,
-        audioPath: '',
+        csvPath: result.csvPath,
+        audioPath: result.audioPath,
         durationSeconds: _selectedTestVideo!.durationSeconds.clamp(1, 86400),
         thumbnailPath: thumbnailPath,
         audioLabel: null,
@@ -383,10 +425,13 @@ class _RecordScreenState extends State<RecordScreen> {
     } catch (e) {
       debugPrint('[TestMode] $e');
       if (mounted) {
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('測試失敗: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('分析失敗: $e'), backgroundColor: Colors.red),
         );
       }
+    } finally {
+      progressNotifier.dispose();
     }
   }
 

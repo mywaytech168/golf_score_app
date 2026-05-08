@@ -4,7 +4,7 @@ import 'home_page.dart';
 import 'today_info_page.dart';
 import 'upgrade_page.dart';
 import 'recording_history_page.dart';
-import '../recording/record_screen.dart';
+import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
 
@@ -186,8 +186,8 @@ class _MainShellPageState extends State<MainShellPage> {
             badVideoPath: null,
           ),
           
-          // 第 2 頁：骨架推論錄影頁
-          RecordScreen(
+          // 第 2 頁：錄製選擇屏幕
+          RecordingSelectionScreen(
             onComplete: ({
               required videoPath,
               required csvPath,
@@ -204,7 +204,14 @@ class _MainShellPageState extends State<MainShellPage> {
                 thumbnailPath: thumbnailPath,
                 audioLabel: audioLabel,
               );
+              // 完成後返回 Home
+              _pageController.animateToPage(
+                0,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
             },
+            onVideoImported: _loadHistory,
           ),
           
           // 第 3 頁：數據指標頁

@@ -315,27 +315,27 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     });
   }
 
-  /// 刪除影片檔與對應 CSV
+  /// 刪除整個 session 目錄（影片、CSV、音訊、hits.json、縮圖等）
   Future<void> _removeEntryFiles(RecordingHistoryEntry entry) async {
     try {
-      final videoFile = File(entry.filePath);
-      if (await videoFile.exists()) {
-        await videoFile.delete();
+      final sessionDir = Directory(p.dirname(entry.filePath));
+      if (await sessionDir.exists()) {
+        await sessionDir.delete(recursive: true);
+        return;
       }
-    } catch (_) {
-      // 失敗時忽略，避免打斷流程
-    }
+    } catch (_) {}
 
-    final thumbnailPath = entry.thumbnailPath;
-    if (thumbnailPath != null && thumbnailPath.isNotEmpty) {
+    // fallback：session 目錄刪除失敗時逐一清除已知檔案
+    final filesToDelete = [
+      entry.filePath,
+      if (entry.thumbnailPath != null && entry.thumbnailPath!.isNotEmpty)
+        entry.thumbnailPath!,
+    ];
+    for (final path in filesToDelete) {
       try {
-        final thumbFile = File(thumbnailPath);
-        if (await thumbFile.exists()) {
-          await thumbFile.delete();
-        }
-      } catch (_) {
-        // 縮圖刪除失敗無須打斷主流程
-      }
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
     }
   }
 
@@ -882,12 +882,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                       value: _HistoryMenuAction.detectHits,
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.sports_golf,
-                            size: 18,
-                            color: _isDetecting ? Colors.grey : const Color(0xFF1E8E5A),
-                          ),
-                          const SizedBox(width: 8),
                           Text(
                             _isDetecting ? '偵測中...' : '偵測擊球',
                             style: TextStyle(
