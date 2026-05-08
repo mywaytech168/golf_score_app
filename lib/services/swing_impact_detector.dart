@@ -101,7 +101,10 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
       minHeight: SwingImpactDetector._audioMinHeight,
       promScale: SwingImpactDetector._audioPromScale);
 
-  // 5. 交集配對
+  // 5. 配對：有音頻峰值就交集，否則直接用速度峰值
+  if (audioPeaks.isEmpty) {
+    return _speedOnlyHits(speedPeaks, speedDn, fps, n);
+  }
   return _intersectPeaks(
       speedPeaks, audioPeaks, speedDn, audioDn, fps, n);
 }
@@ -229,7 +232,7 @@ List<double> _interpNan(List<double> x) {
   }
   if (first == null) return out;
   for (int i = 0; i < n; i++) {
-    if (out[i].isNaN) out[i] = first!;
+    if (out[i].isNaN) { out[i] = first!; }
     else { first = out[i]; break; }
   }
   // 線性插值中間段
@@ -406,6 +409,43 @@ List<SwingHit> _intersectPeaks(
     ));
   }
 
+  matches.sort((a, b) => a.hitFrame.compareTo(b.hitFrame));
+  return List.generate(
+      matches.length,
+      (i) => SwingHit(
+            hitIndex: i + 1,
+            hitFrame: matches[i].hitFrame,
+            hitSec: matches[i].hitSec,
+            startSec: matches[i].startSec,
+            endSec: matches[i].endSec,
+            speedValue: matches[i].speedValue,
+            audioValue: matches[i].audioValue,
+          ));
+}
+
+// ── 純速度偵測（音頻不可用時的後備模式） ────────────────────────────────────────
+
+List<SwingHit> _speedOnlyHits(
+  List<int> speedPeaks,
+  List<double> speedSig,
+  double fps,
+  int totalFrames,
+) {
+  final matches = <SwingHit>[];
+  for (final s in speedPeaks) {
+    final hitSec = s / fps;
+    final startSec = math.max(0.0, hitSec - SwingImpactDetector.clipPreSec);
+    final endSec = math.min(totalFrames / fps, hitSec + SwingImpactDetector.clipPostSec);
+    matches.add(SwingHit(
+      hitIndex: 0,
+      hitFrame: s,
+      hitSec: hitSec,
+      startSec: startSec,
+      endSec: endSec,
+      speedValue: speedSig[s],
+      audioValue: 0.0,
+    ));
+  }
   matches.sort((a, b) => a.hitFrame.compareTo(b.hitFrame));
   return List.generate(
       matches.length,
