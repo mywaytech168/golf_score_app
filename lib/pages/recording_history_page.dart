@@ -49,11 +49,13 @@ enum _SortBy {
 class RecordingHistoryPage extends StatefulWidget {
   final List<RecordingHistoryEntry> entries; // 外部帶入的歷史資料清單
   final String? userAvatarPath; // 使用者自訂頭像，方便進入播放頁時供分享覆蓋
+  final VoidCallback? onDelete; // 影片刪除時的回調，供父頁面即時刷新
 
   const RecordingHistoryPage({
     super.key,
     required this.entries,
     this.userAvatarPath,
+    this.onDelete,
   });
 
   @override
@@ -184,6 +186,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (mounted) {
       debugPrint('[歷史頁] 刪除後立即刷新列表，剩餘 ${_entries.length} 筆');
       setState(() {}); // 通知畫面重新渲染
+      
+      // 通知父頁面即時更新（不需要等返回）
+      widget.onDelete?.call();
     }
 
     await RecordingHistoryStorage.instance.saveHistory(_entries);
@@ -737,9 +742,14 @@ class _HistoryTileState extends State<_HistoryTile> {
         _isDetecting = false;
       });
 
-      final msg = hits.isEmpty ? '未偵測到擊球（請確認 pose CSV 資料）' : '偵測到 ${hits.length} 次擊球 ✅';
+      final msg = hits.isEmpty
+          ? '未偵測到擊球\n影片中可能無明顯揮桿動作，或骨架分析未能成功辨識'
+          : '偵測到 ${hits.length} 次擊球 ✅';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+        SnackBar(
+          content: Text(msg, style: const TextStyle(height: 1.5)),
+          duration: Duration(seconds: hits.isEmpty ? 5 : 3),
+        ),
       );
     } catch (e) {
       debugPrint('[偵測擊球] 錯誤: $e');
