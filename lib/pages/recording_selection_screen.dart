@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:video_player/video_player.dart';
 
 import '../recording/record_screen.dart';
 import 'external_video_importer_local.dart';
@@ -72,7 +75,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   /// 選項 2: 選擇本地影片
   void _selectLocalVideo() async {
     debugPrint('[RecordingSelection] 使用者選擇本地影片');
-    
+
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       allowMultiple: false,
@@ -84,26 +87,48 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
         message: '❌ 未選擇任何檔案',
         type: NotificationType.cancelled,
       );
-      return; // 使用者取消選擇時直接結束
+      return;
     }
 
-    // 顯示選擇成功通知
+    // 選完立即鎖定畫面，防止使用者繼續操作
+    if (!mounted) return;
+    setState(() => _isImporting = true);
+
+    final path = result.files.single.path!;
     final fileName = result.files.single.name;
     final fileSize = result.files.single.size;
-    final fileSizeStr = fileSize > 0 
-        ? _formatFileSize(fileSize)
-        : 'Unknown size';
-    
-    _showNotification(
-      message: '✅ 已選擇影片: $fileName ($fileSizeStr)',
-      type: NotificationType.selected,
-    );
+
+    // 先檢查影片長度，超過 1 分鐘拒絕
+    final durationSec = await _getVideoDurationSeconds(path);
+    if (durationSec > 60) {
+      if (!mounted) return;
+      setState(() => _isImporting = false);
+      _showNotification(
+        message: '❌ 影片超過 1 分鐘限制（$durationSec 秒）\n請選擇 60 秒以內的影片',
+        type: NotificationType.failed,
+        duration: const Duration(seconds: 4),
+      );
+      return;
+    }
 
     await _importExternalVideo(
-      path: result.files.single.path!,
+      path: path,
       fileName: fileName,
       fileSize: fileSize,
     );
+  }
+
+  /// 取得影片秒數（失敗時回傳 0）
+  Future<int> _getVideoDurationSeconds(String path) async {
+    final controller = VideoPlayerController.file(File(path));
+    try {
+      await controller.initialize();
+      return controller.value.duration.inSeconds;
+    } catch (_) {
+      return 0;
+    } finally {
+      await controller.dispose();
+    }
   }
 
   /// 實際執行影片匯入（含骨架分析與音訊提取）
@@ -113,7 +138,6 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     required int fileSize,
   }) async {
     if (!mounted) return;
-    setState(() => _isImporting = true);
 
     final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
 
@@ -237,13 +261,6 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
       case NotificationType.cancelled:
         return const Color(0xFF757575); // 灰色 - 已取消
     }
-  }
-
-  /// 格式化檔案大小
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   /// 格式化視頻時長
