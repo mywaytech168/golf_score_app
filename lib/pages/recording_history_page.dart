@@ -600,6 +600,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                       itemBuilder: (context, index) {
                         final entry = filteredEntries[index];
                         return _HistoryTile(
+                          key: ValueKey(entry.filePath),
                           entry: entry,
                           formattedTime: _formatTimestamp(entry.recordedAt),
                           onTap: () => _playEntry(entry),
@@ -654,6 +655,7 @@ class _HistoryTile extends StatefulWidget {
   final VoidCallback onDelete; // 刪除影片紀錄
 
   const _HistoryTile({
+    super.key,
     required this.entry,
     required this.formattedTime,
     required this.onTap,
@@ -675,6 +677,15 @@ class _HistoryTileState extends State<_HistoryTile> {
     super.initState();
     _loadHitsSummary();
     _swingHitsFuture = SwingHit.loadFromSession(p.dirname(widget.entry.filePath));
+  }
+
+  @override
+  void didUpdateWidget(_HistoryTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entry.filePath != widget.entry.filePath) {
+      _loadHitsSummary();
+      _swingHitsFuture = SwingHit.loadFromSession(p.dirname(widget.entry.filePath));
+    }
   }
 
   void _loadHitsSummary() {
