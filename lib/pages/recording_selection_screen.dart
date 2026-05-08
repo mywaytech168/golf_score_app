@@ -98,13 +98,13 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     final fileName = result.files.single.name;
     final fileSize = result.files.single.size;
 
-    // 先檢查影片長度，超過 1 分鐘拒絕
+    // 先檢查影片長度，超過 2 分鐘拒絕
     final durationSec = await _getVideoDurationSeconds(path);
-    if (durationSec > 60) {
+    if (durationSec > 120) {
       if (!mounted) return;
       setState(() => _isImporting = false);
       _showNotification(
-        message: '❌ 影片超過 1 分鐘限制（$durationSec 秒）\n請選擇 60 秒以內的影片',
+        message: '❌ 影片超過 2 分鐘限制（$durationSec 秒）\n請選擇 120 秒以內的影片',
         type: NotificationType.failed,
         duration: const Duration(seconds: 4),
       );
