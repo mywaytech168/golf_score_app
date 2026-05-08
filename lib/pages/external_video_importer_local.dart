@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
+import '../services/video_analysis_service.dart';
 
 /// 外部影片對入工具：複複影片、建立歷史紀錄
 /// 
@@ -21,52 +22,46 @@ class ExternalVideoImporter {
   const ExternalVideoImporter();
 
   /// 匯入單支影片並回傳建立好的歷史紀錄條目
-  /// 生成與錄製相同的目錄結構，確保導入與錄製的文件格式一致
+  /// 生成與錄製相同的目錄結構，並執行骨架分析與音訊提取
   Future<RecordingHistoryEntry?> importVideo({
     required String sourcePath,
     required int nextRoundIndex,
     String? originalName,
-
+    void Function(double progress, String label)? onProgress,
   }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
-      return null; // 找不到來源檔案就結束
+      return null;
     }
 
     try {
-      // 生成與 RecordScreen 相同的 sessionId
       final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
-      
-      // 創建 golf_recordings/{sessionId}/ 目錄結構
       final appDir = await getApplicationDocumentsDirectory();
       final sessionDir = p.join(appDir.path, 'golf_recordings', sessionId);
-      final sessionDirectory = Directory(sessionDir);
-      if (!await sessionDirectory.exists()) {
-        await sessionDirectory.create(recursive: true);
-      }
+      await Directory(sessionDir).create(recursive: true);
 
-      // 複製視頻為 swing.mp4（與錄製產生的名稱一致）
+      // 複製影片
+      onProgress?.call(0.0, '複製影片中...');
       final videoPath = p.join(sessionDir, 'swing.mp4');
       await File(sourcePath).copy(videoPath);
 
-      // 建立空的 pose_landmarks.csv（導入時無實時姿態數據）
-      final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
-      final csvFile = File(csvPath);
-      await csvFile.writeAsString('frame,time_sec,landmarks\n'); // CSV 標題行
-
-      // 建立空的 audio.pcm（導入時不進行實時音頻捕獲）
-      final audioPath = p.join(sessionDir, 'audio.pcm');
-      final audioFile = File(audioPath);
-      await audioFile.writeAsBytes([]);
-
-      // 生成視頻封面（與錄製方式相同）
-      final thumbnailPath = await _generateThumbnail(videoPath);
-
-      // 解析視頻時長
+      // 先取得時長（分析需要）
       final durationSeconds = await _resolveDurationSeconds(videoPath);
+
+      // 骨架分析 + 音訊提取
+      final analysis = await VideoAnalysisService().analyze(
+        videoPath: videoPath,
+        sessionDir: sessionDir,
+        durationSeconds: durationSeconds,
+        onProgress: onProgress,
+      );
+
+      // 生成縮圖
+      final thumbnailPath = await _generateThumbnail(videoPath);
       final sanitizedName = _normalizeImportName(originalName);
 
-      debugPrint('[Importer] ✅ 導入完成: sessionId=$sessionId, video=$videoPath, thumbnail=$thumbnailPath');
+      debugPrint('[Importer] ✅ 導入完成: sessionId=$sessionId'
+          ', csv=${analysis.csvPath}, audio=${analysis.audioPath}');
 
       return RecordingHistoryEntry(
         filePath: videoPath,

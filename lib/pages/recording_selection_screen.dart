@@ -106,33 +106,60 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     );
   }
 
-  /// 實際執行影片匯入
+  /// 實際執行影片匯入（含骨架分析與音訊提取）
   Future<void> _importExternalVideo({
     required String path,
     String? fileName,
     required int fileSize,
   }) async {
     if (!mounted) return;
-    
     setState(() => _isImporting = true);
-    
-    try {
-      // 顯示導入進行中通知
-      _showNotification(
-        message: '⏳ 正在導入影片，請稍候...',
-        type: NotificationType.importing,
-      );
 
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('影片分析中', style: TextStyle(color: Colors.white)),
+          content: ValueListenableBuilder<(double, String)>(
+            valueListenable: progressNotifier,
+            builder: (_, val, __) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: val.$1,
+                  backgroundColor: Colors.grey[700],
+                  color: Colors.green,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  val.$2,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
       final existing = await RecordingHistoryStorage.instance.loadHistory();
       final nextRoundIndex = ExternalVideoImporter.calculateNextRoundIndex(existing);
-      
+
       final entry = await _videoImporter.importVideo(
         sourcePath: path,
         originalName: fileName,
         nextRoundIndex: nextRoundIndex,
+        onProgress: (prog, label) => progressNotifier.value = (prog, label),
       );
 
       if (!mounted) return;
+      Navigator.pop(context); // 關閉進度 Dialog
 
       if (entry == null) {
         _showNotification(
@@ -140,17 +167,14 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
           type: NotificationType.failed,
           duration: const Duration(seconds: 3),
         );
-        setState(() => _isImporting = false);
         return;
       }
 
-      // 保存到歷史記錄
       final updated = <RecordingHistoryEntry>[entry, ...existing];
       await RecordingHistoryStorage.instance.saveHistory(updated);
 
       if (!mounted) return;
-      
-      // 顯示成功消息，包含詳細信息
+
       final durationStr = _formatDuration(entry.durationSeconds);
       _showNotification(
         message: '✅ 導入成功！\n${entry.customName ?? fileName}\n時長: $durationStr',
@@ -158,33 +182,21 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
         duration: const Duration(seconds: 3),
       );
 
-      // 調用回調刷新父頁面
       widget.onVideoImported?.call();
-
       debugPrint('[RecordingSelection] 本地影片導入完成: ${entry.filePath}');
-      
-      // 延遲顯示處理完成通知
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-      
-      _showNotification(
-        message: '📝 已添加到歷史記錄',
-        type: NotificationType.success,
-        duration: const Duration(seconds: 2),
-      );
     } catch (e) {
       debugPrint('[RecordingSelection] 本地影片導入失敗: $e');
-      if (!mounted) return;
-      
-      _showNotification(
-        message: '❌ 導入出錯\n$e',
-        type: NotificationType.failed,
-        duration: const Duration(seconds: 3),
-      );
-    } finally {
       if (mounted) {
-        setState(() => _isImporting = false);
+        Navigator.pop(context); // 關閉進度 Dialog
+        _showNotification(
+          message: '❌ 導入出錯\n$e',
+          type: NotificationType.failed,
+          duration: const Duration(seconds: 3),
+        );
       }
+    } finally {
+      progressNotifier.dispose();
+      if (mounted) setState(() => _isImporting = false);
     }
   }
 
