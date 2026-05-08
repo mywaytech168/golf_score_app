@@ -27,7 +27,7 @@ class SwingImpactDetector {
 
   // ── 峰值偵測共用參數 ──────────────────────────────────────────────────────
   static const double peakDistanceSec = 0.45;
-  static const double intersectToleranceSec = 0.33;
+  static const double intersectToleranceSec = 0.50;
 
   // ── 速度訊號參數 ──────────────────────────────────────────────────────────
   static const int _speedMedianK = 7;
@@ -40,7 +40,7 @@ class SwingImpactDetector {
   // ── 音頻訊號參數 ──────────────────────────────────────────────────────────
   static const int _audioMedianK = 9;
   static const int _audioSmoothW = 9;
-  static const int _audioBaselineK = 151;
+  static const int _audioBaselineK = 71;
   static const double _audioHeightPct = 90.0;
   static const double _audioMinHeight = 0.04;
   static const double _audioPromScale = 2.0;
