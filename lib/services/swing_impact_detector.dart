@@ -241,6 +241,16 @@ List<double> _pcmToFrameAmplitude(
     }
     result[f] = math.sqrt(sumSq / (end - start));
   }
+
+  // 全局正規化：對齊 Python 版 amps /= max(amps)
+  // Python 將振幅縮放到 [0,1]，AUDIO_MIN_HEIGHT=0.04 才有意義（最大值的 4%）
+  // 未正規化時原始 RMS 通常在 0.001~0.05，min_height 會直接等於或超過最大值
+  final mx = result.reduce(math.max);
+  if (mx > 1e-8) {
+    for (int i = 0; i < result.length; i++) {
+      result[i] /= mx;
+    }
+  }
   return result;
 }
 
