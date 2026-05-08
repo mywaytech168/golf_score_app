@@ -12,12 +12,19 @@ import '../models/swing_hit.dart';
 // Dart port of golf_impact_detection_v3_fast.py
 //
 // 演算法：
-//   1. 從 CSV 提取右手腕像素速度（逐幀）
+//   1. 從 CSV 提取右手腕像素速度（逐幀），並計算實際 FPS
 //   2. 從 PCM 提取每幀 RMS 音量
 //   3. 各自去噪（中值濾波 → 移動平均 → 基線扣除）
 //   4. 各自找峰值（高度門檻 + 最小間距 + 顯著性）
-//   5. 交集配對（速度峰 ± 0.33s 內找最近音頻峰 → hit = 平均幀）
+//   5. 有音頻峰值時交集配對；無音頻時純速度後備
 //   6. 回傳 List<SwingHit>（含 startSec / hitSec / endSec）
+//
+// ── FPS 自適應 ────────────────────────────────────────────────────────────────
+// Python 原版逐幀處理（~30fps），Dart 有兩條路：
+//   即時錄影  ~10fps（CameraAwesome maxFramesPerSecond:10）
+//   影片匯入  ~15fps（67ms 取幀）
+// 所有 kernel 參數改以「秒」表示，runtime 根據 CSV 實際 FPS 換算成幀數，
+// 確保三種路徑的時間窗口一致。
 // ──────────────────────────────────────────────────────────────────────────────
 
 class SwingImpactDetector {
@@ -25,22 +32,28 @@ class SwingImpactDetector {
   static const double clipPreSec = 2.5;
   static const double clipPostSec = 2.5;
 
-  // ── 峰值偵測共用參數 ──────────────────────────────────────────────────────
+  // ── 峰值偵測共用參數（秒為單位，FPS 無關）────────────────────────────────
   static const double peakDistanceSec = 0.45;
   static const double intersectToleranceSec = 0.40;
 
-  // ── 速度訊號參數（原版校準 ~30fps，Dart 取幀 ~15fps，kernel 縮小一半）──────
-  static const int _speedMedianK = 5;
-  static const int _speedSmoothW = 5;
-  static const int _speedBaselineK = 61;
+  // ── 速度訊號參數（時間秒，對應 Python 原版 ~30fps 下的 kernel 尺寸）──────
+  // speedMedianSec  = 7/30 ≈ 0.23s
+  // speedSmoothSec  = 7/30 ≈ 0.23s
+  // speedBaselineSec= 121/30 ≈ 4.0s
+  static const double _speedMedianSec = 0.23;
+  static const double _speedSmoothSec = 0.23;
+  static const double _speedBaselineSec = 4.0;
   static const double _speedHeightPct = 92.0;
   static const double _speedMinHeight = 0.8;
   static const double _speedPromScale = 2.5;
 
-  // ── 音頻訊號參數（同上，縮小一半）────────────────────────────────────────
-  static const int _audioMedianK = 5;
-  static const int _audioSmoothW = 5;
-  static const int _audioBaselineK = 71;
+  // ── 音頻訊號參數（時間秒，對應 Python 原版 ~30fps 下的 kernel 尺寸）──────
+  // audioMedianSec  = 9/30  = 0.30s
+  // audioSmoothSec  = 9/30  = 0.30s
+  // audioBaselineSec= 151/30 ≈ 5.0s
+  static const double _audioMedianSec = 0.30;
+  static const double _audioSmoothSec = 0.30;
+  static const double _audioBaselineSec = 5.0;
   static const double _audioHeightPct = 90.0;
   static const double _audioMinHeight = 0.04;
   static const double _audioPromScale = 2.0;
@@ -68,7 +81,7 @@ class SwingImpactDetector {
 // ── Isolate 入口（頂層函數） ─────────────────────────────────────────────────
 
 List<SwingHit> _detectIsolate(_DetectArgs args) {
-  // 1. 解析 CSV → 右手腕速度
+  // 1. 解析 CSV → 右手腕速度（同時取得實際 FPS）
   final csvResult = _parseWristSpeed(args.csvPath);
   if (csvResult == null) return [];
   final speedRaw = csvResult.speed;
@@ -76,18 +89,20 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
   final n = speedRaw.length;
   if (n < 10) return [];
 
+  // 根據實際 FPS 換算 kernel 幀數（確保奇數且 >= 3）
+  final speedMk  = _toOddFrames(SwingImpactDetector._speedMedianSec,   fps);
+  final speedSw  = _toOddFrames(SwingImpactDetector._speedSmoothSec,   fps);
+  final speedBk  = _toOddFrames(SwingImpactDetector._speedBaselineSec, fps);
+  final audioMk  = _toOddFrames(SwingImpactDetector._audioMedianSec,   fps);
+  final audioSw  = _toOddFrames(SwingImpactDetector._audioSmoothSec,   fps);
+  final audioBk  = _toOddFrames(SwingImpactDetector._audioBaselineSec, fps);
+
   // 2. PCM → 每幀 RMS 振幅
   final audioRaw = _pcmToFrameAmplitude(args.audioPcm, args.audioSampleRate, fps, n);
 
   // 3. 去噪
-  final speedDn = _denoiseSignal(speedRaw,
-      SwingImpactDetector._speedMedianK,
-      SwingImpactDetector._speedSmoothW,
-      SwingImpactDetector._speedBaselineK);
-  final audioDn = _denoiseSignal(audioRaw,
-      SwingImpactDetector._audioMedianK,
-      SwingImpactDetector._audioSmoothW,
-      SwingImpactDetector._audioBaselineK);
+  final speedDn = _denoiseSignal(speedRaw, speedMk, speedSw, speedBk);
+  final audioDn = _denoiseSignal(audioRaw, audioMk, audioSw, audioBk);
 
   // 4. 找峰值
   final speedPeaks = _findPeaks(speedDn, fps,
@@ -101,12 +116,11 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
       minHeight: SwingImpactDetector._audioMinHeight,
       promScale: SwingImpactDetector._audioPromScale);
 
-  // 5. 配對：有音頻峰值就交集，否則直接用速度峰值
+  // 5. 配對：有音頻峰值就交集，否則純速度後備
   if (audioPeaks.isEmpty) {
     return _speedOnlyHits(speedPeaks, speedDn, fps, n);
   }
-  return _intersectPeaks(
-      speedPeaks, audioPeaks, speedDn, audioDn, fps, n);
+  return _intersectPeaks(speedPeaks, audioPeaks, speedDn, audioDn, fps, n);
 }
 
 // ── CSV 解析 ─────────────────────────────────────────────────────────────────
@@ -272,6 +286,12 @@ List<double> _movingAverage(List<double> x, int window) {
     out[i] = sum / cnt;
   }
   return out;
+}
+
+/// 將秒數轉換為幀數，並確保結果為奇數且 >= 3
+int _toOddFrames(double sec, double fps) {
+  final k = math.max(3, (sec * fps).round());
+  return (k % 2 == 1) ? k : k + 1;
 }
 
 int _oddKernel(int k) {
