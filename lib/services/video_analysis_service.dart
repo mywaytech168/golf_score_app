@@ -23,7 +23,7 @@ class VideoAnalysisService {
   }) async {
     final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
     final audioPath = p.join(sessionDir, 'audio.pcm');
-    final poseService = PoseDetectorService();
+    final poseService = PoseDetectorService(mode: PoseDetectionMode.single);
 
     try {
       await _analyzePose(
@@ -72,12 +72,15 @@ class VideoAnalysisService {
     for (var ms = 0; ms < totalMs; ms += _frameIntervalMs) {
       String? thumbPath;
       try {
+        // maxWidth: 720 對齊 Python 原版的 FAST_POSE_LONG_SIDE=720
+        // 縮小輸入尺寸可加速 ML Kit 推理，同時減少磁碟 I/O
         thumbPath = await VideoThumbnail.thumbnailFile(
           video: videoPath,
           thumbnailPath: tmpDir,
           imageFormat: ImageFormat.JPEG,
           timeMs: ms,
           quality: 85,
+          maxWidth: 720,
         );
 
         if (thumbPath != null && await File(thumbPath).exists()) {

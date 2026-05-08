@@ -219,15 +219,25 @@ double _toDouble(dynamic v) {
 List<double> _pcmToFrameAmplitude(
     List<double> pcm, int sampleRate, double fps, int numFrames) {
   if (pcm.isEmpty || numFrames <= 0) return List.filled(numFrames, 0.0);
+
+  // 將 PCM 裁剪到 CSV 時長對應的樣本數
+  // audio_extractor 提取的音軌有時比影片長（編碼後的音軌長度 ≠ 影片長度）
+  // 只取 [0, csvDurationSec] 範圍的 PCM，確保每幀 RMS 與 CSV 幀對齊
+  final csvDurationSec = numFrames / fps;
+  final expectedSamples = (csvDurationSec * sampleRate).round();
+  final effectivePcm = pcm.length > expectedSamples
+      ? pcm.sublist(0, expectedSamples)
+      : pcm;
+
   final samplesPerFrame = sampleRate / fps;
   final result = List<double>.filled(numFrames, 0.0);
   for (int f = 0; f < numFrames; f++) {
     final start = (f * samplesPerFrame).round();
-    final end = math.min(((f + 1) * samplesPerFrame).round(), pcm.length);
-    if (start >= end || start >= pcm.length) continue;
+    final end = math.min(((f + 1) * samplesPerFrame).round(), effectivePcm.length);
+    if (start >= end || start >= effectivePcm.length) continue;
     double sumSq = 0.0;
     for (int i = start; i < end; i++) {
-      sumSq += pcm[i] * pcm[i];
+      sumSq += effectivePcm[i] * effectivePcm[i];
     }
     result[f] = math.sqrt(sumSq / (end - start));
   }
