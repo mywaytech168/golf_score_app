@@ -1,10 +1,10 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../recording/pose_csv_writer.dart';
@@ -63,58 +63,42 @@ class VideoAnalysisService {
     void Function(double)? onProgress,
   }) async {
     final writer = PoseCsvWriter(csvPath);
+    final tmpDir = (await getTemporaryDirectory()).path;
     final totalMs = durationSeconds * 1000;
     final totalSteps = (totalMs / _frameIntervalMs).ceil().clamp(1, 99999);
     var frameIndex = 0;
     double imgW = 720, imgH = 1280;
 
     for (var ms = 0; ms < totalMs; ms += _frameIntervalMs) {
+      String? thumbPath;
       try {
-        // 取得 JPEG bytes（不寫磁碟）
-        final jpegBytes = await VideoThumbnail.thumbnailData(
+        thumbPath = await VideoThumbnail.thumbnailFile(
           video: videoPath,
+          thumbnailPath: tmpDir,
           imageFormat: ImageFormat.JPEG,
           timeMs: ms,
           quality: 85,
         );
 
-        if (jpegBytes != null && jpegBytes.isNotEmpty) {
-          // 解碼 JPEG → raw RGBA（dart:ui，在記憶體中完成）
-          final codec = await ui.instantiateImageCodec(jpegBytes);
-          final frame = await codec.getNextFrame();
-          final uiImage = frame.image;
-
+        if (thumbPath != null && await File(thumbPath).exists()) {
           if (frameIndex == 0) {
-            imgW = uiImage.width.toDouble();
-            imgH = uiImage.height.toDouble();
+            // 第一幀從 JPEG header 解析尺寸
+            final bytes = await File(thumbPath).readAsBytes();
+            final dims = _parseJpegSize(bytes);
+            imgW = dims.$1.toDouble();
+            imgH = dims.$2.toDouble();
             debugPrint('[VideoAnalysis] video frame size: ${imgW}x$imgH');
           }
 
-          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.rawRgba);
-          uiImage.dispose();
-
-          if (byteData != null) {
-            final inputImage = InputImage.fromBytes(
-              bytes: byteData.buffer.asUint8List(),
-              metadata: InputImageMetadata(
-                size: Size(imgW, imgH),
-                rotation: InputImageRotation.rotation0deg,
-                format: InputImageFormat.bgra8888,
-                bytesPerRow: imgW.toInt() * 4,
-              ),
-            );
-            final poses = await poseService.detect(inputImage);
-            if (poses.isNotEmpty) {
-              writer.addFrame(PoseFrameModel.fromPose(
-                frame: frameIndex,
-                timeSec: ms / 1000.0,
-                pose: poses.first,
-                imgWidth: imgW,
-                imgHeight: imgH,
-              ));
-            } else {
-              writer.addFrame(PoseFrameModel.empty(frame: frameIndex, timeSec: ms / 1000.0));
-            }
+          final poses = await poseService.detect(InputImage.fromFilePath(thumbPath));
+          if (poses.isNotEmpty) {
+            writer.addFrame(PoseFrameModel.fromPose(
+              frame: frameIndex,
+              timeSec: ms / 1000.0,
+              pose: poses.first,
+              imgWidth: imgW,
+              imgHeight: imgH,
+            ));
           } else {
             writer.addFrame(PoseFrameModel.empty(frame: frameIndex, timeSec: ms / 1000.0));
           }
@@ -122,6 +106,10 @@ class VideoAnalysisService {
       } catch (e) {
         debugPrint('[VideoAnalysis] frame $frameIndex error: $e');
         writer.addFrame(PoseFrameModel.empty(frame: frameIndex, timeSec: ms / 1000.0));
+      } finally {
+        if (thumbPath != null) {
+          try { await File(thumbPath).delete(); } catch (_) {}
+        }
       }
 
       frameIndex++;
@@ -130,6 +118,31 @@ class VideoAnalysisService {
 
     await writer.flush();
     debugPrint('[VideoAnalysis] pose done: $frameIndex frames → $csvPath');
+  }
+
+  // Parses JPEG SOF0/SOF1/SOF2 marker to extract image width and height.
+  static (int, int) _parseJpegSize(Uint8List bytes) {
+    if (bytes.length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) {
+      return (720, 1280);
+    }
+    var i = 2;
+    while (i + 3 < bytes.length) {
+      while (i < bytes.length && bytes[i] != 0xFF) { i++; }
+      if (i + 1 >= bytes.length) break;
+      final marker = bytes[i + 1];
+      if (marker == 0xD9 || marker == 0xDA) break;
+      if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) {
+        if (i + 8 < bytes.length) {
+          final h = (bytes[i + 5] << 8) | bytes[i + 6];
+          final w = (bytes[i + 7] << 8) | bytes[i + 8];
+          if (w > 0 && h > 0) return (w, h);
+        }
+      }
+      final segLen = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (segLen < 2) { i += 2; continue; }
+      i += 2 + segLen;
+    }
+    return (720, 1280);
   }
 
   Future<bool> _extractAudio({
