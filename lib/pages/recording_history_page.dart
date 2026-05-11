@@ -4,19 +4,16 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
-import 'package:video_player/video_player.dart';
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
-import '../models/swing_hit.dart';
 import '../services/recording_history_storage.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/swing_impact_detector.dart';
+import '../services/video_clip_service.dart';
 import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
@@ -94,59 +91,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_entries));
   }
 
-  /// 根據視頻檔案路徑獲取對應的縮略圖路徑
-  /// 例如：/path/REC_20260129100658.mp4 -> /path/REC_20260129100658.jpg
-  String _getThumbnailPath(String videoFilePath) {
-    final withoutExtension = videoFilePath.replaceFirst(RegExp(r'\.[^.]*$'), '');
-    return '$withoutExtension.jpg';
-  }
-
-  /// 獲取視頻的時長（秒數）
-  Future<int> _getVideoDuration(String videoPath) async {
-    try {
-      debugPrint('[歷史頁] 正在獲取視頻時長: $videoPath');
-      final controller = VideoPlayerController.file(File(videoPath));
-      await controller.initialize();
-      final duration = controller.value.duration.inSeconds;
-      await controller.dispose();
-      debugPrint('[歷史頁] ✅ 視頻時長: $duration 秒');
-      return duration;
-    } catch (e) {
-      debugPrint('[歷史頁] ⚠️ 獲取視頻時長失敗: $e，使用預設值 0');
-      return 0;
-    }
-  }
-
-  /// 為指定的視頻生成縮略圖
-  /// 使用 VideoThumbnail 套件從視頻的第一幀提取縮略圖
-  Future<String?> _generateThumbnailForVideo(String videoPath) async {
-    try {
-      debugPrint('[歷史頁] 正在為 $videoPath 生成縮略圖...');
-      final targetPath = _getThumbnailPath(videoPath);
-      
-      // 使用 video_thumbnail 套件生成縮略圖
-      // 如果套件可用，會生成 JPEG 縮略圖；否則返回 null
-      final thumb = await vt.VideoThumbnail.thumbnailFile(
-        video: videoPath,
-        imageFormat: vt.ImageFormat.JPEG,
-        timeMs: 0, // 從第 0 毫秒處提取
-        quality: 75,
-        thumbnailPath: targetPath,
-      );
-      
-      if (thumb != null && thumb.isNotEmpty) {
-        debugPrint('[歷史頁] ✅ 縮略圖成功生成: $targetPath');
-        return targetPath;
-      } else {
-        debugPrint('[歷史頁] ⚠️ 縮略圖生成失敗: $videoPath');
-        return null;
-      }
-    } catch (e) {
-      debugPrint('[歷史頁] ❌ 生成縮略圖時發生錯誤: $e');
-      return null;
-    }
-  }
-
   /// 移除指定紀錄並同步刪除實體檔案
   Future<void> _deleteEntry(RecordingHistoryEntry entry) async {
     final confirm = await showDialog<bool>(
@@ -154,7 +98,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('刪除影片'),
-          content: Text('確定要刪除「${entry.displayTitle}」嗎？影片與 CSV 將會一併移除。'),
+          content: Text(
+        entry.videoType == VideoType.localClip
+            ? '確定要刪除切片「${entry.displayTitle}」嗎？'
+            : '確定要刪除「${entry.displayTitle}」嗎？影片、CSV 及所有切片將一併移除。',
+      ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -182,7 +130,13 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     // 移除本地檔案
     await _removeEntryFiles(entry);
 
-    _entries.removeAt(index); // 先調整資料來源
+    _entries.removeAt(index);
+    // 刪除原始影片時，同步移除來自該影片的所有切片 entry
+    if (entry.videoType == VideoType.original) {
+      _entries.removeWhere(
+        (e) => e.videoType == VideoType.localClip && e.sourceVideoPath == entry.filePath,
+      );
+    }
     if (mounted) {
       debugPrint('[歷史頁] 刪除後立即刷新列表，剩餘 ${_entries.length} 筆');
       setState(() {}); // 通知畫面重新渲染
@@ -320,8 +274,35 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     });
   }
 
-  /// 刪除整個 session 目錄（影片、CSV、音訊、hits.json、縮圖等）
+  /// 擊球偵測完成後，將切片加入歷史清單並標記來源影片為已切片
+  void _onClipsGenerated(RecordingHistoryEntry original, List<RecordingHistoryEntry> clips) {
+    final idx = _entries.indexWhere((e) => e.filePath == original.filePath);
+    if (idx != -1) {
+      _entries[idx] = _entries[idx].copyWith(isClipped: true);
+    }
+    _entries.addAll(clips);
+    setState(() {});
+    RecordingHistoryStorage.instance.saveHistory(_entries);
+  }
+
+  /// 刪除 session 目錄或切片檔案
   Future<void> _removeEntryFiles(RecordingHistoryEntry entry) async {
+    if (entry.videoType == VideoType.localClip) {
+      // 切片只刪除影片檔與縮圖，保留來源 session 資料夾
+      for (final path in [
+        entry.filePath,
+        if (entry.thumbnailPath != null && entry.thumbnailPath!.isNotEmpty)
+          entry.thumbnailPath!,
+      ]) {
+        try {
+          final f = File(path);
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+      return;
+    }
+
+    // 原始影片：刪除整個 session 目錄（含 clips 子目錄）
     try {
       final sessionDir = Directory(p.dirname(entry.filePath));
       if (await sessionDir.exists()) {
@@ -331,12 +312,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     } catch (_) {}
 
     // fallback：session 目錄刪除失敗時逐一清除已知檔案
-    final filesToDelete = [
+    for (final path in [
       entry.filePath,
       if (entry.thumbnailPath != null && entry.thumbnailPath!.isNotEmpty)
         entry.thumbnailPath!,
-    ];
-    for (final path in filesToDelete) {
+    ]) {
       try {
         final f = File(path);
         if (await f.exists()) await f.delete();
@@ -611,6 +591,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           onTap: () => _playEntry(entry),
                           onRename: () => _renameEntry(entry),
                           onDelete: () => _deleteEntry(entry),
+                          onClipsGenerated: _onClipsGenerated,
                         );
                       },
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -658,6 +639,8 @@ class _HistoryTile extends StatefulWidget {
   final VoidCallback onTap; // 點擊後的播放行為
   final VoidCallback onRename; // 重新命名影片
   final VoidCallback onDelete; // 刪除影片紀錄
+  /// 擊球偵測完成並裁切片段後的回呼，帶入來源影片與新切片清單
+  final void Function(RecordingHistoryEntry original, List<RecordingHistoryEntry> clips)? onClipsGenerated;
 
   const _HistoryTile({
     super.key,
@@ -666,6 +649,7 @@ class _HistoryTile extends StatefulWidget {
     required this.onTap,
     required this.onRename,
     required this.onDelete,
+    this.onClipsGenerated,
   });
 
   @override
@@ -674,16 +658,15 @@ class _HistoryTile extends StatefulWidget {
 
 class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
-  late Future<List<SwingHit>> _swingHitsFuture;
   bool _isDetecting = false;
 
   bool get _isLongVideo => widget.entry.durationSeconds > 5;
+  bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
 
   @override
   void initState() {
     super.initState();
     _loadHitsSummary();
-    _swingHitsFuture = SwingHit.loadFromSession(p.dirname(widget.entry.filePath));
   }
 
   @override
@@ -691,7 +674,6 @@ class _HistoryTileState extends State<_HistoryTile> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.entry.filePath != widget.entry.filePath) {
       _loadHitsSummary();
-      _swingHitsFuture = SwingHit.loadFromSession(p.dirname(widget.entry.filePath));
     }
   }
 
@@ -705,8 +687,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
-  /// 執行擊球偵測：讀取 pose CSV 與可選音頻 PCM，
-  /// 呼叫 SwingImpactDetector，將結果存入 hits.json 並刷新面板。
+  /// 執行擊球偵測 → 裁切片段 → 回傳切片給父層列入歷史清單
   Future<void> _runDetection() async {
     if (_isDetecting) return;
     setState(() => _isDetecting = true);
@@ -715,7 +696,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
 
-      // 嘗試讀取原始 float32 PCM（若存在）
+      // 1. 讀取 PCM
       List<double> audioPcm = [];
       const int sampleRate = 44100;
       final pcmFile = File(p.join(sessionDir, 'audio.pcm'));
@@ -728,27 +709,89 @@ class _HistoryTileState extends State<_HistoryTile> {
         );
       }
 
+      // 2. 偵測擊球
       final hits = await SwingImpactDetector.detect(
         csvPath: csvPath,
         audioPcm: audioPcm,
         audioSampleRate: sampleRate,
       );
 
-      await SwingHit.saveToSession(sessionDir, hits);
+      if (!mounted) return;
+
+      if (hits.isEmpty) {
+        setState(() => _isDetecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '未偵測到擊球\n影片中可能無明顯揮桿動作，或骨架分析未能成功辨識',
+              style: TextStyle(height: 1.5),
+            ),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
+
+      // 3. 裁切片段
+      final clipsDir = Directory(p.join(sessionDir, 'clips'));
+      await clipsDir.create(recursive: true);
+
+      final clipEntries = <RecordingHistoryEntry>[];
+      for (final hit in hits) {
+        final clipPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}.mp4');
+        final trimmed = await VideoClipService.trimClip(
+          srcPath: widget.entry.filePath,
+          dstPath: clipPath,
+          startSec: hit.startSec,
+          endSec: hit.endSec,
+        );
+        if (trimmed == null) continue;
+
+        // 縮圖定位到擊球瞬間（相對片段時間）
+        String? thumbPath;
+        try {
+          final thumbTarget = p.join(clipsDir.path, 'hit_${hit.hitIndex}.jpg');
+          final hitInClipMs = ((hit.hitSec - hit.startSec) * 1000).round().clamp(0, 999999);
+          thumbPath = await vt.VideoThumbnail.thumbnailFile(
+            video: trimmed,
+            thumbnailPath: thumbTarget,
+            imageFormat: vt.ImageFormat.JPEG,
+            timeMs: hitInClipMs,
+            quality: 75,
+          );
+        } catch (_) {}
+
+        final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
+        clipEntries.add(RecordingHistoryEntry(
+          filePath: trimmed,
+          roundIndex: widget.entry.roundIndex,
+          recordedAt: widget.entry.recordedAt,
+          durationSeconds: clipDuration,
+          customName: '${widget.entry.displayTitle} 第${hit.hitIndex}球',
+          thumbnailPath: thumbPath,
+          videoType: VideoType.localClip,
+          sourceVideoPath: widget.entry.filePath,
+          hitSecond: hit.hitSec - hit.startSec,
+          startSecond: hit.startSec,
+          endSecond: hit.endSec,
+        ));
+      }
 
       if (!mounted) return;
-      setState(() {
-        _swingHitsFuture = Future.value(hits);
-        _isDetecting = false;
-      });
+      setState(() => _isDetecting = false);
 
-      final msg = hits.isEmpty
-          ? '未偵測到擊球\n影片中可能無明顯揮桿動作，或骨架分析未能成功辨識'
-          : '偵測到 ${hits.length} 次擊球 ✅';
+      if (clipEntries.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('偵測成功，但片段裁切失敗，請重試')),
+        );
+        return;
+      }
+
+      widget.onClipsGenerated?.call(widget.entry, clipEntries);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg, style: const TextStyle(height: 1.5)),
-          duration: Duration(seconds: hits.isEmpty ? 5 : 3),
+          content: Text('已生成 ${clipEntries.length} 個擊球片段 ✅'),
+          duration: const Duration(seconds: 3),
         ),
       );
     } catch (e) {
@@ -930,7 +973,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                       value: _HistoryMenuAction.rename,
                       child: Text('重新命名'),
                     ),
-                    if (_isLongVideo)
+                    if (_isLongVideo && _isOriginalVideo)
                       PopupMenuItem<_HistoryMenuAction>(
                         value: _HistoryMenuAction.detectHits,
                         child: Row(
@@ -1040,39 +1083,25 @@ class _HistoryTileState extends State<_HistoryTile> {
                 );
               },
             ),
-            // 擊球偵測列表（僅長影片顯示）
-            if (_isLongVideo)
-              if (_isDetecting)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        '正在偵測擊球...',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                FutureBuilder<List<SwingHit>>(
-                  future: _swingHitsFuture,
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                      return const SizedBox.shrink();
-                    }
-                    return _SwingHitsPanel(
-                      hits: snapshot.data!,
-                      videoPath: widget.entry.filePath,
-                    );
-                  },
+            // 裁切進度提示（偵測 + 裁切期間顯示）
+            if (_isDetecting)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      '正在分析並裁切片段...',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                    ),
+                  ],
                 ),
+              ),
           ],
         ),
       ),
@@ -1080,108 +1109,6 @@ class _HistoryTileState extends State<_HistoryTile> {
   }
 }
 
-/// 擊球偵測列表面板：可收合，每筆顯示時間範圍與跳轉播放按鈕
-class _SwingHitsPanel extends StatelessWidget {
-  final List<SwingHit> hits;
-  final String videoPath;
-
-  const _SwingHitsPanel({required this.hits, required this.videoPath});
-
-  String _fmtSec(double sec) {
-    final m = sec ~/ 60;
-    final s = (sec % 60).toStringAsFixed(1);
-    return m > 0 ? '$m:${s.padLeft(4, '0')}' : '${s}s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: EdgeInsets.zero,
-        title: Row(
-          children: [
-            const Icon(Icons.sports_golf, size: 16, color: Color(0xFF1E8E5A)),
-            const SizedBox(width: 6),
-            Text(
-              '偵測到 ${hits.length} 次擊球',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1E8E5A),
-              ),
-            ),
-          ],
-        ),
-        children: [
-          const Divider(height: 1),
-          ...hits.map((hit) => _HitRow(hit: hit, videoPath: videoPath, fmtSec: _fmtSec)),
-        ],
-      ),
-    );
-  }
-}
-
-class _HitRow extends StatelessWidget {
-  final SwingHit hit;
-  final String videoPath;
-  final String Function(double) fmtSec;
-
-  const _HitRow({required this.hit, required this.videoPath, required this.fmtSec});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E8E5A).withAlpha(25),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                '${hit.hitIndex}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1E8E5A),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${fmtSec(hit.startSec)} – ${fmtSec(hit.endSec)}  ·  撞擊 ${fmtSec(hit.hitSec)}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF4F5D75)),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.play_circle_outline, size: 22, color: Color(0xFF1976D2)),
-            tooltip: '從擊球點播放',
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => VideoPlayerPage(
-                    videoPath: videoPath,
-                    startPosition: hit.startDuration,
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 /// 縮圖元件：顯示影片預覽或替代圖示，並標示錄影輪次
 class _HistoryPreview extends StatelessWidget {

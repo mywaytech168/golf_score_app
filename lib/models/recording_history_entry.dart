@@ -73,6 +73,9 @@ class RecordingHistoryEntry {
   /// 即時音頻分析評分標籤（Pro / Sweet / Keep going!）
   final String? audioLabel;
 
+  /// 切片來源影片路徑（videoType == localClip 時有值）
+  final String? sourceVideoPath;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -88,6 +91,7 @@ class RecordingHistoryEntry {
     this.audioCrispness,
     this.goodShot,
     this.audioLabel,
+    this.sourceVideoPath,
   });
 
   /// 建立更新後的新實例，方便調整時長或其他欄位
@@ -106,6 +110,7 @@ class RecordingHistoryEntry {
     double? audioCrispness,
     bool? goodShot,
     String? audioLabel,
+    String? sourceVideoPath,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -122,6 +127,7 @@ class RecordingHistoryEntry {
       audioCrispness: audioCrispness ?? this.audioCrispness,
       goodShot: goodShot ?? this.goodShot,
       audioLabel: audioLabel ?? this.audioLabel,
+      sourceVideoPath: sourceVideoPath ?? this.sourceVideoPath,
     );
   }
 
@@ -157,6 +163,7 @@ class RecordingHistoryEntry {
       'audioCrispness': audioCrispness,
       'goodShot': goodShot,
       'audioLabel': audioLabel,
+      'sourceVideoPath': sourceVideoPath,
     };
   }
 
@@ -192,6 +199,7 @@ class RecordingHistoryEntry {
       audioCrispness: (json['audioCrispness'] as num?)?.toDouble(),
       goodShot: (json['goodShot'] as bool?),
       audioLabel: (json['audioLabel'] as String?),
+      sourceVideoPath: (json['sourceVideoPath'] as String?),
     );
   }
 }
