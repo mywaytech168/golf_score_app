@@ -54,7 +54,7 @@ class RecordingHistoryStorage {
       // 過濾掉已經不存在的影片，避免點擊後找不到檔案
       return entries
           .where((entry) => File(entry.filePath).existsSync())
-          .toList(growable: false);
+          .toList(); // growable=true（預設），讓呼叫端可呼叫 addAll / add
     } catch (_) {
       return [];
     }

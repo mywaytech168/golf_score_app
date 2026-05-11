@@ -187,9 +187,24 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 val origTimeSec = startSec + clipTimeSec
                 val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
 
-                // 8. 確保 bitmap 為 ARGB_8888 可繪製
-                val mutable: Bitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-                bitmap.recycle()
+                // 8. 確保 bitmap 為 ARGB_8888 且尺寸恰好等於 clipW×clipH。
+                //    getFrameAtTime() 可能回傳縮放過的影格（尺寸與 clipW×clipH 不同），
+                //    若直接使用原始尺寸傳入 fillYuvImage(…, clipW, clipH) 會觸發
+                //    Bitmap.getPixels: "x + width must be <= bitmap.width()"。
+                val mutable: Bitmap = if (bitmap.width == clipW && bitmap.height == clipH
+                    && bitmap.config == Bitmap.Config.ARGB_8888 && bitmap.isMutable) {
+                    bitmap
+                } else {
+                    // 先縮放到目標尺寸，再確保為可寫的 ARGB_8888
+                    val scaled = if (bitmap.width == clipW && bitmap.height == clipH) bitmap
+                                 else android.graphics.Bitmap.createScaledBitmap(bitmap, clipW, clipH, true)
+                    val result = if (scaled.config == Bitmap.Config.ARGB_8888 && scaled.isMutable) scaled
+                                 else scaled.copy(Bitmap.Config.ARGB_8888, true).also {
+                                     if (scaled !== bitmap) scaled.recycle()
+                                 }
+                    bitmap.recycle()
+                    result
+                }
 
                 // 9. 繪製骨架
                 frameData[csvFrameIdx]?.let { landmarks ->

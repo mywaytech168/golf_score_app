@@ -745,7 +745,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         );
         if (trimmed == null) continue;
 
-        // 3b. 疊加骨架（失敗時降級使用原始裁切影片）
+        // 3b. 疊加骨架
         final skeletonPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}_skeleton.mp4');
         final overlaid = await SkeletonOverlayService.render(
           clipPath: trimmed,
@@ -753,68 +753,64 @@ class _HistoryTileState extends State<_HistoryTile> {
           startSec: hit.startSec,
           outputPath: skeletonPath,
         );
-        debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-            '${overlaid != null ? '骨架疊加成功' : '骨架疊加失敗，降級'}');
+        if (overlaid == null) {
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 骨架疊加失敗');
+        } else {
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 骨架疊加成功');
+        }
 
         // 3c. 疊加球軌跡（三階段混合架構）
         //     Phase 1 – Kotlin 像素層：幀差 + BFS blob
         //     Phase 2 – Dart 智慧層：Kalman + 狀態機追蹤
         //     Phase 3 – Kotlin I/O 層：疊加軌跡曲線到影片
-        String finalClipPath = overlaid ?? trimmed;
+        String? finalClipPath;
         if (overlaid != null) {
           final trajPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}_final.mp4');
-          bool trajOk = false;
-          try {
-            // Phase 1：Kotlin 提取每幀 blob（寬鬆門檻）
-            final extraction = await BallTrajectoryService.extractBlobs(
-              inputPath: overlaid,
+
+          // Phase 1：Kotlin 提取每幀 blob（寬鬆門檻）
+          final extraction = await BallTrajectoryService.extractBlobs(
+            inputPath: overlaid,
+          );
+          if (extraction == null) {
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → blob 提取失敗');
+          } else {
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
+                'blob 提取完成：${extraction.frames.length} 幀，'
+                'fps=${extraction.fps.toStringAsFixed(1)}，'
+                '${extraction.width}×${extraction.height}');
+
+            // Phase 2：Dart Kalman 狀態機追蹤（完整移植 Python 算法）
+            final tracker = BallTracker();
+            final trackPts = tracker.track(
+              frames: extraction.frames,
+              fps:    extraction.fps,
+              videoW: extraction.width,
+              videoH: extraction.height,
             );
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
+                '追蹤完成：${trackPts.length} 個軌跡點');
 
-            if (extraction != null && extraction.frames.isNotEmpty) {
-              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                  'blob 提取完成：${extraction.frames.length} 幀，'
-                  'fps=${extraction.fps.toStringAsFixed(1)}，'
-                  '${extraction.width}×${extraction.height}');
-
-              // Phase 2：Dart Kalman 狀態機追蹤（完整移植 Python 算法）
-              final tracker = BallTracker();
-              final trackPts = tracker.track(
-                frames: extraction.frames,
-                fps:    extraction.fps,
-                videoW: extraction.width,
-                videoH: extraction.height,
-              );
-
-              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                  '追蹤完成：${trackPts.length} 個軌跡點');
-
-              if (trackPts.length >= 2) {
-                // Phase 3：Kotlin 疊加軌跡曲線
-                final withTraj = await BallTrajectoryService.renderOverlay(
-                  inputPath:  overlaid,
-                  outputPath: trajPath,
-                  trackPts:   trackPts.map((p) => p.toMap()).toList(),
-                );
-                if (withTraj != null) {
-                  finalClipPath = withTraj;
-                  trajOk = true;
-                  debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 球軌跡疊加成功');
-                }
-              } else {
-                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                    '追蹤點不足（${trackPts.length}），略過疊加');
-              }
+            if (trackPts.length < 2) {
+              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 追蹤點不足，略過疊加');
             } else {
-              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → blob 提取失敗或無幀');
+              // Phase 3：Kotlin 疊加軌跡曲線
+              final withTraj = await BallTrajectoryService.renderOverlay(
+                inputPath:  overlaid,
+                outputPath: trajPath,
+                trackPts:   trackPts.map((pt) => pt.toMap()).toList(),
+              );
+              if (withTraj == null) {
+                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 軌跡疊加失敗');
+              } else {
+                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 球軌跡疊加成功');
+                finalClipPath = withTraj;
+              }
             }
-          } catch (e) {
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 軌跡追蹤例外: $e');
-          }
-
-          if (!trajOk) {
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 球軌跡疊加失敗，使用骨架片段');
           }
         }
+
+        // 最終影片路徑（依序取第一個成功的結果）
+        final clipPath = finalClipPath ?? overlaid ?? trimmed;
 
         // 3d. 縮圖定位到擊球瞬間（相對片段時間）
         String? thumbPath;
@@ -822,17 +818,19 @@ class _HistoryTileState extends State<_HistoryTile> {
           final thumbTarget = p.join(clipsDir.path, 'hit_${hit.hitIndex}.jpg');
           final hitInClipMs = ((hit.hitSec - hit.startSec) * 1000).round().clamp(0, 999999);
           thumbPath = await vt.VideoThumbnail.thumbnailFile(
-            video: finalClipPath,
+            video: clipPath,
             thumbnailPath: thumbTarget,
             imageFormat: vt.ImageFormat.JPEG,
             timeMs: hitInClipMs,
             quality: 75,
           );
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 縮圖生成失敗: $e');
+        }
 
         final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
         clipEntries.add(RecordingHistoryEntry(
-          filePath: finalClipPath,
+          filePath: clipPath,
           roundIndex: widget.entry.roundIndex,
           recordedAt: widget.entry.recordedAt,
           durationSeconds: clipDuration,
