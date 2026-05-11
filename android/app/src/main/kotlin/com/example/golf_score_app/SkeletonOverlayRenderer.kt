@@ -108,15 +108,15 @@ class SkeletonOverlayRenderer(private val context: Context) {
             inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
         }.getOrElse { 30f }
         
-        // ✅ 提取旋轉信息（重要！避免影片變行）
-        val rotation  = runCatching {
-            inputFormat.getInteger(MediaFormat.KEY_ROTATION)
-        }.getOrElse { 0 }
-        Log.d(TAG, "提取旋轉信息: rotation=$rotation°")
-
-        val scaleX = videoW.toFloat() / poseW
-        val scaleY = videoH.toFloat() / poseH
-        Log.d(TAG, "片段: ${videoW}x${videoH} fps=$fps  scale=${scaleX}x${scaleY}  rotation=$rotation°")
+        val rotation = android.media.MediaMetadataRetriever().use { mmr ->
+            mmr.setDataSource(clipPath)
+            mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+        }
+        // 輸出以 display 尺寸編碼（旋轉後的正方向），不在 MP4 寫 rotation metadata
+        val displayW = if (rotation == 90 || rotation == 270) videoH else videoW
+        val displayH = if (rotation == 90 || rotation == 270) videoW else videoH
+        Log.d(TAG, "片段: coded=${videoW}x${videoH} display=${displayW}x${displayH} fps=$fps poseSize=${poseW}x${poseH} rotation=$rotation°")
 
         // 4. 建立解碼器
         val decoder = try {
@@ -134,17 +134,18 @@ class SkeletonOverlayRenderer(private val context: Context) {
             Log.e(TAG, "無法建立編碼器: $e")
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
-        val encFmt = MediaFormat.createVideoFormat("video/avc", videoW, videoH).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420Flexible)
+        // 部分硬體編碼器要求寬高為 16 的倍數，不足時補齊（例如 1080→1088）
+        val encW = (displayW + 15) and -16
+        val encH = (displayH + 15) and -16
+        // COLOR_FormatYUV420SemiPlanar = NV12，與 bitmapToNv12 完全對應，避免 Flexible 在不同裝置
+        // 映射到 I420 造成 UV 通道交換（粉/青色偏）
+        val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
             setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            // ✅ 保留旋轉信息到編碼器輸出格式
-            if (rotation != 0) {
-                setInteger(MediaFormat.KEY_ROTATION, rotation)
-                Log.d(TAG, "編碼器設置旋轉: $rotation°")
-            }
         }
+        Log.d(TAG, "編碼器尺寸: ${encW}x${encH}（display=${displayW}x${displayH}）")
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 
@@ -204,33 +205,35 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     val origTimeSec = startSec + clipTimeSec
                     val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
 
-                    // ── YUV → Bitmap（保留彩色）────────────────
-                    val bmp = yuvToBitmap(image, videoW, videoH)
+                    // ── YUV → Bitmap → 物理旋轉到 display 方向 ─
+                    val rawBmp = yuvToBitmap(image, videoW, videoH)
+                    val rotBmp = if (rotation != 0) {
+                        val m = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+                        Bitmap.createBitmap(rawBmp, 0, 0, rawBmp.width, rawBmp.height, m, true)
+                            .also { rawBmp.recycle() }
+                    } else rawBmp
 
-                    // ── 繪製骨架 ─────────────────────────────────
+                    // 若需要 16-alignment 補齊，建立 encW×encH 的 bitmap（右/下補黑邊）
+                    val bmp = if (encW != displayW || encH != displayH) {
+                        Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
+                            .also { Canvas(it).drawBitmap(rotBmp, 0f, 0f, null); rotBmp.recycle() }
+                    } else rotBmp
+
+                    // ── 繪製骨架（bitmap 已是 display 方向，直接 scale）──
                     frameData[csvFrameIdx]?.let { landmarks ->
-                        drawSkeleton(Canvas(bmp), landmarks, scaleX, scaleY, videoW, videoH)
+                        drawSkeleton(Canvas(bmp), landmarks, poseW, poseH, displayW, displayH)
                     }
 
-                    // ── Bitmap → 編碼器 ──────────────────────────
+                    // ── Bitmap → NV12 → 編碼器 ───────────────────
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
-                    // ✅ 用 frameCount 計算正確的 pts，避免最後一幀 pts=0
                     val ptsUs = frameCount * 1_000_000L / fps.toLong()
-                    
+
                     if (encInIdx >= 0) {
-                        // 統一用 ByteBuffer 模式（最穩定且可追蹤 size）
                         val buf  = encoder.getInputBuffer(encInIdx)!!
-                        val nv12 = bitmapToNv12(bmp, videoW, videoH)
-                        
+                        val nv12 = bitmapToNv12(bmp, encW, encH)
                         buf.clear()
-                        buf.put(nv12, 0, nv12.size)  // 明確指定 offset 和 length
-                        buf.flip()
-                        
+                        buf.put(nv12, 0, nv12.size)
                         encoder.queueInputBuffer(encInIdx, 0, nv12.size, ptsUs, 0)
-                        
-                        if (frameCount < 3 || frameCount % 50 == 0) {
-                            Log.d(TAG, "queueInputBuffer: idx=$encInIdx, size=${nv12.size}, pts=$ptsUs (frameCount=$frameCount)")
-                        }
                         frameCount++
                     } else {
                         Log.w(TAG, "dequeueInputBuffer 返回 $encInIdx，略過幀 pts=$ptsUs")
@@ -243,7 +246,6 @@ class SkeletonOverlayRenderer(private val context: Context) {
                         getTrack = { muxTrack },
                         isMuxed  = { muxStarted },
                         eos      = false,
-                        rotation = rotation,  // ✅ 傳遞旋轉資訊
                         onSampleWritten = { encodedFrames++; samplesWritten++ },
                     )
 
@@ -283,7 +285,6 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     getTrack = { muxTrack },
                     isMuxed  = { muxStarted },
                     eos      = true,
-                    rotation = rotation,  // ✅ 傳遞旋轉資訊
                     onSampleWritten = { encodedFrames++; samplesWritten++ },
                 )
                 Log.d(TAG, "Encoder drained, encodedFrames=$encodedFrames")
@@ -326,15 +327,16 @@ class SkeletonOverlayRenderer(private val context: Context) {
     private fun drawSkeleton(
         canvas: Canvas,
         landmarks: Array<LandmarkPoint?>,
-        scaleX: Float, scaleY: Float,
-        w: Int, h: Int,
-        rotation: Int = 0,
+        poseW: Float, poseH: Float,
+        displayW: Int, displayH: Int,
     ) {
-        val strokeW = (w / 120f).coerceIn(3f, 9f)
-        val radius  = (w / 90f).coerceIn(4f, 12f)
+        val scaleX  = displayW.toFloat() / poseW
+        val scaleY  = displayH.toFloat() / poseH
+        val shortSide = minOf(displayW, displayH).toFloat()
+        val strokeW = (shortSide / 80f).coerceIn(3f, 9f)
+        val radius  = (shortSide / 60f).coerceIn(4f, 12f)
 
-        // ❌ 不應用旋轉轉換 - 骨架保持原始座標
-
+        // bitmap 已物理旋轉為 display 方向，CSV 也是 display-space，直接 scale 即可
         val linePaint = Paint().apply {
             strokeWidth = strokeW
             style       = Paint.Style.STROKE
@@ -355,12 +357,8 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 a in RIGHT_LANDMARKS && b in RIGHT_LANDMARKS -> Color.argb(210, 240, 55, 55)
                 else                                          -> Color.argb(210, 255, 215, 0)
             }
-            // ❌ 使用原始座標，不轉換
-            val laX = la.xPx * scaleX
-            val laY = la.yPx * scaleY
-            val lbX = lb.xPx * scaleX
-            val lbY = lb.yPx * scaleY
-            canvas.drawLine(laX, laY, lbX, lbY, linePaint)
+            canvas.drawLine(la.xPx * scaleX, la.yPx * scaleY,
+                            lb.xPx * scaleX, lb.yPx * scaleY, linePaint)
         }
 
         for ((i, lm) in landmarks.withIndex()) {
@@ -370,10 +368,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 in RIGHT_LANDMARKS -> Color.argb(230, 210, 35, 35)
                 else               -> Color.argb(230, 255, 200, 0)
             }
-            // ❌ 使用原始座標，不轉換
-            val x = lm.xPx * scaleX
-            val y = lm.yPx * scaleY
-            canvas.drawCircle(x, y, radius, dotPaint)
+            canvas.drawCircle(lm.xPx * scaleX, lm.yPx * scaleY, radius, dotPaint)
         }
     }
 
@@ -512,7 +507,6 @@ class SkeletonOverlayRenderer(private val context: Context) {
         encoder: MediaCodec, muxer: MediaMuxer, info: MediaCodec.BufferInfo,
         setTrack: (Int) -> Unit, getTrack: () -> Int, isMuxed: () -> Boolean,
         eos: Boolean,
-        rotation: Int = 0,  // ✅ 新增：旋轉資訊
         onSampleWritten: () -> Unit = {},
     ) {
         var tryAgainCount = 0
@@ -544,13 +538,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     tryAgainCount = 0
                     Log.d(TAG, "drainEncoder: OUTPUT_FORMAT_CHANGED")
-                    val outputFormat = encoder.outputFormat
-                    // ✅ 將旋轉信息添加到輸出格式
-                    if (rotation != 0) {
-                        outputFormat.setInteger(MediaFormat.KEY_ROTATION, rotation)
-                        Log.d(TAG, "drainEncoder: 添加旋轉信息到 Muxer: $rotation°")
-                    }
-                    val t = muxer.addTrack(outputFormat)
+                    val t = muxer.addTrack(encoder.outputFormat)
                     muxer.start(); setTrack(t)
                 }
                 idx >= 0 -> {

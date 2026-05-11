@@ -43,27 +43,30 @@ class ClipProgress {
 
 /// 切片 + 按需分析（骨架 + 球軌跡）的流程服務。
 ///
-/// 每顆球的切片存入獨立 session 子目錄：
-///   {clipsDir}/hit_{n}/clip.mp4
-///   {clipsDir}/hit_{n}/thumbnail.jpg
-///   （分析後）{clipsDir}/hit_{n}/pose_landmarks.csv
-///             {clipsDir}/hit_{n}/skeleton.mp4
-///             {clipsDir}/hit_{n}/final.mp4
+/// 每顆球的切片存入 golf_recordings 底下的獨立目錄：
+///   {golf_recordings}/{session_name}_hit_{n}/clip.mp4
+///   {golf_recordings}/{session_name}_hit_{n}/thumbnail.jpg
+///   {golf_recordings}/{session_name}_hit_{n}/pose_landmarks.csv  ← 切片時即從原始 CSV 擷取
+///   （分析後）{...}/skeleton.mp4
+///             {...}/final.mp4
 class ClipPipelineService {
   const ClipPipelineService._();
 
   // ──────────────────────────────────────────────────────────────
-  // 切片流程：只裁切 + 縮圖，每球建立獨立 session 目錄
+  // 切片流程：裁切 + 縮圖 + 繼承 CSV，每球建立獨立 session 目錄
   // ──────────────────────────────────────────────────────────────
 
   static Future<List<ClipResult>> run({
     required List<SwingHit> hits,
     required String srcVideoPath,
-    required String clipsDir,
     required RecordingHistoryEntry sourceEntry,
     void Function(ClipProgress)? onProgress,
   }) async {
-    await Directory(clipsDir).create(recursive: true);
+    // srcVideoPath = .../golf_recordings/{session_name}/swing.mp4
+    final srcSessionDir = p.dirname(srcVideoPath);
+    final sessionName   = p.basename(srcSessionDir);
+    final golfRecDir    = p.dirname(srcSessionDir);
+    final srcCsvPath    = p.join(srcSessionDir, 'pose_landmarks.csv');
 
     final results = <ClipResult>[];
     for (int i = 0; i < hits.length; i++) {
@@ -71,7 +74,9 @@ class ClipPipelineService {
       final result = await _trimHit(
         hit: hit,
         srcVideoPath: srcVideoPath,
-        clipsDir: clipsDir,
+        golfRecDir: golfRecDir,
+        sessionName: sessionName,
+        srcCsvPath: srcCsvPath,
         sourceEntry: sourceEntry,
       );
       if (result != null) results.add(result);
@@ -83,11 +88,13 @@ class ClipPipelineService {
   static Future<ClipResult?> _trimHit({
     required SwingHit hit,
     required String srcVideoPath,
-    required String clipsDir,
+    required String golfRecDir,
+    required String sessionName,
+    required String srcCsvPath,
     required RecordingHistoryEntry sourceEntry,
   }) async {
-    // 每球獨立 session 目錄
-    final sessionDir = p.join(clipsDir, 'hit_${hit.hitIndex}');
+    // 每球獨立目錄：golf_recordings/{session_name}_hit_{n}/
+    final sessionDir = p.join(golfRecDir, '${sessionName}_hit_${hit.hitIndex}');
     await Directory(sessionDir).create(recursive: true);
 
     final clipPath = p.join(sessionDir, 'clip.mp4');
@@ -117,6 +124,15 @@ class ClipPipelineService {
       debugPrint('[Pipeline] hit ${hit.hitIndex} → 縮圖生成失敗: $e');
     }
 
+    // 從原始 CSV 擷取此球的骨架資料，存入 clip session 目錄
+    final dstCsvPath = p.join(sessionDir, 'pose_landmarks.csv');
+    await _sliceCsv(
+      srcCsvPath: srcCsvPath,
+      dstCsvPath: dstCsvPath,
+      startSec: hit.startSec,
+      endSec: hit.endSec,
+    );
+
     debugPrint('[Pipeline] hit ${hit.hitIndex} → ✅ 裁切完成：$trimmed');
 
     final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
@@ -137,11 +153,68 @@ class ClipPipelineService {
     );
   }
 
+  /// 從原始 CSV 擷取 [startSec, endSec] 範圍的骨架幀，重新以 0 為起點編號寫出。
+  ///
+  /// SkeletonOverlayRenderer 以 csvFrameIdx = (clipTimeSec * 1000 / 67).round() 查表，
+  /// 所以 clip CSV 的 frame 欄位必須是 0-based 的連續整數，time_sec 也重置為 0-based。
+  static Future<void> _sliceCsv({
+    required String srcCsvPath,
+    required String dstCsvPath,
+    required double startSec,
+    required double endSec,
+  }) async {
+    final src = File(srcCsvPath);
+    if (!await src.exists()) {
+      debugPrint('[Pipeline] _sliceCsv: 原始 CSV 不存在，略過');
+      return;
+    }
+
+    final lines = await src.readAsLines();
+    if (lines.isEmpty) return;
+
+    final buffer = StringBuffer()..writeln(lines.first); // header
+
+    const double eps = 0.1; // 100ms 緩衝，確保邊界幀不被截掉
+    int newFrameIdx = 0;
+
+    for (final line in lines.skip(1)) {
+      if (line.trim().isEmpty) continue;
+
+      // 快速解析 time_sec（第 2 欄），不做完整 CSV parse
+      final firstComma  = line.indexOf(',');
+      if (firstComma < 0) continue;
+      final secondComma = line.indexOf(',', firstComma + 1);
+      if (secondComma < 0) continue;
+
+      final timeSec = double.tryParse(line.substring(firstComma + 1, secondComma).trim());
+      if (timeSec == null) continue;
+      if (timeSec < startSec - eps) continue;
+      if (timeSec > endSec + eps) break;
+
+      final relTime = (timeSec - startSec).clamp(0.0, double.infinity);
+      // 只替換前兩欄（frame, time_sec），其餘原樣保留
+      buffer
+        ..write(newFrameIdx)
+        ..write(',')
+        ..write(relTime.toStringAsFixed(6))
+        ..write(line.substring(secondComma)) // 從第二個逗號開始（含），保留後續所有欄位
+        ..writeln();
+      newFrameIdx++;
+    }
+
+    if (newFrameIdx == 0) {
+      debugPrint('[Pipeline] _sliceCsv: 範圍內無資料（startSec=$startSec endSec=$endSec）');
+      return;
+    }
+
+    await File(dstCsvPath).writeAsString(buffer.toString());
+    debugPrint('[Pipeline] _sliceCsv: $newFrameIdx 幀 → $dstCsvPath');
+  }
+
   // ──────────────────────────────────────────────────────────────
-  // 影片分析：對已裁切的短片執行 pose 分析 → 骨架 → 球軌跡
+  // 影片分析：骨架疊加 → 球軌跡
   //
-  // [clipPath]    短片路徑（clip.mp4）
-  // [sessionDir]  = p.dirname(clipPath)，即切片的 session 目錄
+  // 若切片時已繼承 pose_landmarks.csv，直接跳過 VideoAnalysisService。
   // ──────────────────────────────────────────────────────────────
 
   static Future<AnalysisResult?> analyze({
@@ -150,22 +223,30 @@ class ClipPipelineService {
     required int durationSeconds,
     void Function(String label)? onProgress,
   }) async {
-    // 1. Pose 分析 → pose_landmarks.csv + audio.pcm
-    onProgress?.call('分析骨架中...');
-    VideoAnalysisResult? analysisResult;
-    try {
-      analysisResult = await VideoAnalysisService().analyze(
-        videoPath: clipPath,
-        sessionDir: sessionDir,
-        durationSeconds: durationSeconds,
-        onProgress: (_, label) => onProgress?.call(label),
-      );
-    } catch (e) {
-      debugPrint('[Pipeline.analyze] VideoAnalysis 失敗: $e');
-      return null;
-    }
+    final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
 
-    final csvPath = analysisResult.csvPath;
+    // 1. Pose 分析（若 CSV 已由切片繼承則略過，節省重複 ML Kit 推理）
+    if (await File(csvPath).exists()) {
+      onProgress?.call('使用骨架資料...');
+      debugPrint('[Pipeline.analyze] ✅ CSV 已繼承，略過 VideoAnalysis：$csvPath');
+    } else {
+      onProgress?.call('分析骨架中...');
+      try {
+        await VideoAnalysisService().analyze(
+          videoPath: clipPath,
+          sessionDir: sessionDir,
+          durationSeconds: durationSeconds,
+          onProgress: (_, label) => onProgress?.call(label),
+        );
+      } catch (e) {
+        debugPrint('[Pipeline.analyze] VideoAnalysis 失敗: $e');
+        return null;
+      }
+      if (!await File(csvPath).exists()) {
+        debugPrint('[Pipeline.analyze] ❌ VideoAnalysis 完成但 CSV 不存在：$csvPath');
+        return null;
+      }
+    }
 
     // 2. 疊加骨架（startSec=0，CSV 已相對於切片）
     onProgress?.call('疊加骨架中...');
@@ -173,28 +254,24 @@ class ClipPipelineService {
     String? skeletonPath;
     final skelOut = p.join(sessionDir, 'skeleton.mp4');
 
-    if (!await File(csvPath).exists()) {
-      debugPrint('[Pipeline.analyze] ❌ CSV 不存在：$csvPath');
+    String? overlaid = await SkeletonOverlayService.render(
+      clipPath: clipPath,
+      csvPath: csvPath,
+      startSec: 0,
+      outputPath: skelOut,
+    );
+    if (overlaid != null && !await File(overlaid).exists()) {
+      debugPrint('[Pipeline.analyze] ❌ 骨架輸出檔不存在，視為失敗');
+      overlaid = null;
+    }
+    if (overlaid != null) {
+      hasSkeleton = true;
+      skeletonPath = overlaid;
+      debugPrint('[Pipeline.analyze] ✅ 骨架疊加成功');
     } else {
-      String? overlaid = await SkeletonOverlayService.render(
-        clipPath: clipPath,
-        csvPath: csvPath,
-        startSec: 0,
-        outputPath: skelOut,
-      );
-      if (overlaid != null && !await File(overlaid).exists()) {
-        debugPrint('[Pipeline.analyze] ❌ 骨架輸出檔不存在，視為失敗');
-        overlaid = null;
-      }
-      if (overlaid != null) {
-        hasSkeleton = true;
-        skeletonPath = overlaid;
-        debugPrint('[Pipeline.analyze] ✅ 骨架疊加成功');
-      } else {
-        debugPrint('[Pipeline.analyze] ❌ 骨架疊加失敗');
-        final bad = File(skelOut);
-        if (await bad.exists()) await bad.delete();
-      }
+      debugPrint('[Pipeline.analyze] ❌ 骨架疊加失敗');
+      final bad = File(skelOut);
+      if (await bad.exists()) await bad.delete();
     }
 
     // 3. 球軌跡（Phase1 blob → Phase2 Kalman → Phase3 疊加）

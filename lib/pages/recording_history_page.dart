@@ -290,7 +290,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   /// 刪除 session 目錄或切片檔案
   Future<void> _removeEntryFiles(RecordingHistoryEntry entry) async {
     if (entry.videoType == VideoType.localClip) {
-      // 切片刪除整個 session 子目錄（hit_n/）
+      // 切片刪除整個 session 目錄（golf_recordings/{session}_hit_n/）
       try {
         final clipSessionDir = Directory(p.dirname(entry.filePath));
         if (await clipSessionDir.exists()) {
@@ -757,11 +757,9 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
 
       // 3. 依序裁切（每球建立獨立 session 目錄，不執行骨架/球軌跡）
-      final clipsDir = p.join(sessionDir, 'clips');
       final results = await ClipPipelineService.run(
         hits: hits,
         srcVideoPath: widget.entry.filePath,
-        clipsDir: clipsDir,
         sourceEntry: widget.entry,
         onProgress: (prog) {
           if (mounted) setState(() => _progress = prog);
