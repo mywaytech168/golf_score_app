@@ -1,22 +1,17 @@
 ﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 // restored original local VideoPlayerPage usage
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
 import '../services/recording_history_storage.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/swing_impact_detector.dart';
-import '../services/video_clip_service.dart';
-import '../services/skeleton_overlay_service.dart';
-import '../services/ball_trajectory_service.dart';
-import '../services/ball_tracker.dart';
+import '../services/clip_pipeline_service.dart';
 import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
@@ -656,6 +651,7 @@ class _HistoryTile extends StatefulWidget {
 class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
   bool _isDetecting = false;
+  ClipProgress? _progress;
 
   bool get _isLongVideo => widget.entry.durationSeconds > 5;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
@@ -684,10 +680,13 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
-  /// 執行擊球偵測 → 裁切片段 → 回傳切片給父層列入歷史清單
+  /// 執行擊球偵測 → 裁切片段 → 骨架 → 球軌跡 → 回傳切片給父層
   Future<void> _runDetection() async {
     if (_isDetecting) return;
-    setState(() => _isDetecting = true);
+    setState(() {
+      _isDetecting = true;
+      _progress = null;
+    });
 
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
@@ -716,7 +715,10 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (!mounted) return;
 
       if (hits.isEmpty) {
-        setState(() => _isDetecting = false);
+        setState(() {
+          _isDetecting = false;
+          _progress = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -729,142 +731,57 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
-      // 3. 裁切片段並疊加骨架
-      final clipsDir = Directory(p.join(sessionDir, 'clips'));
-      await clipsDir.create(recursive: true);
-
-      final clipEntries = <RecordingHistoryEntry>[];
-      for (final hit in hits) {
-        // 3a. 裁切原始片段
-        final rawClipPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}.mp4');
-        final trimmed = await VideoClipService.trimClip(
-          srcPath: widget.entry.filePath,
-          dstPath: rawClipPath,
-          startSec: hit.startSec,
-          endSec: hit.endSec,
-        );
-        if (trimmed == null) continue;
-
-        // 3b. 疊加骨架
-        final skeletonPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}_skeleton.mp4');
-        final overlaid = await SkeletonOverlayService.render(
-          clipPath: trimmed,
-          csvPath: csvPath,
-          startSec: hit.startSec,
-          outputPath: skeletonPath,
-        );
-        if (overlaid == null) {
-          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 骨架疊加失敗');
-        } else {
-          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 骨架疊加成功');
-        }
-
-        // 3c. 疊加球軌跡（三階段混合架構）
-        //     Phase 1 – Kotlin 像素層：幀差 + BFS blob
-        //     Phase 2 – Dart 智慧層：Kalman + 狀態機追蹤
-        //     Phase 3 – Kotlin I/O 層：疊加軌跡曲線到影片
-        String? finalClipPath;
-        if (overlaid != null) {
-          final trajPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}_final.mp4');
-
-          // Phase 1：Kotlin 提取每幀 blob（寬鬆門檻）
-          final extraction = await BallTrajectoryService.extractBlobs(
-            inputPath: overlaid,
-          );
-          if (extraction == null) {
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → blob 提取失敗');
-          } else {
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                'blob 提取完成：${extraction.frames.length} 幀，'
-                'fps=${extraction.fps.toStringAsFixed(1)}，'
-                '${extraction.width}×${extraction.height}');
-
-            // Phase 2：Dart Kalman 狀態機追蹤（完整移植 Python 算法）
-            final tracker = BallTracker();
-            final trackPts = tracker.track(
-              frames: extraction.frames,
-              fps:    extraction.fps,
-              videoW: extraction.width,
-              videoH: extraction.height,
-            );
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                '追蹤完成：${trackPts.length} 個軌跡點');
-
-            if (trackPts.length < 2) {
-              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 追蹤點不足，略過疊加');
-            } else {
-              // Phase 3：Kotlin 疊加軌跡曲線
-              final withTraj = await BallTrajectoryService.renderOverlay(
-                inputPath:  overlaid,
-                outputPath: trajPath,
-                trackPts:   trackPts.map((pt) => pt.toMap()).toList(),
-              );
-              if (withTraj == null) {
-                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 軌跡疊加失敗');
-              } else {
-                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 球軌跡疊加成功');
-                finalClipPath = withTraj;
-              }
-            }
-          }
-        }
-
-        // 最終影片路徑（依序取第一個成功的結果）
-        final clipPath = finalClipPath ?? overlaid ?? trimmed;
-
-        // 3d. 縮圖定位到擊球瞬間（相對片段時間）
-        String? thumbPath;
-        try {
-          final thumbTarget = p.join(clipsDir.path, 'hit_${hit.hitIndex}.jpg');
-          final hitInClipMs = ((hit.hitSec - hit.startSec) * 1000).round().clamp(0, 999999);
-          thumbPath = await vt.VideoThumbnail.thumbnailFile(
-            video: clipPath,
-            thumbnailPath: thumbTarget,
-            imageFormat: vt.ImageFormat.JPEG,
-            timeMs: hitInClipMs,
-            quality: 75,
-          );
-        } catch (e) {
-          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 縮圖生成失敗: $e');
-        }
-
-        final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
-        clipEntries.add(RecordingHistoryEntry(
-          filePath: clipPath,
-          roundIndex: widget.entry.roundIndex,
-          recordedAt: widget.entry.recordedAt,
-          durationSeconds: clipDuration,
-          customName: '${widget.entry.displayTitle} 第${hit.hitIndex}球',
-          thumbnailPath: thumbPath,
-          videoType: VideoType.localClip,
-          sourceVideoPath: widget.entry.filePath,
-          hitSecond: hit.hitSec - hit.startSec,
-          startSecond: hit.startSec,
-          endSecond: hit.endSec,
-        ));
-      }
+      // 3. 依序裁切、疊加骨架、球軌跡
+      final clipsDir = p.join(sessionDir, 'clips');
+      final results = await ClipPipelineService.run(
+        hits: hits,
+        srcVideoPath: widget.entry.filePath,
+        csvPath: csvPath,
+        clipsDir: clipsDir,
+        sourceEntry: widget.entry,
+        onProgress: (prog) {
+          if (mounted) setState(() => _progress = prog);
+        },
+      );
 
       if (!mounted) return;
-      setState(() => _isDetecting = false);
+      setState(() {
+        _isDetecting = false;
+        _progress = null;
+      });
 
-      if (clipEntries.isEmpty) {
+      if (results.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('偵測成功，但片段裁切失敗，請重試')),
         );
         return;
       }
 
-      widget.onClipsGenerated?.call(widget.entry, clipEntries);
+      // 統計各功能成敗，生成摘要訊息
+      final noSkeleton = results.where((r) => !r.hasSkeleton).length;
+      final noBallTrack = results.where((r) => !r.hasBallTrack).length;
+      final warnings = <String>[];
+      if (noSkeleton > 0) warnings.add('$noSkeleton 球骨架失敗');
+      if (noBallTrack > 0) warnings.add('$noBallTrack 球未追蹤到球軌跡');
+      final warningStr = warnings.isEmpty ? '' : '\n⚠️ ${warnings.join('、')}';
+
+      widget.onClipsGenerated?.call(
+        widget.entry,
+        results.map((r) => r.entry).toList(),
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已生成 ${clipEntries.length} 個擊球片段 ✅'),
-          duration: const Duration(seconds: 3),
+          content: Text('已生成 ${results.length} 個擊球片段 ✅$warningStr'),
+          duration: Duration(seconds: warnings.isEmpty ? 3 : 5),
         ),
       );
     } catch (e) {
       debugPrint('[偵測擊球] 錯誤: $e');
       if (!mounted) return;
-      setState(() => _isDetecting = false);
+      setState(() {
+        _isDetecting = false;
+        _progress = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('偵測失敗: $e'),
@@ -1152,19 +1069,21 @@ class _HistoryTileState extends State<_HistoryTile> {
             ),
             // 裁切進度提示（偵測 + 裁切期間顯示）
             if (_isDetecting)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
-                    SizedBox(
+                    const SizedBox(
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Text(
-                      '正在分析、裁切、骨架與球軌跡...',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                      _progress == null
+                          ? '正在偵測擊球...'
+                          : '處理第 ${_progress!.current} / ${_progress!.total} 球（骨架 + 球軌跡）',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
                     ),
                   ],
                 ),

@@ -188,22 +188,16 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
 
                 // 8. 確保 bitmap 為 ARGB_8888 且尺寸恰好等於 clipW×clipH。
-                //    getFrameAtTime() 可能回傳縮放過的影格（尺寸與 clipW×clipH 不同），
-                //    若直接使用原始尺寸傳入 fillYuvImage(…, clipW, clipH) 會觸發
-                //    Bitmap.getPixels: "x + width must be <= bitmap.width()"。
-                val mutable: Bitmap = if (bitmap.width == clipW && bitmap.height == clipH
-                    && bitmap.config == Bitmap.Config.ARGB_8888 && bitmap.isMutable) {
-                    bitmap
+                //    getFrameAtTime() 可能回傳縮放過的影格，直接餵給 fillYuvImage 會觸發
+                //    "x + width must be <= bitmap.width()"。
+                val needsScale = bitmap.width != clipW || bitmap.height != clipH
+                val scaled = if (needsScale) Bitmap.createScaledBitmap(bitmap, clipW, clipH, true)
+                             else bitmap
+                if (needsScale) bitmap.recycle()
+                val mutable: Bitmap = if (scaled.config == Bitmap.Config.ARGB_8888 && scaled.isMutable) {
+                    scaled
                 } else {
-                    // 先縮放到目標尺寸，再確保為可寫的 ARGB_8888
-                    val scaled = if (bitmap.width == clipW && bitmap.height == clipH) bitmap
-                                 else android.graphics.Bitmap.createScaledBitmap(bitmap, clipW, clipH, true)
-                    val result = if (scaled.config == Bitmap.Config.ARGB_8888 && scaled.isMutable) scaled
-                                 else scaled.copy(Bitmap.Config.ARGB_8888, true).also {
-                                     if (scaled !== bitmap) scaled.recycle()
-                                 }
-                    bitmap.recycle()
-                    result
+                    scaled.copy(Bitmap.Config.ARGB_8888, true).also { scaled.recycle() }
                 }
 
                 // 9. 繪製骨架
