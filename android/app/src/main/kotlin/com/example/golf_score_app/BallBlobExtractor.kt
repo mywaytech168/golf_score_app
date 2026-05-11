@@ -1,0 +1,330 @@
+package com.example.golf_score_app
+
+import android.media.Image
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.util.Log
+import java.io.File
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * 球偵測像素層（Kotlin 負責）。
+ *
+ * 使用 MediaExtractor + MediaCodec 對含骨架的 mp4 逐幀解碼，
+ * 對 Y 平面做幀差 + 二值化 + 形態開運算 + BFS 連通域，
+ * 以寬鬆門檻輸出每幀候選 blob，由 Dart 層做智慧追蹤決策。
+ *
+ * 寬鬆門檻（Kotlin 層只做粗篩，不做動態調整）：
+ *   diff_thresh = 10
+ *   area ∈ [3, 800]
+ *   circ ≥ 0.25
+ *
+ * 回傳格式（MethodChannel 序列化）：
+ * {
+ *   "fps"    : Double,
+ *   "width"  : Int,
+ *   "height" : Int,
+ *   "frames" : List<Map> 其中每個 Map = {
+ *       "ptsUs" : Long,
+ *       "blobs" : List<Map> 其中每個 Map = {
+ *           "cx"       : Int,
+ *           "cy"       : Int,
+ *           "area"     : Int,
+ *           "circ"     : Double,
+ *           "diffMean" : Double
+ *       }
+ *   }
+ * }
+ */
+class BallBlobExtractor {
+
+    companion object {
+        private const val TAG = "BallBlobExtractor"
+
+        // ── 寬鬆偵測門檻（Dart 會在其上疊動態門檻）──
+        private const val DIFF_THRESH = 10        // 幀差最小值
+        private const val AREA_LO    = 3          // blob 最小面積（像素）
+        private const val AREA_HI    = 800        // blob 最大面積（像素）
+        private const val CIRC_MIN   = 0.25       // 最低圓度
+        private const val MORPH_K    = 3          // 形態開運算 kernel 尺寸
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 主入口
+    // ────────────────────────────────────────────────────────────
+
+    /**
+     * 對 [inputPath] 的影片做逐幀偵測，回傳每幀的 blob 資料列表。
+     * 失敗時回傳 null。
+     */
+    fun extract(inputPath: String): Map<String, Any>? {
+        if (!File(inputPath).exists()) {
+            Log.w(TAG, "輸入檔不存在: $inputPath")
+            return null
+        }
+
+        // ── 1. 建立 MediaExtractor ──────────────────────────────
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(inputPath)
+        } catch (e: Exception) {
+            Log.e(TAG, "無法開啟輸入: $e")
+            return null
+        }
+
+        var videoTrack = -1
+        var inputFormat: MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val fmt = extractor.getTrackFormat(i)
+            if ((fmt.getString(MediaFormat.KEY_MIME) ?: "").startsWith("video/")) {
+                videoTrack = i; inputFormat = fmt; break
+            }
+        }
+        if (videoTrack < 0 || inputFormat == null) {
+            Log.e(TAG, "找不到視頻 track")
+            extractor.release()
+            return null
+        }
+        extractor.selectTrack(videoTrack)
+
+        val videoW    = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
+        val videoH    = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
+        val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
+        val fps       = runCatching {
+            inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
+        }.getOrElse { 15.0 }
+
+        Log.d(TAG, "影片: ${videoW}x${videoH} fps=$fps mime=$videoMime")
+
+        // ── 2. 建立解碼器 ───────────────────────────────────────
+        val decoder = try {
+            MediaCodec.createDecoderByType(videoMime)
+        } catch (e: Exception) {
+            Log.e(TAG, "無法建立解碼器: $e")
+            extractor.release()
+            return null
+        }
+        decoder.configure(inputFormat, null, null, 0)
+        decoder.start()
+
+        // ── 3. 逐幀解碼 ─────────────────────────────────────────
+        val frameList  = mutableListOf<Map<String, Any>>()
+        val bufInfo    = MediaCodec.BufferInfo()
+        var inputEos   = false
+        var prevYData  : ByteArray? = null
+        var prevYStride = 0
+
+        try {
+            while (true) {
+                // 餵解碼器
+                if (!inputEos) {
+                    val inIdx = decoder.dequeueInputBuffer(0L)
+                    if (inIdx >= 0) {
+                        val buf  = decoder.getInputBuffer(inIdx)!!
+                        val size = extractor.readSampleData(buf, 0)
+                        if (size < 0) {
+                            decoder.queueInputBuffer(
+                                inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
+                            inputEos = true
+                        } else {
+                            decoder.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+
+                // 取解碼輸出
+                val outIdx = decoder.dequeueOutputBuffer(bufInfo, 10_000L)
+                if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) continue
+                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) continue
+                if (outIdx < 0) continue
+
+                val image = runCatching { decoder.getOutputImage(outIdx) }.getOrNull()
+                if (image == null) {
+                    decoder.releaseOutputBuffer(outIdx, false)
+                    if ((bufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                    continue
+                }
+
+                try {
+                    val pts     = bufInfo.presentationTimeUs
+                    val yPlane  = image.planes[0]
+                    val yStride = yPlane.rowStride
+                    val yBuf    = yPlane.buffer
+                    val yData   = ByteArray(videoH * yStride)
+                    yBuf.get(yData)
+
+                    // 幀差偵測（需要前幀）
+                    val blobs: List<Map<String, Any>>
+                    val prevY = prevYData
+                    blobs = if (prevY != null && prevY.size == yData.size) {
+                        detectBlobs(yData, prevY, videoW, videoH, yStride)
+                    } else {
+                        emptyList()
+                    }
+
+                    frameList.add(mapOf(
+                        "ptsUs" to pts,
+                        "blobs" to blobs,
+                    ))
+
+                    prevYData   = yData
+                    prevYStride = yStride
+
+                } finally {
+                    image.close()
+                    decoder.releaseOutputBuffer(outIdx, false)
+                }
+
+                if ((bufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "偵測失敗: $e", e)
+        } finally {
+            runCatching { decoder.stop(); decoder.release() }
+            runCatching { extractor.release() }
+        }
+
+        Log.d(TAG, "完成: ${frameList.size} 幀，合計 ${frameList.sumOf { (it["blobs"] as List<*>).size }} 個 blob")
+
+        return mapOf(
+            "fps"    to fps,
+            "width"  to videoW,
+            "height" to videoH,
+            "frames" to frameList,
+        )
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 幀差偵測 → 形態開運算 → BFS 連通域
+    // ────────────────────────────────────────────────────────────
+
+    private fun detectBlobs(
+        cur: ByteArray, prev: ByteArray,
+        w: Int, h: Int, stride: Int,
+    ): List<Map<String, Any>> {
+
+        // 1. 幀差 + 二值化
+        //    同時保留每像素差值（供 diffMean 計算）
+        val diff   = ByteArray(w * h)
+        val binary = BooleanArray(w * h)
+        for (j in 0 until h) {
+            for (i in 0 until w) {
+                val d = abs(
+                    (cur[j * stride + i].toInt() and 0xFF) -
+                    (prev[j * stride + i].toInt() and 0xFF)
+                )
+                diff[j * w + i]   = d.toByte()
+                binary[j * w + i] = d >= DIFF_THRESH
+            }
+        }
+
+        // 2. 形態學開運算 3×3（侵蝕 → 膨脹）
+        val opened = morphOpen(binary, w, h, MORPH_K)
+
+        // 3. BFS 連通域（4-連通）
+        val visited = BooleanArray(w * h)
+        val blobs   = mutableListOf<Map<String, Any>>()
+        val queue   = ArrayDeque<Int>(256)
+
+        for (start in 0 until w * h) {
+            if (!opened[start] || visited[start]) continue
+
+            queue.clear()
+            queue.add(start)
+            visited[start] = true
+
+            var sumX      = 0L
+            var sumY      = 0L
+            var area      = 0
+            var perim     = 0
+            var diffSum   = 0L   // 用於 diffMean
+
+            while (queue.isNotEmpty()) {
+                val idx  = queue.removeFirst()
+                val px   = idx % w
+                val py   = idx / w
+                sumX    += px
+                sumY    += py
+                area++
+                diffSum += diff[idx].toInt() and 0xFF
+
+                var isBorder = false
+                val ns = intArrayOf(
+                    if (px > 0)     idx - 1 else -1,
+                    if (px < w - 1) idx + 1 else -1,
+                    if (py > 0)     idx - w else -1,
+                    if (py < h - 1) idx + w else -1,
+                )
+                for (n in ns) {
+                    if (n < 0 || !opened[n]) { isBorder = true; continue }
+                    if (!visited[n]) { visited[n] = true; queue.add(n) }
+                }
+                if (isBorder) perim++
+            }
+
+            // 面積篩選
+            if (area !in AREA_LO..AREA_HI) continue
+
+            // 圓度
+            val circ = if (perim < 1) 0.0
+                       else 4.0 * Math.PI * area / (perim.toDouble() * perim)
+            if (circ < CIRC_MIN) continue
+
+            val cx       = (sumX / area).toInt()
+            val cy       = (sumY / area).toInt()
+            val diffMean = diffSum.toDouble() / area
+
+            blobs.add(mapOf(
+                "cx"       to cx,
+                "cy"       to cy,
+                "area"     to area,
+                "circ"     to circ,
+                "diffMean" to diffMean,
+            ))
+        }
+
+        return blobs
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 形態學開運算（侵蝕 + 膨脹）
+    // ────────────────────────────────────────────────────────────
+
+    private fun morphOpen(binary: BooleanArray, w: Int, h: Int, k: Int): BooleanArray {
+        val r = k / 2
+        // 侵蝕
+        val eroded = BooleanArray(w * h)
+        for (j in r until h - r) {
+            for (i in r until w - r) {
+                var all = true
+                outer@ for (dj in -r..r) {
+                    for (di in -r..r) {
+                        if (!binary[(j + dj) * w + (i + di)]) { all = false; break@outer }
+                    }
+                }
+                eroded[j * w + i] = all
+            }
+        }
+        // 膨脹
+        val dilated = BooleanArray(w * h)
+        for (j in r until h - r) {
+            for (i in r until w - r) {
+                var any = false
+                outer@ for (dj in -r..r) {
+                    for (di in -r..r) {
+                        if (eroded[(j + dj) * w + (i + di)]) { any = true; break@outer }
+                    }
+                }
+                dilated[j * w + i] = any
+            }
+        }
+        return dilated
+    }
+}

@@ -1051,6 +1051,7 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => RecordingHistoryPage(
           entries: _recordingHistory,
           userAvatarPath: _avatarPath,
+          onDelete: _loadInitialHistory,
         ),
       ),
     );

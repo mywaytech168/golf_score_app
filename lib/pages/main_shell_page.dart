@@ -218,6 +218,7 @@ class _MainShellPageState extends State<MainShellPage> {
           RecordingHistoryPage(
             entries: _recordingHistory,
             userAvatarPath: _avatarPath,
+            onDelete: _loadHistory,
           ),
           
           // 第 4 頁：升級頁

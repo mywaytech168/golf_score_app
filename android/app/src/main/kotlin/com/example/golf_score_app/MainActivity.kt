@@ -30,12 +30,19 @@ class MainActivity: FlutterActivity() {
     private val VIDEO_OVERLAY_CHANNEL = "video_overlay_channel"
     private val TRIMMER_CHANNEL = "com.example.golf_score_app/trimmer"
     private val TRAJECTORY_CHANNEL = "com.example.golf_score_app/trajectory"
+    private val SKELETON_OVERLAY_CHANNEL = "com.example.golf_score_app/skeleton_overlay"
+    private val BALL_TRAJECTORY_CHANNEL = "com.example.golf_score_app/ball_trajectory"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val trajectoryExecutor = Executors.newSingleThreadExecutor()
+    private val skeletonExecutor = Executors.newSingleThreadExecutor()
+    private val ballTrajExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
     private val videoTrimmer by lazy { VideoTrimmer(this) }
     private val trajectoryAnalyzer by lazy { TrajectoryAnalyzer() }
+    private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
+    private val ballBlobExtractor      by lazy { BallBlobExtractor() }
+    private val trajectoryOverlayRenderer by lazy { TrajectoryOverlayRenderer() }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -196,6 +203,92 @@ class MainActivity: FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 videoTrimmer.handle(call, result)
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SKELETON_OVERLAY_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "render") {
+                    val clipPath = call.argument<String>("clipPath")
+                    val csvPath = call.argument<String>("csvPath")
+                    val startSec = call.argument<Double>("startSec") ?: 0.0
+                    val outputPath = call.argument<String>("outputPath")
+
+                    if (clipPath.isNullOrBlank() || csvPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
+                        result.error("invalid_args", "缺少必要參數", null)
+                        return@setMethodCallHandler
+                    }
+
+                    skeletonExecutor.execute {
+                        try {
+                            val ok = skeletonRenderer.render(
+                                clipPath = clipPath,
+                                csvPath = csvPath,
+                                startSec = startSec,
+                                outputPath = outputPath
+                            )
+                            runOnUiThread { result.success(ok) }
+                        } catch (e: Exception) {
+                            Log.e(logTag, "骨架渲染失敗: ${e.message}", e)
+                            runOnUiThread { result.error("render_failed", e.message, null) }
+                        }
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BALL_TRAJECTORY_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+
+                    // ── Step 1：Kotlin 像素層 → 每幀 blob ──────────────
+                    "extractBlobs" -> {
+                        val inputPath = call.argument<String>("inputPath")
+                        if (inputPath.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 inputPath", null)
+                            return@setMethodCallHandler
+                        }
+                        ballTrajExecutor.execute {
+                            try {
+                                val data = ballBlobExtractor.extract(inputPath)
+                                runOnUiThread {
+                                    if (data != null) result.success(data)
+                                    else result.error("extract_failed", "blob 偵測失敗", null)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "blob 偵測例外: ${e.message}", e)
+                                runOnUiThread { result.error("extract_failed", e.message, null) }
+                            }
+                        }
+                    }
+
+                    // ── Step 2：Kotlin I/O 層 → 疊加軌跡 ───────────────
+                    "renderOverlay" -> {
+                        val inputPath  = call.argument<String>("inputPath")
+                        val outputPath = call.argument<String>("outputPath")
+                        @Suppress("UNCHECKED_CAST")
+                        val trackPts   = call.argument<List<Map<String, Any>>>("trackPts")
+
+                        if (inputPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 inputPath / outputPath", null)
+                            return@setMethodCallHandler
+                        }
+
+                        ballTrajExecutor.execute {
+                            try {
+                                val ok = trajectoryOverlayRenderer.render(
+                                    inputPath  = inputPath,
+                                    outputPath = outputPath,
+                                    trackPts   = trackPts ?: emptyList(),
+                                )
+                                runOnUiThread { result.success(ok) }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "軌跡疊加失敗: ${e.message}", e)
+                                runOnUiThread { result.error("render_failed", e.message, null) }
+                            }
+                        }
+                    }
+
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRAJECTORY_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "analyzeTrajectory") {
@@ -241,6 +334,8 @@ class MainActivity: FlutterActivity() {
         overlayExecutor.shutdown()
         audioExtractorExecutor.shutdown()
         trajectoryExecutor.shutdown()
+        skeletonExecutor.shutdown()
+        ballTrajExecutor.shutdown()
     }
 
     private data class AudioExtractionResult(
