@@ -16,7 +16,7 @@ import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, delete }
+enum _HistoryMenuAction { rename, detectHits, analyzeVideo, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -277,10 +277,28 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     RecordingHistoryStorage.instance.saveHistory(_entries);
   }
 
+  /// 影片分析完成後，以新版 entry 取代舊版
+  void _onEntryUpdated(RecordingHistoryEntry oldEntry, RecordingHistoryEntry newEntry) {
+    final idx = _entries.indexWhere((e) => e.filePath == oldEntry.filePath);
+    if (idx != -1) {
+      _entries[idx] = newEntry;
+      setState(() {});
+      RecordingHistoryStorage.instance.saveHistory(_entries);
+    }
+  }
+
   /// 刪除 session 目錄或切片檔案
   Future<void> _removeEntryFiles(RecordingHistoryEntry entry) async {
     if (entry.videoType == VideoType.localClip) {
-      // 切片只刪除影片檔與縮圖，保留來源 session 資料夾
+      // 切片刪除整個 session 子目錄（hit_n/）
+      try {
+        final clipSessionDir = Directory(p.dirname(entry.filePath));
+        if (await clipSessionDir.exists()) {
+          await clipSessionDir.delete(recursive: true);
+          return;
+        }
+      } catch (_) {}
+      // fallback：逐一刪除已知檔案
       for (final path in [
         entry.filePath,
         if (entry.thumbnailPath != null && entry.thumbnailPath!.isNotEmpty)
@@ -584,6 +602,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           onRename: () => _renameEntry(entry),
                           onDelete: () => _deleteEntry(entry),
                           onClipsGenerated: _onClipsGenerated,
+                          onEntryUpdated: _onEntryUpdated,
                         );
                       },
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -633,6 +652,8 @@ class _HistoryTile extends StatefulWidget {
   final VoidCallback onDelete; // 刪除影片紀錄
   /// 擊球偵測完成並裁切片段後的回呼，帶入來源影片與新切片清單
   final void Function(RecordingHistoryEntry original, List<RecordingHistoryEntry> clips)? onClipsGenerated;
+  /// 影片分析完成後，以新版 entry 取代舊版
+  final void Function(RecordingHistoryEntry old, RecordingHistoryEntry updated)? onEntryUpdated;
 
   const _HistoryTile({
     super.key,
@@ -642,6 +663,7 @@ class _HistoryTile extends StatefulWidget {
     required this.onRename,
     required this.onDelete,
     this.onClipsGenerated,
+    this.onEntryUpdated,
   });
 
   @override
@@ -652,9 +674,12 @@ class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
   bool _isDetecting = false;
   ClipProgress? _progress;
+  bool _isAnalyzing = false;
+  String _analyzeLabel = '';
 
   bool get _isLongVideo => widget.entry.durationSeconds > 5;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
+  bool get _isClip => widget.entry.videoType == VideoType.localClip;
 
   @override
   void initState() {
@@ -680,7 +705,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
-  /// 執行擊球偵測 → 裁切片段 → 骨架 → 球軌跡 → 回傳切片給父層
+  /// 執行擊球偵測 → 裁切片段（不自動執行骨架與球軌跡）
   Future<void> _runDetection() async {
     if (_isDetecting) return;
     setState(() {
@@ -731,12 +756,11 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
-      // 3. 依序裁切、疊加骨架、球軌跡
+      // 3. 依序裁切（每球建立獨立 session 目錄，不執行骨架/球軌跡）
       final clipsDir = p.join(sessionDir, 'clips');
       final results = await ClipPipelineService.run(
         hits: hits,
         srcVideoPath: widget.entry.filePath,
-        csvPath: csvPath,
         clipsDir: clipsDir,
         sourceEntry: widget.entry,
         onProgress: (prog) {
@@ -757,22 +781,14 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
-      // 統計各功能成敗，生成摘要訊息
-      final noSkeleton = results.where((r) => !r.hasSkeleton).length;
-      final noBallTrack = results.where((r) => !r.hasBallTrack).length;
-      final warnings = <String>[];
-      if (noSkeleton > 0) warnings.add('$noSkeleton 球骨架失敗');
-      if (noBallTrack > 0) warnings.add('$noBallTrack 球未追蹤到球軌跡');
-      final warningStr = warnings.isEmpty ? '' : '\n⚠️ ${warnings.join('、')}';
-
       widget.onClipsGenerated?.call(
         widget.entry,
         results.map((r) => r.entry).toList(),
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已生成 ${results.length} 個擊球片段 ✅$warningStr'),
-          duration: Duration(seconds: warnings.isEmpty ? 3 : 5),
+          content: Text('已生成 ${results.length} 個擊球片段 ✅\n可對每個切片執行「影片分析」加入骨架與球軌跡'),
+          duration: const Duration(seconds: 4),
         ),
       );
     } catch (e) {
@@ -785,6 +801,73 @@ class _HistoryTileState extends State<_HistoryTile> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('偵測失敗: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  /// 對切片執行影片分析（骨架 + 球軌跡），完成後更新 entry
+  Future<void> _runAnalysis() async {
+    if (_isAnalyzing) return;
+    setState(() {
+      _isAnalyzing = true;
+      _analyzeLabel = '準備中...';
+    });
+
+    try {
+      final clipPath = widget.entry.filePath;
+      final sessionDir = p.dirname(clipPath);
+
+      final result = await ClipPipelineService.analyze(
+        clipPath: clipPath,
+        sessionDir: sessionDir,
+        durationSeconds: widget.entry.durationSeconds,
+        onProgress: (label) {
+          if (mounted) setState(() => _analyzeLabel = label);
+        },
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _isAnalyzing = false;
+        _analyzeLabel = '';
+      });
+
+      if (result == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('影片分析失敗，請重試'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final warnings = <String>[];
+      if (!result.hasSkeleton) warnings.add('骨架疊加失敗');
+      if (!result.hasBallTrack) warnings.add('未追蹤到球軌跡');
+      final warningStr = warnings.isEmpty ? '' : '\n⚠️ ${warnings.join('、')}';
+
+      final updatedEntry = widget.entry.copyWith(filePath: result.finalPath);
+      widget.onEntryUpdated?.call(widget.entry, updatedEntry);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('影片分析完成 ✅$warningStr'),
+          duration: Duration(seconds: warnings.isEmpty ? 3 : 5),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[影片分析] 錯誤: $e');
+      if (!mounted) return;
+      setState(() {
+        _isAnalyzing = false;
+        _analyzeLabel = '';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('影片分析失敗: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -946,6 +1029,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                         case _HistoryMenuAction.detectHits:
                           _runDetection();
                           break;
+                        case _HistoryMenuAction.analyzeVideo:
+                          _runAnalysis();
+                          break;
                         case _HistoryMenuAction.delete:
                           widget.onDelete();
                           break;
@@ -969,6 +1055,28 @@ class _HistoryTileState extends State<_HistoryTile> {
                               ),
                             ),
                             if (_isDetecting) ...[
+                              const SizedBox(width: 8),
+                              const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    if (_isClip)
+                      PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.analyzeVideo,
+                        child: Row(
+                          children: [
+                            Text(
+                              _isAnalyzing ? '分析中...' : '影片分析',
+                              style: TextStyle(
+                                color: _isAnalyzing ? Colors.grey : null,
+                              ),
+                            ),
+                            if (_isAnalyzing) ...[
                               const SizedBox(width: 8),
                               const SizedBox(
                                 width: 12,
@@ -1067,7 +1175,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                 );
               },
             ),
-            // 裁切進度提示（偵測 + 裁切期間顯示）
+            // 偵測擊球 / 裁切進度
             if (_isDetecting)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1082,8 +1190,30 @@ class _HistoryTileState extends State<_HistoryTile> {
                     Text(
                       _progress == null
                           ? '正在偵測擊球...'
-                          : '處理第 ${_progress!.current} / ${_progress!.total} 球（骨架 + 球軌跡）',
+                          : '裁切第 ${_progress!.current} / ${_progress!.total} 球...',
                       style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                    ),
+                  ],
+                ),
+              ),
+            // 影片分析進度
+            if (_isAnalyzing)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _analyzeLabel.isEmpty ? '正在分析影片...' : _analyzeLabel,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
