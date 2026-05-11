@@ -131,12 +131,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     await _removeEntryFiles(entry);
 
     _entries.removeAt(index);
-    // 刪除原始影片時，同步移除來自該影片的所有切片 entry
-    if (entry.videoType == VideoType.original) {
-      _entries.removeWhere(
-        (e) => e.videoType == VideoType.localClip && e.sourceVideoPath == entry.filePath,
-      );
-    }
     if (mounted) {
       debugPrint('[歷史頁] 刪除後立即刷新列表，剩餘 ${_entries.length} 筆');
       setState(() {}); // 通知畫面重新渲染
