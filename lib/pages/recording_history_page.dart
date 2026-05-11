@@ -747,16 +747,42 @@ class _HistoryTileState extends State<_HistoryTile> {
 
         // 3b. 疊加骨架
         final skeletonPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}_skeleton.mp4');
-        final overlaid = await SkeletonOverlayService.render(
+        
+        // 驗證輸入文件存在
+        final csvFile = File(csvPath);
+        final trimmedFile = File(trimmed);
+        final csvExists = await csvFile.exists();
+        final trimmedExists = await trimmedFile.exists();
+        
+        if (!csvExists) {
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ❌ CSV 不存在：$csvPath');
+        }
+        if (!trimmedExists) {
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ❌ 裁切片段不存在：$trimmed');
+        }
+        
+        var overlaid = await SkeletonOverlayService.render(
           clipPath: trimmed,
           csvPath: csvPath,
           startSec: hit.startSec,
           outputPath: skeletonPath,
         );
         if (overlaid == null) {
-          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 骨架疊加失敗');
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ❌ 骨架疊加失敗');
+          final skeletonFile = File(skeletonPath);
+          if (await skeletonFile.exists()) {
+            await skeletonFile.delete();
+            debugPrint('[偵測擊球] 已刪除壞檔：$skeletonPath');
+          }
         } else {
-          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 骨架疊加成功');
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ✅ 骨架疊加成功：$skeletonPath');
+          
+          // 檢查輸出文件是否真的存在且有效
+          final skeletonFile = File(skeletonPath);
+          if (!await skeletonFile.exists()) {
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ❌ 骨架輸出文件不存在，骨架疊加失敗');
+            overlaid = null;
+          }
         }
 
         // 3c. 疊加球軌跡（三階段混合架構）
@@ -766,16 +792,16 @@ class _HistoryTileState extends State<_HistoryTile> {
         String? finalClipPath;
         if (overlaid != null) {
           final trajPath = p.join(clipsDir.path, 'hit_${hit.hitIndex}_final.mp4');
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 開始球軌跡疊加流程');
 
           // Phase 1：Kotlin 提取每幀 blob（寬鬆門檻）
           final extraction = await BallTrajectoryService.extractBlobs(
             inputPath: overlaid,
           );
           if (extraction == null) {
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → blob 提取失敗');
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ❌ blob 提取失敗');
           } else {
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                'blob 提取完成：${extraction.frames.length} 幀，'
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ✅ blob 提取完成：${extraction.frames.length} 幀，'
                 'fps=${extraction.fps.toStringAsFixed(1)}，'
                 '${extraction.width}×${extraction.height}');
 
@@ -787,11 +813,10 @@ class _HistoryTileState extends State<_HistoryTile> {
               videoW: extraction.width,
               videoH: extraction.height,
             );
-            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → '
-                '追蹤完成：${trackPts.length} 個軌跡點');
+            debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ✅ 追蹤完成：${trackPts.length} 個軌跡點');
 
             if (trackPts.length < 2) {
-              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 追蹤點不足，略過疊加');
+              debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ⚠️  追蹤點不足 (${trackPts.length} 個)，略過疊加');
             } else {
               // Phase 3：Kotlin 疊加軌跡曲線
               final withTraj = await BallTrajectoryService.renderOverlay(
@@ -800,13 +825,20 @@ class _HistoryTileState extends State<_HistoryTile> {
                 trackPts:   trackPts.map((pt) => pt.toMap()).toList(),
               );
               if (withTraj == null) {
-                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 軌跡疊加失敗');
+                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ❌ 軌跡疊加失敗');
+                final trajFile = File(trajPath);
+                if (await trajFile.exists()) {
+                  await trajFile.delete();
+                  debugPrint('[偵測擊球] 已刪除壞檔：$trajPath');
+                }
               } else {
-                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → 球軌跡疊加成功');
+                debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ✅ 球軌跡疊加成功：$trajPath');
                 finalClipPath = withTraj;
               }
             }
           }
+        } else {
+          debugPrint('[偵測擊球] 第${hit.hitIndex}球 → ⚠️  骨架疊加失敗，略過球軌跡疊加');
         }
 
         // 最終影片路徑（依序取第一個成功的結果）

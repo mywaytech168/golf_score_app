@@ -1,0 +1,14 @@
+{
+  "hit_idx": 3,
+  "speed_frame": 1945,
+  "audio_frame": 1952,
+  "hit_frame": 1948,
+  "delta_frames": 7,
+  "delta_sec": 0.23324545533091412,
+  "start_frame": 1872,
+  "end_frame": 2023,
+  "start_sec": 62.37649891135303,
+  "end_sec": 67.40793659063418,
+  "clip_raw": "D:\\Projects\\golf_score_app\\python\\Test_data\\long_record\\detectresult_v3_fast_peak_intersection\\segments\\hit_0003\\hit_0003.mp4",
+  "clip_skeleton": "D:\\Projects\\golf_score_app\\python\\Test_data\\long_record\\detectresult_v3_fast_peak_intersection\\segments\\hit_0003\\hit_0003_skeleton.mp4"
+}

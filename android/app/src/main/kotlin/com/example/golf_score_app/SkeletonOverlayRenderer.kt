@@ -8,8 +8,8 @@ import android.graphics.Paint
 import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaCodecInfo.CodecCapabilities
+import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.util.Log
 import java.io.File
@@ -18,8 +18,8 @@ import kotlin.math.roundToInt
 /**
  * 替裁切後的高爾夫揮桿片段渲染骨架疊加影片。
  *
- * 輸入：已裁切的 mp4 片段、原始錄影的 pose_landmarks.csv、片段在原始影片中的起始秒數
- * 輸出：帶有骨架線條的 mp4 影片（輸出幀率與分析取樣率一致，約 15fps）
+ * 採用 MediaExtractor + MediaCodec 順序解碼（與 TrajectoryOverlayRenderer 相同架構），
+ * 逐幀解碼 → 繪製骨架 → 重新編碼，輸出保留原始幀率與解析度。
  *
  * 骨架座標系轉換：
  *   CSV 中的 x_px / y_px 是在縮圖空間（maxWidth=720），
@@ -33,312 +33,361 @@ class SkeletonOverlayRenderer(private val context: Context) {
         /** 骨架分析取樣間隔（毫秒），對應 VideoAnalysisService 的 _frameIntervalMs = 67 */
         private const val ANALYSIS_INTERVAL_MS = 67.0
 
-        /** MediaPipe 33-landmark 骨骼連接定義（按人體左/右分色） */
         val CONNECTIONS = listOf(
             // 臉部
             0 to 1, 1 to 2, 2 to 3, 3 to 7,
             0 to 4, 4 to 5, 5 to 6, 6 to 8,
             9 to 10,
-            // 左臂（人體左側）
+            // 左臂
             11 to 13, 13 to 15, 15 to 17, 17 to 19, 19 to 15, 15 to 21,
-            // 右臂（人體右側）
+            // 右臂
             12 to 14, 14 to 16, 16 to 18, 18 to 20, 20 to 16, 16 to 22,
             // 軀幹
             11 to 12, 12 to 24, 24 to 23, 23 to 11,
             // 左腿
             23 to 25, 25 to 27, 27 to 29, 29 to 31, 31 to 27,
             // 右腿
-            24 to 26, 26 to 28, 28 to 30, 30 to 32, 32 to 28
+            24 to 26, 26 to 28, 28 to 30, 30 to 32, 32 to 28,
         )
 
-        /** 人體左側關節點索引（MediaPipe 定義） */
-        val LEFT_LANDMARKS = setOf(1, 2, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31)
-
-        /** 人體右側關節點索引 */
+        val LEFT_LANDMARKS  = setOf(1, 2, 3, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31)
         val RIGHT_LANDMARKS = setOf(4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32)
     }
 
-    /** 單一關節點的解析資料 */
     private data class LandmarkPoint(
-        val xPx: Float,
-        val yPx: Float,
-        val xNorm: Float,
-        val yNorm: Float,
-        val visibility: Float
+        val xPx: Float, val yPx: Float,
+        val xNorm: Float, val yNorm: Float,
+        val visibility: Float,
     )
 
-    /**
-     * 渲染骨架疊加影片。
-     *
-     * @param clipPath   已裁切的 mp4 路徑
-     * @param csvPath    pose_landmarks.csv 路徑（原始完整錄影的分析結果）
-     * @param startSec   片段在原始影片中的起始秒數
-     * @param outputPath 輸出 mp4 路徑
-     * @return 成功回傳 true，失敗回傳 false
-     */
+    // ────────────────────────────────────────────────────────────
+    // 主入口
+    // ────────────────────────────────────────────────────────────
+
     fun render(
         clipPath: String,
         csvPath: String,
         startSec: Double,
-        outputPath: String
+        outputPath: String,
     ): Boolean {
         // 1. 解析 CSV
         val frameData = parseCsv(csvPath)
         if (frameData.isEmpty()) {
-            Log.w(TAG, "CSV 沒有資料：$csvPath")
-            return false
+            Log.w(TAG, "CSV 沒有資料：$csvPath"); return false
         }
 
-        // 2. 從 CSV 推算骨架影像尺寸（thumbnail 空間）
+        // 2. 推算骨架影像尺寸（thumbnail 空間）
         val poseSize = inferPoseImageSize(frameData)
         if (poseSize == null) {
-            Log.w(TAG, "無法從 CSV 推算骨架影像尺寸")
-            return false
+            Log.w(TAG, "無法從 CSV 推算骨架影像尺寸"); return false
         }
         val (poseW, poseH) = poseSize
         Log.d(TAG, "骨架影像尺寸推算: ${poseW}x${poseH}")
 
-        // 3. 讀取片段元資料
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(clipPath)
+        // 3. MediaExtractor 開啟輸入片段
+        val extractor = MediaExtractor()
+        try { extractor.setDataSource(clipPath) }
+        catch (e: Exception) { Log.e(TAG, "無法開啟片段: $e"); return false }
+
+        var videoTrack = -1; var inputFormat: MediaFormat? = null
+        for (i in 0 until extractor.trackCount) {
+            val fmt = extractor.getTrackFormat(i)
+            if ((fmt.getString(MediaFormat.KEY_MIME) ?: "").startsWith("video/")) {
+                videoTrack = i; inputFormat = fmt; break
+            }
+        }
+        if (videoTrack < 0 || inputFormat == null) {
+            Log.e(TAG, "找不到視頻 track"); extractor.release(); return false
+        }
+        extractor.selectTrack(videoTrack)
+
+        val videoW    = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
+        val videoH    = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
+        val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
+        val fps       = runCatching {
+            inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
+        }.getOrElse { 30f }
+        
+        // ✅ 提取旋轉信息（重要！避免影片變行）
+        val rotation  = runCatching {
+            inputFormat.getInteger(MediaFormat.KEY_ROTATION)
+        }.getOrElse { 0 }
+        Log.d(TAG, "提取旋轉信息: rotation=$rotation°")
+
+        val scaleX = videoW.toFloat() / poseW
+        val scaleY = videoH.toFloat() / poseH
+        Log.d(TAG, "片段: ${videoW}x${videoH} fps=$fps  scale=${scaleX}x${scaleY}  rotation=$rotation°")
+
+        // 4. 建立解碼器
+        val decoder = try {
+            MediaCodec.createDecoderByType(videoMime)
         } catch (e: Exception) {
-            Log.e(TAG, "無法開啟片段: $e")
-            return false
+            Log.e(TAG, "無法建立解碼器: $e"); extractor.release(); return false
         }
+        decoder.configure(inputFormat, null, null, 0)
+        decoder.start()
 
-        val clipW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-            ?.toIntOrNull() ?: 720
-        val clipH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-            ?.toIntOrNull() ?: 1280
-        val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            ?.toLongOrNull() ?: 3000L
-
-        val scaleX = clipW.toFloat() / poseW
-        val scaleY = clipH.toFloat() / poseH
-        Log.d(TAG, "片段: ${clipW}x${clipH} duration=${durationMs}ms scale=${scaleX}x${scaleY}")
-
-        // 4. 根據分析取樣率計算需要渲染的幀列表
-        //    輸出幀率 = 1000 / ANALYSIS_INTERVAL_MS ≈ 14.9fps
-        val outputFps = (1000.0 / ANALYSIS_INTERVAL_MS).toFloat()
-        val analysisIntervalUs = (ANALYSIS_INTERVAL_MS * 1000).toLong()
-
-        // 收集要渲染的幀：每隔 analysisIntervalMs 取一幀
-        val framesToRender = mutableListOf<Long>() // clip 內的 timeUs
-        var t = 0L
-        while (t < durationMs * 1000L) {
-            framesToRender.add(t)
-            t += analysisIntervalUs
-        }
-        if (framesToRender.isEmpty()) framesToRender.add(0L)
-
-        Log.d(TAG, "要渲染 ${framesToRender.size} 幀（分析取樣率）")
-
-        // 5. 建立 MediaCodec 編碼器 + MediaMuxer
-        val mime = "video/avc"
-        val encoder: MediaCodec
-        try {
-            encoder = MediaCodec.createEncoderByType(mime)
+        // 5. 建立編碼器
+        val encoder = try {
+            MediaCodec.createEncoderByType("video/avc")
         } catch (e: Exception) {
             Log.e(TAG, "無法建立編碼器: $e")
-            retriever.release()
-            return false
+            decoder.stop(); decoder.release(); extractor.release(); return false
         }
-
-        val encFormat = MediaFormat.createVideoFormat(mime, clipW, clipH).apply {
+        val encFmt = MediaFormat.createVideoFormat("video/avc", videoW, videoH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, 3_000_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, outputFps.roundToInt())
+            setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // ✅ 保留旋轉信息到編碼器輸出格式
+            if (rotation != 0) {
+                setInteger(MediaFormat.KEY_ROTATION, rotation)
+                Log.d(TAG, "編碼器設置旋轉: $rotation°")
+            }
         }
+        encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
 
-        try {
-            encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            encoder.start()
-        } catch (e: Exception) {
-            Log.e(TAG, "編碼器設定失敗: $e")
-            encoder.release()
-            retriever.release()
-            return false
-        }
-
-        // 確保輸出目錄存在
+        // 6. 建立 Muxer
         File(outputPath).parentFile?.mkdirs()
+        val muxer      = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        var muxTrack   = -1
+        var muxStarted = false
 
-        val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var videoTrackIndex = -1
-        var muxerStarted = false
-        val bufferInfo = MediaCodec.BufferInfo()
-        var success = false
+        val decBufInfo = MediaCodec.BufferInfo()
+        val encBufInfo = MediaCodec.BufferInfo()
+        var inputEos   = false
+        var frameCount = 0
+        var encodedFrames = 0
+        var drainedOutputs = 0
+        var samplesWritten = 0
+        var success    = false
 
         try {
-            for ((frameIdx, clipTimeUs) in framesToRender.withIndex()) {
-                // 6. 從片段取出原始幀
-                val bitmap = retriever.getFrameAtTime(
-                    clipTimeUs, MediaMetadataRetriever.OPTION_CLOSEST
-                )
-                if (bitmap == null) {
-                    Log.w(TAG, "幀 $frameIdx @${clipTimeUs}us 取得失敗，略過")
+            while (true) {
+                // ── 餵解碼器 ────────────────────────────────────
+                if (!inputEos) {
+                    val inIdx = decoder.dequeueInputBuffer(0L)
+                    if (inIdx >= 0) {
+                        val buf  = decoder.getInputBuffer(inIdx)!!
+                        val size = extractor.readSampleData(buf, 0)
+                        if (size < 0) {
+                            decoder.queueInputBuffer(
+                                inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
+                            inputEos = true
+                        } else {
+                            decoder.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+
+                // ── 取解碼輸出 ──────────────────────────────────
+                val outIdx = decoder.dequeueOutputBuffer(decBufInfo, 10_000L)
+                if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) continue
+                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) continue
+                if (outIdx < 0) continue
+
+                val image = runCatching { decoder.getOutputImage(outIdx) }.getOrNull()
+                if (image == null) {
+                    decoder.releaseOutputBuffer(outIdx, false)
+                    if ((decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
                     continue
                 }
 
-                // 7. 找對應的 CSV 幀索引
-                val clipTimeSec = clipTimeUs / 1_000_000.0
-                val origTimeSec = startSec + clipTimeSec
-                val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
+                try {
+                    val pts = decBufInfo.presentationTimeUs
 
-                // 8. 確保 bitmap 為 ARGB_8888 且尺寸恰好等於 clipW×clipH。
-                //    getFrameAtTime() 可能回傳縮放過的影格（尺寸與 clipW×clipH 不同），
-                //    若直接使用原始尺寸傳入 fillYuvImage(…, clipW, clipH) 會觸發
-                //    Bitmap.getPixels: "x + width must be <= bitmap.width()"。
-                val mutable: Bitmap = if (bitmap.width == clipW && bitmap.height == clipH
-                    && bitmap.config == Bitmap.Config.ARGB_8888 && bitmap.isMutable) {
-                    bitmap
-                } else {
-                    // 先縮放到目標尺寸，再確保為可寫的 ARGB_8888
-                    val scaled = if (bitmap.width == clipW && bitmap.height == clipH) bitmap
-                                 else android.graphics.Bitmap.createScaledBitmap(bitmap, clipW, clipH, true)
-                    val result = if (scaled.config == Bitmap.Config.ARGB_8888 && scaled.isMutable) scaled
-                                 else scaled.copy(Bitmap.Config.ARGB_8888, true).also {
-                                     if (scaled !== bitmap) scaled.recycle()
-                                 }
-                    bitmap.recycle()
-                    result
-                }
+                    // ── 計算對應的 CSV 幀索引 ────────────────────
+                    val clipTimeSec = pts / 1_000_000.0
+                    val origTimeSec = startSec + clipTimeSec
+                    val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
 
-                // 9. 繪製骨架
-                frameData[csvFrameIdx]?.let { landmarks ->
-                    drawSkeleton(Canvas(mutable), landmarks, scaleX, scaleY, clipW, clipH)
-                }
+                    // ── YUV → Bitmap（保留彩色）────────────────
+                    val bmp = yuvToBitmap(image, videoW, videoH)
 
-                // 10. 餵入編碼器
-                val pts = clipTimeUs
-                val inputIdx = encoder.dequeueInputBuffer(50_000L)
-                if (inputIdx >= 0) {
-                    val image = runCatching { encoder.getInputImage(inputIdx) }.getOrNull()
-                    if (image != null) {
-                        fillYuvImage(image, mutable, clipW, clipH)
-                        encoder.queueInputBuffer(inputIdx, 0, 0, pts, 0)
-                    } else {
-                        val buf = encoder.getInputBuffer(inputIdx)!!
-                        val yuv = argbToNv12(mutable, clipW, clipH)
-                        buf.clear()
-                        buf.put(yuv)
-                        encoder.queueInputBuffer(inputIdx, 0, yuv.size, pts, 0)
+                    // ── 繪製骨架 ─────────────────────────────────
+                    frameData[csvFrameIdx]?.let { landmarks ->
+                        drawSkeleton(Canvas(bmp), landmarks, scaleX, scaleY, videoW, videoH)
                     }
+
+                    // ── Bitmap → 編碼器 ──────────────────────────
+                    val encInIdx = encoder.dequeueInputBuffer(50_000L)
+                    // ✅ 用 frameCount 計算正確的 pts，避免最後一幀 pts=0
+                    val ptsUs = frameCount * 1_000_000L / fps.toLong()
+                    
+                    if (encInIdx >= 0) {
+                        // 統一用 ByteBuffer 模式（最穩定且可追蹤 size）
+                        val buf  = encoder.getInputBuffer(encInIdx)!!
+                        val nv12 = bitmapToNv12(bmp, videoW, videoH)
+                        
+                        buf.clear()
+                        buf.put(nv12, 0, nv12.size)  // 明確指定 offset 和 length
+                        buf.flip()
+                        
+                        encoder.queueInputBuffer(encInIdx, 0, nv12.size, ptsUs, 0)
+                        
+                        if (frameCount < 3 || frameCount % 50 == 0) {
+                            Log.d(TAG, "queueInputBuffer: idx=$encInIdx, size=${nv12.size}, pts=$ptsUs (frameCount=$frameCount)")
+                        }
+                        frameCount++
+                    } else {
+                        Log.w(TAG, "dequeueInputBuffer 返回 $encInIdx，略過幀 pts=$ptsUs")
+                    }
+                    bmp.recycle()
+
+                    drainEncoder(
+                        encoder, muxer, encBufInfo,
+                        setTrack = { t -> muxTrack = t; muxStarted = true },
+                        getTrack = { muxTrack },
+                        isMuxed  = { muxStarted },
+                        eos      = false,
+                        rotation = rotation,  // ✅ 傳遞旋轉資訊
+                        onSampleWritten = { encodedFrames++; samplesWritten++ },
+                    )
+
+                } finally {
+                    image.close()
+                    decoder.releaseOutputBuffer(outIdx, false)
                 }
-                mutable.recycle()
 
-                // 11. 排空編碼器輸出
-                drainEncoder(encoder, muxer, bufferInfo, { idx -> videoTrackIndex = idx; muxerStarted = true },
-                    { videoTrackIndex }, { muxerStarted }, false)
+                if ((decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
             }
 
-            // 12. 送出 EOS 並等待所有輸出
-            val eosIdx = encoder.dequeueInputBuffer(100_000L)
-            if (eosIdx >= 0) {
-                encoder.queueInputBuffer(eosIdx, 0, 0,
-                    framesToRender.lastOrNull()?.plus(analysisIntervalUs) ?: 0L,
-                    MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            // ── EOS ─────────────────────────────────────────────
+            Log.d(TAG, "Signaling EOS to encoder, current queuedFrames=$frameCount")
+            
+            // 檢查是否有幀被 queue 了
+            if (frameCount <= 0) {
+                Log.e(TAG, "CRITICAL: frameCount=0，編碼器沒有收到任何幀，停止處理")
+                success = false
+                encodedFrames = 0
+            } else {
+                val eosIdx = encoder.dequeueInputBuffer(100_000L)
+                if (eosIdx >= 0) {
+                    // ✅ EOS 的 pts 應該是最後一幀之後的時間
+                    val ptsUs = frameCount * 1_000_000L / fps.toLong()
+                    encoder.queueInputBuffer(
+                        eosIdx, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                    )
+                    Log.d(TAG, "EOS queued at index $eosIdx, frameCount=$frameCount, ptsUs=$ptsUs")
+                } else {
+                    Log.w(TAG, "Failed to get input buffer for EOS: $eosIdx")
+                }
+                
+                Log.d(TAG, "Draining encoder with eos=true")
+                drainEncoder(
+                    encoder, muxer, encBufInfo,
+                    setTrack = { t -> muxTrack = t; muxStarted = true },
+                    getTrack = { muxTrack },
+                    isMuxed  = { muxStarted },
+                    eos      = true,
+                    rotation = rotation,  // ✅ 傳遞旋轉資訊
+                    onSampleWritten = { encodedFrames++; samplesWritten++ },
+                )
+                Log.d(TAG, "Encoder drained, encodedFrames=$encodedFrames")
             }
-            drainEncoder(encoder, muxer, bufferInfo, { idx -> videoTrackIndex = idx; muxerStarted = true },
-                { videoTrackIndex }, { muxerStarted }, true)
 
-            success = muxerStarted
-            Log.d(TAG, "骨架渲染完成: $outputPath")
+            // ✅ 驗證編碼幀數：已有輸出即視為成功
+            if (encodedFrames > 0 && samplesWritten > 0) {
+                success = muxStarted
+                Log.d(TAG, "✅ SUCCESS: renderedFrames=$frameCount, encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
+                Log.d(TAG, "骨架渲染完成: $frameCount 幀 → $outputPath")
+            } else {
+                Log.e(TAG, "❌ ERROR: encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
+                Log.e(TAG, "Skeleton MP4 編碼失敗: renderedFrames=$frameCount, encodedFrames=$encodedFrames, drainedOutputs=$drainedOutputs, samplesWritten=$samplesWritten")
+                success = false
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "骨架渲染錯誤: $e", e)
-            success = false
         } finally {
-            runCatching { encoder.stop() }
-            runCatching { encoder.release() }
-            runCatching { if (muxerStarted) { muxer.stop(); muxer.release() } else muxer.release() }
-            runCatching { retriever.release() }
+            runCatching { decoder.stop(); decoder.release() }
+            runCatching { encoder.stop(); encoder.release() }
+            runCatching { extractor.release() }
+            runCatching {
+                if (muxStarted) { muxer.stop(); muxer.release() } else muxer.release()
+            }
         }
 
         if (!success) {
+            Log.e(TAG, "Skeleton overlay failed, deleting: $outputPath")
+            Log.e(TAG, "Final stats: renderedFrames=$frameCount, encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
             runCatching { File(outputPath).delete() }
         }
         return success
     }
 
-    // ------------------------------------------------------------------
+    // ────────────────────────────────────────────────────────────
     // 骨架繪製
-    // ------------------------------------------------------------------
+    // ────────────────────────────────────────────────────────────
 
     private fun drawSkeleton(
         canvas: Canvas,
         landmarks: Array<LandmarkPoint?>,
         scaleX: Float, scaleY: Float,
-        w: Int, h: Int
+        w: Int, h: Int,
+        rotation: Int = 0,
     ) {
         val strokeW = (w / 120f).coerceIn(3f, 9f)
-        val radius = (w / 90f).coerceIn(4f, 12f)
+        val radius  = (w / 90f).coerceIn(4f, 12f)
+
+        // ❌ 不應用旋轉轉換 - 骨架保持原始座標
 
         val linePaint = Paint().apply {
             strokeWidth = strokeW
-            style = Paint.Style.STROKE
+            style       = Paint.Style.STROKE
             isAntiAlias = true
-            strokeCap = Paint.Cap.ROUND
+            strokeCap   = Paint.Cap.ROUND
         }
         val dotPaint = Paint().apply {
-            style = Paint.Style.FILL
+            style       = Paint.Style.FILL
             isAntiAlias = true
         }
 
-        // 骨骼連接線
         for ((a, b) in CONNECTIONS) {
             val la = landmarks.getOrNull(a) ?: continue
             val lb = landmarks.getOrNull(b) ?: continue
             if (la.visibility < 0.3f || lb.visibility < 0.3f) continue
-
             linePaint.color = when {
-                a in LEFT_LANDMARKS && b in LEFT_LANDMARKS -> Color.argb(210, 0, 230, 90)
+                a in LEFT_LANDMARKS  && b in LEFT_LANDMARKS  -> Color.argb(210, 0, 230, 90)
                 a in RIGHT_LANDMARKS && b in RIGHT_LANDMARKS -> Color.argb(210, 240, 55, 55)
-                else -> Color.argb(210, 255, 215, 0)
+                else                                          -> Color.argb(210, 255, 215, 0)
             }
-            canvas.drawLine(
-                la.xPx * scaleX, la.yPx * scaleY,
-                lb.xPx * scaleX, lb.yPx * scaleY,
-                linePaint
-            )
+            // ❌ 使用原始座標，不轉換
+            val laX = la.xPx * scaleX
+            val laY = la.yPx * scaleY
+            val lbX = lb.xPx * scaleX
+            val lbY = lb.yPx * scaleY
+            canvas.drawLine(laX, laY, lbX, lbY, linePaint)
         }
 
-        // 關節點
         for ((i, lm) in landmarks.withIndex()) {
             if (lm == null || lm.visibility < 0.3f) continue
             dotPaint.color = when (i) {
-                in LEFT_LANDMARKS -> Color.argb(230, 0, 200, 70)
+                in LEFT_LANDMARKS  -> Color.argb(230, 0, 200, 70)
                 in RIGHT_LANDMARKS -> Color.argb(230, 210, 35, 35)
-                else -> Color.argb(230, 255, 200, 0)
+                else               -> Color.argb(230, 255, 200, 0)
             }
-            canvas.drawCircle(lm.xPx * scaleX, lm.yPx * scaleY, radius, dotPaint)
+            // ❌ 使用原始座標，不轉換
+            val x = lm.xPx * scaleX
+            val y = lm.yPx * scaleY
+            canvas.drawCircle(x, y, radius, dotPaint)
         }
     }
 
-    // ------------------------------------------------------------------
+    // ────────────────────────────────────────────────────────────
     // CSV 解析
-    // CSV 格式（寬格式）：
-    //   frame, time_sec,
-    //   lm0_x_norm, lm0_y_norm, lm0_z, lm0_visibility, lm0_x_px, lm0_y_px,
-    //   lm1_x_norm, ..., lm32_y_px
-    // 共 2 + 33×6 = 200 欄
-    // ------------------------------------------------------------------
+    // ────────────────────────────────────────────────────────────
 
     private fun parseCsv(csvPath: String): Map<Int, Array<LandmarkPoint?>> {
         val file = File(csvPath)
-        if (!file.exists()) {
-            Log.w(TAG, "CSV 不存在: $csvPath")
-            return emptyMap()
-        }
+        if (!file.exists()) { Log.w(TAG, "CSV 不存在: $csvPath"); return emptyMap() }
 
         val result = mutableMapOf<Int, Array<LandmarkPoint?>>()
-
         file.bufferedReader().use { reader ->
-            // 跳過標頭列
-            reader.readLine()
-            // 逐列處理（避免在 inline lambda 中使用 continue/break）
+            reader.readLine() // 跳過標頭
             var line = reader.readLine()
             while (line != null) {
                 val cols = line.split(",")
@@ -347,13 +396,12 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     if (frameIdx != null) {
                         val landmarks = arrayOfNulls<LandmarkPoint>(33)
                         for (i in 0 until 33) {
-                            // 每組 6 欄：x_norm, y_norm, z, visibility, x_px, y_px
-                            val base = 2 + i * 6
+                            val base  = 2 + i * 6
                             val xNorm = cols[base + 0].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
                             val yNorm = cols[base + 1].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
-                            val vis = cols[base + 3].trim().toFloatOrNull() ?: 0f
-                            val xPx = cols[base + 4].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
-                            val yPx = cols[base + 5].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
+                            val vis   = cols[base + 3].trim().toFloatOrNull() ?: 0f
+                            val xPx   = cols[base + 4].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
+                            val yPx   = cols[base + 5].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
                             if (xNorm != null && yNorm != null && xPx != null && yPx != null
                                 && xNorm > 0f && yNorm > 0f
                             ) {
@@ -366,17 +414,12 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 line = reader.readLine()
             }
         }
-
         Log.d(TAG, "CSV 解析完成：${result.size} 幀")
         return result
     }
 
-    /**
-     * 從 CSV 資料推算骨架影像的寬高。
-     * 利用 xPx / xNorm = imgWidth（ML Kit 回傳的 pixel 座標 / 正規化座標）。
-     */
     private fun inferPoseImageSize(
-        frameData: Map<Int, Array<LandmarkPoint?>>
+        frameData: Map<Int, Array<LandmarkPoint?>>,
     ): Pair<Float, Float>? {
         for ((_, landmarks) in frameData) {
             for (lm in landmarks) {
@@ -390,119 +433,148 @@ class SkeletonOverlayRenderer(private val context: Context) {
         return null
     }
 
-    // ------------------------------------------------------------------
-    // 編碼器輔助
-    // ------------------------------------------------------------------
+    // ────────────────────────────────────────────────────────────
+    // YUV Image ↔ Bitmap  /  Bitmap → NV12
+    // ────────────────────────────────────────────────────────────
 
-    /**
-     * 排空編碼器輸出緩衝區並寫入 Muxer。
-     * [endOfStream] = true 時持續等待直到收到 EOS。
-     */
-    private fun drainEncoder(
-        encoder: MediaCodec,
-        muxer: MediaMuxer,
-        bufferInfo: MediaCodec.BufferInfo,
-        onTrackAdded: (Int) -> Unit,
-        trackIndexProvider: () -> Int,
-        muxerStartedProvider: () -> Boolean,
-        endOfStream: Boolean
-    ) {
-        val timeoutUs = if (endOfStream) 100_000L else 0L
-        while (true) {
-            val outIdx = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
-            when {
-                outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    if (!endOfStream) break
-                }
-                outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    val newFormat = encoder.outputFormat
-                    val trackIdx = muxer.addTrack(newFormat)
-                    muxer.start()
-                    onTrackAdded(trackIdx)
-                }
-                outIdx >= 0 -> {
-                    val buf = encoder.getOutputBuffer(outIdx)
-                    val isEos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+    private fun yuvToBitmap(image: Image, w: Int, h: Int): Bitmap {
+        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
+        val yBuf = yP.buffer; val uBuf = uP.buffer; val vBuf = vP.buffer
+        val yStride = yP.rowStride
+        val uvStride      = uP.rowStride
+        val uvPixelStride = uP.pixelStride
 
-                    if (buf != null && bufferInfo.size > 0 && muxerStartedProvider()) {
-                        buf.position(bufferInfo.offset)
-                        buf.limit(bufferInfo.offset + bufferInfo.size)
-                        muxer.writeSampleData(trackIndexProvider(), buf, bufferInfo)
-                    }
-                    encoder.releaseOutputBuffer(outIdx, false)
-                    if (isEos) break
-                }
+        val pixels = IntArray(w * h)
+        for (j in 0 until h) {
+            for (i in 0 until w) {
+                val yv    = (yBuf[j * yStride + i].toInt() and 0xFF) - 16
+                val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
+                val u     = (uBuf[uvOff].toInt() and 0xFF) - 128
+                val v     = (vBuf[uvOff].toInt() and 0xFF) - 128
+                val r = ((298 * yv + 409 * v + 128) shr 8).coerceIn(0, 255)
+                val g = ((298 * yv - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
+                val b = ((298 * yv + 516 * u + 128) shr 8).coerceIn(0, 255)
+                pixels[j * w + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
+        }
+        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp ->
+            bmp.setPixels(pixels, 0, w, 0, 0, w, h)
         }
     }
 
-    /**
-     * 將 ARGB_8888 Bitmap 寫入 MediaCodec Image（YUV420Flexible，處理 NV12 / I420 兩種 layout）。
-     */
-    private fun fillYuvImage(image: Image, bitmap: Bitmap, w: Int, h: Int) {
+    private fun bitmapFillYuv(image: Image, bmp: Bitmap, w: Int, h: Int) {
         val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-
-        val yPlane = image.planes[0]
-        val uPlane = image.planes[1]
-        val vPlane = image.planes[2]
-
-        val yBuf = yPlane.buffer
-        val uBuf = uPlane.buffer
-        val vBuf = vPlane.buffer
-        val yStride = yPlane.rowStride
-        val uvStride = uPlane.rowStride
-        val uvPixelStride = uPlane.pixelStride // 1 = I420, 2 = NV12
-
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
+        val yBuf = yP.buffer; val uBuf = uP.buffer; val vBuf = vP.buffer
+        val yStride = yP.rowStride; val uvStride = uP.rowStride; val uvPixelStride = uP.pixelStride
         for (j in 0 until h) {
             for (i in 0 until w) {
                 val p = pixels[j * w + i]
-                val r = (p shr 16) and 0xFF
-                val g = (p shr 8) and 0xFF
-                val b = p and 0xFF
+                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
                 val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
                 yBuf.put(j * yStride + i, y.toByte())
-
                 if (j % 2 == 0 && i % 2 == 0) {
                     val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
                     val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
-                    uBuf.put(uvOff, u.toByte())
-                    vBuf.put(uvOff, v.toByte())
+                    uBuf.put(uvOff, u.toByte()); vBuf.put(uvOff, v.toByte())
                 }
             }
         }
     }
 
-    /**
-     * 備援用：將 ARGB_8888 Bitmap 轉換為 NV12 (YUV420SemiPlanar) 位元組陣列。
-     */
-    private fun argbToNv12(bitmap: Bitmap, w: Int, h: Int): ByteArray {
+    private fun bitmapToNv12(bmp: Bitmap, w: Int, h: Int): ByteArray {
         val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        val nv12 = ByteArray(w * h + (w * h / 2))
-
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        val nv12 = ByteArray(w * h + w * h / 2)
         for (j in 0 until h) {
             for (i in 0 until w) {
                 val p = pixels[j * w + i]
-                val r = (p shr 16) and 0xFF
-                val g = (p shr 8) and 0xFF
-                val b = p and 0xFF
-                val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                nv12[j * w + i] = y.toByte()
-
+                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+                nv12[j * w + i] = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).toByte()
                 if (j % 2 == 0 && i % 2 == 0) {
                     val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    // NV12: UV plane interleaved U,V; one pair per 2×2 block
-                    val uvBase = w * h + (j / 2) * w + (i / 2) * 2
-                    if (uvBase + 1 < nv12.size) {
-                        nv12[uvBase] = u.toByte()
-                        nv12[uvBase + 1] = v.toByte()
-                    }
+                    val base = w * h + (j / 2) * w + (i / 2) * 2
+                    if (base + 1 < nv12.size) { nv12[base] = u.toByte(); nv12[base + 1] = v.toByte() }
                 }
             }
         }
         return nv12
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 編碼器排空
+    // ────────────────────────────────────────────────────────────
+
+    private fun drainEncoder(
+        encoder: MediaCodec, muxer: MediaMuxer, info: MediaCodec.BufferInfo,
+        setTrack: (Int) -> Unit, getTrack: () -> Int, isMuxed: () -> Boolean,
+        eos: Boolean,
+        rotation: Int = 0,  // ✅ 新增：旋轉資訊
+        onSampleWritten: () -> Unit = {},
+    ) {
+        var tryAgainCount = 0
+        var drainedSamples = 0  // ✅ 追蹤 drainEncoder 內的輸出
+        val maxTryAgainCount = 50  // 防止無限迴圈
+        
+        while (true) {
+            val idx = encoder.dequeueOutputBuffer(info, 10_000L)
+            when {
+                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    tryAgainCount++
+                    Log.d(TAG, "drainEncoder: TRY_AGAIN_LATER ($tryAgainCount/$maxTryAgainCount), eos=$eos, drainedSamples=$drainedSamples")
+                    
+                    // ✅ EOS 模式下的 timeout 邏輯
+                    if (eos && tryAgainCount > maxTryAgainCount) {
+                        // 如果已經有輸出，即使 timeout 也視為成功
+                        if (drainedSamples > 0) {
+                            Log.w(TAG, "drainEncoder: EOS timeout 後已有 $drainedSamples 個輸出，視為成功")
+                            break
+                        } else {
+                            Log.e(TAG, "drainEncoder: Timeout after $maxTryAgainCount TRY_AGAIN_LATER，且無輸出")
+                            break
+                        }
+                    }
+                    
+                    // 非 EOS 模式下立即退出
+                    if (!eos) break
+                }
+                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    tryAgainCount = 0
+                    Log.d(TAG, "drainEncoder: OUTPUT_FORMAT_CHANGED")
+                    val outputFormat = encoder.outputFormat
+                    // ✅ 將旋轉信息添加到輸出格式
+                    if (rotation != 0) {
+                        outputFormat.setInteger(MediaFormat.KEY_ROTATION, rotation)
+                        Log.d(TAG, "drainEncoder: 添加旋轉信息到 Muxer: $rotation°")
+                    }
+                    val t = muxer.addTrack(outputFormat)
+                    muxer.start(); setTrack(t)
+                }
+                idx >= 0 -> {
+                    tryAgainCount = 0
+                    Log.d(TAG, "drainEncoder: idx=$idx, size=${info.size}, flags=${info.flags}, pts=${info.presentationTimeUs}")
+                    
+                    val buf = encoder.getOutputBuffer(idx)
+                    if (buf != null && info.size > 0 && isMuxed()) {
+                        buf.position(info.offset); buf.limit(info.offset + info.size)
+                        muxer.writeSampleData(getTrack(), buf, info)
+                        onSampleWritten()
+                        drainedSamples++  // ✅ 計數已輸出樣本
+                        Log.d(TAG, "writeSampleData: size=${info.size}, drainedSamples=$drainedSamples")
+                    } else {
+                        Log.w(TAG, "writeSampleData skip: buf=$buf, size=${info.size}, isMuxed=${isMuxed()}")
+                    }
+                    
+                    encoder.releaseOutputBuffer(idx, false)
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        Log.d(TAG, "drainEncoder: EOS flag detected from encoder, breaking")
+                        break
+                    }
+                }
+            }
+        }
     }
 }

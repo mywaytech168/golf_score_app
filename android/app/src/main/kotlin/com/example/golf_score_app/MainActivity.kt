@@ -224,6 +224,9 @@ class MainActivity: FlutterActivity() {
                                 startSec = startSec,
                                 outputPath = outputPath
                             )
+                            if (!ok) {
+                                Log.e(logTag, "骨架渲染失敗，不執行後續流程")
+                            }
                             runOnUiThread { result.success(ok) }
                         } catch (e: Exception) {
                             Log.e(logTag, "骨架渲染失敗: ${e.message}", e)

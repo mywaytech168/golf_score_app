@@ -1,0 +1,78 @@
+{
+  "video_path": "D:\\Projects\\golf_score_app\\python\\Test_data\\swing.mp4",
+  "fps": 30.011302857193236,
+  "frame_count": 2572,
+  "duration_sec": 85.70104444444445,
+  "rotation_applied_deg": -90,
+  "num_speed_peaks": 18,
+  "num_audio_peaks": 24,
+  "num_intersection_hits": 4,
+  "intersect_tolerance_sec": 0.33,
+  "gpu_enabled_requested": true,
+  "gpu_used": false,
+  "timing_sec": {
+    "extract_series": 104.81670500000473,
+    "extract_audio": 4.820847599999979,
+    "denoise": 0.011978499998804182,
+    "detect_peaks": 0.02333679998992011,
+    "intersect": 0.0004786000354215503,
+    "export_segments": 29.506876399973407,
+    "total": 140.39436479995493
+  },
+  "speed_peak_config": {
+    "height": 6.895130743595128,
+    "prominence": 1.646555807794484,
+    "distance_frames": 13,
+    "num_peaks": 18,
+    "peak_heights_mean": 16.501105086917878
+  },
+  "audio_peak_config": {
+    "height": 0.08241264799402824,
+    "prominence": 0.010690804943442343,
+    "distance_frames": 13,
+    "num_peaks": 24,
+    "peak_heights_mean": 0.13348413953833557
+  },
+  "hits": [
+    {
+      "hit_idx": 1,
+      "speed_frame": 634,
+      "audio_frame": 641,
+      "hit_frame": 638,
+      "delta_frames": 7,
+      "delta_sec": 0.23324545533091412,
+      "speed_value": 17.3946524995633,
+      "audio_value": 0.21381609886884684
+    },
+    {
+      "hit_idx": 2,
+      "speed_frame": 1817,
+      "audio_frame": 1820,
+      "hit_frame": 1818,
+      "delta_frames": 3,
+      "delta_sec": 0.09996233799896319,
+      "speed_value": 9.76279504155871,
+      "audio_value": 0.11203046143054962
+    },
+    {
+      "hit_idx": 3,
+      "speed_frame": 1945,
+      "audio_frame": 1952,
+      "hit_frame": 1948,
+      "delta_frames": 7,
+      "delta_sec": 0.23324545533091412,
+      "speed_value": 9.596605992883912,
+      "audio_value": 0.1388623114261362
+    },
+    {
+      "hit_idx": 4,
+      "speed_frame": 2026,
+      "audio_frame": 2021,
+      "hit_frame": 2024,
+      "delta_frames": -5,
+      "delta_sec": -0.16660389666493866,
+      "speed_value": 14.831220110706553,
+      "audio_value": 0.08739646027485531
+    }
+  ]
+}

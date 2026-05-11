@@ -245,8 +245,11 @@ class BallTrajectoryRenderer(private val context: Context) {
         val fps = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat() }
             .getOrElse { 15f }
         val dt = 1f / max(fps, 1f)
-
-        Log.d(TAG, "輸入: ${videoW}x${videoH} fps=$fps mime=$videoMime")
+        // ✅ 提取旋轉信息
+        val rotation = runCatching {
+            inputFormat.getInteger(MediaFormat.KEY_ROTATION)
+        }.getOrElse { 0 }
+        Log.d(TAG, "輸入: ${videoW}x${videoH} fps=$fps rotation=$rotation° mime=$videoMime")
 
         // 2. 建立解碼器
         val decoder = try {
@@ -269,24 +272,34 @@ class BallTrajectoryRenderer(private val context: Context) {
             setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // ✅ 保留旋轉信息
+            if (rotation != 0) {
+                setInteger(MediaFormat.KEY_ROTATION, rotation)
+                Log.d(TAG, "編碼器設置旋轉: $rotation°")
+            }
         }
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 
         File(outputPath).parentFile?.mkdirs()
         val muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var muxTrack = -1; var muxStarted = false
+        var muxTrack = -1
+        var muxStarted = false
+        var formatChanged = false  // ✅ 追蹤 format change
 
         // 4. 軌跡狀態
         val kf = Kalman2D(dt)
         var state = S_WAIT_P0
         val trackPts = mutableListOf<Pair<Int, Int>>()
         var p0FrameIdx = -1
-        var frameIdx = 0
-        var noCandCount = 0
-        var waitFrames = 0
-        var prevYData: ByteArray? = null
-        var prevYStride = 0
+        var frameIdx = 0        // ✅ 當前幀計數
+        var frameCount = 0      // ✅ 追蹤輸入幀
+        var encodedFrames = 0   // ✅ 追蹤編碼幀
+        var samplesWritten = 0  // ✅ 追蹤寫入樣本
+        var waitFrames = 0      // ✅ 等待計數
+        var noCandCount = 0     // ✅ 無候選計數
+        var prevYData: ByteArray? = null  // ✅ 上一幀 Y 數據
+        var prevYStride = 0     // ✅ 上一幀 stride
 
         val decBufInfo = MediaCodec.BufferInfo()
         val encBufInfo = MediaCodec.BufferInfo()
@@ -418,35 +431,35 @@ class BallTrajectoryRenderer(private val context: Context) {
                     // ── YUV → Bitmap，繪製軌跡 ────────────────────────
                     val bmp = yuvImageToBitmap(image, videoW, videoH)
                     if (trackPts.size >= 2) {
-                        drawTrajectory(Canvas(bmp), trackPts, videoW)
+                        drawTrajectory(Canvas(bmp), trackPts, videoW, videoH)
                     }
 
                     // ── Bitmap → 編碼器 ───────────────────────────────
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
+                    // ✅ 用 frameCount 計算正確的 pts
+                    val ptsUs = frameCount * 1_000_000L / fps.toLong()
+                    
                     if (encInIdx >= 0) {
-                        val img = runCatching { encoder.getInputImage(encInIdx) }.getOrNull()
-                        if (img != null) {
-                            bitmapFillYuv(img, bmp, videoW, videoH)
-                            encoder.queueInputBuffer(encInIdx, 0, 0, pts, 0)
-                        } else {
-                            val buf = encoder.getInputBuffer(encInIdx)!!
-                            val nv12 = bitmapToNv12(bmp, videoW, videoH)
-                            buf.clear(); buf.put(nv12)
-                            encoder.queueInputBuffer(encInIdx, 0, nv12.size, pts, 0)
-                        }
+                        val buf = encoder.getInputBuffer(encInIdx)!!
+                        val nv12 = bitmapToNv12(bmp, videoW, videoH)
+                        buf.clear()
+                        buf.put(nv12)
+                        encoder.queueInputBuffer(encInIdx, 0, nv12.size, ptsUs, 0)
                     }
                     bmp.recycle()
 
                     // 排空編碼器輸出
                     drainEncoder(encoder, muxer, encBufInfo,
-                        setTrack = { t -> muxTrack = t; muxStarted = true },
+                        setTrack = { t -> muxTrack = t; muxStarted = true; formatChanged = true },
                         getTrack = { muxTrack },
                         isMuxStarted = { muxStarted },
-                        eos = false)
+                        eos = false,
+                        onSampleWritten = { encodedFrames++; samplesWritten++ })
 
                     prevYData = yData
                     prevYStride = yStride
-                    frameIdx++
+                    frameIdx++    // ✅ 遞增幀索引
+                    frameCount++  // ✅ 計數輸入幀
 
                 } finally {
                     image.close()
@@ -456,20 +469,41 @@ class BallTrajectoryRenderer(private val context: Context) {
                 if ((decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
             }
 
-            // EOS
-            val eosIdx = encoder.dequeueInputBuffer(100_000L)
-            if (eosIdx >= 0) {
-                encoder.queueInputBuffer(eosIdx, 0, 0, 0,
-                    MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            // ── EOS ──────────────────────────────────────────────
+            Log.d(TAG, "Signaling EOS to encoder, frameCount=$frameCount")
+            
+            if (frameCount > 0) {
+                val eosIdx = encoder.dequeueInputBuffer(100_000L)
+                if (eosIdx >= 0) {
+                    val ptsUs = frameCount * 1_000_000L / fps.toLong()
+                    encoder.queueInputBuffer(eosIdx, 0, 0, ptsUs,
+                        MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    Log.d(TAG, "EOS queued at index $eosIdx, ptsUs=$ptsUs")
+                }
+                drainEncoder(encoder, muxer, encBufInfo,
+                    setTrack = { t -> muxTrack = t; muxStarted = true; formatChanged = true },
+                    getTrack = { muxTrack },
+                    isMuxStarted = { muxStarted },
+                    eos = true,
+                    onSampleWritten = { encodedFrames++; samplesWritten++ })
             }
-            drainEncoder(encoder, muxer, encBufInfo,
-                setTrack = { t -> muxTrack = t; muxStarted = true },
-                getTrack = { muxTrack },
-                isMuxStarted = { muxStarted },
-                eos = true)
-
-            success = muxStarted
-            Log.d(TAG, "完成: ${trackPts.size} 軌跡點 → $outputPath")
+            
+            // ✅ 改進的成功條件判定
+            if (formatChanged && encodedFrames > 0 && samplesWritten > 0) {
+                Log.d(TAG, "✅ 編碼成功: frameCount=$frameCount, encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
+                
+                // ✅ 驗證輸出 MP4 有效性
+                if (isValidVideo(outputPath)) {
+                    success = true
+                    Log.d(TAG, "✅ final.mp4 驗證通過: ${trackPts.size} 軌跡點 → $outputPath")
+                } else {
+                    Log.e(TAG, "❌ final.mp4 驗證失敗，檔案損壞")
+                    success = false
+                }
+            } else {
+                Log.e(TAG, "❌ 編碼失敗: formatChanged=$formatChanged, encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
+                success = false
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "渲染失敗: $e", e)
@@ -485,6 +519,22 @@ class BallTrajectoryRenderer(private val context: Context) {
 
         if (!success) runCatching { File(outputPath).delete() }
         return success
+    }
+
+    private fun isValidVideo(path: String): Boolean {
+        return try {
+            val retriever = android.media.MediaMetadataRetriever()
+            retriever.setDataSource(path)
+            val hasVideo = retriever.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
+            val duration = retriever.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            retriever.release()
+            hasVideo && duration > 0
+        } catch (e: Exception) {
+            Log.e(TAG, "MP4 驗證異常: $e")
+            false
+        }
     }
 
     // ----------------------------------------------------------------
@@ -584,8 +634,10 @@ class BallTrajectoryRenderer(private val context: Context) {
     // ----------------------------------------------------------------
     // 軌跡繪製
     // ----------------------------------------------------------------
-    private fun drawTrajectory(canvas: Canvas, pts: List<Pair<Int, Int>>, w: Int) {
+    private fun drawTrajectory(canvas: Canvas, pts: List<Pair<Int, Int>>, w: Int, h: Int, rotation: Int = 0) {
         if (pts.size < 2) return
+
+        // ❌ 不應用旋轉轉換 - 軌跡保持原始座標
 
         val linePaint = Paint().apply {
             color = TRAJ_COLOR
@@ -610,24 +662,26 @@ class BallTrajectoryRenderer(private val context: Context) {
 
         // 陰影線（略粗，黑色半透明）
         for (i in 1 until pts.size) {
-            canvas.drawLine(
-                pts[i - 1].first.toFloat(), pts[i - 1].second.toFloat(),
-                pts[i].first.toFloat(), pts[i].second.toFloat(),
-                shadowPaint
-            )
+            val x1 = pts[i - 1].first.toFloat()
+            val y1 = pts[i - 1].second.toFloat()
+            val x2 = pts[i].first.toFloat()
+            val y2 = pts[i].second.toFloat()
+            canvas.drawLine(x1, y1, x2, y2, shadowPaint)
         }
         // 軌跡線
         for (i in 1 until pts.size) {
-            canvas.drawLine(
-                pts[i - 1].first.toFloat(), pts[i - 1].second.toFloat(),
-                pts[i].first.toFloat(), pts[i].second.toFloat(),
-                linePaint
-            )
+            val x1 = pts[i - 1].first.toFloat()
+            val y1 = pts[i - 1].second.toFloat()
+            val x2 = pts[i].first.toFloat()
+            val y2 = pts[i].second.toFloat()
+            canvas.drawLine(x1, y1, x2, y2, linePaint)
         }
         // 最新點白色圓點
         val last = pts.last()
-        canvas.drawCircle(last.first.toFloat(), last.second.toFloat(), DOT_RADIUS, dotPaint)
-        canvas.drawCircle(last.first.toFloat(), last.second.toFloat(), DOT_RADIUS, linePaint.apply {
+        val lastX = last.first.toFloat()
+        val lastY = last.second.toFloat()
+        canvas.drawCircle(lastX, lastY, DOT_RADIUS, dotPaint)
+        canvas.drawCircle(lastX, lastY, DOT_RADIUS, linePaint.apply {
             style = Paint.Style.STROKE; strokeWidth = 2f
         })
     }
@@ -721,22 +775,42 @@ class BallTrajectoryRenderer(private val context: Context) {
     private fun drainEncoder(
         encoder: MediaCodec, muxer: MediaMuxer, info: MediaCodec.BufferInfo,
         setTrack: (Int) -> Unit, getTrack: () -> Int, isMuxStarted: () -> Boolean,
-        eos: Boolean
+        eos: Boolean,
+        onSampleWritten: () -> Unit = {},
     ) {
-        val timeout = if (eos) 100_000L else 0L
+        var tryAgainCount = 0
+        var drainedSamples = 0
+        val maxTryAgainCount = 50
+        
         while (true) {
-            val idx = encoder.dequeueOutputBuffer(info, timeout)
+            val idx = encoder.dequeueOutputBuffer(info, if (eos) 10_000L else 0L)
             when {
-                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> { if (!eos) break }
+                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    tryAgainCount++
+                    if (eos && tryAgainCount > maxTryAgainCount) {
+                        if (drainedSamples > 0) {
+                            Log.w(TAG, "drainEncoder: EOS timeout, but got $drainedSamples samples")
+                            break
+                        } else {
+                            Log.e(TAG, "drainEncoder: Timeout with no output")
+                            break
+                        }
+                    }
+                    if (!eos) break
+                }
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    tryAgainCount = 0
                     val t = muxer.addTrack(encoder.outputFormat)
                     muxer.start(); setTrack(t)
                 }
                 idx >= 0 -> {
+                    tryAgainCount = 0
                     val buf = encoder.getOutputBuffer(idx)
                     if (buf != null && info.size > 0 && isMuxStarted()) {
                         buf.position(info.offset); buf.limit(info.offset + info.size)
                         muxer.writeSampleData(getTrack(), buf, info)
+                        onSampleWritten()
+                        drainedSamples++
                     }
                     encoder.releaseOutputBuffer(idx, false)
                     if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
