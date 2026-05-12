@@ -29,17 +29,14 @@ class MainActivity: FlutterActivity() {
     private val AUDIO_EXTRACT_CHANNEL = "audio_extractor_channel"
     private val VIDEO_OVERLAY_CHANNEL = "video_overlay_channel"
     private val TRIMMER_CHANNEL = "com.example.golf_score_app/trimmer"
-    private val TRAJECTORY_CHANNEL = "com.example.golf_score_app/trajectory"
     private val SKELETON_OVERLAY_CHANNEL = "com.example.golf_score_app/skeleton_overlay"
     private val BALL_TRAJECTORY_CHANNEL = "com.example.golf_score_app/ball_trajectory"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
-    private val trajectoryExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
     private val ballTrajExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
     private val videoTrimmer by lazy { VideoTrimmer(this) }
-    private val trajectoryAnalyzer by lazy { TrajectoryAnalyzer() }
     private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
     private val ballBlobExtractor      by lazy { BallBlobExtractor() }
     private val trajectoryOverlayRenderer by lazy { TrajectoryOverlayRenderer() }
@@ -292,35 +289,6 @@ class MainActivity: FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRAJECTORY_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                if (call.method == "analyzeTrajectory") {
-                    val videoPath = call.argument<String>("videoPath")
-                    if (videoPath.isNullOrBlank()) {
-                        result.error("invalid_args", "videoPath is empty", null)
-                        return@setMethodCallHandler
-                    }
-                    trajectoryExecutor.execute {
-                        try {
-                            val r = trajectoryAnalyzer.analyze(videoPath)
-                            runOnUiThread {
-                                result.success(
-                                    mapOf(
-                                        "hit_frame" to r.hitFrame,
-                                        "init_ball" to r.initBall,
-                                        "polyfit" to r.polyfit,
-                                        "points" to r.points
-                                    )
-                                )
-                            }
-                        } catch (e: Exception) {
-                            runOnUiThread { result.error("analysis_failed", e.message, null) }
-                        }
-                    }
-                } else {
-                    result.notImplemented()
-                }
-            }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -336,7 +304,6 @@ class MainActivity: FlutterActivity() {
         super.onDestroy()
         overlayExecutor.shutdown()
         audioExtractorExecutor.shutdown()
-        trajectoryExecutor.shutdown()
         skeletonExecutor.shutdown()
         ballTrajExecutor.shutdown()
     }

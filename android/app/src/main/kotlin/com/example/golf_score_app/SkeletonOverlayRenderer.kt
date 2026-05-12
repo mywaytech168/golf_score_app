@@ -434,18 +434,22 @@ class SkeletonOverlayRenderer(private val context: Context) {
 
     private fun yuvToBitmap(image: Image, w: Int, h: Int): Bitmap {
         val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
-        val yBuf = yP.buffer; val uBuf = uP.buffer; val vBuf = vP.buffer
-        val yStride = yP.rowStride
+        val yStride       = yP.rowStride
         val uvStride      = uP.rowStride
         val uvPixelStride = uP.pixelStride
+
+        // Bulk-copy ByteBuffers to ByteArrays once — avoids 2.7M virtual JVM calls per frame
+        val yBytes = ByteArray(yP.buffer.remaining()).also { yP.buffer.get(it) }
+        val uBytes = ByteArray(uP.buffer.remaining()).also { uP.buffer.get(it) }
+        val vBytes = ByteArray(vP.buffer.remaining()).also { vP.buffer.get(it) }
 
         val pixels = IntArray(w * h)
         for (j in 0 until h) {
             for (i in 0 until w) {
-                val yv    = (yBuf[j * yStride + i].toInt() and 0xFF) - 16
+                val yv    = (yBytes[j * yStride + i].toInt() and 0xFF) - 16
                 val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
-                val u     = (uBuf[uvOff].toInt() and 0xFF) - 128
-                val v     = (vBuf[uvOff].toInt() and 0xFF) - 128
+                val u     = (uBytes[uvOff].toInt() and 0xFF) - 128
+                val v     = (vBytes[uvOff].toInt() and 0xFF) - 128
                 val r = ((298 * yv + 409 * v + 128) shr 8).coerceIn(0, 255)
                 val g = ((298 * yv - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
                 val b = ((298 * yv + 516 * u + 128) shr 8).coerceIn(0, 255)

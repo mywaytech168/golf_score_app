@@ -280,7 +280,7 @@ class ClipPipelineService {
     if (skeletonPath != null) {
       onProgress?.call('追蹤球軌跡中...');
       final trajOut = p.join(sessionDir, 'final.mp4');
-      final extraction = await BallTrajectoryService.extractBlobs(inputPath: skeletonPath);
+      final extraction = await BallTrajectoryService.extractBlobs(inputPath: clipPath);
       if (extraction == null) {
         debugPrint('[Pipeline.analyze] ❌ blob 提取失敗');
       } else {

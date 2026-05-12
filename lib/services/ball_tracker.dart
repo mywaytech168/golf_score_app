@@ -231,12 +231,14 @@ class BallTracker {
   // ── 基礎偵測設定（對應 Python DETECT_CFG_BASE）────────────
   static const int _areaLoBase = 6;
   static const int _areaHiBase = 150;
-  static const double _circBase = 0.60;
+  // Kotlin BFS 周長計算與 cv2.arcLength 有差異（BFS 較大 → 圓度偏低），
+  // 所以 waitP0/P1 的初始門檻從 Python 的 0.60 降至 0.45。
+  static const double _circBase = 0.45;
 
   // ── 動態放寬下限（Python 各 XXX_MIN 常數）────────────────
   static const double _cfgSpeed = 0.4; // CFG_SPEED
   // _diffMin (=9) applied by Kotlin pixel layer as DIFF_THRESH baseline
-  static const double _circMin = 0.60; // CIRC_MIN
+  static const double _circMin = 0.45; // CIRC_MIN（對應 _circBase 降幅）
   static const int _areaLoMin = 6; // AREA_LO_MIN
 
   // ── 遠球自適應（FAR_*）────────────────────────────────────
@@ -437,13 +439,11 @@ class BallTracker {
       return;
     }
 
-    // Python: 取最接近 ROI 中心（我們無固定 ROI，改取中心距最近 + circ 最高）
-    // 用評分：circ × area，值越高越像球（避免邊緣雜訊）
-    final best = blobs.reduce((a, b) {
-      final scoreA = a.circ * a.area.toDouble();
-      final scoreB = b.circ * b.area.toDouble();
-      return scoreA >= scoreB ? a : b;
-    });
+    // Python：取最接近 ROI 中心的候選（我們以畫面中心代替固定 ROI）
+    final cx = w ~/ 2;
+    final cy = h ~/ 2;
+    final best = blobs.reduce((a, b) =>
+        _dist2(a.cx, a.cy, cx, cy) <= _dist2(b.cx, b.cy, cx, cy) ? a : b);
 
     _trackPts.add(TrackPoint(
       x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
@@ -511,11 +511,8 @@ class BallTracker {
       return;
     }
 
-    // Python: FAR_MANY_CANDS_STOP
-    if (blobs.length >= _farManyCandsStop) {
-      _state = _TrackState.stopped;
-      return;
-    }
+    // FAR_MANY_CANDS_STOP: skip during active tracking — Kalman blue-point fallback
+    // handles noisy frames; stopping here kills trajectories in busy swing clips.
 
     _noCandCount = 0;
     final tooMany = blobs.length >= _tooManyCandsThreshold;

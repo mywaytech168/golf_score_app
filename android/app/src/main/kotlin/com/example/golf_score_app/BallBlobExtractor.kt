@@ -46,10 +46,10 @@ class BallBlobExtractor {
         private const val TAG = "BallBlobExtractor"
 
         // ── 寬鬆偵測門檻（Dart 會在其上疊動態門檻）──
-        private const val DIFF_THRESH = 10        // 幀差最小值
-        private const val AREA_LO    = 3          // blob 最小面積（像素）
-        private const val AREA_HI    = 800        // blob 最大面積（像素）
-        private const val CIRC_MIN   = 0.25       // 最低圓度
+        private const val DIFF_THRESH = 18        // 幀差最小值（提高以濾掉身體/背景噪訊）
+        private const val AREA_LO    = 5          // blob 最小面積（像素）
+        private const val AREA_HI    = 600        // blob 最大面積（像素）
+        private const val CIRC_MIN   = 0.30       // 最低圓度
         private const val MORPH_K    = 3          // 形態開運算 kernel 尺寸
     }
 
@@ -98,7 +98,16 @@ class BallBlobExtractor {
             inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
         }.getOrElse { 15.0 }
 
-        Log.d(TAG, "影片: ${videoW}x${videoH} fps=$fps mime=$videoMime")
+        val rotation = android.media.MediaMetadataRetriever().use { mmr ->
+            mmr.setDataSource(inputPath)
+            mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+        }
+
+        val displayW = if (rotation == 90 || rotation == 270) videoH else videoW
+        val displayH = if (rotation == 90 || rotation == 270) videoW else videoH
+
+        Log.d(TAG, "影片: coded=${videoW}x${videoH} display=${displayW}x${displayH} fps=$fps mime=$videoMime rotation=$rotation°")
 
         // ── 2. 建立解碼器 ───────────────────────────────────────
         val decoder = try {
@@ -116,7 +125,6 @@ class BallBlobExtractor {
         val bufInfo    = MediaCodec.BufferInfo()
         var inputEos   = false
         var prevYData  : ByteArray? = null
-        var prevYStride = 0
 
         try {
             while (true) {
@@ -156,16 +164,32 @@ class BallBlobExtractor {
                     val yPlane  = image.planes[0]
                     val yStride = yPlane.rowStride
                     val yBuf    = yPlane.buffer
-                    val yData   = ByteArray(videoH * yStride)
-                    yBuf.get(yData)
+                    val yRaw    = ByteArray(videoH * yStride)
+                    yBuf.get(yRaw)
 
-                    // 幀差偵測（需要前幀）
-                    val blobs: List<Map<String, Any>>
+                    // 幀差偵測在 coded-space 執行（避免昂貴的 Y 平面旋轉）
+                    // blob 座標最後再轉換到 display-space
                     val prevY = prevYData
-                    blobs = if (prevY != null && prevY.size == yData.size) {
-                        detectBlobs(yData, prevY, videoW, videoH, yStride)
+                    val codedBlobs = if (prevY != null && prevY.size == yRaw.size) {
+                        detectBlobs(yRaw, prevY, videoW, videoH, yStride)
                     } else {
                         emptyList()
+                    }
+
+                    // 只對 blob 重心做座標轉換（O(numBlobs)，遠比逐像素旋轉快）
+                    val blobs: List<Map<String, Any>> = if (rotation == 0) codedBlobs else {
+                        codedBlobs.map { b ->
+                            val (dx, dy) = codedToDisplay(
+                                b["cx"] as Int, b["cy"] as Int, videoW, videoH, rotation
+                            )
+                            mapOf(
+                                "cx"       to dx,
+                                "cy"       to dy,
+                                "area"     to b["area"]!!,
+                                "circ"     to b["circ"]!!,
+                                "diffMean" to b["diffMean"]!!,
+                            )
+                        }
                     }
 
                     frameList.add(mapOf(
@@ -173,8 +197,7 @@ class BallBlobExtractor {
                         "blobs" to blobs,
                     ))
 
-                    prevYData   = yData
-                    prevYStride = yStride
+                    prevYData = yRaw
 
                 } finally {
                     image.close()
@@ -195,10 +218,24 @@ class BallBlobExtractor {
 
         return mapOf(
             "fps"    to fps,
-            "width"  to videoW,
-            "height" to videoH,
+            "width"  to displayW,
+            "height" to displayH,
             "frames" to frameList,
         )
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Blob 座標轉換（coded-space → display-space）
+    // ────────────────────────────────────────────────────────────
+
+    /** 將單一像素座標從 coded-space 轉換到 display-space。 */
+    private fun codedToDisplay(
+        cx: Int, cy: Int, w: Int, h: Int, rotation: Int,
+    ): Pair<Int, Int> = when (rotation) {
+        90  -> Pair(h - 1 - cy, cx)           // displayW=h, displayH=w
+        270 -> Pair(cy, w - 1 - cx)            // displayW=h, displayH=w
+        180 -> Pair(w - 1 - cx, h - 1 - cy)
+        else -> Pair(cx, cy)
     }
 
     // ────────────────────────────────────────────────────────────

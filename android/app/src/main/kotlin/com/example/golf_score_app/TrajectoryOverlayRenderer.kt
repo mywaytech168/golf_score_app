@@ -103,6 +103,8 @@ class TrajectoryOverlayRenderer {
         val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
         val fps       = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat() }
                             .getOrElse { 15f }
+        val encW = (videoW + 15) and -16
+        val encH = (videoH + 15) and -16
 
         // ── 建立解碼器 ──────────────────────────────────────────
         val decoder = try {
@@ -120,8 +122,8 @@ class TrajectoryOverlayRenderer {
             Log.e(TAG, "無法建立編碼器: $e")
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
-        val encFmt = MediaFormat.createVideoFormat("video/avc", videoW, videoH).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420Flexible)
+        val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
             setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
@@ -132,12 +134,22 @@ class TrajectoryOverlayRenderer {
         File(outputPath).parentFile?.mkdirs()
         val muxer   = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var muxTrack   = -1
-        var muxStarted = false
+        var muxStarted    = false
+        var encodedFrames = 0
 
         val decBufInfo = MediaCodec.BufferInfo()
         val encBufInfo = MediaCodec.BufferInfo()
         var inputEos   = false
         var success    = false
+
+        // ── 預分配可重用緩衝區（避免每幀 ~13MB GC 壓力）────────
+        val yuvPixels  = IntArray(videoW * videoH)
+        val encPixels  = IntArray(encW   * encH)
+        val nv12Buf    = ByteArray(encW * encH + encW * encH / 2)
+        val frameBmp   = Bitmap.createBitmap(videoW, videoH, Bitmap.Config.ARGB_8888)
+        val padBmp     = if (encW != videoW || encH != videoH)
+                             Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
+                         else null
 
         try {
             while (true) {
@@ -175,38 +187,37 @@ class TrajectoryOverlayRenderer {
                 try {
                     val pts = decBufInfo.presentationTimeUs
 
-                    // ── YUV → Bitmap ───────────────────────────
-                    val bmp = yuvToBitmap(image, videoW, videoH)
+                    // ── YUV → Bitmap（重用 frameBmp + yuvPixels）──
+                    yuvFillPixels(image, videoW, videoH, yuvPixels)
+                    frameBmp.setPixels(yuvPixels, 0, videoW, 0, 0, videoW, videoH)
 
-                    // ── 找出本幀應顯示的軌跡點 ─────────────────
-                    val visible = sortedPts.filter { it.first <= pts }
-                    if (visible.size >= 2) {
-                        drawTrajectory(Canvas(bmp), visible)
-                    } else if (visible.size == 1) {
-                        drawDot(Canvas(bmp), visible[0].second, visible[0].third)
+                    // ── 找出本幀應顯示的軌跡點（二分搜尋，O(log n)）──
+                    val visibleEnd = sortedPts.binarySearchLast { it.first <= pts }
+                    if (visibleEnd >= 0) {
+                        val visible = sortedPts.subList(0, visibleEnd + 1)
+                        if (visible.size >= 2) drawTrajectory(Canvas(frameBmp), visible)
+                        else drawDot(Canvas(frameBmp), visible[0].second, visible[0].third)
                     }
 
-                    // ── Bitmap → 編碼器 ────────────────────────
+                    // ── Bitmap → 編碼器（重用 encPixels + nv12Buf）──
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
                     if (encInIdx >= 0) {
-                        val img = runCatching { encoder.getInputImage(encInIdx) }.getOrNull()
-                        if (img != null) {
-                            bitmapFillYuv(img, bmp, videoW, videoH)
-                            encoder.queueInputBuffer(encInIdx, 0, 0, pts, 0)
-                        } else {
-                            val buf  = encoder.getInputBuffer(encInIdx)!!
-                            val nv12 = bitmapToNv12(bmp, videoW, videoH)
-                            buf.clear(); buf.put(nv12)
-                            encoder.queueInputBuffer(encInIdx, 0, nv12.size, pts, 0)
-                        }
+                        val srcBmp = if (padBmp != null) {
+                            Canvas(padBmp).drawBitmap(frameBmp, 0f, 0f, null); padBmp
+                        } else frameBmp
+                        bitmapFillNv12(srcBmp, encW, encH, encPixels, nv12Buf)
+                        val buf = encoder.getInputBuffer(encInIdx)!!
+                        buf.clear()
+                        buf.put(nv12Buf, 0, nv12Buf.size)
+                        encoder.queueInputBuffer(encInIdx, 0, nv12Buf.size, pts, 0)
                     }
-                    bmp.recycle()
 
                     drainEncoder(
                         encoder, muxer, encBufInfo,
                         setTrack   = { t -> muxTrack = t; muxStarted = true },
                         getTrack   = { muxTrack },
                         isMuxed    = { muxStarted },
+                        onFrame    = { encodedFrames++ },
                         eos        = false,
                     )
 
@@ -218,25 +229,37 @@ class TrajectoryOverlayRenderer {
                 if ((decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
             }
 
-            // EOS
-            val eosIdx = encoder.dequeueInputBuffer(100_000L)
+            // ── EOS：持續重試直到取得輸入緩衝區槽 ─────────────────
+            Log.d(TAG, "Signaling EOS to encoder, encodedFrames=$encodedFrames")
+            var eosIdx = -1
+            var eosTries = 0
+            while (eosIdx < 0 && eosTries < 20) {
+                eosIdx = encoder.dequeueInputBuffer(100_000L)
+                eosTries++
+            }
             if (eosIdx >= 0) {
                 encoder.queueInputBuffer(eosIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                Log.d(TAG, "EOS queued at idx=$eosIdx after $eosTries tries")
+            } else {
+                Log.w(TAG, "Failed to get EOS input buffer after $eosTries tries")
             }
             drainEncoder(
                 encoder, muxer, encBufInfo,
                 setTrack = { t -> muxTrack = t; muxStarted = true },
                 getTrack = { muxTrack },
                 isMuxed  = { muxStarted },
+                onFrame  = { encodedFrames++ },
                 eos      = true,
             )
 
-            success = muxStarted
-            Log.d(TAG, "完成 → $outputPath")
+            success = encodedFrames > 0
+            Log.d(TAG, "完成 → $outputPath (encodedFrames=$encodedFrames)")
 
         } catch (e: Exception) {
             Log.e(TAG, "渲染失敗: $e", e)
         } finally {
+            runCatching { frameBmp.recycle() }
+            runCatching { padBmp?.recycle() }
             runCatching { decoder.stop(); decoder.release() }
             runCatching { encoder.stop(); encoder.release() }
             runCatching { extractor.release() }
@@ -319,62 +342,41 @@ class TrajectoryOverlayRenderer {
     }
 
     // ────────────────────────────────────────────────────────────
-    // YUV Image ↔ Bitmap  /  Bitmap → NV12
+    // YUV Image → IntArray  /  Bitmap → NV12 ByteArray (in-place)
     // ────────────────────────────────────────────────────────────
 
-    private fun yuvToBitmap(image: Image, w: Int, h: Int): Bitmap {
+    /** Decode YUV420 image into pre-allocated ARGB pixels array (no heap alloc). */
+    private fun yuvFillPixels(image: Image, w: Int, h: Int, pixels: IntArray) {
         val yP  = image.planes[0]
         val uP  = image.planes[1]
         val vP  = image.planes[2]
-        val yBuf = yP.buffer; val uBuf = uP.buffer; val vBuf = vP.buffer
-        val yStride = yP.rowStride
+        val yStride       = yP.rowStride
         val uvStride      = uP.rowStride
         val uvPixelStride = uP.pixelStride
 
-        val pixels = IntArray(w * h)
+        // Bulk-copy ByteBuffers to ByteArrays — avoids per-pixel JVM virtual calls
+        val yBytes = ByteArray(yP.buffer.remaining()).also { yP.buffer.get(it) }
+        val uBytes = ByteArray(uP.buffer.remaining()).also { uP.buffer.get(it) }
+        val vBytes = ByteArray(vP.buffer.remaining()).also { vP.buffer.get(it) }
+
         for (j in 0 until h) {
             for (i in 0 until w) {
-                val yv     = (yBuf[j * yStride + i].toInt() and 0xFF) - 16
-                val uvOff  = (j / 2) * uvStride + (i / 2) * uvPixelStride
-                val u      = (uBuf[uvOff].toInt() and 0xFF) - 128
-                val v      = (vBuf[uvOff].toInt() and 0xFF) - 128
+                val yv    = (yBytes[j * yStride + i].toInt() and 0xFF) - 16
+                val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
+                val u     = (uBytes[uvOff].toInt() and 0xFF) - 128
+                val v     = (vBytes[uvOff].toInt() and 0xFF) - 128
                 val r = ((298 * yv + 409 * v + 128) shr 8).coerceIn(0, 255)
                 val g = ((298 * yv - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
                 val b = ((298 * yv + 516 * u + 128) shr 8).coerceIn(0, 255)
                 pixels[j * w + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
-        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp ->
-            bmp.setPixels(pixels, 0, w, 0, 0, w, h)
-        }
     }
 
-    private fun bitmapFillYuv(image: Image, bmp: Bitmap, w: Int, h: Int) {
-        val pixels = IntArray(w * h)
+    /** Encode Bitmap into pre-allocated NV12 byte array (no heap alloc). */
+    private fun bitmapFillNv12(bmp: Bitmap, w: Int, h: Int, pixels: IntArray, nv12: ByteArray) {
         bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
-        val yBuf = yP.buffer; val uBuf = uP.buffer; val vBuf = vP.buffer
-        val yStride = yP.rowStride; val uvStride = uP.rowStride; val uvPixelStride = uP.pixelStride
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val p = pixels[j * w + i]
-                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
-                val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                yBuf.put(j * yStride + i, y.toByte())
-                if (j % 2 == 0 && i % 2 == 0) {
-                    val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
-                    val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
-                    uBuf.put(uvOff, u.toByte()); vBuf.put(uvOff, v.toByte())
-                }
-            }
-        }
-    }
-
-    private fun bitmapToNv12(bmp: Bitmap, w: Int, h: Int): ByteArray {
-        val pixels = IntArray(w * h)
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val nv12 = ByteArray(w * h + w * h / 2)
+        val uvBase = w * h
         for (j in 0 until h) {
             for (i in 0 until w) {
                 val p = pixels[j * w + i]
@@ -383,12 +385,21 @@ class TrajectoryOverlayRenderer {
                 if (j % 2 == 0 && i % 2 == 0) {
                     val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val base = w * h + (j / 2) * w + (i / 2) * 2
+                    val base = uvBase + (j / 2) * w + (i / 2) * 2
                     if (base + 1 < nv12.size) { nv12[base] = u.toByte(); nv12[base + 1] = v.toByte() }
                 }
             }
         }
-        return nv12
+    }
+
+    /** Returns index of last element satisfying [predicate], or -1. */
+    private inline fun <T> List<T>.binarySearchLast(predicate: (T) -> Boolean): Int {
+        var lo = 0; var hi = size - 1; var result = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            if (predicate(this[mid])) { result = mid; lo = mid + 1 } else hi = mid - 1
+        }
+        return result
     }
 
     // ────────────────────────────────────────────────────────────
@@ -398,25 +409,45 @@ class TrajectoryOverlayRenderer {
     private fun drainEncoder(
         encoder: MediaCodec, muxer: MediaMuxer, info: MediaCodec.BufferInfo,
         setTrack: (Int) -> Unit, getTrack: () -> Int, isMuxed: () -> Boolean,
+        onFrame: (() -> Unit)? = null,
         eos: Boolean,
     ) {
-        val timeout = if (eos) 100_000L else 0L
+        var tryAgainCount = 0
+        var samplesWritten = 0
+        val maxTryAgain = 50  // prevent infinite loop: 50 × 10ms = 500ms max
+
         while (true) {
-            val idx = encoder.dequeueOutputBuffer(info, timeout)
+            val idx = encoder.dequeueOutputBuffer(info, 10_000L)
             when {
-                idx == MediaCodec.INFO_TRY_AGAIN_LATER  -> { if (!eos) break }
+                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    if (!eos) break
+                    tryAgainCount++
+                    Log.d(TAG, "drainEncoder TRY_AGAIN_LATER ($tryAgainCount/$maxTryAgain) eos=true samples=$samplesWritten")
+                    if (tryAgainCount > maxTryAgain) {
+                        Log.w(TAG, "drainEncoder EOS timeout — samples=$samplesWritten")
+                        break
+                    }
+                }
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    tryAgainCount = 0
                     val t = muxer.addTrack(encoder.outputFormat)
                     muxer.start(); setTrack(t)
+                    Log.d(TAG, "drainEncoder FORMAT_CHANGED, mux track=$t")
                 }
                 idx >= 0 -> {
+                    tryAgainCount = 0
                     val buf = encoder.getOutputBuffer(idx)
                     if (buf != null && info.size > 0 && isMuxed()) {
                         buf.position(info.offset); buf.limit(info.offset + info.size)
                         muxer.writeSampleData(getTrack(), buf, info)
+                        onFrame?.invoke()
+                        samplesWritten++
                     }
                     encoder.releaseOutputBuffer(idx, false)
-                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        Log.d(TAG, "drainEncoder EOS received, samples=$samplesWritten")
+                        break
+                    }
                 }
             }
         }
