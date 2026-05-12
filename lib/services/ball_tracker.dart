@@ -251,6 +251,17 @@ class BallTracker {
   static const int _farFewCandsMax = 3;
   static const int _farManyCandsStop = 25;
 
+  // ── ROI 篩選（Python FIXED_ROI_MODE + ROI_CENTER_LOCK_TO_LAST）──────────
+  // Python ROI_FIXED_SIZE=400 → half=200px；recovery 每 miss 增 35px 上限 210px
+  static const double _roiHalfBase    = 200.0;
+  static const double _roiGrowPerMiss = 35.0;
+  static const double _roiHalfMax     = 210.0;
+  // P0 固定 ROI 中心 = Python FIXED_ROI_CENTER(1084,376) 轉換到 portrait display
+  // CCW 旋轉空間 (1084, 376) → portrait (343, 1084) ≈ (47.6%, 84.7%)
+  static const double _p0RoiXFrac     = 0.476;
+  static const double _p0RoiYFrac     = 0.847;
+  static const double _p0RoiHalf      = 250.0; // waitP0/P1 搜尋半徑
+
   // ── P0 / P1 ──────────────────────────────────────────────
   static const int _p1DeadlineFrames = 1; // Python P1_MUST_APPEAR_NEXT_FRAME + DEADLINE=1
   static const int _waitMaxFrames = 180; // Python WAIT_MAX_FRAMES
@@ -322,14 +333,25 @@ class BallTracker {
 
     for (int fi = 0; fi < frames.length; fi++) {
       final frame = frames[fi];
-      final pIndex = math.max(_trackPts.length - 1, 0);
 
-      // 動態過濾：Dart 對 Kotlin 傳來的寬鬆 blob 再套 Python 動態門檻
+      // ── Kalman 預測（在 ROI 篩選前執行，提供 tracking 狀態的 ROI 中心）──
+      (double, double)? bluePred;
+      if (_state == _TrackState.tracking && _kf.initialized) {
+        _kf.predict();
+        bluePred = _kf.pos;
+        _blueHist.add(bluePred);
+      }
+
+      // ── ROI 空間篩選（模擬 Python 400×400 視窗，大幅降低假陽性）──
+      final roiFiltered = _applyRoiFilter(frame.blobs, videoW, videoH, bluePred);
+
+      // ── 動態門檻篩選（Dart 層複製 Python 動態 circ/area 門檻）──
+      final pIndex = math.max(_trackPts.length - 1, 0);
       final filtered = _applyDynamicFilter(
-        frame.blobs, pIndex, _noCandCount, _areaEma,
+        roiFiltered, pIndex, _noCandCount, _areaEma,
       );
 
-      _processFrame(fi, frame.ptsUs, filtered, videoW, videoH);
+      _processFrame(fi, frame.ptsUs, filtered, videoW, videoH, bluePred);
     }
 
     return List.unmodifiable(_trackPts);
@@ -399,21 +421,72 @@ class BallTracker {
   }
 
   // ============================================================
+  // ROI 空間篩選（Python FIXED_ROI_MODE + ROI_CENTER_LOCK_TO_LAST）
+  // ============================================================
+
+  /// 根據追蹤狀態，只保留在 ROI 視窗內的 blob。
+  ///
+  /// • waitP0 / waitP1：以 FIXED_ROI_CENTER 等效點為中心，半徑 250px
+  /// • tracking：以最後軌跡點（miss 時改用 Kalman 預測）為中心，
+  ///             半徑從 200px 起，每 miss 增 35px，上限 210px
+  List<BlobData> _applyRoiFilter(
+    List<BlobData> blobs,
+    int w, int h,
+    (double, double)? bluePred,
+  ) {
+    if (blobs.isEmpty) return blobs;
+
+    switch (_state) {
+      case _TrackState.waitP0:
+        final cx = (w * _p0RoiXFrac).round();
+        final cy = (h * _p0RoiYFrac).round();
+        return blobs
+            .where((b) => _dist(b.cx, b.cy, cx, cy) <= _p0RoiHalf)
+            .toList();
+
+      case _TrackState.waitP1:
+        if (_trackPts.isEmpty) return blobs;
+        final p0 = _trackPts.first;
+        return blobs
+            .where((b) => _dist(b.cx, b.cy, p0.x, p0.y) <= _p0RoiHalf)
+            .toList();
+
+      case _TrackState.tracking:
+        // 半徑隨 miss 數放大（對應 Python RECOVERY_ROI_GROW_PER_MISS）
+        final radius = math.min(
+          _roiHalfMax,
+          _roiHalfBase + _noCandCount * _roiGrowPerMiss,
+        );
+        // miss 時用 Kalman 預測中心（RECOVERY_USE_KALMAN_CENTER_ON_MISS）；
+        // 否則鎖定最後有效軌跡點（ROI_CENTER_LOCK_TO_LAST）
+        double cx, cy;
+        if (_noCandCount > 0 && bluePred != null) {
+          cx = bluePred.$1;
+          cy = bluePred.$2;
+        } else if (_trackPts.isNotEmpty) {
+          cx = _trackPts.last.x.toDouble();
+          cy = _trackPts.last.y.toDouble();
+        } else {
+          return blobs;
+        }
+        return blobs
+            .where((b) => _dist(b.cx, b.cy, cx.round(), cy.round()) <= radius)
+            .toList();
+
+      case _TrackState.stopped:
+        return blobs;
+    }
+  }
+
+  // ============================================================
   // 逐幀狀態機
   // ============================================================
 
   void _processFrame(
     int frameIdx, int ptsUs, List<BlobData> blobs, int w, int h,
+    (double, double)? bluePred,
   ) {
-    (double, double)? bluePred;
-
-    // Tracking 狀態：先 Kalman predict，保存預測點到歷史
-    if (_state == _TrackState.tracking && _kf.initialized) {
-      _kf.predict();
-      bluePred = _kf.pos;
-      _blueHist.add(bluePred);
-    }
-
+    // Kalman predict + blueHist 已在 track() 迴圈完成
     switch (_state) {
       case _TrackState.waitP0:
         _handleWaitP0(frameIdx, ptsUs, blobs, w, h);
@@ -439,11 +512,11 @@ class BallTracker {
       return;
     }
 
-    // Python FIXED_ROI_CENTER ≈ display (343, 1084) = 左側 48%、下方 85%。
-    // 高爾夫球在 portrait 畫面中永遠在左下（tee 位置）；
-    // 不能用 frame center，否則會選到肩膀/手臂 blob。
-    final roiX = (w * 0.35).round();   // ≈ 左 35%（golfer 左側）
-    final roiY = (h * 0.80).round();   // ≈ 下 80%（地面 / tee 高度）
+    // Python FIXED_ROI_CENTER = (1084, 376) 在 CCW 景觀空間 → portrait (343, 1084)
+    // ≈ (47.6%, 84.7%)。blobs 已由 _applyRoiFilter 限定在此中心 250px 內，
+    // 此處再取距中心最近者。
+    final roiX = (w * _p0RoiXFrac).round();
+    final roiY = (h * _p0RoiYFrac).round();
     final best = blobs.reduce((a, b) =>
         _dist2(a.cx, a.cy, roiX, roiY) <= _dist2(b.cx, b.cy, roiX, roiY)
             ? a
@@ -515,8 +588,11 @@ class BallTracker {
       return;
     }
 
-    // FAR_MANY_CANDS_STOP: skip during active tracking — Kalman blue-point fallback
-    // handles noisy frames; stopping here kills trajectories in busy swing clips.
+    // ROI 篩選後候選仍過多 → ROI 視窗內背景噪訊（Python FAR_MANY_CANDS_STOP=25）
+    if (blobs.length >= _farManyCandsStop) {
+      _state = _TrackState.stopped;
+      return;
+    }
 
     _noCandCount = 0;
     final tooMany = blobs.length >= _tooManyCandsThreshold;
