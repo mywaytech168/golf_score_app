@@ -41,6 +41,43 @@ class TrajectoryOverlayRenderer {
         private const val DOT_RADIUS   = 9f
         private const val SHADOW_ALPHA = 100
         private const val SHADOW_WIDTH = 10f
+
+        // 預快取 Paint（所有 render() 呼叫為序列，共用安全）
+        private val shadowPaint by lazy {
+            Paint().apply {
+                color       = Color.argb(SHADOW_ALPHA, 0, 0, 0)
+                strokeWidth = SHADOW_WIDTH
+                style       = Paint.Style.STROKE
+                isAntiAlias = true
+                strokeCap   = Paint.Cap.ROUND
+                strokeJoin  = Paint.Join.ROUND
+            }
+        }
+        private val linePaint by lazy {
+            Paint().apply {
+                color       = TRAJ_COLOR
+                strokeWidth = TRAJ_STROKE
+                style       = Paint.Style.STROKE
+                isAntiAlias = true
+                strokeCap   = Paint.Cap.ROUND
+                strokeJoin  = Paint.Join.ROUND
+            }
+        }
+        private val dotFillPaint by lazy {
+            Paint().apply {
+                color       = Color.WHITE
+                style       = Paint.Style.FILL
+                isAntiAlias = true
+            }
+        }
+        private val dotBorderPaint by lazy {
+            Paint().apply {
+                color       = TRAJ_COLOR
+                strokeWidth = 2f
+                style       = Paint.Style.STROKE
+                isAntiAlias = true
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────
@@ -282,34 +319,7 @@ class TrajectoryOverlayRenderer {
             return
         }
 
-        val shadowPaint = Paint().apply {
-            color       = Color.argb(SHADOW_ALPHA, 0, 0, 0)
-            strokeWidth = SHADOW_WIDTH
-            style       = Paint.Style.STROKE
-            isAntiAlias = true
-            strokeCap   = Paint.Cap.ROUND
-            strokeJoin  = Paint.Join.ROUND
-        }
-        val linePaint = Paint().apply {
-            color       = TRAJ_COLOR
-            strokeWidth = TRAJ_STROKE
-            style       = Paint.Style.STROKE
-            isAntiAlias = true
-            strokeCap   = Paint.Cap.ROUND
-            strokeJoin  = Paint.Join.ROUND
-        }
-        val dotPaint = Paint().apply {
-            color       = Color.WHITE
-            style       = Paint.Style.FILL
-            isAntiAlias = true
-        }
-        val dotBorder = Paint().apply {
-            color       = TRAJ_COLOR
-            strokeWidth = 2f
-            style       = Paint.Style.STROKE
-            isAntiAlias = true
-        }
-
+        // 使用 companion object 快取的 Paint（避免每幀 4× new Paint()）
         // 陰影線
         for (i in 1 until pts.size) {
             canvas.drawLine(
@@ -328,17 +338,12 @@ class TrajectoryOverlayRenderer {
         }
         // 最新點圓點
         val last = pts.last()
-        canvas.drawCircle(last.second.toFloat(), last.third.toFloat(), DOT_RADIUS, dotPaint)
-        canvas.drawCircle(last.second.toFloat(), last.third.toFloat(), DOT_RADIUS, dotBorder)
+        canvas.drawCircle(last.second.toFloat(), last.third.toFloat(), DOT_RADIUS, dotFillPaint)
+        canvas.drawCircle(last.second.toFloat(), last.third.toFloat(), DOT_RADIUS, dotBorderPaint)
     }
 
     private fun drawDot(canvas: Canvas, x: Int, y: Int) {
-        val dotPaint = Paint().apply {
-            color       = Color.WHITE
-            style       = Paint.Style.FILL
-            isAntiAlias = true
-        }
-        canvas.drawCircle(x.toFloat(), y.toFloat(), DOT_RADIUS, dotPaint)
+        canvas.drawCircle(x.toFloat(), y.toFloat(), DOT_RADIUS, dotFillPaint)
     }
 
     // ────────────────────────────────────────────────────────────

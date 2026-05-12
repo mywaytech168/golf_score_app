@@ -164,6 +164,16 @@ class SkeletonOverlayRenderer(private val context: Context) {
         var samplesWritten = 0
         var success    = false
 
+        // ── 預配置可重用緩衝區（避免每幀 ~9MB GC 壓力）────────────
+        // yuvFillPixelsRotated 直接輸出 display-space 像素，省去 rawBmp + rotBmp
+        val yuvPixels  = IntArray(displayW * displayH)
+        val displayBmp = Bitmap.createBitmap(displayW, displayH, Bitmap.Config.ARGB_8888)
+        val padBmp     = if (encW != displayW || encH != displayH)
+                             Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
+                         else null
+        val encPixels  = IntArray(encW * encH)
+        val nv12Buf    = ByteArray(encW * encH + encW * encH / 2)
+
         try {
             while (true) {
                 // ── 餵解碼器 ────────────────────────────────────
@@ -205,19 +215,14 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     val origTimeSec = startSec + clipTimeSec
                     val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
 
-                    // ── YUV → Bitmap → 物理旋轉到 display 方向 ─
-                    val rawBmp = yuvToBitmap(image, videoW, videoH)
-                    val rotBmp = if (rotation != 0) {
-                        val m = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
-                        Bitmap.createBitmap(rawBmp, 0, 0, rawBmp.width, rawBmp.height, m, true)
-                            .also { rawBmp.recycle() }
-                    } else rawBmp
+                    // ── YUV → display-space pixels（含旋轉，單次像素迴圈，無中間 Bitmap）──
+                    yuvFillPixelsRotated(image, videoW, videoH, rotation, displayW, displayH, yuvPixels)
+                    displayBmp.setPixels(yuvPixels, 0, displayW, 0, 0, displayW, displayH)
 
-                    // 若需要 16-alignment 補齊，建立 encW×encH 的 bitmap（右/下補黑邊）
-                    val bmp = if (encW != displayW || encH != displayH) {
-                        Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
-                            .also { Canvas(it).drawBitmap(rotBmp, 0f, 0f, null); rotBmp.recycle() }
-                    } else rotBmp
+                    // 若需要 16-alignment 補齊，將 displayBmp 畫入 padBmp（右/下補黑邊）
+                    val bmp = if (padBmp != null) {
+                        Canvas(padBmp).drawBitmap(displayBmp, 0f, 0f, null); padBmp
+                    } else displayBmp
 
                     // ── 繪製骨架（bitmap 已是 display 方向，直接 scale）──
                     frameData[csvFrameIdx]?.let { landmarks ->
@@ -226,19 +231,20 @@ class SkeletonOverlayRenderer(private val context: Context) {
 
                     // ── Bitmap → NV12 → 編碼器 ───────────────────
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
-                    val ptsUs = frameCount * 1_000_000L / fps.toLong()
+                    // ✅ 使用浮點除法避免 fps.toLong() 截斷（如 29.97→29）
+                    val ptsUs = (frameCount.toDouble() * 1_000_000.0 / fps).toLong()
 
                     if (encInIdx >= 0) {
-                        val buf  = encoder.getInputBuffer(encInIdx)!!
-                        val nv12 = bitmapToNv12(bmp, encW, encH)
+                        val buf = encoder.getInputBuffer(encInIdx)!!
+                        bitmapFillNv12(bmp, encW, encH, encPixels, nv12Buf)
                         buf.clear()
-                        buf.put(nv12, 0, nv12.size)
-                        encoder.queueInputBuffer(encInIdx, 0, nv12.size, ptsUs, 0)
+                        buf.put(nv12Buf, 0, nv12Buf.size)
+                        encoder.queueInputBuffer(encInIdx, 0, nv12Buf.size, ptsUs, 0)
                         frameCount++
                     } else {
                         Log.w(TAG, "dequeueInputBuffer 返回 $encInIdx，略過幀 pts=$ptsUs")
                     }
-                    bmp.recycle()
+                    // 不 recycle —— displayBmp / padBmp 是預配置共用資源
 
                     drainEncoder(
                         encoder, muxer, encBufInfo,
@@ -266,16 +272,17 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 success = false
                 encodedFrames = 0
             } else {
-                val eosIdx = encoder.dequeueInputBuffer(100_000L)
+                // ✅ 持續重試直到取得 EOS 輸入緩衝區（同 TrajectoryOverlayRenderer 的 20 次策略）
+                var eosIdx = -1; var eosTries = 0
+                while (eosIdx < 0 && eosTries < 20) {
+                    eosIdx = encoder.dequeueInputBuffer(100_000L); eosTries++
+                }
                 if (eosIdx >= 0) {
-                    // ✅ EOS 的 pts 應該是最後一幀之後的時間
-                    val ptsUs = frameCount * 1_000_000L / fps.toLong()
-                    encoder.queueInputBuffer(
-                        eosIdx, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                    )
-                    Log.d(TAG, "EOS queued at index $eosIdx, frameCount=$frameCount, ptsUs=$ptsUs")
+                    val ptsUs = (frameCount.toDouble() * 1_000_000.0 / fps).toLong()
+                    encoder.queueInputBuffer(eosIdx, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    Log.d(TAG, "EOS queued at index $eosIdx after $eosTries tries, frameCount=$frameCount, ptsUs=$ptsUs")
                 } else {
-                    Log.w(TAG, "Failed to get input buffer for EOS: $eosIdx")
+                    Log.w(TAG, "Failed to get EOS input buffer after $eosTries tries")
                 }
                 
                 Log.d(TAG, "Draining encoder with eos=true")
@@ -304,6 +311,8 @@ class SkeletonOverlayRenderer(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "骨架渲染錯誤: $e", e)
         } finally {
+            runCatching { displayBmp.recycle() }
+            runCatching { padBmp?.recycle() }
             runCatching { decoder.stop(); decoder.release() }
             runCatching { encoder.stop(); encoder.release() }
             runCatching { extractor.release() }
@@ -429,64 +438,60 @@ class SkeletonOverlayRenderer(private val context: Context) {
     }
 
     // ────────────────────────────────────────────────────────────
-    // YUV Image ↔ Bitmap  /  Bitmap → NV12
+    // YUV Image → display-space IntArray（含旋轉，無中間 Bitmap 分配）
     // ────────────────────────────────────────────────────────────
 
-    private fun yuvToBitmap(image: Image, w: Int, h: Int): Bitmap {
+    /**
+     * 將 YUV420 Image 直接解碼並旋轉，寫入預配置的 [pixels] 陣列（display-space）。
+     * 旋轉在像素迴圈內以座標映射實現，省去 rawBmp + Matrix.postRotate Bitmap 的分配。
+     *
+     * 旋轉映射（display(dx,dy) ← coded(ci, cj)）：
+     *   90°  → ci = dy,          cj = codedH-1-dx
+     *   270° → ci = codedW-1-dy, cj = dx
+     *   180° → ci = codedW-1-dx, cj = codedH-1-dy
+     *   0°   → ci = dx,          cj = dy
+     */
+    private fun yuvFillPixelsRotated(
+        image: Image,
+        codedW: Int, codedH: Int,
+        rotation: Int,
+        displayW: Int, displayH: Int,
+        pixels: IntArray,
+    ) {
         val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
         val yStride       = yP.rowStride
         val uvStride      = uP.rowStride
         val uvPixelStride = uP.pixelStride
-
-        // Bulk-copy ByteBuffers to ByteArrays once — avoids 2.7M virtual JVM calls per frame
+        // Bulk-copy ByteBuffers once — avoids per-pixel JVM virtual calls
         val yBytes = ByteArray(yP.buffer.remaining()).also { yP.buffer.get(it) }
         val uBytes = ByteArray(uP.buffer.remaining()).also { uP.buffer.get(it) }
         val vBytes = ByteArray(vP.buffer.remaining()).also { vP.buffer.get(it) }
 
-        val pixels = IntArray(w * h)
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val yv    = (yBytes[j * yStride + i].toInt() and 0xFF) - 16
-                val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
+        for (dy in 0 until displayH) {
+            for (dx in 0 until displayW) {
+                val ci: Int; val cj: Int
+                when (rotation) {
+                    90  -> { ci = dy;              cj = codedH - 1 - dx }
+                    270 -> { ci = codedW - 1 - dy; cj = dx              }
+                    180 -> { ci = codedW - 1 - dx; cj = codedH - 1 - dy }
+                    else -> { ci = dx;              cj = dy              }
+                }
+                val yv    = (yBytes[cj * yStride + ci].toInt() and 0xFF) - 16
+                val uvOff = (cj / 2) * uvStride + (ci / 2) * uvPixelStride
                 val u     = (uBytes[uvOff].toInt() and 0xFF) - 128
                 val v     = (vBytes[uvOff].toInt() and 0xFF) - 128
                 val r = ((298 * yv + 409 * v + 128) shr 8).coerceIn(0, 255)
                 val g = ((298 * yv - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
                 val b = ((298 * yv + 516 * u + 128) shr 8).coerceIn(0, 255)
-                pixels[j * w + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-        return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp ->
-            bmp.setPixels(pixels, 0, w, 0, 0, w, h)
-        }
-    }
-
-    private fun bitmapFillYuv(image: Image, bmp: Bitmap, w: Int, h: Int) {
-        val pixels = IntArray(w * h)
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
-        val yBuf = yP.buffer; val uBuf = uP.buffer; val vBuf = vP.buffer
-        val yStride = yP.rowStride; val uvStride = uP.rowStride; val uvPixelStride = uP.pixelStride
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val p = pixels[j * w + i]
-                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
-                val y = ((66 * r + 129 * g + 25 * b + 128) shr 8) + 16
-                yBuf.put(j * yStride + i, y.toByte())
-                if (j % 2 == 0 && i % 2 == 0) {
-                    val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
-                    val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
-                    uBuf.put(uvOff, u.toByte()); vBuf.put(uvOff, v.toByte())
-                }
+                pixels[dy * displayW + dx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
     }
 
-    private fun bitmapToNv12(bmp: Bitmap, w: Int, h: Int): ByteArray {
-        val pixels = IntArray(w * h)
+    /** Bitmap → 已預配置的 NV12 ByteArray（無 heap 分配）*/
+    private fun bitmapFillNv12(bmp: Bitmap, w: Int, h: Int, pixels: IntArray, nv12: ByteArray) {
         bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val nv12 = ByteArray(w * h + w * h / 2)
+        val uvBase = w * h
         for (j in 0 until h) {
             for (i in 0 until w) {
                 val p = pixels[j * w + i]
@@ -495,12 +500,11 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 if (j % 2 == 0 && i % 2 == 0) {
                     val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
                     val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val base = w * h + (j / 2) * w + (i / 2) * 2
+                    val base = uvBase + (j / 2) * w + (i / 2) * 2
                     if (base + 1 < nv12.size) { nv12[base] = u.toByte(); nv12[base + 1] = v.toByte() }
                 }
             }
         }
-        return nv12
     }
 
     // ────────────────────────────────────────────────────────────

@@ -340,6 +340,8 @@ class BallTracker {
         _kf.predict();
         bluePred = _kf.pos;
         _blueHist.add(bluePred);
+        // 只保留最近 10 筆（_pickBlueFromHistory 最多用到 offset=-2）
+        if (_blueHist.length > 10) _blueHist.removeAt(0);
       }
 
       // ── ROI 空間篩選（模擬 Python 400×400 視窗，大幅降低假陽性）──
