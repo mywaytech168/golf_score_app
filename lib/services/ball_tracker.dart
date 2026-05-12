@@ -232,8 +232,8 @@ class BallTracker {
   static const int _areaLoBase = 6;
   static const int _areaHiBase = 150;
   // Kotlin BFS 周長計算與 cv2.arcLength 有差異（BFS 較大 → 圓度偏低），
-  // 所以 waitP0/P1 的初始門檻從 Python 的 0.60 降至 0.45。
-  static const double _circBase = 0.45;
+  // 從 Python 0.60 降至 0.55；球比球桿頭更圓，這個門檻足以過濾球桿頭形狀。
+  static const double _circBase = 0.55;
 
   // ── 動態放寬下限（Python 各 XXX_MIN 常數）────────────────
   static const double _cfgSpeed = 0.4; // CFG_SPEED
@@ -263,7 +263,7 @@ class BallTracker {
   static const double _p0RoiHalf      = 250.0; // waitP0/P1 搜尋半徑
 
   // ── P0 / P1 ──────────────────────────────────────────────
-  static const int _p1DeadlineFrames = 1; // Python P1_MUST_APPEAR_NEXT_FRAME + DEADLINE=1
+  static const int _p1DeadlineFrames = 3; // 3幀 ≈ 200ms@15fps，給高速球足夠的偵測視窗
   static const int _waitMaxFrames = 180; // Python WAIT_MAX_FRAMES
 
   // ── Tracking ─────────────────────────────────────────────
@@ -285,8 +285,8 @@ class BallTracker {
   static const double _stepEmaAlpha = 0.25;
   static const double _stepGrowthFactor = 1.9;
   static const double _stepAbsMax = 140.0;
-  static const double _stepAbsHardMax = 130.0;
-  static const double _predDistHardMax = 170.0;
+  static const double _stepAbsHardMax = 200.0; // 高速球每幀可跳 200px
+  static const double _predDistHardMax = 250.0; // 允許較大的 Kalman 預測偏差
   static const int _outlierStrikesToFreeze = 8;
 
   // ── 執行狀態（每次 track() 重置）─────────────────────────
@@ -302,21 +302,29 @@ class BallTracker {
   int _outlierStrikes = 0;
   late Kalman2D _kf;
 
+  // ── 擊球時間視窗（由 hitSec 計算，避免在揮桿前偵測到球桿頭）──────────
+  int _hitWindowStart = 0; // 最早允許偵測 P0 的幀序
+  int _hitWindowEnd   = -1; // 最晚允許偵測 P0 的幀序（-1 = 不限制）
+
   // ============================================================
   // 公開入口
   // ============================================================
 
   /// 對整段影片的逐幀 blob 資料執行追蹤，回傳軌跡點列表。
   ///
-  /// [frames]  Kotlin 回傳的每幀 blob（已過 pixel-level 初篩）
-  /// [fps]     影片幀率（決定 Kalman dt）
-  /// [videoW]  影片寬（用於初始 ROI 判斷）
-  /// [videoH]  影片高
+  /// [frames]   Kotlin 回傳的每幀 blob（已過 pixel-level 初篩）
+  /// [fps]      影片幀率（決定 Kalman dt）
+  /// [videoW]   影片寬（用於初始 ROI 判斷）
+  /// [videoH]   影片高
+  /// [hitSec]   擊球時刻（秒，相對於切片起點）。
+  ///            提供後，P0 搜尋只在 [hitSec-0.5s, hitSec+1.0s] 範圍內進行，
+  ///            避免揮桿前球桿頭的移動被誤判為球的初始位置。
   List<TrackPoint> track({
     required List<FrameBlobs> frames,
     required double fps,
     required int videoW,
     required int videoH,
+    double? hitSec,
   }) {
     // 重置所有狀態
     _state = _TrackState.waitP0;
@@ -330,6 +338,17 @@ class BallTracker {
     _blueHist.clear();
     _outlierStrikes = 0;
     _kf = Kalman2D(dt: 1.0 / math.max(fps, 1.0));
+
+    // 計算擊球時間視窗
+    if (hitSec != null) {
+      const double leadSec  = 0.5;  // 擊球前最多往前搜 0.5 秒
+      const double trailSec = 1.0;  // 擊球後最多往後搜 1.0 秒
+      _hitWindowStart = math.max(0, ((hitSec - leadSec) * fps).round());
+      _hitWindowEnd   = ((hitSec + trailSec) * fps).round();
+    } else {
+      _hitWindowStart = 0;
+      _hitWindowEnd   = -1; // 不限制
+    }
 
     for (int fi = 0; fi < frames.length; fi++) {
       final frame = frames[fi];
@@ -506,6 +525,15 @@ class BallTracker {
   void _handleWaitP0(
     int frameIdx, int ptsUs, List<BlobData> blobs, int w, int h,
   ) {
+    // ── 擊球時間視窗守衛 ──────────────────────────────────
+    // 尚未進入視窗：靜待，不計入 _waitFrames
+    if (frameIdx < _hitWindowStart) return;
+    // 超出視窗：停止搜尋
+    if (_hitWindowEnd >= 0 && frameIdx > _hitWindowEnd) {
+      _state = _TrackState.stopped;
+      return;
+    }
+
     _waitFrames++;
     if (blobs.isEmpty) {
       if (_waitFrames >= _waitMaxFrames) {

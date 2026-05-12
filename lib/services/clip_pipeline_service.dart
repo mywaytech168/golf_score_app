@@ -221,6 +221,7 @@ class ClipPipelineService {
     required String clipPath,
     required String sessionDir,
     required int durationSeconds,
+    double? hitSec,
     void Function(String label)? onProgress,
   }) async {
     final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
@@ -294,6 +295,7 @@ class ClipPipelineService {
           fps: extraction.fps,
           videoW: extraction.width,
           videoH: extraction.height,
+          hitSec: hitSec,
         );
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
 

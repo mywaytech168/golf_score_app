@@ -821,6 +821,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         clipPath: clipPath,
         sessionDir: sessionDir,
         durationSeconds: widget.entry.durationSeconds,
+        hitSec: widget.entry.hitSecond,
         onProgress: (label) {
           if (mounted) setState(() => _analyzeLabel = label);
         },
