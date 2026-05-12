@@ -1063,7 +1063,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                           ],
                         ),
                       ),
-                    if (_isClip)
+                    if (_isClip || _isOriginalVideo)
                       PopupMenuItem<_HistoryMenuAction>(
                         value: _HistoryMenuAction.analyzeVideo,
                         child: Row(
