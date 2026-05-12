@@ -439,11 +439,15 @@ class BallTracker {
       return;
     }
 
-    // Python：取最接近 ROI 中心的候選（我們以畫面中心代替固定 ROI）
-    final cx = w ~/ 2;
-    final cy = h ~/ 2;
+    // Python FIXED_ROI_CENTER ≈ display (343, 1084) = 左側 48%、下方 85%。
+    // 高爾夫球在 portrait 畫面中永遠在左下（tee 位置）；
+    // 不能用 frame center，否則會選到肩膀/手臂 blob。
+    final roiX = (w * 0.35).round();   // ≈ 左 35%（golfer 左側）
+    final roiY = (h * 0.80).round();   // ≈ 下 80%（地面 / tee 高度）
     final best = blobs.reduce((a, b) =>
-        _dist2(a.cx, a.cy, cx, cy) <= _dist2(b.cx, b.cy, cx, cy) ? a : b);
+        _dist2(a.cx, a.cy, roiX, roiY) <= _dist2(b.cx, b.cy, roiX, roiY)
+            ? a
+            : b);
 
     _trackPts.add(TrackPoint(
       x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
