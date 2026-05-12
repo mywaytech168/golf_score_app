@@ -159,12 +159,15 @@ class TrajectoryOverlayRenderer {
             Log.e(TAG, "無法建立編碼器: $e")
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
+        val bitRate = (videoW.toLong() * videoH * fps * 0.25)
+            .toLong().coerceIn(6_000_000L, 20_000_000L).toInt()
         val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
-            setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
+        Log.d(TAG, "編碼器 bitRate=${bitRate/1_000_000}Mbps (${videoW}x${videoH}@${fps}fps)")
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 

@@ -255,12 +255,12 @@ class BallTracker {
   // Python ROI_FIXED_SIZE=400 → half=200px；recovery 每 miss 增 35px 上限 210px
   static const double _roiHalfBase    = 200.0;
   static const double _roiGrowPerMiss = 35.0;
-  static const double _roiHalfMax     = 210.0;
+  static const double _roiHalfMax     = 200.0;
   // P0 固定 ROI 中心 = Python FIXED_ROI_CENTER(1084,376) 轉換到 portrait display
   // CCW 旋轉空間 (1084, 376) → portrait (343, 1084) ≈ (47.6%, 84.7%)
-  static const double _p0RoiXFrac     = 0.476;
-  static const double _p0RoiYFrac     = 0.847;
-  static const double _p0RoiHalf      = 250.0; // waitP0/P1 搜尋半徑
+  static const double _p0RoiXFrac     = 0.651;
+  static const double _p0RoiYFrac     = 0.565;
+  static const double _p0RoiHalf      = 200.0; // waitP0/P1 搜尋半徑
 
   // ── P0 / P1 ──────────────────────────────────────────────
   static const int _p1DeadlineFrames = 3; // 3幀 ≈ 200ms@15fps，給高速球足夠的偵測視窗
