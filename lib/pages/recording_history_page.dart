@@ -4,14 +4,16 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-// restored original local VideoPlayerPage usage
+
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
 import '../services/recording_history_storage.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/clip_pipeline_service.dart';
+import '../services/video_analysis_pipeline_service.dart';
 import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
@@ -677,7 +679,7 @@ class _HistoryTileState extends State<_HistoryTile> {
   bool _isAnalyzing = false;
   String _analyzeLabel = '';
 
-  bool get _isLongVideo => widget.entry.durationSeconds > 5;
+  bool get _isLongVideo => widget.entry.durationSeconds >= 60 && widget.entry.durationSeconds <= 120;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
   bool get _isClip => widget.entry.videoType == VideoType.localClip;
 
@@ -705,22 +707,41 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
-  /// 執行擊球偵測 → 裁切片段（不自動執行骨架與球軌跡）
+  /// 執行擊球偵測 → 裁切片段
+  /// 前置條件：必須先進行骨架分析與音訊提取
   Future<void> _runDetection() async {
     if (_isDetecting) return;
     setState(() {
       _isDetecting = true;
-      _progress = null;
+      _analyzeLabel = '準備骨架分析...';
     });
 
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
+      final audioPath = p.join(sessionDir, 'audio.pcm');
 
-      // 1. 讀取 PCM
+      // 1. 確保骨架與音訊已分析（若無則先進行基礎分析）
+      if (!await File(csvPath).exists()) {
+        debugPrint('[偵測擊球] CSV 不存在，先執行基礎分析...');
+        final durationSeconds = widget.entry.durationSeconds;
+        final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
+          videoPath: widget.entry.filePath,
+          sessionDir: sessionDir,
+          durationSeconds: durationSeconds,
+          onProgress: (label) {
+            if (mounted) setState(() => _analyzeLabel = label);
+          },
+        );
+        if (basicAnalysis == null) {
+          throw '基礎分析失敗：無法生成骨架';
+        }
+      }
+
+      // 2. 讀取 PCM
       List<double> audioPcm = [];
       const int sampleRate = 44100;
-      final pcmFile = File(p.join(sessionDir, 'audio.pcm'));
+      final pcmFile = File(audioPath);
       if (await pcmFile.exists()) {
         final bytes = await pcmFile.readAsBytes();
         final byteData = bytes.buffer.asByteData();
@@ -730,7 +751,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         );
       }
 
-      // 2. 偵測擊球
+      // 3. 偵測擊球
+      setState(() => _analyzeLabel = '偵測擊球中...');
       final hits = await SwingImpactDetector.detect(
         csvPath: csvPath,
         audioPcm: audioPcm,
@@ -742,7 +764,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (hits.isEmpty) {
         setState(() {
           _isDetecting = false;
-          _progress = null;
+          _analyzeLabel = '';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -756,20 +778,26 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
-      // 3. 依序裁切（每球建立獨立 session 目錄，不執行骨架/球軌跡）
+      // 4. 依序裁切
+      setState(() => _analyzeLabel = '裁切片段中...');
       final results = await ClipPipelineService.run(
         hits: hits,
         srcVideoPath: widget.entry.filePath,
         sourceEntry: widget.entry,
         onProgress: (prog) {
-          if (mounted) setState(() => _progress = prog);
+          if (mounted) {
+            final percentage = prog.total > 0 
+              ? ((prog.current / prog.total) * 100).round() 
+              : 0;
+            setState(() => _analyzeLabel = '裁切片段中... $percentage%');
+          }
         },
       );
 
       if (!mounted) return;
       setState(() {
         _isDetecting = false;
-        _progress = null;
+        _analyzeLabel = '';
       });
 
       if (results.isEmpty) {
@@ -794,7 +822,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (!mounted) return;
       setState(() {
         _isDetecting = false;
-        _progress = null;
+        _analyzeLabel = '';
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -805,7 +833,9 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
-  /// 對切片執行影片分析（骨架 + 球軌跡），完成後更新 entry
+  /// 執行影片分析（根據時長採用不同流程）
+  /// - 短影片 (5-60s)：直接進行完整分析 (骨架 + 音訊 + 球軌跡)
+  /// - 長影片 (60-120s)：先進行基礎分析 (骨架 + 音訊)，然後使用者可點擊「偵測擊球」
   Future<void> _runAnalysis() async {
     if (_isAnalyzing) return;
     setState(() {
@@ -816,47 +846,89 @@ class _HistoryTileState extends State<_HistoryTile> {
     try {
       final clipPath = widget.entry.filePath;
       final sessionDir = p.dirname(clipPath);
+      final durationSeconds = widget.entry.durationSeconds;
 
-      final result = await ClipPipelineService.analyze(
-        clipPath: clipPath,
-        sessionDir: sessionDir,
-        durationSeconds: widget.entry.durationSeconds,
-        hitSec: widget.entry.hitSecond,
-        onProgress: (label) {
-          if (mounted) setState(() => _analyzeLabel = label);
-        },
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _isAnalyzing = false;
-        _analyzeLabel = '';
-      });
-
-      if (result == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('影片分析失敗，請重試'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
+      // 檢查時長有效性
+      if (durationSeconds < 5 || durationSeconds > 120) {
+        throw '影片時長 ($durationSeconds 秒) 不符合要求 (5-120 秒)';
       }
 
-      final warnings = <String>[];
-      if (!result.hasSkeleton) warnings.add('骨架疊加失敗');
-      if (!result.hasBallTrack) warnings.add('未追蹤到球軌跡');
-      final warningStr = warnings.isEmpty ? '' : '\n⚠️ ${warnings.join('、')}';
+      // 根據時長決定分析流程
+      if (_isLongVideo) {
+        // 長影片：先進行基礎分析
+        debugPrint('[分析] 長影片 ($durationSeconds s)：執行基礎分析');
+        setState(() => _analyzeLabel = '分析骨架中...');
+        
+        final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
+          videoPath: clipPath,
+          sessionDir: sessionDir,
+          durationSeconds: durationSeconds,
+          onProgress: (label) {
+            if (mounted) setState(() => _analyzeLabel = label);
+          },
+        );
 
-      final updatedEntry = widget.entry.copyWith(filePath: result.finalPath);
-      widget.onEntryUpdated?.call(widget.entry, updatedEntry);
+        if (basicAnalysis == null) {
+          throw '基礎分析失敗';
+        }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('影片分析完成 ✅$warningStr'),
-          duration: Duration(seconds: warnings.isEmpty ? 3 : 5),
-        ),
-      );
+        if (!mounted) return;
+        setState(() {
+          _isAnalyzing = false;
+          _analyzeLabel = '';
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('基礎分析完成 ✅\n現在可點擊「偵測擊球」來進行裁切或「影片分析」來添加球軌跡'),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      } else {
+        // 短影片：進行完整分析
+        debugPrint('[分析] 短影片 ($durationSeconds s)：執行完整分析');
+        
+        final result = await ClipPipelineService.analyze(
+          clipPath: clipPath,
+          sessionDir: sessionDir,
+          durationSeconds: durationSeconds,
+          hitSec: widget.entry.hitSecond,
+          onProgress: (label) {
+            if (mounted) setState(() => _analyzeLabel = label);
+          },
+        );
+
+        if (!mounted) return;
+        setState(() {
+          _isAnalyzing = false;
+          _analyzeLabel = '';
+        });
+
+        if (result == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('影片分析失敗，請重試'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+
+        final warnings = <String>[];
+        if (!result.hasSkeleton) warnings.add('骨架疊加失敗');
+        if (!result.hasBallTrack) warnings.add('未追蹤到球軌跡');
+        final warningStr = warnings.isEmpty ? '' : '\n⚠️ ${warnings.join('、')}';
+
+        final updatedEntry = widget.entry.copyWith(filePath: result.finalPath);
+        widget.onEntryUpdated?.call(widget.entry, updatedEntry);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('影片分析完成 ✅$warningStr'),
+            duration: Duration(seconds: warnings.isEmpty ? 3 : 5),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('[影片分析] 錯誤: $e');
       if (!mounted) return;

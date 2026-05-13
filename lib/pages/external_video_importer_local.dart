@@ -8,21 +8,27 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
-import '../services/video_analysis_service.dart';
 
-/// 外部影片對入工具：複複影片、建立歷史紀錄
+/// 外部影片導入工具：只複製影片、驗證時長、建立歷史紀錄
 /// 
 /// 生成與 RecordScreen 相同的文件結構：
 /// golf_recordings/{sessionId}/
 ///   ├─ swing.mp4 (導入的視頻)
-///   ├─ pose_landmarks.csv (元數據 - 導入時為空)
-///   ├─ audio.pcm (音頻 - 導入時為空)
+///   ├─ pose_landmarks.csv (分析後產生)
+///   ├─ audio.pcm (分析後產生)
 ///   └─ thumbnail.jpg (視頻封面)
+/// 
+/// 驗證規則：只接受 5-120 秒的影片
 class ExternalVideoImporter {
   const ExternalVideoImporter();
 
-  /// 匯入單支影片並回傳建立好的歷史紀錄條目
-  /// 生成與錄製相同的目錄結構，並執行骨架分析與音訊提取
+  /// 匯入單支影片：只複製影片、驗證時長、建立歷史紀錄
+  /// 分析（骨架、音訊、擊球偵測）在歷史頁面按鈕觸發時執行
+  /// 
+  /// 時長驗證：
+  ///   - < 5秒：拒絕
+  ///   - 5-120秒：接受
+  ///   - > 120秒：拒絕
   Future<RecordingHistoryEntry?> importVideo({
     required String sourcePath,
     required int nextRoundIndex,
@@ -31,6 +37,7 @@ class ExternalVideoImporter {
   }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
+      debugPrint('[Importer] ❌ 來源檔案不存在: $sourcePath');
       return null;
     }
 
@@ -45,23 +52,24 @@ class ExternalVideoImporter {
       final videoPath = p.join(sessionDir, 'swing.mp4');
       await File(sourcePath).copy(videoPath);
 
-      // 先取得時長（分析需要）
+      // 取得時長並驗證
       final durationSeconds = await _resolveDurationSeconds(videoPath);
-
-      // 骨架分析 + 音訊提取
-      final analysis = await VideoAnalysisService().analyze(
-        videoPath: videoPath,
-        sessionDir: sessionDir,
-        durationSeconds: durationSeconds,
-        onProgress: onProgress,
-      );
+      if (durationSeconds < 5 || durationSeconds > 120) {
+        debugPrint('[Importer] ❌ 影片時長不符：$durationSeconds 秒 (需 5-120 秒)');
+        await File(videoPath).delete();
+        await Directory(sessionDir).delete();
+        onProgress?.call(1.0, '影片時長不符 (需 5-120 秒)');
+        return null;
+      }
 
       // 生成縮圖
+      onProgress?.call(0.5, '生成縮圖中...');
       final thumbnailPath = await _generateThumbnail(videoPath);
       final sanitizedName = _normalizeImportName(originalName);
 
-      debugPrint('[Importer] ✅ 導入完成: sessionId=$sessionId'
-          ', csv=${analysis.csvPath}, audio=${analysis.audioPath}');
+      onProgress?.call(1.0, '匯入完成 ✅');
+      debugPrint('[Importer] ✅ 導入完成: sessionId=$sessionId, '
+          'duration=$durationSeconds秒, thumbnail=$thumbnailPath');
 
       return RecordingHistoryEntry(
         filePath: videoPath,
