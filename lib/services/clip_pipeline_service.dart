@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -67,6 +68,7 @@ class ClipPipelineService {
     final sessionName   = p.basename(srcSessionDir);
     final golfRecDir    = p.dirname(srcSessionDir);
     final srcCsvPath    = p.join(srcSessionDir, 'pose_landmarks.csv');
+    final srcAudioPath  = p.join(srcSessionDir, 'audio.wav');
 
     final results = <ClipResult>[];
     for (int i = 0; i < hits.length; i++) {
@@ -74,9 +76,11 @@ class ClipPipelineService {
       final result = await _trimHit(
         hit: hit,
         srcVideoPath: srcVideoPath,
+        srcSessionDir: srcSessionDir,
         golfRecDir: golfRecDir,
         sessionName: sessionName,
         srcCsvPath: srcCsvPath,
+        srcAudioPath: srcAudioPath,
         sourceEntry: sourceEntry,
       );
       if (result != null) results.add(result);
@@ -88,9 +92,11 @@ class ClipPipelineService {
   static Future<ClipResult?> _trimHit({
     required SwingHit hit,
     required String srcVideoPath,
+    required String srcSessionDir,
     required String golfRecDir,
     required String sessionName,
     required String srcCsvPath,
+    required String srcAudioPath,
     required RecordingHistoryEntry sourceEntry,
   }) async {
     // 每球獨立目錄：golf_recordings/{session_name}_hit_{n}/
@@ -129,6 +135,15 @@ class ClipPipelineService {
     await _sliceCsv(
       srcCsvPath: srcCsvPath,
       dstCsvPath: dstCsvPath,
+      startSec: hit.startSec,
+      endSec: hit.endSec,
+    );
+
+    // 從原始音頻切分此球的音頻片段，存入 clip session 目錄
+    final dstAudioPath = p.join(sessionDir, 'audio.wav');
+    await _sliceAudio(
+      srcAudioPath: srcAudioPath,
+      dstAudioPath: dstAudioPath,
       startSec: hit.startSec,
       endSec: hit.endSec,
     );
@@ -327,5 +342,130 @@ class ClipPipelineService {
       hasSkeleton: hasSkeleton,
       hasBallTrack: hasBallTrack,
     );
+  }
+
+  /// 從原始音頻（PCM）中切分出指定時間範圍的片段
+  /// 
+  /// PCM 格式：Float32，44.1kHz，每個樣本占 4 字節
+  static Future<void> _sliceAudio({
+    required String srcAudioPath,
+    required String dstAudioPath,
+    required double startSec,
+    required double endSec,
+  }) async {
+    final src = File(srcAudioPath);
+    if (!await src.exists()) {
+      debugPrint('[Pipeline._sliceAudio] 原始音頻不存在，略過：$srcAudioPath');
+      return;
+    }
+
+    try {
+      const int sampleRate = 44100;
+      const int bytesPerSample = 2; // 16-bit PCM
+      
+      final bytes = await src.readAsBytes();
+      
+      // WAV 头最小 44 字节
+      if (bytes.length < 44) {
+        debugPrint('[Pipeline._sliceAudio] WAV 檔案太小: ${bytes.length} 字節');
+        return;
+      }
+
+      // 查找 "data" chunk 的起始位置
+      int dataStart = 44;
+      for (int i = 36; i < bytes.length - 8; i++) {
+        if (bytes[i] == 100 && bytes[i + 1] == 97 &&
+            bytes[i + 2] == 116 && bytes[i + 3] == 97) {
+          dataStart = i + 8;
+          break;
+        }
+      }
+
+      final dataBytes = bytes.sublist(dataStart);
+      final totalSamples = dataBytes.length ~/ bytesPerSample;
+      
+      // 計算樣本範圍
+      final startSample = (startSec * sampleRate).toInt().clamp(0, totalSamples);
+      final endSample = (endSec * sampleRate).toInt().clamp(0, totalSamples);
+      
+      if (startSample >= endSample) {
+        debugPrint('[Pipeline._sliceAudio] 無效範圍：$startSample-$endSample');
+        return;
+      }
+      
+      // 提取音頻數據
+      final startByte = startSample * bytesPerSample;
+      final endByte = endSample * bytesPerSample;
+      final slicedAudioBytes = dataBytes.sublist(startByte, endByte);
+      
+      // 🔧 重新生成 WAV 頭
+      final wavHeader = BytesBuilder();
+      
+      // ChunkID "RIFF"
+      wavHeader.addByte(82); wavHeader.addByte(73); 
+      wavHeader.addByte(70); wavHeader.addByte(70);
+      
+      // ChunkSize (44 - 8 + dataSize)
+      final fileSize = 36 + slicedAudioBytes.length;
+      wavHeader.addByte(fileSize & 0xFF);
+      wavHeader.addByte((fileSize >> 8) & 0xFF);
+      wavHeader.addByte((fileSize >> 16) & 0xFF);
+      wavHeader.addByte((fileSize >> 24) & 0xFF);
+      
+      // Format "WAVE"
+      wavHeader.addByte(87); wavHeader.addByte(65);
+      wavHeader.addByte(86); wavHeader.addByte(69);
+      
+      // Subchunk1ID "fmt "
+      wavHeader.addByte(102); wavHeader.addByte(109);
+      wavHeader.addByte(116); wavHeader.addByte(32);
+      
+      // Subchunk1Size (16)
+      wavHeader.addByte(16); wavHeader.addByte(0);
+      wavHeader.addByte(0); wavHeader.addByte(0);
+      
+      // AudioFormat (1 = PCM)
+      wavHeader.addByte(1); wavHeader.addByte(0);
+      
+      // NumChannels (1 = mono)
+      wavHeader.addByte(1); wavHeader.addByte(0);
+      
+      // SampleRate (44100)
+      wavHeader.addByte(0x44); wavHeader.addByte(0xAC);
+      wavHeader.addByte(0); wavHeader.addByte(0);
+      
+      // ByteRate (44100 * 1 * 2 = 88200)
+      wavHeader.addByte(0x88); wavHeader.addByte(0x58);
+      wavHeader.addByte(1); wavHeader.addByte(0);
+      
+      // BlockAlign (1 * 2 = 2)
+      wavHeader.addByte(2); wavHeader.addByte(0);
+      
+      // BitsPerSample (16)
+      wavHeader.addByte(16); wavHeader.addByte(0);
+      
+      // Subchunk2ID "data"
+      wavHeader.addByte(100); wavHeader.addByte(97);
+      wavHeader.addByte(116); wavHeader.addByte(97);
+      
+      // Subchunk2Size (dataSize)
+      wavHeader.addByte(slicedAudioBytes.length & 0xFF);
+      wavHeader.addByte((slicedAudioBytes.length >> 8) & 0xFF);
+      wavHeader.addByte((slicedAudioBytes.length >> 16) & 0xFF);
+      wavHeader.addByte((slicedAudioBytes.length >> 24) & 0xFF);
+      
+      // 合併頭部 + 數據
+      final finalWav = BytesBuilder();
+      finalWav.add(wavHeader.toBytes());
+      finalWav.add(slicedAudioBytes);
+      
+      // 寫入目標檔案
+      await File(dstAudioPath).writeAsBytes(finalWav.toBytes());
+      
+      final slicedSamples = slicedAudioBytes.length ~/ bytesPerSample;
+      debugPrint('[Pipeline._sliceAudio] 切分完成: $startSample-$endSample ($slicedSamples 樣本) → $dstAudioPath');
+    } catch (e) {
+      debugPrint('[Pipeline._sliceAudio] 錯誤: $e');
+    }
   }
 }

@@ -879,33 +879,92 @@ class _HomePageState extends State<HomePage> {
     required String path,
     String? fileName,
   }) async {
-    final nextRoundIndex =
-        ExternalVideoImporter.calculateNextRoundIndex(_recordingHistory);
-    final entry = await _videoImporter.importVideo(
-      sourcePath: path,
-      originalName: fileName,
-      nextRoundIndex: nextRoundIndex,
+    if (!mounted) return;
+
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備匯入...'));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('導入影片中', style: TextStyle(color: Colors.white)),
+          content: ValueListenableBuilder<(double, String)>(
+            valueListenable: progressNotifier,
+            builder: (_, val, __) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: val.$1,
+                  backgroundColor: Colors.grey[700],
+                  color: Colors.blue,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  val.$2,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
 
-    if (entry == null) {
-      if (!mounted) {
+    try {
+      final nextRoundIndex =
+          ExternalVideoImporter.calculateNextRoundIndex(_recordingHistory);
+      final entry = await _videoImporter.importVideo(
+        sourcePath: path,
+        originalName: fileName,
+        nextRoundIndex: nextRoundIndex,
+        onProgress: (prog, label) {
+          progressNotifier.value = (prog, label);
+        },
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // 關閉進度對話框
+
+      if (entry == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('匯入影片失敗，請確認檔案是否仍存在。')),
+        );
         return;
       }
+
+      final updatedEntries = <RecordingHistoryEntry>[entry, ..._recordingHistory];
+      
+      setState(() {
+        _recordingHistory
+          ..clear()
+          ..addAll(updatedEntries);
+      });
+
+      await RecordingHistoryStorage.instance.saveHistory(updatedEntries);
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('匯入影片失敗，請確認檔案是否仍存在。')),
+        SnackBar(
+          content: Text('✅ 影片匯入成功：${entry.displayTitle}'),
+          duration: const Duration(seconds: 3),
+        ),
       );
-      return;
+    } catch (e) {
+      debugPrint('[Home] 匯入影片錯誤: $e');
+      if (!mounted) return;
+      Navigator.pop(context); // 關閉進度對話框
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('匯入失敗: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      progressNotifier.dispose();
     }
-
-    final updatedEntries = <RecordingHistoryEntry>[entry, ..._recordingHistory];
-    await _applyHistoryState(updatedEntries);
-
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已匯入 ${entry.displayTitle}，並同步加入練習統計。')),
-    );
   }
 
   /// 將更新後的錄影紀錄套用到首頁狀態並觸發儲存與統計重算

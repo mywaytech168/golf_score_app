@@ -163,27 +163,17 @@ class VideoAnalysisService {
     final wavFile = File(wavPath);
     if (!await wavFile.exists()) return false;
 
-    // WAV layout: 44-byte header + int16 LE PCM samples
-    final wavBytes = await wavFile.readAsBytes();
+    // 直接复制 WAV 文件（改为 .wav 扩展名）
     try {
-      await wavFile.delete();
-    } catch (_) {}
-
-    if (wavBytes.length <= 44) return false;
-
-    // Convert int16 LE → float32 LE (matching live recording format)
-    final pcmData = wavBytes.sublist(44);
-    final sampleCount = pcmData.length ~/ 2;
-    final src = pcmData.buffer.asByteData();
-    final dst = ByteData(sampleCount * 4);
-    for (var i = 0; i < sampleCount; i++) {
-      final s = src.getInt16(i * 2, Endian.little) / 32768.0;
-      dst.setFloat32(i * 4, s.clamp(-1.0, 1.0), Endian.little);
+      await wavFile.copy(audioPath);
+      debugPrint('[VideoAnalysis] audio done: $audioPath');
+      return true;
+    } catch (e) {
+      debugPrint('[VideoAnalysis] audio copy failed: $e');
+      return false;
+    } finally {
+      try { await wavFile.delete(); } catch (_) {}
     }
-
-    await File(audioPath).writeAsBytes(dst.buffer.asUint8List());
-    debugPrint('[VideoAnalysis] audio done: $sampleCount samples → $audioPath');
-    return true;
   }
 }
 

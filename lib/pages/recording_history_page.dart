@@ -14,11 +14,14 @@ import '../services/hits_summary_storage.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/video_analysis_pipeline_service.dart';
+import '../services/audio_export_service.dart';
+import '../services/audio_export_models.dart';
+import '../services/audio_extraction_service.dart';
 import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyzeVideo, delete }
+enum _HistoryMenuAction { rename, detectHits, analyze, resetAnalysisState, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -676,10 +679,12 @@ class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
   bool _isDetecting = false;
   bool _isAnalyzing = false;
+  AudioAnalysisResult? _audioResult;
 
-  bool get _isLongVideo => widget.entry.durationSeconds >= 60 && widget.entry.durationSeconds <= 120;
+  bool get _isLongVideo => widget.entry.durationSeconds > 5 && widget.entry.durationSeconds <= 120;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
   bool get _isClip => widget.entry.videoType == VideoType.localClip;
+  bool get _isAnalyzed => widget.entry.isAnalyzed;
 
   @override
   void initState() {
@@ -748,7 +753,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
-      final audioPath = p.join(sessionDir, 'audio.pcm');
+      final audioPath = p.join(sessionDir, 'audio.wav');
 
       // 1. 確保骨架與音訊已分析（若無則先進行基礎分析）
       if (!await File(csvPath).exists()) {
@@ -767,18 +772,33 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
       }
 
-      // 2. 讀取 PCM
+      // 2. 讀取 WAV 並轉換為 PCM
       progressNotifier.value = (0.35, '載入音訊中...');
       List<double> audioPcm = [];
       const int sampleRate = 44100;
-      final pcmFile = File(audioPath);
-      if (await pcmFile.exists()) {
-        final bytes = await pcmFile.readAsBytes();
-        final byteData = bytes.buffer.asByteData();
-        audioPcm = List<double>.generate(
-          bytes.length ~/ 4,
-          (i) => byteData.getFloat32(i * 4, Endian.little),
-        );
+      final wavFile = File(audioPath);
+      if (await wavFile.exists()) {
+        final wavBytes = await wavFile.readAsBytes();
+        
+        if (wavBytes.length >= 44) {
+          // 🔧 解析 WAV 头
+          int dataStart = 44;
+          for (int i = 36; i < wavBytes.length - 8; i++) {
+            if (wavBytes[i] == 100 && wavBytes[i + 1] == 97 &&
+                wavBytes[i + 2] == 116 && wavBytes[i + 3] == 97) {
+              dataStart = i + 8;
+              break;
+            }
+          }
+          
+          // 🔧 转换 int16 → float32
+          final audioDataBytes = wavBytes.sublist(dataStart);
+          for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
+            final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
+            final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
+            audioPcm.add(signedInt16 / 32768.0);
+          }
+        }
       }
 
       // 3. 偵測擊球
@@ -860,10 +880,8 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
-  /// 執行影片分析（根據時長採用不同流程，顯示進度對話框）
-  /// - 短影片 (5-60s)：直接進行完整分析 (骨架 + 音訊 + 球軌跡)
-  /// - 長影片 (60-120s)：先進行基礎分析 (骨架 + 音訊)，然後使用者可點擊「偵測擊球」
-  Future<void> _runAnalysis() async {
+  /// 執行完整分析（視頻 + 音頻），合併結果
+  Future<void> _runCombinedAnalysis() async {
     if (_isAnalyzing) return;
     setState(() => _isAnalyzing = true);
 
@@ -878,7 +896,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         canPop: false,
         child: AlertDialog(
           backgroundColor: Colors.grey[900],
-          title: const Text('影片分析中', style: TextStyle(color: Colors.white)),
+          title: const Text('🎬 完整分析中', style: TextStyle(color: Colors.white)),
           content: ValueListenableBuilder<(double, String)>(
             valueListenable: progressNotifier,
             builder: (_, val, __) => Column(
@@ -887,7 +905,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                 LinearProgressIndicator(
                   value: val.$1,
                   backgroundColor: Colors.grey[700],
-                  color: Colors.green,
+                  color: Colors.cyan,
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -911,17 +929,22 @@ class _HistoryTileState extends State<_HistoryTile> {
         throw '影片時長 ($durationSeconds 秒) 不符合要求 (5-120 秒)';
       }
 
-      // 根據時長決定分析流程
+      // Stage 1: 視頻分析（0-70%）
+      debugPrint('[完整分析] 開始視頻分析...');
+      progressNotifier.value = (0.0, '視頻分析中...');
+
+      RecordingHistoryEntry? updatedEntry;
+
       if (_isLongVideo) {
         // 長影片：先進行基礎分析
-        debugPrint('[分析] 長影片 ($durationSeconds s)：執行基礎分析');
+        debugPrint('[完整分析] 長影片 ($durationSeconds s)：執行基礎分析');
         
         final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
           videoPath: clipPath,
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
           onProgress: (label) {
-            progressNotifier.value = (0.7, label);
+            progressNotifier.value = (0.35, label);
           },
         );
 
@@ -929,19 +952,10 @@ class _HistoryTileState extends State<_HistoryTile> {
           throw '基礎分析失敗';
         }
 
-        if (!mounted) return;
-        Navigator.pop(context);
-        setState(() => _isAnalyzing = false);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('基礎分析完成 ✅\n現在可點擊「偵測擊球」來進行裁切或「影片分析」來添加球軌跡'),
-            duration: const Duration(seconds: 4),
-          ),
-        );
+        updatedEntry = widget.entry.copyWith(isAnalyzed: true);
       } else {
         // 短影片：進行完整分析
-        debugPrint('[分析] 短影片 ($durationSeconds s)：執行完整分析');
+        debugPrint('[完整分析] 短影片 ($durationSeconds s)：執行完整分析');
         
         final result = await ClipPipelineService.analyze(
           clipPath: clipPath,
@@ -949,53 +963,180 @@ class _HistoryTileState extends State<_HistoryTile> {
           durationSeconds: durationSeconds,
           hitSec: widget.entry.hitSecond,
           onProgress: (label) {
-            progressNotifier.value = (0.8, label);
+            progressNotifier.value = (0.35, label);
           },
         );
 
-        if (!mounted) return;
-        Navigator.pop(context);
-        setState(() => _isAnalyzing = false);
-
         if (result == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('影片分析失敗，請重試'),
-              backgroundColor: Colors.red,
-            ),
-          );
-          return;
+          throw '視頻分析失敗';
         }
 
-        final warnings = <String>[];
-        if (!result.hasSkeleton) warnings.add('骨架疊加失敗');
-        if (!result.hasBallTrack) warnings.add('未追蹤到球軌跡');
-        final warningStr = warnings.isEmpty ? '' : '\n⚠️ ${warnings.join('、')}';
-
-        final updatedEntry = widget.entry.copyWith(filePath: result.finalPath);
-        widget.onEntryUpdated?.call(widget.entry, updatedEntry);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('影片分析完成 ✅$warningStr'),
-            duration: Duration(seconds: warnings.isEmpty ? 3 : 5),
-          ),
+        updatedEntry = widget.entry.copyWith(
+          filePath: result.finalPath,
+          isAnalyzed: true,
         );
       }
+
+      // Stage 2: 音頻分析（70-100%）
+      debugPrint('[完整分析] 開始音頻分析...');
+      progressNotifier.value = (0.7, '音頻分析中...');
+
+      const int sampleRate = 44100;
+      final wavFile = File(p.join(sessionDir, 'audio.wav'));
+      debugPrint('[完整分析] WAV 檔案路徑: ${wavFile.path}');
+      
+      AudioAnalysisResult? audioResult;
+      var wavExists = await wavFile.exists();
+      
+      // 如果 WAV 不存在，尝试从视频提取
+      if (!wavExists) {
+        debugPrint('[完整分析] 📥 WAV 不存在，尝试从视频提取...');
+        progressNotifier.value = (0.72, '从视频提取音频中...');
+        
+        // 使用原始视频提取音频（clipPath 是导入的或已分析的视频）
+        debugPrint('[完整分析] 提取音频源: $clipPath');
+        
+        final samplesExtracted = await AudioExtractionService.extractAudioFromVideo(
+          videoPath: clipPath,
+          outputWavPath: wavFile.path,
+          onProgress: (progress, message) {
+            final adjustedProgress = 0.72 + progress * 0.08;
+            progressNotifier.value = (adjustedProgress, message);
+          },
+        );
+        
+        if (samplesExtracted > 0) {
+          debugPrint('[完整分析] ✅ 音频提取成功: $samplesExtracted 样本');
+          wavExists = await wavFile.exists();
+        } else {
+          debugPrint('[完整分析] ⚠️  音频提取失败或系统无FFmpeg支持');
+        }
+      }
+      
+      if (wavExists) {
+        debugPrint('[完整分析] ✅ WAV 檔案存在');
+        try {
+          final bytes = await wavFile.readAsBytes();
+          debugPrint('[完整分析] WAV 字節數: ${bytes.length}');
+          
+          if (bytes.isEmpty || bytes.length < 44) {
+            debugPrint('[完整分析] ⚠️  WAV 檔案太小');
+          } else {
+            // 🔧 解析 WAV 头
+            int dataStart = 44;
+            for (int i = 36; i < bytes.length - 8; i++) {
+              if (bytes[i] == 100 && bytes[i + 1] == 97 &&
+                  bytes[i + 2] == 116 && bytes[i + 3] == 97) {
+                dataStart = i + 8;
+                break;
+              }
+            }
+            
+            // 🔧 转换 int16 → float32
+            final audioDataBytes = bytes.sublist(dataStart);
+            final pcmSamples = <double>[];
+            
+            for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
+              final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
+              final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
+              pcmSamples.add(signedInt16 / 32768.0);
+            }
+            
+            debugPrint('[完整分析] PCM 樣本數: ${pcmSamples.length}');
+
+            if (pcmSamples.isNotEmpty) {
+              debugPrint('[完整分析] 🎵 開始調用 AudioExportService.analyzeFromPcm...');
+              audioResult = await AudioExportService.analyzeFromPcm(
+                pcmSamples: pcmSamples,
+                sessionDir: sessionDir,
+                sampleRate: sampleRate,
+                onProgress: (progress) {
+                  // 調整音頻進度到 80-100% 範圍
+                  final adjustedProgress = 0.8 + progress.progress * 0.2;
+                  progressNotifier.value = (adjustedProgress, progress.message);
+                },
+              );
+              debugPrint('[完整分析] 📊 分析返回結果: ${audioResult != null ? "成功" : "null"}');
+              if (audioResult != null) {
+                debugPrint('[完整分析] ✅ 分類: ${audioResult.predictedClass}, 反饋: ${audioResult.feedbackLabel}');
+              }
+            } else {
+              debugPrint('[完整分析] ⚠️  PCM 樣本為空');
+            }
+          }
+        } catch (e) {
+          debugPrint('[完整分析] ❌ 音頻分析異常：$e');
+        }
+      } else {
+        debugPrint('[完整分析] ℹ️  WAV 檔案不存在，无法提取音频（可能是舊錄製或系统无FFmpeg支持）');
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context);
+      setState(() => _isAnalyzing = false);
+
+      // Stage 3: 合併結果並更新條目
+      if (audioResult != null) {
+        updatedEntry = updatedEntry!.copyWith(
+          audioCrispness: audioResult.features.isNotEmpty
+              ? audioResult.features.first.sharpnessHfxLoud
+              : null,
+          goodShot: audioResult.predictedClass == 'pro' || audioResult.predictedClass == 'good',
+          audioLabel: audioResult.feedbackLabel,
+        );
+      }
+
+      widget.onEntryUpdated?.call(widget.entry, updatedEntry!);
+
+      if (!mounted) return;
+
+      // 顯示完成訊息
+      final audioMsg = audioResult != null 
+          ? '\n🎵 音頻：${audioResult.feedbackLabel}'
+          : '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '完整分析完成 ✅$audioMsg',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     } catch (e) {
-      debugPrint('[影片分析] 錯誤: $e');
+      debugPrint('[完整分析] 錯誤: $e');
       if (mounted) {
         Navigator.pop(context);
         setState(() => _isAnalyzing = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('影片分析失敗: $e'),
+            content: Text('完整分析失敗: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
       progressNotifier.dispose();
+    }
+  }
+
+  /// 測試用：重置分析狀態為 false
+  Future<void> _resetAnalysisState() async {
+    final updatedEntry = widget.entry.copyWith(
+      isAnalyzed: false,
+      audioLabel: null,
+      goodShot: null,
+      audioCrispness: null,
+    );
+    
+    widget.onEntryUpdated?.call(widget.entry, updatedEntry);
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ 分析狀態已重置'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -1132,6 +1273,30 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 ),
                               ),
                             ),
+                          // 音頻分析標籤
+                          if (widget.entry.audioLabel != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF6F00).withAlpha(25),
+                                border: Border.all(
+                                  color: const Color(0xFFFF6F00),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '🎵 ${widget.entry.audioLabel}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFFFF6F00),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ],
@@ -1154,8 +1319,11 @@ class _HistoryTileState extends State<_HistoryTile> {
                         case _HistoryMenuAction.detectHits:
                           _runDetection();
                           break;
-                        case _HistoryMenuAction.analyzeVideo:
-                          _runAnalysis();
+                        case _HistoryMenuAction.analyze:
+                          _runCombinedAnalysis();
+                          break;
+                        case _HistoryMenuAction.resetAnalysisState:
+                          _resetAnalysisState();
                           break;
                         case _HistoryMenuAction.delete:
                           widget.onDelete();
@@ -1190,13 +1358,13 @@ class _HistoryTileState extends State<_HistoryTile> {
                           ],
                         ),
                       ),
-                    if (_isClip || _isOriginalVideo)
+                    if ((_isClip || (!_isLongVideo && _isOriginalVideo)) && !_isAnalyzed)
                       PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.analyzeVideo,
+                        value: _HistoryMenuAction.analyze,
                         child: Row(
                           children: [
                             Text(
-                              _isAnalyzing ? '分析中...' : '影片分析',
+                              _isAnalyzing ? '分析中...' : '🎬 完整分析',
                               style: TextStyle(
                                 color: _isAnalyzing ? Colors.grey : null,
                               ),
@@ -1212,6 +1380,10 @@ class _HistoryTileState extends State<_HistoryTile> {
                           ],
                         ),
                       ),
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.resetAnalysisState,
+                      child: Text('🧪 測試: 重置分析狀態'),
+                    ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.delete,
                       child: Text('刪除影片'),

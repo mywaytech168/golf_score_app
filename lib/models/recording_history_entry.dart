@@ -55,6 +55,9 @@ class RecordingHistoryEntry {
   /// 如果是原始影片，標記是否已被切片（只對 VideoType.original 有效）
   final bool isClipped;
 
+  /// 標記是否已完成骨架分析（分析完後不再顯示「影片分析」選項）
+  final bool isAnalyzed;
+
   /// 擊球時刻（秒數），用於切片標識
   final double? hitSecond;
 
@@ -85,6 +88,7 @@ class RecordingHistoryEntry {
     this.thumbnailPath,
     this.videoType = VideoType.original,
     this.isClipped = false,
+    this.isAnalyzed = false,
     this.hitSecond,
     this.startSecond,
     this.endSecond,
@@ -104,6 +108,7 @@ class RecordingHistoryEntry {
     String? thumbnailPath,
     VideoType? videoType,
     bool? isClipped,
+    bool? isAnalyzed,
     double? hitSecond,
     double? startSecond,
     double? endSecond,
@@ -121,6 +126,7 @@ class RecordingHistoryEntry {
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       videoType: videoType ?? this.videoType,
       isClipped: isClipped ?? this.isClipped,
+      isAnalyzed: isAnalyzed ?? this.isAnalyzed,
       hitSecond: hitSecond ?? this.hitSecond,
       startSecond: startSecond ?? this.startSecond,
       endSecond: endSecond ?? this.endSecond,
@@ -157,6 +163,7 @@ class RecordingHistoryEntry {
       'thumbnailPath': thumbnailPath,
       'videoType': videoType.name,
       'isClipped': isClipped,
+      'isAnalyzed': isAnalyzed,
       'hitSecond': hitSecond,
       'startSecond': startSecond,
       'endSecond': endSecond,
@@ -193,6 +200,7 @@ class RecordingHistoryEntry {
           rawThumbnail == null || rawThumbnail.isEmpty ? null : rawThumbnail,
       videoType: videoType,
       isClipped: (json['isClipped'] as bool?) ?? false,
+      isAnalyzed: (json['isAnalyzed'] as bool?) ?? false,
       hitSecond: (json['hitSecond'] as num?)?.toDouble(),
       startSecond: (json['startSecond'] as num?)?.toDouble(),
       endSecond: (json['endSecond'] as num?)?.toDouble(),
