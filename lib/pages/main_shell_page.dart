@@ -182,8 +182,6 @@ class _MainShellPageState extends State<MainShellPage> {
             audioCrispness: _audioCrispness ?? 0,
             goodHits: _goodHits,
             badHits: _badHits,
-            goodVideoPath: null,
-            badVideoPath: null,
           ),
           
           // 第 2 頁：錄製選擇屏幕

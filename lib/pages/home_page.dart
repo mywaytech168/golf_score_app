@@ -14,7 +14,6 @@ import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
-import '../services/user_profile_storage.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
@@ -23,7 +22,6 @@ import '../services/daily_ad_manager.dart';
 import '../widgets/purchase_test_panel.dart';
 import 'recording_history_page.dart';
 import 'video_player_page.dart' as video_player;
-import 'profile_edit_page.dart';
 
 /// 錄影卡片支援的操作種類
 enum _HistoryAction { rename, delete }
@@ -45,11 +43,6 @@ class _HomePageState extends State<HomePage> {
   double? _sweetSpotPercentage; // 甜蜜點命中率百分比
   double? _audioCrispness; // 聲音清脆度（0-100）
   bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
-  _ComparisonSnapshot? _comparisonBefore; // 比較區塊的上一筆紀錄
-  _ComparisonSnapshot? _comparisonAfter; // 比較區塊的最新紀錄
-  String _displayName = 'TekSwing'; // 顯示於標題列的暱稱，預設為產品名稱
-  String _userEmail = ''; // 使用者電郵，從 SharedPreferences 讀取
-  String? _avatarPath; // 使用者頭像路徑，若為空則顯示預設圖示
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 匯入外部影片的工具實例
   
   // 統計服務相關
@@ -67,7 +60,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _restoreUserProfile();
     _loadInitialHistory();
     // 初始化統計服務並加載後端和本地數據
     _initializeStatistics();
@@ -109,29 +101,6 @@ class _HomePageState extends State<HomePage> {
       debugPrint('⚠️ 初始化統計服務失敗: $e');
     }
     // 本地指標會在 _refreshDashboardMetrics 中計算並更新
-  }
-
-  /// 從本地偏好讀取暱稱、電郵與頭像，確保重新進入 App 仍保有個人化設定
-  Future<void> _restoreUserProfile() async {
-    final profile =
-        await UserProfileStorage.instance.loadProfile(defaultDisplayName: _displayName);
-    final prefs = await SharedPreferences.getInstance();
-    final userEmail = prefs.getString('user_email') ?? '';
-    
-    if (!mounted) {
-      return; // 若頁面已卸載則不需更新狀態
-    }
-
-    setState(() {
-      _displayName = profile.displayName; // 還原使用者自訂暱稱
-      _userEmail = userEmail; // 還原使用者電郵
-      _avatarPath = profile.avatarPath; // 還原之前儲存的頭像
-    });
-  }
-
-  /// 將時間轉換為比較區塊顯示的日期文字（例：05/21）
-  String _formatComparisonDate(DateTime dateTime) {
-    return '${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')}';
   }
 
   Widget _buildTodayInfoCard() {
@@ -197,113 +166,14 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 建立比較區塊，呈現昨天與今天的速度對比
-  Widget _buildComparisonCard() {
-    // 使用後端 API 的昨天和今天數據
-    final yesterdayStats = _statisticsService.yesterdayStatistics;
-    final todayStats = _statisticsService.todayStatistics;
-    
-    final yesterdaySpeed = yesterdayStats?.peakValue.maximum;
-    final todaySpeed = todayStats?.peakValue.maximum;
-    
-    String buildSpeedLabel(double? speed) {
-      if (speed == null || speed == 0) return '--';
-      return '${speed.toStringAsFixed(1)} MPH';
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SectionHeader(
-            title: 'Comparison',
-            actions: [
-              GestureDetector(
-                onTap: _openRecordingHistoryPage,
-                child: const Text(
-                  '查看歷史',
-                  style: TextStyle(
-                    color: Color(0xFF1E8E5A),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('昨天', style: TextStyle(color: Color(0xFF7D8B9A))),
-                    const SizedBox(height: 6),
-                    Text(
-                      buildSpeedLabel(yesterdaySpeed),
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFDA4E5D),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      '昨天的最佳速度',
-                      style: TextStyle(color: Color(0xFF7D8B9A)),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                height: 80,
-                width: 1,
-                color: const Color(0xFFE4E8F0),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('今天', style: TextStyle(color: Color(0xFF7D8B9A))),
-                    const SizedBox(height: 6),
-                    Text(
-                      buildSpeedLabel(todaySpeed),
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E8E5A),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      '今天的最佳速度',
-                      style: TextStyle(color: Color(0xFF7D8B9A)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   // ---------- 方法區 ----------
   /// 建立統計資訊卡片，方便重複使用與維持一致風格
   /// 構建指標卡片網格
   Widget _buildMetricsGrid(bool isLoadingStats, StatisticsResponse? backendStats) {
-    // 統計好球、壞球數量
-    final goodShotCount = _recordingHistory.where((e) => e.goodShot == true).length;
-    final badShotCount = _recordingHistory.where((e) => e.goodShot == false).length;
+    // 使用今天的後端統計數據
+    final todayStats = _statisticsService.todayStatistics;
+    final goodShotCount = todayStats?.goodShot ?? 0;
+    final badShotCount = todayStats?.badShot ?? 0;
     
     // 準備所有指標數據
     final metricsCards = <Map<String, dynamic>>[
@@ -311,8 +181,8 @@ class _HomePageState extends State<HomePage> {
         'title': '最佳速度',
         'value': isLoadingStats
             ? '載入中...'
-            : backendStats != null && backendStats.peakValue.maximum > 0
-                ? '${backendStats.peakValue.maximum.toStringAsFixed(1)} MPH'
+            : todayStats != null && todayStats.peakValue.maximum > 0
+                ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH'
                 : '尚無資料',
         'color': const Color(0xFF2E8EFF),
         'highlight': true,
@@ -321,8 +191,8 @@ class _HomePageState extends State<HomePage> {
         'title': '甜蜜點命中',
         'value': isLoadingStats
             ? '載入中...'
-            : backendStats != null
-                ? '${backendStats.sweetSpotPercentage.toStringAsFixed(0)} %'
+            : todayStats != null
+                ? '${todayStats.sweetSpotPercentage.toStringAsFixed(0)} %'
                 : '尚無資料',
         'color': const Color(0xFF8E4AF4),
         'highlight': false,
@@ -343,15 +213,15 @@ class _HomePageState extends State<HomePage> {
         'title': '聲音清脆度',
         'value': isLoadingStats
             ? '載入中...'
-            : backendStats != null && backendStats.audioCrispness.average > 0
-                ? '${backendStats.audioCrispness.average.toStringAsFixed(0)}'
+            : todayStats != null && todayStats.audioCrispness.average > 0
+                ? '${todayStats.audioCrispness.average.toStringAsFixed(0)}'
                 : '尚無資料',
         'color': const Color(0xFFDA4E5D),
         'highlight': false,
       },
       {
         'title': '練習次數',
-        'value': '$_practiceCount 次',
+        'value': '${todayStats?.totalCount ?? 0} 次',
         'color': const Color(0xFF1E8E5A),
         'highlight': false,
       },
@@ -459,47 +329,6 @@ class _HomePageState extends State<HomePage> {
 
     // 返回登錄頁面
     Navigator.of(context).pushReplacementNamed('/login');
-  }
-
-  /// 開啟個人資訊編輯頁，並在儲存後更新首頁顯示資訊
-  Future<void> _openProfileEditPage() async {
-    final result = await Navigator.of(context).push<ProfileEditResult>(
-      MaterialPageRoute(
-        builder: (_) => ProfileEditPage(
-          initialDisplayName: _displayName,
-          initialEmail: _userEmail,
-          initialAvatarPath: _avatarPath,
-        ),
-      ),
-    );
-
-    if (!mounted || result == null) {
-      return; // 使用者取消或頁面已卸載時不處理回傳資料
-    }
-
-    final resolvedDisplayName =
-        result.displayName.trim(); // 再次保險去除頭尾空白避免儲存異常
-    final safeDisplayName =
-        resolvedDisplayName.isEmpty ? 'TekSwing' : resolvedDisplayName; // 防禦性處理空字串
-
-    final nextAvatarPath = result.removeAvatar
-        ? null
-        : result.avatarPath ?? _avatarPath; // 若僅更新暱稱則沿用舊頭像
-
-    setState(() {
-      _displayName = safeDisplayName; // 將最新暱稱同步到標題列
-      _avatarPath = nextAvatarPath; // 更新頭像狀態（可能為 null 代表清除）
-    });
-
-    await UserProfileStorage.instance.saveProfile(
-      displayName: safeDisplayName,
-      avatarPath: nextAvatarPath,
-    );
-
-    // 顯示提示訊息，告知使用者更新已生效
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('個人資訊已更新')),
-    );
   }
 
   /// 為網格顯示構建緊湊型影片卡片
@@ -1045,36 +874,12 @@ class _HomePageState extends State<HomePage> {
         }
       }
       
-      // 轉換 _ComparisonSnapshot 為 ComparisonSnapshot
-      ComparisonSnapshot? before;
-      if (metrics.comparisonBefore != null) {
-        before = ComparisonSnapshot(
-          entryId: metrics.comparisonBefore!.entry.filePath,
-          recordedAtLabel: _formatComparisonDate(metrics.comparisonBefore!.entry.recordedAt),
-          speedMph: metrics.comparisonBefore!.speedMph,
-          impactClarity: metrics.comparisonBefore!.impactClarity,
-          audioCrispness: metrics.comparisonBefore!.audioCrispness,
-        );
-      }
-      
-      ComparisonSnapshot? after;
-      if (metrics.comparisonAfter != null) {
-        after = ComparisonSnapshot(
-          entryId: metrics.comparisonAfter!.entry.filePath,
-          recordedAtLabel: _formatComparisonDate(metrics.comparisonAfter!.entry.recordedAt),
-          speedMph: metrics.comparisonAfter!.speedMph,
-          impactClarity: metrics.comparisonAfter!.impactClarity,
-          audioCrispness: metrics.comparisonAfter!.audioCrispness,
-        );
-      }
       
       setState(() {
         _isMetricCalculating = false;
         _bestSpeedMph = metrics.bestSpeedMph;
         _sweetSpotPercentage = metrics.sweetSpotPercentage;
         _audioCrispness = latestAudioCrispness;
-        _comparisonBefore = metrics.comparisonBefore;
-        _comparisonAfter = metrics.comparisonAfter;
       });
       
       // 更新服務中的本地指標，供 Data Metrics 和 Analytics 共享
@@ -1083,8 +888,8 @@ class _HomePageState extends State<HomePage> {
         bestSpeedMph: metrics.bestSpeedMph,
         sweetSpotPercentage: metrics.sweetSpotPercentage,
         audioCrispness: latestAudioCrispness,
-        comparisonBefore: before,
-        comparisonAfter: after,
+        comparisonBefore: null,
+        comparisonAfter: null,
       );
       
     } catch (e) {
@@ -1109,7 +914,7 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(
         builder: (_) => RecordingHistoryPage(
           entries: _recordingHistory,
-          userAvatarPath: _avatarPath,
+          userAvatarPath: null,
           onDelete: _loadInitialHistory,
         ),
       ),
@@ -1138,7 +943,7 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(
         builder: (_) => video_player.VideoPlayerPage(
           videoPath: entry.filePath,
-          avatarPath: _avatarPath,
+          avatarPath: null,
         ),
       ),
     );
@@ -1168,96 +973,11 @@ class _HomePageState extends State<HomePage> {
               ),
               child: const Icon(Icons.golf_course_rounded, color: Colors.white),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _displayName,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF0B2A2E),
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    _userEmail,
-                    style: theme.textTheme.bodyMedium?.copyWith(color: const Color(0xFF6E7B87)),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              onPressed: () {},
-              tooltip: '通知中心',
-              icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0B2A2E)),
-            ),
-            if (kDebugMode)
-              IconButton(
-                onPressed: () => showPurchaseTestPanel(
-                  context,
-                  purchaseService: _purchaseService,
-                ),
-                tooltip: '🧪 購買測試',
-                icon: const Icon(Icons.bug_report, color: Colors.orange),
-              ),
-            if (kDebugMode)
-              IconButton(
-                onPressed: () async {
-                  final adManager = DailyAdManager();
-                  await adManager.initialize();
-                  await adManager.resetAdUsage();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('✅ 廣告使用狀態已重置')),
-                    );
-                  }
-                },
-                tooltip: '🔄 重置廣告',
-                icon: const Icon(Icons.refresh, color: Colors.blue),
-              ),
             const SizedBox(width: 12),
             IconButton(
               onPressed: _logout,
               tooltip: '登出',
               icon: const Icon(Icons.logout_rounded, color: Color(0xFF0B2A2E)),
-            ),
-            const SizedBox(width: 12),
-            InkWell(
-              onTap: _openProfileEditPage,
-              borderRadius: BorderRadius.circular(36),
-              child: Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE6F4EA),
-                  borderRadius: BorderRadius.circular(36),
-                  border: Border.all(color: const Color(0xFF1E8E5A)),
-                ),
-                clipBehavior: Clip.antiAlias,
-                alignment: Alignment.center,
-                child: Builder(
-                  builder: (context) {
-                    // 放大頭像容器與邊框，讓個人圖示更醒目，同時維持裁切為正方形避免拉長
-                    if (_avatarPath != null) {
-                      final avatarFile = File(_avatarPath!);
-                      if (avatarFile.existsSync()) {
-                        return Image.file(
-                          avatarFile,
-                          fit: BoxFit.cover,
-                        );
-                      }
-                    }
-                    return const Icon(
-                      Icons.person_outline,
-                      color: Color(0xFF1E8E5A),
-                      size: 40,
-                    );
-                  },
-                ),
-              ),
             ),
           ],
         ),
@@ -1289,8 +1009,6 @@ class _HomePageState extends State<HomePage> {
             _buildMetricsGrid(isLoadingStats, backendStats),
             const SizedBox(height: 24),
             _buildTodayInfoCard(),
-            const SizedBox(height: 24),
-            _buildComparisonCard(),
             const SizedBox(height: 32),
           ],
         ),
@@ -1313,8 +1031,6 @@ class _MetricsCalculator {
       consistencyScore: null,
       averageImpactClarity: null,
       sweetSpotPercentage: null,
-      comparisonBefore: null,
-      comparisonAfter: null,
     );
   }
 }
@@ -1326,8 +1042,6 @@ class _MetricsResult {
   final double? consistencyScore;
   final double? averageImpactClarity;
   final double? sweetSpotPercentage;
-  final _ComparisonSnapshot? comparisonBefore;
-  final _ComparisonSnapshot? comparisonAfter;
 
   const _MetricsResult({
     required this.averageSpeedMph,
@@ -1335,8 +1049,6 @@ class _MetricsResult {
     required this.consistencyScore,
     required this.averageImpactClarity,
     required this.sweetSpotPercentage,
-    required this.comparisonBefore,
-    required this.comparisonAfter,
   });
 }
 
@@ -1359,21 +1071,6 @@ class _EntrySnapshot {
   final _SwingSnapshot? snapshot; // 解析後的感測數據
 
   const _EntrySnapshot({required this.entry, required this.snapshot});
-}
-
-/// 比較區塊顯示的資料結構
-class _ComparisonSnapshot {
-  final RecordingHistoryEntry entry; // 對應的錄影紀錄
-  final double? speedMph; // 預估揮桿速度
-  final double impactClarity; // 擊球清脆度比例
-  final double? audioCrispness; // 聲音清脆度（0-100）
-
-  const _ComparisonSnapshot({
-    required this.entry,
-    required this.speedMph,
-    required this.impactClarity,
-    this.audioCrispness,
-  });
 }
 
 /// 雷達圖繪製器，呈現五個指標的相對表現
