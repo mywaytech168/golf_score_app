@@ -21,7 +21,7 @@ import '../widgets/hits_summary_widget.dart';
 import 'video_player_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyze, resetAnalysisState, delete }
+enum _HistoryMenuAction { rename, detectHits, analyze, resetAnalysisState, resetClippingState, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -130,7 +130,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 找不到對應項目時直接結束
     }
 
-    // 移除本地檔案
+    // 移除檔案
     await _removeEntryFiles(entry);
 
     _entries.removeAt(index);
@@ -354,12 +354,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     await _playVideoByPath(entry.filePath, missingFileName: entry.fileName);
   }
 
-  /// 顯示本地影片紀錄的 JSON debug 資訊
+  /// 顯示影片紀錄的 JSON debug 資訊
   Future<void> _showDebugJsonInfo() async {
     if (!mounted) return;
     
     try {
-      // 將所有本地紀錄轉換為格式化的 JSON（帶換行和縮進）
+      // 將所有紀錄轉換為格式化的 JSON（帶換行和縮進）
       final jsonList = _entries.map((entry) => entry.toJson()).toList();
       final jsonString = const JsonEncoder.withIndent('  ').convert(jsonList);
       
@@ -368,7 +368,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('本地影片紀錄 (JSON Debug)'),
+          title: const Text('影片紀錄 (JSON Debug)'),
           content: SingleChildScrollView(
             child: SelectableText(
               jsonString,
@@ -397,7 +397,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 實際進行影片播放與檔案檢查的共用方法
   Future<void> _playVideoByPath(String path, {String? missingFileName}) async {
-    // 检查本地文件
+    // 检查档案
     final file = File(path);
     if (!await file.exists()) {
       if (!mounted) return;
@@ -508,7 +508,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           actions: [
             IconButton(
               onPressed: _showDebugJsonInfo,
-              tooltip: 'Debug: 本地紀錄 JSON',
+              tooltip: 'Debug: 紀錄 JSON',
               icon: const Icon(Icons.bug_report_outlined),
             ),
           ],
@@ -713,6 +713,16 @@ class _HistoryTileState extends State<_HistoryTile> {
   /// 執行擊球偵測 → 裁切片段（顯示進度對話框）
   /// 前置條件：必須先進行骨架分析與音訊提取
   Future<void> _runDetection() async {
+    // 檢查是否已經切片過
+    if (widget.entry.isClipped) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('此影片已經切片過，無法重複切片'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     if (_isDetecting) return;
     setState(() => _isDetecting = true);
 
@@ -1140,6 +1150,25 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
+  /// 重置切片狀態（測試功能）
+  Future<void> _resetClippingState() async {
+    final updatedEntry = widget.entry.copyWith(
+      isClipped: false,
+    );
+    
+    widget.onEntryUpdated?.call(widget.entry, updatedEntry);
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ 切片狀態已重置，可重新執行偵測擊球'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -1297,6 +1326,30 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 ),
                               ),
                             ),
+                          // 已分析標籤
+                          if (widget.entry.isAnalyzed)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4CAF50).withAlpha(30),
+                                border: Border.all(
+                                  color: const Color(0xFF4CAF50),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                '✓ 已分析',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF4CAF50),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ],
@@ -1325,6 +1378,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                         case _HistoryMenuAction.resetAnalysisState:
                           _resetAnalysisState();
                           break;
+                        case _HistoryMenuAction.resetClippingState:
+                          _resetClippingState();
+                          break;
                         case _HistoryMenuAction.delete:
                           widget.onDelete();
                           break;
@@ -1336,7 +1392,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                       value: _HistoryMenuAction.rename,
                       child: Text('重新命名'),
                     ),
-                    if (_isLongVideo && _isOriginalVideo)
+                    if (_isLongVideo && _isOriginalVideo && !widget.entry.isClipped)
                       PopupMenuItem<_HistoryMenuAction>(
                         value: _HistoryMenuAction.detectHits,
                         child: Row(
@@ -1383,6 +1439,10 @@ class _HistoryTileState extends State<_HistoryTile> {
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.resetAnalysisState,
                       child: Text('🧪 測試: 重置分析狀態'),
+                    ),
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.resetClippingState,
+                      child: Text('🧪 測試: 重置切片狀態'),
                     ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.delete,

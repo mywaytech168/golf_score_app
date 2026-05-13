@@ -2,18 +2,18 @@ import 'package:flutter/foundation.dart';
 
 /// 影片類型枚舉
 enum VideoType {
-  /// 本地原始影片
+  /// 原始影片
   original,
-  /// 本地切片
+  /// 切片
   localClip;
 
   /// 中文標籤
   String get label {
     switch (this) {
       case VideoType.original:
-        return '本地原始影片';
+        return '原始影片';
       case VideoType.localClip:
-        return '本地切片';
+        return '切片';
     }
   }
 
@@ -49,7 +49,7 @@ class RecordingHistoryEntry {
   /// 影片縮圖的完整路徑，供首頁與歷史頁顯示預覽畫面
   final String? thumbnailPath;
 
-  /// 影片類型（原始/本地切片）
+  /// 影片類型（原始/切片）
   final VideoType videoType;
 
   /// 如果是原始影片，標記是否已被切片（只對 VideoType.original 有效）
@@ -67,7 +67,7 @@ class RecordingHistoryEntry {
   /// 切片結束秒數
   final double? endSecond;
 
-  /// 聲音清脆度評分（0-100），來自本地音頻分析
+  /// 聲音清脆度評分（0-100），來自音頻分析
   final double? audioCrispness;
 
   /// 是否為好球
