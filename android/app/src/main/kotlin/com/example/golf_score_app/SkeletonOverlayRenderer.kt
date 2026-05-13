@@ -139,10 +139,16 @@ class SkeletonOverlayRenderer(private val context: Context) {
         val encH = (displayH + 15) and -16
         // COLOR_FormatYUV420SemiPlanar = NV12，與 bitmapToNv12 完全對應，避免 Flexible 在不同裝置
         // 映射到 I420 造成 UV 通道交換（粉/青色偏）
-        // 依解析度×幀率自適應 bitrate，避免 4 Mbps 固定值對高解析度影片過壓
-        // 係數 0.25 bpp → 1080×1920@15fps ≈ 7.8 Mbps，符合骨架疊加影片的畫質需求
-        val bitRate = (displayW.toLong() * displayH * fps * 0.25)
-            .toLong().coerceIn(6_000_000L, 20_000_000L).toInt()
+        // ✅ 高質量編碼：根據解析度動態調整係數（0.8-1.0 bpp）
+        // 高爾夫揮桿視頻含高度動作和骨架信息，需要較高比特率
+        // 係數從 0.25 bpp 改為 0.8-1.0 bpp，大幅改善質量並減少多次編碼的累積損失
+        val bitRateCoeff = when {
+            displayW >= 1440 -> 1.0   // 2K+ 解析度：最高質量
+            displayW >= 1080 -> 0.8   // 1080p：中等質量
+            else              -> 0.6   // 720p 以下：實用質量
+        }
+        val bitRate = (displayW.toLong() * displayH * fps * bitRateCoeff)
+            .toLong().coerceIn(8_000_000L, 25_000_000L).toInt()
         val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
