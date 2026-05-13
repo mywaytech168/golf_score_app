@@ -675,9 +675,7 @@ class _HistoryTile extends StatefulWidget {
 class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
   bool _isDetecting = false;
-  ClipProgress? _progress;
   bool _isAnalyzing = false;
-  String _analyzeLabel = '';
 
   bool get _isLongVideo => widget.entry.durationSeconds >= 60 && widget.entry.durationSeconds <= 120;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
@@ -707,14 +705,45 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
-  /// 執行擊球偵測 → 裁切片段
+  /// 執行擊球偵測 → 裁切片段（顯示進度對話框）
   /// 前置條件：必須先進行骨架分析與音訊提取
   Future<void> _runDetection() async {
     if (_isDetecting) return;
-    setState(() {
-      _isDetecting = true;
-      _analyzeLabel = '準備骨架分析...';
-    });
+    setState(() => _isDetecting = true);
+
+    if (!mounted) return;
+
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備骨架分析...'));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('擊球偵測中', style: TextStyle(color: Colors.white)),
+          content: ValueListenableBuilder<(double, String)>(
+            valueListenable: progressNotifier,
+            builder: (_, val, __) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: val.$1,
+                  backgroundColor: Colors.grey[700],
+                  color: Colors.blue,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  val.$2,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
 
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
@@ -730,7 +759,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
           onProgress: (label) {
-            if (mounted) setState(() => _analyzeLabel = label);
+            progressNotifier.value = (0.3, label);
           },
         );
         if (basicAnalysis == null) {
@@ -739,6 +768,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
 
       // 2. 讀取 PCM
+      progressNotifier.value = (0.35, '載入音訊中...');
       List<double> audioPcm = [];
       const int sampleRate = 44100;
       final pcmFile = File(audioPath);
@@ -752,7 +782,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
 
       // 3. 偵測擊球
-      setState(() => _analyzeLabel = '偵測擊球中...');
+      progressNotifier.value = (0.5, '偵測擊球中...');
       final hits = await SwingImpactDetector.detect(
         csvPath: csvPath,
         audioPcm: audioPcm,
@@ -762,10 +792,8 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (!mounted) return;
 
       if (hits.isEmpty) {
-        setState(() {
-          _isDetecting = false;
-          _analyzeLabel = '';
-        });
+        Navigator.pop(context);
+        setState(() => _isDetecting = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -779,26 +807,24 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
 
       // 4. 依序裁切
-      setState(() => _analyzeLabel = '裁切片段中...');
       final results = await ClipPipelineService.run(
         hits: hits,
         srcVideoPath: widget.entry.filePath,
         sourceEntry: widget.entry,
         onProgress: (prog) {
-          if (mounted) {
-            final percentage = prog.total > 0 
-              ? ((prog.current / prog.total) * 100).round() 
-              : 0;
-            setState(() => _analyzeLabel = '裁切片段中... $percentage%');
-          }
+          final percentage = prog.total > 0 
+            ? (prog.current / prog.total) * 100 
+            : 0;
+          progressNotifier.value = (
+            0.5 + (percentage / 100) * 0.5,
+            '裁切片段中... ${percentage.round()}% (${prog.current}/${prog.total})'
+          );
         },
       );
 
       if (!mounted) return;
-      setState(() {
-        _isDetecting = false;
-        _analyzeLabel = '';
-      });
+      Navigator.pop(context);
+      setState(() => _isDetecting = false);
 
       if (results.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -819,29 +845,61 @@ class _HistoryTileState extends State<_HistoryTile> {
       );
     } catch (e) {
       debugPrint('[偵測擊球] 錯誤: $e');
-      if (!mounted) return;
-      setState(() {
-        _isDetecting = false;
-        _analyzeLabel = '';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('偵測失敗: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        Navigator.pop(context);
+        setState(() => _isDetecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('偵測失敗: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      progressNotifier.dispose();
     }
   }
 
-  /// 執行影片分析（根據時長採用不同流程）
+  /// 執行影片分析（根據時長採用不同流程，顯示進度對話框）
   /// - 短影片 (5-60s)：直接進行完整分析 (骨架 + 音訊 + 球軌跡)
   /// - 長影片 (60-120s)：先進行基礎分析 (骨架 + 音訊)，然後使用者可點擊「偵測擊球」
   Future<void> _runAnalysis() async {
     if (_isAnalyzing) return;
-    setState(() {
-      _isAnalyzing = true;
-      _analyzeLabel = '準備中...';
-    });
+    setState(() => _isAnalyzing = true);
+
+    if (!mounted) return;
+
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('影片分析中', style: TextStyle(color: Colors.white)),
+          content: ValueListenableBuilder<(double, String)>(
+            valueListenable: progressNotifier,
+            builder: (_, val, __) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: val.$1,
+                  backgroundColor: Colors.grey[700],
+                  color: Colors.green,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  val.$2,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
 
     try {
       final clipPath = widget.entry.filePath;
@@ -857,14 +915,13 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (_isLongVideo) {
         // 長影片：先進行基礎分析
         debugPrint('[分析] 長影片 ($durationSeconds s)：執行基礎分析');
-        setState(() => _analyzeLabel = '分析骨架中...');
         
         final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
           videoPath: clipPath,
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
           onProgress: (label) {
-            if (mounted) setState(() => _analyzeLabel = label);
+            progressNotifier.value = (0.7, label);
           },
         );
 
@@ -873,10 +930,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
 
         if (!mounted) return;
-        setState(() {
-          _isAnalyzing = false;
-          _analyzeLabel = '';
-        });
+        Navigator.pop(context);
+        setState(() => _isAnalyzing = false);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -894,15 +949,13 @@ class _HistoryTileState extends State<_HistoryTile> {
           durationSeconds: durationSeconds,
           hitSec: widget.entry.hitSecond,
           onProgress: (label) {
-            if (mounted) setState(() => _analyzeLabel = label);
+            progressNotifier.value = (0.8, label);
           },
         );
 
         if (!mounted) return;
-        setState(() {
-          _isAnalyzing = false;
-          _analyzeLabel = '';
-        });
+        Navigator.pop(context);
+        setState(() => _isAnalyzing = false);
 
         if (result == null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -931,17 +984,18 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
     } catch (e) {
       debugPrint('[影片分析] 錯誤: $e');
-      if (!mounted) return;
-      setState(() {
-        _isAnalyzing = false;
-        _analyzeLabel = '';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('影片分析失敗: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        Navigator.pop(context);
+        setState(() => _isAnalyzing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('影片分析失敗: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      progressNotifier.dispose();
     }
   }
 
@@ -1246,49 +1300,8 @@ class _HistoryTileState extends State<_HistoryTile> {
                 );
               },
             ),
-            // 偵測擊球 / 裁切進度
-            if (_isDetecting)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _progress == null
-                          ? '正在偵測擊球...'
-                          : '裁切第 ${_progress!.current} / ${_progress!.total} 球...',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                    ),
-                  ],
-                ),
-              ),
-            // 影片分析進度
-            if (_isAnalyzing)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _analyzeLabel.isEmpty ? '正在分析影片...' : _analyzeLabel,
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            // 偵測擊球 / 裁切進度（已改為對話框顯示）
+            // 影片分析進度（已改為對話框顯示）
           ],
         ),
       ),
