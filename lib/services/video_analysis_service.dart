@@ -1,11 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../recording/pose_csv_writer.dart';
 import '../recording/pose_detector_service.dart';
@@ -13,6 +14,7 @@ import '../recording/pose_frame_model.dart';
 
 class VideoAnalysisService {
   static const _audioChannel = MethodChannel('audio_extractor_channel');
+  static const _frameExtractorChannel = MethodChannel('com.example.golf_score_app/frame_extractor');
   static const _frameIntervalMs = 67; // ~15fps
 
   Future<VideoAnalysisResult> analyze({
@@ -63,37 +65,50 @@ class VideoAnalysisService {
     void Function(double)? onProgress,
   }) async {
     final writer = PoseCsvWriter(csvPath);
-    final tmpDir = (await getTemporaryDirectory()).path;
     final totalMs = durationSeconds * 1000;
     final totalSteps = (totalMs / _frameIntervalMs).ceil().clamp(1, 99999);
     var frameIndex = 0;
     double imgW = 720, imgH = 1280;
 
+    // 使用 Native 直接提取 RGB (無 JPEG 開銷)
+    // 預期: VideoThumbnail 50ms → Native 10-15ms (5x 快速!)
     for (var ms = 0; ms < totalMs; ms += _frameIntervalMs) {
-      String? thumbPath;
       try {
-        // maxWidth: 720 對齊 Python 原版的 FAST_POSE_LONG_SIDE=720
-        // 縮小輸入尺寸可加速 ML Kit 推理，同時減少磁碟 I/O
-        thumbPath = await VideoThumbnail.thumbnailFile(
-          video: videoPath,
-          thumbnailPath: tmpDir,
-          imageFormat: ImageFormat.JPEG,
-          timeMs: ms,
-          quality: 85,
-          maxWidth: 720,
-        );
+        // 1️⃣ 呼叫 Kotlin VideoFrameExtractor 直接解碼為 RGB
+        final result = await _frameExtractorChannel.invokeMethod(
+          'extractFrameRgb',
+          {
+            'videoPath': videoPath,
+            'timeMs': ms,
+            'maxWidth': 720,
+          },
+        ) as Map<dynamic, dynamic>?;
 
-        if (thumbPath != null && await File(thumbPath).exists()) {
+        if (result != null) {
+          final width = result['width'] as int;
+          final height = result['height'] as int;
+          final pixelBytes = result['pixels'] as Uint8List;
+
           if (frameIndex == 0) {
-            // 第一幀從 JPEG header 解析尺寸
-            final bytes = await File(thumbPath).readAsBytes();
-            final dims = _parseJpegSize(bytes);
-            imgW = dims.$1.toDouble();
-            imgH = dims.$2.toDouble();
+            imgW = width.toDouble();
+            imgH = height.toDouble();
             debugPrint('[VideoAnalysis] video frame size: ${imgW}x$imgH');
           }
 
-          final poses = await poseService.detect(InputImage.fromFilePath(thumbPath));
+          // 2️⃣ 將 ARGB byte array 轉為 InputImage (無 JPEG 解碼)
+          final inputImage = InputImage.fromBytes(
+            bytes: pixelBytes,
+            metadata: InputImageMetadata(
+              size: Size(imgW, imgH),
+              rotation: InputImageRotation.rotation0deg,
+              format: InputImageFormat.bgra8888,
+              bytesPerRow: width * 4,
+            ),
+          );
+
+          // 3️⃣ ML Kit 推理
+          final poses = await poseService.detect(inputImage);
+          
           if (poses.isNotEmpty) {
             writer.addFrame(PoseFrameModel.fromPose(
               frame: frameIndex,
@@ -105,14 +120,12 @@ class VideoAnalysisService {
           } else {
             writer.addFrame(PoseFrameModel.empty(frame: frameIndex, timeSec: ms / 1000.0));
           }
+        } else {
+          writer.addFrame(PoseFrameModel.empty(frame: frameIndex, timeSec: ms / 1000.0));
         }
       } catch (e) {
         debugPrint('[VideoAnalysis] frame $frameIndex error: $e');
         writer.addFrame(PoseFrameModel.empty(frame: frameIndex, timeSec: ms / 1000.0));
-      } finally {
-        if (thumbPath != null) {
-          try { await File(thumbPath).delete(); } catch (_) {}
-        }
       }
 
       frameIndex++;
@@ -121,31 +134,6 @@ class VideoAnalysisService {
 
     await writer.flush();
     debugPrint('[VideoAnalysis] pose done: $frameIndex frames → $csvPath');
-  }
-
-  // Parses JPEG SOF0/SOF1/SOF2 marker to extract image width and height.
-  static (int, int) _parseJpegSize(Uint8List bytes) {
-    if (bytes.length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) {
-      return (720, 1280);
-    }
-    var i = 2;
-    while (i + 3 < bytes.length) {
-      while (i < bytes.length && bytes[i] != 0xFF) { i++; }
-      if (i + 1 >= bytes.length) break;
-      final marker = bytes[i + 1];
-      if (marker == 0xD9 || marker == 0xDA) break;
-      if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) {
-        if (i + 8 < bytes.length) {
-          final h = (bytes[i + 5] << 8) | bytes[i + 6];
-          final w = (bytes[i + 7] << 8) | bytes[i + 8];
-          if (w > 0 && h > 0) return (w, h);
-        }
-      }
-      final segLen = (bytes[i + 2] << 8) | bytes[i + 3];
-      if (segLen < 2) { i += 2; continue; }
-      i += 2 + segLen;
-    }
-    return (720, 1280);
   }
 
   Future<bool> _extractAudio({

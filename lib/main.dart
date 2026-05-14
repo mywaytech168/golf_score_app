@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -7,6 +8,7 @@ import 'services/ad_service.dart';
 import 'services/purchase_service.dart';
 import 'services/in_app_purchase_service.dart';
 import 'services/daily_ad_manager.dart';
+import 'services/video_frame_extractor_test.dart';
 import 'pages/login_page.dart';
 import 'pages/main_shell_page.dart';
 import 'providers/auth_provider.dart';
@@ -59,6 +61,47 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    
+    // 🧪 非阻塞地運行 VideoFrameExtractor 測試
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      debugPrint('[INIT] ========== 後幀回調開始 ==========');
+      _runVideoFrameExtractorTest();
+    });
+  }
+
+  /// 測試 VideoFrameExtractor 性能
+  Future<void> _runVideoFrameExtractorTest() async {
+    try {
+      // 使用已有的視頻文件進行測試
+      const videoPath = '/sdcard/Movies/Screen Recorder/2025-06-17-15-42-35.mp4';
+      debugPrint('📲 [DEBUG] 正在嘗試測試 VideoFrameExtractor...');
+      debugPrint('📲 [DEBUG] 視頻路徑: $videoPath');
+      
+      // 簡單的測試：直接調用 MethodChannel
+      const frameExtractorChannel =
+          MethodChannel('com.example.golf_score_app/frame_extractor');
+      
+      debugPrint('📲 [DEBUG] 調用 extractFrameRgb at timeMs=0...');
+      final result = await frameExtractorChannel.invokeMethod(
+        'extractFrameRgb',
+        {
+          'videoPath': videoPath,
+          'timeMs': 0,
+          'maxWidth': 720,
+        },
+      ) as Map<dynamic, dynamic>?;
+      
+      if (result != null) {
+        final width = result['width'] as int;
+        final height = result['height'] as int;
+        final pixels = result['pixels'];
+        debugPrint('✅ [SUCCESS] 幀提取成功: ${width}x$height, ${pixels.toString().length} bytes');
+      } else {
+        debugPrint('❌ [ERROR] 結果為 null');
+      }
+    } catch (e) {
+      debugPrint('❌ [ERROR] 測試失敗: $e');
+    }
   }
 
   // ---------- 方法區 ----------

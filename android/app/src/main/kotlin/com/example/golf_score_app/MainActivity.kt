@@ -31,15 +31,18 @@ class MainActivity: FlutterActivity() {
     private val TRIMMER_CHANNEL = "com.example.golf_score_app/trimmer"
     private val SKELETON_OVERLAY_CHANNEL = "com.example.golf_score_app/skeleton_overlay"
     private val BALL_TRAJECTORY_CHANNEL = "com.example.golf_score_app/ball_trajectory"
+    private val FRAME_EXTRACTOR_CHANNEL = "com.example.golf_score_app/frame_extractor"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
     private val ballTrajExecutor = Executors.newSingleThreadExecutor()
+    private val frameExtractorExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
     private val videoTrimmer by lazy { VideoTrimmer(this) }
     private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
     private val ballBlobExtractor      by lazy { BallBlobExtractor() }
     private val trajectoryOverlayRenderer by lazy { TrajectoryOverlayRenderer() }
+    private val frameExtractor by lazy { VideoFrameExtractor() }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -286,6 +289,65 @@ class MainActivity: FlutterActivity() {
                         }
                     }
 
+                    else -> result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FRAME_EXTRACTOR_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "extractFrameRgb" -> {
+                        val videoPath = call.argument<String>("videoPath")
+                        val timeMs = call.argument<Long>("timeMs") ?: 0L
+                        val maxWidth = call.argument<Int>("maxWidth") ?: 720
+
+                        if (videoPath.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 videoPath", null)
+                            return@setMethodCallHandler
+                        }
+
+                        frameExtractorExecutor.execute {
+                            try {
+                                val bitmap = frameExtractor.extractFrameRgb(
+                                    videoPath = videoPath,
+                                    timeMs = timeMs,
+                                    maxWidth = maxWidth
+                                )
+
+                                if (bitmap != null) {
+                                    // 將 Bitmap 轉為 ARGB byte array
+                                    val bitmapWidth = bitmap.width
+                                    val bitmapHeight = bitmap.height
+                                    val pixels = IntArray(bitmapWidth * bitmapHeight)
+                                    bitmap.getPixels(pixels, 0, bitmapWidth, 0, 0, bitmapWidth, bitmapHeight)
+                                    val bytes = ByteArray(pixels.size * 4)
+                                    for (i in pixels.indices) {
+                                        bytes[i * 4] = (pixels[i] shr 24).toByte()
+                                        bytes[i * 4 + 1] = (pixels[i] shr 16).toByte()
+                                        bytes[i * 4 + 2] = (pixels[i] shr 8).toByte()
+                                        bytes[i * 4 + 3] = pixels[i].toByte()
+                                    }
+                                    bitmap.recycle()
+
+                                    runOnUiThread {
+                                        result.success(mapOf(
+                                            "width" to bitmapWidth,
+                                            "height" to bitmapHeight,
+                                            "pixels" to bytes
+                                        ))
+                                    }
+                                } else {
+                                    runOnUiThread {
+                                        result.error("extract_failed", "提取幀失敗", null)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "幀提取例外: ${e.message}", e)
+                                runOnUiThread {
+                                    result.error("extract_failed", e.message, null)
+                                }
+                            }
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
