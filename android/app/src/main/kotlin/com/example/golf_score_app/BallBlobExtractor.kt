@@ -96,7 +96,11 @@ class BallBlobExtractor {
         val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
         val fps       = runCatching {
             inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
-        }.getOrElse { 15.0 }
+        }.getOrElse { 30.0 }  // ✅ 改為 30fps，保持與原錄影一致
+        
+        // 🎬 明確記錄 fps 來源
+        val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
+        Log.d(TAG, "[BallBlobExtractor] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
 
         val rotation = android.media.MediaMetadataRetriever().use { mmr ->
             mmr.setDataSource(inputPath)
@@ -107,7 +111,7 @@ class BallBlobExtractor {
         val displayW = if (rotation == 90 || rotation == 270) videoH else videoW
         val displayH = if (rotation == 90 || rotation == 270) videoW else videoH
 
-        Log.d(TAG, "影片: coded=${videoW}x${videoH} display=${displayW}x${displayH} fps=$fps mime=$videoMime rotation=$rotation°")
+        Log.d(TAG, "[BallBlobExtractor] 影片: coded=${videoW}x${videoH} display=${displayW}x${displayH} fps=$fps mime=$videoMime rotation=$rotation°")
 
         // ── 2. 建立解碼器 ───────────────────────────────────────
         val decoder = try {

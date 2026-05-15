@@ -139,7 +139,12 @@ class TrajectoryOverlayRenderer {
         val videoH    = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
         val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
         val fps       = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat() }
-                            .getOrElse { 15f }
+                            .getOrElse { 30f }  // ✅ 改為 30fps，保持與原錄影一致
+        
+        // 🎬 明確記錄 fps 來源
+        val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
+        Log.d(TAG, "[TrajectoryOverlay] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
+        
         val encW = (videoW + 15) and -16
         val encH = (videoH + 15) and -16
 

@@ -612,6 +612,9 @@ class MainActivity: FlutterActivity() {
         maxWidth: Int,
         outputCsvPath: String
     ): String? {
+        // 🎬 記錄輸入參數
+        Log.i(logTag, "[PoseAnalyzer] 🎬 開始分析: targetFps=$targetFps maxWidth=$maxWidth videoPath=$videoPath")
+        
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var csvWriter: java.io.FileWriter? = null
@@ -641,6 +644,12 @@ class MainActivity: FlutterActivity() {
             val codedH = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
             val mime   = videoFormat.getString(MediaFormat.KEY_MIME) ?: ""
 
+            // 🎬 讀取視頻的實際 fps metadata（重要：不能只依賴 targetFps 參數！）
+            val actualVideoFps = runCatching {
+                videoFormat.getInteger(MediaFormat.KEY_FRAME_RATE)
+            }.getOrElse { targetFps }
+            Log.i(logTag, "[PoseAnalyzer] 🎬 fps metadata: targetFps=$targetFps, actualVideoFps=$actualVideoFps from format")
+
             // display 尺寸（旋轉修正後的正確寬高）
             val displayW = if (rotation == 90 || rotation == 270) codedH else codedW
             val displayH = if (rotation == 90 || rotation == 270) codedW else codedH
@@ -649,8 +658,10 @@ class MainActivity: FlutterActivity() {
                 mmr.setDataSource(videoPath)
                 mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             }
-            val expectedFrames = (durationMs * targetFps / 1000L).toInt()
-            Log.i(logTag, "[PoseAnalyzer] coded=${codedW}x${codedH} display=${displayW}x${displayH} rotation=$rotation duration=${durationMs}ms targetFps=$targetFps expected≈$expectedFrames")
+            val expectedFrames = (durationMs * actualVideoFps / 1000L).toInt()  // 🎬 使用實際 fps 計算期望幀數
+            Log.i(logTag, "[PoseAnalyzer] 📊 時長檢測: durationMs=$durationMs")
+            Log.i(logTag, "[PoseAnalyzer] 📊 幀數計算: $expectedFrames = ($durationMs ms × $actualVideoFps fps / 1000)")
+            Log.i(logTag, "[PoseAnalyzer] coded=${codedW}x${codedH} display=${displayW}x${displayH} rotation=$rotation duration=${durationMs}ms actualVideoFps=$actualVideoFps expected≈$expectedFrames")
 
             extractor.selectTrack(videoTrackIndex)
             codec = MediaCodec.createDecoderByType(mime)
@@ -677,14 +688,23 @@ class MainActivity: FlutterActivity() {
 
             val bufferInfo = MediaCodec.BufferInfo()
             var frameCount  = 0
+            var decodedFrames = 0  // 🎬 追踪解碼的總幀數
             var poseUpdateId = 0
             var lastLandmarks: List<com.google.mlkit.vision.pose.PoseLandmark>? = null
             var mlKitFailures = 0
 
-            val frameIntervalUs = 1_000_000L / targetFps
+            // 🎬 使用實際視頻 fps 計算採樣間隔，而不是硬編碼的 targetFps
+            val frameIntervalUs = 1_000_000L / actualVideoFps
             var nextSampleUs   = 0L
             var inputEOS  = false
             var outputEOS = false
+            
+            // 🎬 容差：允許 ±500 微秒的誤差，防止因 ptsUs 微小偏差導致的採樣邏輯錯誤
+            val SAMPLE_TOLERANCE_US = 500L
+            
+            // 🎬 詳細記錄採樣參數
+            Log.i(logTag, "[PoseAnalyzer] 🎬 採樣配置: actualVideoFps=$actualVideoFps, frameIntervalUs=$frameIntervalUs us (${frameIntervalUs/1000.0f}ms)")
+            Log.i(logTag, "[PoseAnalyzer] 🎬 初始 nextSampleUs=$nextSampleUs, tolerance=±${SAMPLE_TOLERANCE_US}us")
 
             val sw = System.currentTimeMillis()
 
@@ -712,10 +732,23 @@ class MainActivity: FlutterActivity() {
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> { /* 繼續 */ }
                     outIdx >= 0 -> {
                         val ptsUs = bufferInfo.presentationTimeUs
+                        decodedFrames++
 
-                        if (ptsUs >= nextSampleUs && bufferInfo.size > 0) {
+                        // 🎬 詳細診斷：每幀都記錄採樣決策
+                        val shouldSample = ptsUs >= nextSampleUs - SAMPLE_TOLERANCE_US && bufferInfo.size > 0
+                        if (decodedFrames <= 10 || decodedFrames % 30 == 0) {
+                            Log.d(logTag, "[PoseAnalyzer] 幀#$decodedFrames: ptsUs=$ptsUs, nextSample=$nextSampleUs, shouldSample=$shouldSample, diff=${ptsUs - nextSampleUs}")
+                        }
+
+                        if (shouldSample) {
+                            // 🎬 採樣此幀
                             nextSampleUs = ptsUs + frameIntervalUs
                             val timeSec  = ptsUs / 1_000_000.0
+                            
+                            // 間隔 30 幀時才記錄一次，避免日誌爆炸
+                            if (frameCount % 30 == 0) {
+                                Log.d(logTag, "[PoseAnalyzer] ✅ 採樣幀 #$frameCount: ptsUs=$ptsUs μs → 下次採樣=$nextSampleUs μs")
+                            }
 
                             val image = runCatching { codec.getOutputImage(outIdx) }.getOrNull()
                             if (image != null) {
@@ -789,8 +822,23 @@ class MainActivity: FlutterActivity() {
             csvWriter.flush()
             val elapsedMs = System.currentTimeMillis() - sw
             val fps = if (elapsedMs > 0) "%.1f".format(frameCount * 1000.0 / elapsedMs) else "N/A"
+            Log.i(logTag, "[PoseAnalyzer] 📊 処理完成:")
+            Log.i(logTag, "[PoseAnalyzer]   總解碼幀: $decodedFrames")
+            Log.i(logTag, "[PoseAnalyzer]   已採樣幀: $frameCount")
+            Log.i(logTag, "[PoseAnalyzer]   採樣率: ${(frameCount * 100.0 / maxOf(1, decodedFrames)).toInt()}% (${decodedFrames - frameCount} 幀被跳過)")
+            Log.i(logTag, "[PoseAnalyzer]   預期幀數: $expectedFrames")
+            Log.i(logTag, "[PoseAnalyzer]   差異: ${expectedFrames - frameCount} 幀 (${(frameCount * 100.0 / maxOf(1, expectedFrames)).toInt()}% of expected)")
             Log.i(logTag, "[PoseAnalyzer] done: $frameCount frames, ${elapsedMs}ms, ${fps}fps, mlkit_fail=${mlKitFailures} -> $outputCsvPath")
             if (mlKitFailures > 0) Log.w(logTag, "[PoseAnalyzer] mlkit_fail=${mlKitFailures} frames (version compat or hw accel issue)")
+            if (frameCount < expectedFrames * 0.8) {
+                Log.w(logTag, "[PoseAnalyzer] ⚠️ 幀數異常: 只寫入 ${(frameCount * 100.0 / maxOf(1, expectedFrames)).toInt()}% 的預期幀數！")
+                Log.w(logTag, "[PoseAnalyzer] 💡 原因分析:")
+                Log.w(logTag, "[PoseAnalyzer]    - decodedFrames=$decodedFrames (實際解碼)")
+                Log.w(logTag, "[PoseAnalyzer]    - expectedFrames=$expectedFrames (理論預期)")
+                Log.w(logTag, "[PoseAnalyzer]    - frameCount=$frameCount (實際採樣)")
+                Log.w(logTag, "[PoseAnalyzer]    如果 decodedFrames ≈ expectedFrames 但 frameCount << 採樣，是採樣邏輯問題")
+                Log.w(logTag, "[PoseAnalyzer]    如果 decodedFrames << expectedFrames，是解碼幀率或時長讀取問題")
+            }
             return outputCsvPath
 
         } catch (e: Exception) {

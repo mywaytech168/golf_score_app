@@ -116,6 +116,10 @@ class SkeletonOverlayRenderer(private val context: Context) {
             inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
         }.getOrElse { 30f }
         
+        // 🎬 明確記錄 fps 來源
+        val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
+        Log.d(TAG, "[SkeletonOverlay] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
+        
         val rotation = android.media.MediaMetadataRetriever().use { mmr ->
             mmr.setDataSource(clipPath)
             mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)

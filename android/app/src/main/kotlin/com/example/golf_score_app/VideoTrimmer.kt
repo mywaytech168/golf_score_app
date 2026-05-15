@@ -2,6 +2,7 @@ package com.example.golf_score_app
 
 import android.content.Context
 import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.util.Log
@@ -77,7 +78,20 @@ class VideoTrimmer(private val context: Context) {
             for (i in 0 until extractor.trackCount) {
                 val fmt  = extractor.getTrackFormat(i)
                 val mime = fmt.getString("mime") ?: continue
-                if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+                if (mime.startsWith("video/")) {
+                    // ✅ 明確讀取源幀率，避免 mux 後遺失
+                    val srcFps = runCatching {
+                        fmt.getInteger(MediaFormat.KEY_FRAME_RATE)
+                    }.getOrElse { 30 }  // 預設 30fps
+                    fmt.setInteger(MediaFormat.KEY_FRAME_RATE, srcFps)
+                    
+                    // 🎬 明確記錄 fps 來源
+                    val fpsFromMetadata = runCatching { fmt.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
+                    Log.d(TAG, "[VideoTrimmer] 🎬 fps 檢測: metadata=$fpsFromMetadata → 使用=$srcFps")
+                    
+                    trackMap[i] = muxer.addTrack(fmt)
+                    extractor.selectTrack(i)
+                } else if (mime.startsWith("audio/")) {
                     trackMap[i] = muxer.addTrack(fmt)
                     extractor.selectTrack(i)
                 }
