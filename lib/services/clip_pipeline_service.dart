@@ -305,7 +305,6 @@ class ClipPipelineService {
       final trajOut = p.join(sessionDir, 'final.mp4');
       
       final tracker = EnhancedBallTracker(dt: 1.0 / 30.0);
-      const baseRoiSize = 400;
 
       // Blob 提取（全幀粗篩，ROI 過濾在 Dart 層執行）
       FrameExtractionResult? extraction =
@@ -345,7 +344,7 @@ class ClipPipelineService {
           // Fix A: P0 確定後，以 Kalman 預測（或上一點）為中心做 ROI 過濾，
           // 排除揮桿身體動作產生的大量誤報 blob
           if (tracker.trackPoints.isNotEmpty) {
-            final roiHalf = tracker.getDynamicRoiSize(baseRoiSize) / 2.0;
+            final roiHalf = tracker.getFixedRoiSize() / 2.0;
             final Offset roiCenter;
             if (tracker.isKalmanInitialized) {
               final pos = tracker.getKalmanPos();
@@ -424,23 +423,14 @@ class ClipPipelineService {
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
 
         if (trackPts.length >= 2) {
-          final currentRoiSize = tracker.getDynamicRoiSize(baseRoiSize);
+          final currentRoiSize = tracker.getFixedRoiSize();
 
-          // ── 後置 ROI 過濾：移除落在小屏幕 ROI 外的雜散追蹤點 ──
-          final videoW = extraction.width;
-          final videoH = extraction.height;
-          final screenX = videoW / 2.0;
-          const roiXFrac = 0.6519;
-          const roiYFrac = 0.5646;
-          const roiSizeRatioW = 400.0 / 1080.0;
-          const roiSizeRatioH = 400.0 / 1920.0;
-          final roiCenterX = screenX + (videoW / 2.0) * roiXFrac;
-          final roiCenterY = videoH * roiYFrac;
-          final scaledHalf = ((videoW * roiSizeRatioW + videoH * roiSizeRatioH) / 2) / 2;
-          final roiLeft   = (roiCenterX - scaledHalf).clamp(0.0, videoW - 1.0);
-          final roiTop    = (roiCenterY - scaledHalf).clamp(0.0, videoH - 1.0);
-          final roiRight  = (roiCenterX + scaledHalf).clamp(0.0, videoW - 1.0);
-          final roiBottom = (roiCenterY + scaledHalf).clamp(0.0, videoH - 1.0);
+          // ── 後置 ROI 過濾：用 tracker 統一的 ROI 邏輯移除雜散追蹤點 ──
+          final (roiLeft, roiTop, roiRight, roiBottom) = tracker.calculateRoiBounds(
+            videoW: extraction.width,
+            videoH: extraction.height,
+            roiSize: currentRoiSize,
+          );
           final roiFilteredPts = trackPts.where((pt) =>
             pt.x >= roiLeft && pt.x <= roiRight &&
             pt.y >= roiTop  && pt.y <= roiBottom
