@@ -1,7 +1,5 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -10,8 +8,7 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import 'ball_tracker.dart';
-import 'enhanced_ball_tracker.dart';  // [新增 Week 3]
-import 'detection_config.dart';        // [新增 Week 3]
+import 'enhanced_ball_tracker.dart';
 import 'ball_trajectory_service.dart';
 import 'skeleton_overlay_service.dart';
 import 'video_analysis_service.dart';
@@ -305,12 +302,8 @@ class ClipPipelineService {
       final trajOut = p.join(sessionDir, 'final.mp4');
       
       final tracker = EnhancedBallTracker(dt: 1.0 / 30.0);
-      const baseRoiSize = 400;
-      int? p0FrameIdx;
-      const p1DeadlineFrames = 5;
 
-      // Blob 提取（全幀粗篩，ROI 過濾在 Dart 層執行）
-      FrameExtractionResult? extraction =
+      final extraction =
           await BallTrajectoryService.extractBlobs(inputPath: clipPath);
 
       if (extraction == null) {
@@ -321,153 +314,37 @@ class ClipPipelineService {
             'fps=${extraction.fps.toStringAsFixed(1)}，'
             '${extraction.width}×${extraction.height}');
 
-        final List<TrackPoint> trackPts = [];
-
         for (int i = 0; i < extraction.frames.length; i++) {
-          final frameBlobs = extraction.frames[i];
-          var candidates = frameBlobs.blobs
-              .map((b) => Offset(b.cx.toDouble(), b.cy.toDouble()))
-              .toList();
-
-          // Fix C: 使用影片實際時間戳，而非合成值
-          final ptsUs = frameBlobs.ptsUs;
-
-          // P2+：每幀開始先推進 Kalman，再做候選篩選
-          if (trackPts.length >= 2) {
-            tracker.predictKalman();
+          if (!tracker.processFrame(
+            extraction.frames[i],
+            i,
+            videoW: extraction.width,
+            videoH: extraction.height,
+          )) {
+            debugPrint('[Pipeline.analyze] ⚠️ 追蹤凍結於幀 $i');
+            break;
           }
-
-          // P1 期限：P0 已找到但 P1 遲遲未出現 → 重置，本幀重新從 P0 開始
-          if (trackPts.length == 1 && p0FrameIdx != null &&
-              (i - p0FrameIdx!) > p1DeadlineFrames) {
-            trackPts.clear();
-            tracker.reset();
-            p0FrameIdx = null;
-            debugPrint('[Pipeline.analyze] 🔄 P1 超時，重置追蹤 (幀 $i)');
-          }
-
-          if (candidates.isEmpty) {
-            tracker.recordNoCandidate();
-            continue;
-          }
-
-          tracker.recordFoundCandidates();
-
-          // Fix A: P0 確定後，以 Kalman 預測（或上一點）為中心做 ROI 過濾，
-          // 排除揮桿身體動作產生的大量誤報 blob
-          if (tracker.trackPoints.isNotEmpty) {
-            final roiHalf = tracker.getDynamicRoiSize(
-              baseRoiSize,
-              videoW: extraction.width,
-              videoH: extraction.height,
-            ) / 2.0;
-            final Offset roiCenter;
-            if (tracker.isKalmanInitialized) {
-              final pos = tracker.getKalmanPos();
-              roiCenter = Offset(pos.$1, pos.$2);
-            } else {
-              final last = tracker.trackPoints.last;
-              roiCenter = Offset(last.x.toDouble(), last.y.toDouble());
-            }
-            candidates = candidates.where((c) =>
-              (c.dx - roiCenter.dx).abs() <= roiHalf &&
-              (c.dy - roiCenter.dy).abs() <= roiHalf
-            ).toList();
-          }
-
-          if (candidates.isEmpty) {
-            tracker.recordNoCandidate();
-            continue;
-          }
-
-          // 步距衛士
-          candidates = candidates.where((c) => tracker.stepDistanceGuardCheck(c)).toList();
-
-          // Y 方向約束
-          candidates = tracker.filterByYDirection(candidates);
-
-          if (candidates.isEmpty) {
-            if (tracker.handleOutlierDetection()) {
-              debugPrint('[Pipeline.analyze] ⚠️ 追蹤凍結於幀 $i');
-              break;
-            }
-            continue;
-          }
-
-          // 候選球選取：
-          //   P0: 取面積最小的 blob（最像球體），P1: 取最靠近 P0，P2+: 取最靠近 Kalman 預測
-          final Offset best;
-          if (tracker.isKalmanInitialized) {
-            // P2+: closest to Kalman prediction
-            final pos = tracker.getKalmanPos();
-            final kalmanPt = Offset(pos.$1, pos.$2);
-            best = candidates.reduce((a, b) =>
-              EnhancedBallTracker.distance(a, kalmanPt) <=
-              EnhancedBallTracker.distance(b, kalmanPt) ? a : b);
-          } else if (trackPts.length == 1) {
-            // P1: closest to P0
-            final p0 = Offset(trackPts[0].x.toDouble(), trackPts[0].y.toDouble());
-            best = candidates.reduce((a, b) =>
-              EnhancedBallTracker.distance(a, p0) <=
-              EnhancedBallTracker.distance(b, p0) ? a : b);
-          } else {
-            // P0: smallest area blob is most ball-like
-            final smallestBlob = frameBlobs.blobs.reduce((a, b) =>
-              a.area <= b.area ? a : b);
-            best = Offset(smallestBlob.cx.toDouble(), smallestBlob.cy.toDouble());
-          }
-
-          // 更新面積 EMA（遠球自適應）
-          final blobArea = frameBlobs.blobs.isNotEmpty
-              ? (frameBlobs.blobs[0].area ?? 30)
-              : 30;
-          tracker.updateAreaEmaFromBlob(blobArea);
-
-          if (trackPts.isEmpty) {
-            // P0
-            p0FrameIdx = i;
-            tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
-          } else if (trackPts.length == 1) {
-            // P1: 初始化 Kalman
-            p0FrameIdx = null;
-            tracker.initKalman(
-              trackPts[0].x.toDouble(), trackPts[0].y.toDouble(),
-              best.dx, best.dy,
-            );
-            tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
-          } else {
-            // P2+: Kalman 已在幀頭預測，直接更新
-            tracker.updateKalman(best.dx, best.dy);
-            tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
-          }
-
-          trackPts.add(TrackPoint(
-            x: best.dx.toInt(),
-            y: best.dy.toInt(),
-            frameIdx: i,
-            ptsUs: ptsUs,
-          ));
         }
 
+        final trackPts = tracker.trackPoints;
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
 
         if (trackPts.length >= 2) {
-          final currentRoiSize = tracker.getDynamicRoiSize(
-            baseRoiSize,
+          final roiSize = tracker.getDynamicRoiSize(
+            EnhancedBallTracker.baseRoiSize,
             videoW: extraction.width,
             videoH: extraction.height,
           );
-
           final withTraj = await BallTrajectoryService.renderOverlay(
             inputPath: skeletonPath,
             outputPath: trajOut,
             trackPts: trackPts.map((pt) => pt.toMap()).toList(),
-            roiSize: currentRoiSize,
+            roiSize: roiSize,
           );
           if (withTraj != null) {
             hasBallTrack = true;
             finalPath = withTraj;
-            debugPrint('[Pipeline.analyze] ✅ 球軌跡疊加成功 (ROI=$currentRoiSize px，${trackPts.length} 點)');
+            debugPrint('[Pipeline.analyze] ✅ 球軌跡疊加成功 (ROI=$roiSize px，${trackPts.length} 點)');
           } else {
             debugPrint('[Pipeline.analyze] ❌ 球軌跡疊加失敗');
             final bad = File(trajOut);
