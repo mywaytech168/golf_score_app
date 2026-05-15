@@ -306,6 +306,8 @@ class ClipPipelineService {
       
       final tracker = EnhancedBallTracker(dt: 1.0 / 30.0);
       const baseRoiSize = 400;
+      int? p0FrameIdx;
+      const p1DeadlineFrames = 5;
 
       // Blob 提取（全幀粗篩，ROI 過濾在 Dart 層執行）
       FrameExtractionResult? extraction =
@@ -333,6 +335,15 @@ class ClipPipelineService {
           // P2+：每幀開始先推進 Kalman，再做候選篩選
           if (trackPts.length >= 2) {
             tracker.predictKalman();
+          }
+
+          // P1 期限：P0 已找到但 P1 遲遲未出現 → 重置，本幀重新從 P0 開始
+          if (trackPts.length == 1 && p0FrameIdx != null &&
+              (i - p0FrameIdx!) > p1DeadlineFrames) {
+            trackPts.clear();
+            tracker.reset();
+            p0FrameIdx = null;
+            debugPrint('[Pipeline.analyze] 🔄 P1 超時，重置追蹤 (幀 $i)');
           }
 
           if (candidates.isEmpty) {
@@ -379,16 +390,27 @@ class ClipPipelineService {
             continue;
           }
 
-          // Fix B: 選取距 Kalman 預測最近的候選球（P2+），P0/P1 取第一個
+          // 候選球選取：
+          //   P0: 取面積最小的 blob（最像球體），P1: 取最靠近 P0，P2+: 取最靠近 Kalman 預測
           final Offset best;
           if (tracker.isKalmanInitialized) {
+            // P2+: closest to Kalman prediction
             final pos = tracker.getKalmanPos();
             final kalmanPt = Offset(pos.$1, pos.$2);
             best = candidates.reduce((a, b) =>
               EnhancedBallTracker.distance(a, kalmanPt) <=
               EnhancedBallTracker.distance(b, kalmanPt) ? a : b);
+          } else if (trackPts.length == 1) {
+            // P1: closest to P0
+            final p0 = Offset(trackPts[0].x.toDouble(), trackPts[0].y.toDouble());
+            best = candidates.reduce((a, b) =>
+              EnhancedBallTracker.distance(a, p0) <=
+              EnhancedBallTracker.distance(b, p0) ? a : b);
           } else {
-            best = candidates.first;
+            // P0: smallest area blob is most ball-like
+            final smallestBlob = frameBlobs.blobs.reduce((a, b) =>
+              a.area <= b.area ? a : b);
+            best = Offset(smallestBlob.cx.toDouble(), smallestBlob.cy.toDouble());
           }
 
           // 更新面積 EMA（遠球自適應）
@@ -399,9 +421,11 @@ class ClipPipelineService {
 
           if (trackPts.isEmpty) {
             // P0
+            p0FrameIdx = i;
             tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
           } else if (trackPts.length == 1) {
             // P1: 初始化 Kalman
+            p0FrameIdx = null;
             tracker.initKalman(
               trackPts[0].x.toDouble(), trackPts[0].y.toDouble(),
               best.dx, best.dy,

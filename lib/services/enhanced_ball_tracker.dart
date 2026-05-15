@@ -38,7 +38,7 @@ class EnhancedBallTracker {
   final double dt;  // 時間差（幀時間）
   
   // 核心追蹤器
-  late final Kalman2D kalman;
+  late Kalman2D kalman;
   
   // 配置管理器
   final TrackingConfigManager configManager = TrackingConfigManager();
