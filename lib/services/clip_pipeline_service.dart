@@ -304,14 +304,13 @@ class ClipPipelineService {
       onProgress?.call('追蹤球軌跡中...');
       final trajOut = p.join(sessionDir, 'final.mp4');
       
-      // [Week 3] 使用 EnhancedBallTracker 替代 BallTracker
       final tracker = EnhancedBallTracker(dt: 1.0 / 30.0);
-      final baseRoiSize = 400;
-      
-      // 第一階段：標準 blob 提取 (使用默認配置)
-      FrameExtractionResult? extraction = 
+      const baseRoiSize = 400;
+
+      // Blob 提取（全幀粗篩，ROI 過濾在 Dart 層執行）
+      FrameExtractionResult? extraction =
           await BallTrajectoryService.extractBlobs(inputPath: clipPath);
-      
+
       if (extraction == null) {
         debugPrint('[Pipeline.analyze] ❌ blob 提取失敗');
       } else {
@@ -320,71 +319,100 @@ class ClipPipelineService {
             'fps=${extraction.fps.toStringAsFixed(1)}，'
             '${extraction.width}×${extraction.height}');
 
-        // [Week 3] 使用 EnhancedBallTracker 替代 BallTracker.track()
         final List<TrackPoint> trackPts = [];
-        
+
         for (int i = 0; i < extraction.frames.length; i++) {
           final frameBlobs = extraction.frames[i];
           var candidates = frameBlobs.blobs
               .map((b) => Offset(b.cx.toDouble(), b.cy.toDouble()))
               .toList();
-          
-          final ptsUs = (i * 1000000 ~/ extraction.fps).toInt();
-          
+
+          // Fix C: 使用影片實際時間戳，而非合成值
+          final ptsUs = frameBlobs.ptsUs;
+
+          // P2+：每幀開始先推進 Kalman，再做候選篩選
+          if (trackPts.length >= 2) {
+            tracker.predictKalman();
+          }
+
           if (candidates.isEmpty) {
             tracker.recordNoCandidate();
-            tracker.predictKalman();
             continue;
           }
-          
+
           tracker.recordFoundCandidates();
-          
-          // [Week 3] 應用規則 1: 步距衛士
-          candidates = candidates.where((c) {
-            return tracker.stepDistanceGuardCheck(c);
-          }).toList();
-          
-          // [Week 3] 應用規則 2: Y 方向約束
-          candidates = tracker.filterByYDirection(candidates);
-          
+
+          // Fix A: P0 確定後，以 Kalman 預測（或上一點）為中心做 ROI 過濾，
+          // 排除揮桿身體動作產生的大量誤報 blob
+          if (tracker.trackPoints.isNotEmpty) {
+            final roiHalf = tracker.getDynamicRoiSize(baseRoiSize) / 2.0;
+            final Offset roiCenter;
+            if (tracker.isKalmanInitialized) {
+              final pos = tracker.getKalmanPos();
+              roiCenter = Offset(pos.$1, pos.$2);
+            } else {
+              final last = tracker.trackPoints.last;
+              roiCenter = Offset(last.x.toDouble(), last.y.toDouble());
+            }
+            candidates = candidates.where((c) =>
+              (c.dx - roiCenter.dx).abs() <= roiHalf &&
+              (c.dy - roiCenter.dy).abs() <= roiHalf
+            ).toList();
+          }
+
           if (candidates.isEmpty) {
-            // [Week 3] 應用規則 5: 異常值檢測
+            tracker.recordNoCandidate();
+            continue;
+          }
+
+          // 步距衛士
+          candidates = candidates.where((c) => tracker.stepDistanceGuardCheck(c)).toList();
+
+          // Y 方向約束
+          candidates = tracker.filterByYDirection(candidates);
+
+          if (candidates.isEmpty) {
             if (tracker.handleOutlierDetection()) {
               debugPrint('[Pipeline.analyze] ⚠️ 追蹤凍結於幀 $i');
               break;
             }
             continue;
           }
-          
-          // 選擇最佳候選
-          final best = candidates.first;
-          
-          // [Week 3] 更新面積 EMA (用於規則 3)
-          final blobArea = frameBlobs.blobs.isNotEmpty 
-              ? (frameBlobs.blobs[0].area ?? 30) 
+
+          // Fix B: 選取距 Kalman 預測最近的候選球（P2+），P0/P1 取第一個
+          final Offset best;
+          if (tracker.isKalmanInitialized) {
+            final pos = tracker.getKalmanPos();
+            final kalmanPt = Offset(pos.$1, pos.$2);
+            best = candidates.reduce((a, b) =>
+              EnhancedBallTracker.distance(a, kalmanPt) <=
+              EnhancedBallTracker.distance(b, kalmanPt) ? a : b);
+          } else {
+            best = candidates.first;
+          }
+
+          // 更新面積 EMA（遠球自適應）
+          final blobArea = frameBlobs.blobs.isNotEmpty
+              ? (frameBlobs.blobs[0].area ?? 30)
               : 30;
           tracker.updateAreaEmaFromBlob(blobArea);
-          
-          // 初始化 Kalman（P0 和 P1）
+
           if (trackPts.isEmpty) {
-            // P0: 第一個點
+            // P0
             tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
           } else if (trackPts.length == 1) {
             // P1: 初始化 Kalman
             tracker.initKalman(
-              trackPts[0].x.toDouble(),
-              trackPts[0].y.toDouble(),
-              best.dx,
-              best.dy,
+              trackPts[0].x.toDouble(), trackPts[0].y.toDouble(),
+              best.dx, best.dy,
             );
             tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
           } else {
-            // P2+: 正常追蹤
-            tracker.predictKalman();
+            // P2+: Kalman 已在幀頭預測，直接更新
             tracker.updateKalman(best.dx, best.dy);
             tracker.addTrackPoint(best.dx.toInt(), best.dy.toInt(), i, ptsUs);
           }
-          
+
           trackPts.add(TrackPoint(
             x: best.dx.toInt(),
             y: best.dy.toInt(),
@@ -392,19 +420,17 @@ class ClipPipelineService {
             ptsUs: ptsUs,
           ));
         }
-        
+
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
 
         if (trackPts.length >= 2) {
-          // 計算當前的 ROI 尺寸用於視覺化
-          final baseRoiSize = 400;  // 基本 ROI 尺寸
           final currentRoiSize = tracker.getDynamicRoiSize(baseRoiSize);
-          
+
           final withTraj = await BallTrajectoryService.renderOverlay(
             inputPath: skeletonPath,
             outputPath: trajOut,
             trackPts: trackPts.map((pt) => pt.toMap()).toList(),
-            roiSize: currentRoiSize,  // 傳遞 ROI 尺寸用於繪製邊界框
+            roiSize: currentRoiSize,
           );
           if (withTraj != null) {
             hasBallTrack = true;
