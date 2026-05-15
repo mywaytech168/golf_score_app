@@ -193,8 +193,8 @@ class SkeletonOverlayRenderer(private val context: Context) {
         val overlayPixels = IntArray(encW * encH)
         // 骨架繪製參數：基於編碼尺寸（Canvas 是 encW×encH）
         val encShortSide = minOf(encW, encH).toFloat()
-        linePaint.strokeWidth = (encShortSide / 80f).coerceIn(2f, 7f)
-        val skeletonRadius = (encShortSide / 60f).coerceIn(3f, 9f)
+        linePaint.strokeWidth = (encShortSide / 120f).coerceIn(0.8f, 3f)  // 線條更細：0.8-3 像素（之前 2-7）
+        val skeletonRadius = (encShortSide / 100f).coerceIn(1.5f, 5f)     // 骨架點更小：1.5-5 像素（之前 3-9）
 
         try {
             while (true) {
@@ -363,10 +363,17 @@ class SkeletonOverlayRenderer(private val context: Context) {
             val la = landmarks.getOrNull(a) ?: continue
             val lb = landmarks.getOrNull(b) ?: continue
             if (la.visibility < 0.3f || lb.visibility < 0.3f) continue
+            
+            // 顏色方案：
+            // 1. 右手腕（16）相關 → 紅色
+            // 2. 左臂 → 綠色
+            // 3. 右臂其他 → 藍色
+            // 4. 躯幹、腿 → 黃色
             linePaint.color = when {
-                a in LEFT_LANDMARKS  && b in LEFT_LANDMARKS  -> Color.argb(210, 0, 230, 90)
-                a in RIGHT_LANDMARKS && b in RIGHT_LANDMARKS -> Color.argb(210, 240, 55, 55)
-                else                                          -> Color.argb(210, 255, 215, 0)
+                a == 16 || b == 16                                          -> Color.argb(210, 255, 50, 50)   // 紅色 - 右手腕
+                a in LEFT_LANDMARKS && b in LEFT_LANDMARKS                 -> Color.argb(210, 0, 230, 90)    // 綠色 - 左臂
+                a in RIGHT_LANDMARKS && b in RIGHT_LANDMARKS && a != 16 && b != 16 -> Color.argb(210, 70, 150, 240)  // 藍色 - 右臂（非手腕）
+                else                                                         -> Color.argb(210, 255, 215, 0)   // 黃色 - 躯幹、腿
             }
             canvas.drawLine(la.xPx * scaleX, la.yPx * scaleY,
                             lb.xPx * scaleX, lb.yPx * scaleY, linePaint)
@@ -374,10 +381,11 @@ class SkeletonOverlayRenderer(private val context: Context) {
 
         for ((i, lm) in landmarks.withIndex()) {
             if (lm == null || lm.visibility < 0.3f) continue
-            dotPaint.color = when (i) {
-                in LEFT_LANDMARKS  -> Color.argb(230, 0, 200, 70)
-                in RIGHT_LANDMARKS -> Color.argb(230, 210, 35, 35)
-                else               -> Color.argb(230, 255, 200, 0)
+            dotPaint.color = when {
+                i == 16                                  -> Color.argb(230, 255, 30, 30)    // 紅色 - 右手腕
+                i in LEFT_LANDMARKS                      -> Color.argb(230, 0, 200, 70)    // 綠色 - 左臂
+                i in RIGHT_LANDMARKS && i != 16          -> Color.argb(230, 70, 140, 220)  // 藍色 - 右臂（非手腕）
+                else                                     -> Color.argb(230, 255, 200, 0)   // 黃色 - 其他
             }
             canvas.drawCircle(lm.xPx * scaleX, lm.yPx * scaleY, radius, dotPaint)
         }

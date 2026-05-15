@@ -3,6 +3,7 @@ package com.example.golf_score_app
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.media.Image
 import android.media.MediaCodec
@@ -42,6 +43,10 @@ class TrajectoryOverlayRenderer {
         private const val SHADOW_ALPHA = 100
         private const val SHADOW_WIDTH = 10f
 
+        // ROI 繪製參數
+        private val ROI_COLOR      = Color.argb(150, 0, 255, 255)  // 青色半透明
+        private const val ROI_STROKE   = 3f
+
         // 預快取 Paint（所有 render() 呼叫為序列，共用安全）
         private val shadowPaint by lazy {
             Paint().apply {
@@ -78,6 +83,15 @@ class TrajectoryOverlayRenderer {
                 isAntiAlias = true
             }
         }
+        private val roiBorderPaint by lazy {
+            Paint().apply {
+                color       = ROI_COLOR
+                strokeWidth = ROI_STROKE
+                style       = Paint.Style.STROKE
+                isAntiAlias = true
+                pathEffect  = DashPathEffect(floatArrayOf(10f, 5f), 0f)
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────
@@ -89,12 +103,14 @@ class TrajectoryOverlayRenderer {
      * @param outputPath 輸出路徑（骨架 + 球軌跡）
      * @param trackPts   Dart 回傳的軌跡點 List<Map>，
      *                   每個 Map 含 "x"(Int), "y"(Int), "pts"(Long)
+     * @param roiSize    ROI 尺寸（像素），若 > 0 則繪製 ROI 邊界框，預設 = 0（不繪製）
      * @return 成功回傳 true
      */
     fun render(
         inputPath: String,
         outputPath: String,
         trackPts: List<Map<String, Any>>,
+        roiSize: Int = 0,
     ): Boolean {
         if (!File(inputPath).exists()) {
             Log.w(TAG, "輸入檔不存在: $inputPath"); return false
@@ -245,10 +261,19 @@ class TrajectoryOverlayRenderer {
 
                     // ── 找出本幀應顯示的軌跡點（二分搜尋，O(log n)）──
                     val visibleEnd = sortedPts.binarySearchLast { it.first <= pts }
-                    if (visibleEnd >= 0) {
-                        val visible = sortedPts.subList(0, visibleEnd + 1)
-                        if (visible.size >= 2) drawTrajectory(Canvas(frameBmp), visible)
-                        else drawDot(Canvas(frameBmp), visible[0].second, visible[0].third)
+                    val visible = if (visibleEnd >= 0) {
+                        sortedPts.subList(0, visibleEnd + 1)
+                    } else {
+                        emptyList()
+                    }
+                    
+                    if (visible.size >= 2) drawTrajectory(Canvas(frameBmp), visible)
+                    else if (visible.isNotEmpty()) drawDot(Canvas(frameBmp), visible[0].second, visible[0].third)
+
+                    // ── 繪製 ROI 邊界框（如果指定）──
+                    if (roiSize > 0 && visible.isNotEmpty()) {
+                        val centerPt = visible.last()
+                        drawROI(Canvas(frameBmp), centerPt.second, centerPt.third, roiSize, videoW, videoH)
                     }
 
                     // ── Bitmap → 編碼器（重用 encPixels + nv12Buf）──
@@ -359,6 +384,30 @@ class TrajectoryOverlayRenderer {
 
     private fun drawDot(canvas: Canvas, x: Int, y: Int) {
         canvas.drawCircle(x.toFloat(), y.toFloat(), DOT_RADIUS, dotFillPaint)
+    }
+
+    /**
+     * 繪製 ROI 邊界框（虛線矩形，以最新軌跡點為中心）
+     * @param canvas  Canvas 物件
+     * @param centerX 中心點 X 座標
+     * @param centerY 中心點 Y 座標
+     * @param roiSize ROI 尺寸（像素，寬度 = 高度 = roiSize）
+     * @param videoW  視頻寬度（用於邊界夾緊）
+     * @param videoH  視頻高度（用於邊界夾緊）
+     */
+    private fun drawROI(canvas: Canvas, centerX: Int, centerY: Int, roiSize: Int, videoW: Int, videoH: Int) {
+        val halfRoi = roiSize / 2f
+        val left   = (centerX - halfRoi).coerceIn(0f, (videoW - 1).toFloat())
+        val top    = (centerY - halfRoi).coerceIn(0f, (videoH - 1).toFloat())
+        val right  = (centerX + halfRoi).coerceIn(0f, (videoW - 1).toFloat())
+        val bottom = (centerY + halfRoi).coerceIn(0f, (videoH - 1).toFloat())
+        
+        canvas.drawRect(left, top, right, bottom, roiBorderPaint)
+        
+        // 繪製中心十字標記
+        val crossSize = 15f
+        canvas.drawLine(centerX - crossSize, centerY.toFloat(), centerX + crossSize, centerY.toFloat(), roiBorderPaint)
+        canvas.drawLine(centerX.toFloat(), centerY - crossSize, centerX.toFloat(), centerY + crossSize, roiBorderPaint)
     }
 
     // ────────────────────────────────────────────────────────────

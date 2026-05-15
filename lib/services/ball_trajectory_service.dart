@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'ball_tracker.dart';
+import 'detection_config.dart';  // [新增] 動態配置
 
 /// 幀偵測結果（Kotlin extractBlobs 回傳）
 class FrameExtractionResult {
@@ -60,6 +61,35 @@ class BallTrajectoryService {
     }
   }
 
+  /// 動態配置版本：對 [inputPath] 做逐幀偵測，使用 [config] 動態參數
+  /// [新增 Week 3] 此方法調用 Kotlin 的 'extractBlobsWithConfig'
+  /// 
+  /// 參數:
+  /// - inputPath: 影片路徑
+  /// - config: 動態檢測配置（diffThresh, areaLo, areaHi, circMin）
+  /// - roiSize: 搜尋區域大小（用於後續 ROI 擴大）
+  static Future<FrameExtractionResult?> extractBlobsWithConfig({
+    required String inputPath,
+    required DetectionConfig config,
+    required int roiSize,
+  }) async {
+    try {
+      final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'extractBlobsWithConfig',
+        {
+          'inputPath': inputPath,
+          'config': config.toMap(),
+          'roiSize': roiSize,
+        },
+      );
+      if (raw == null) return null;
+      return FrameExtractionResult._fromMap(raw);
+    } catch (e) {
+      debugPrint('[BallTraj] extractBlobsWithConfig error: $e');
+      return null;
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────
   // Step 2：Kotlin I/O 層 → 疊加軌跡
   // ──────────────────────────────────────────────────────────────
@@ -70,11 +100,14 @@ class BallTrajectoryService {
   /// [trackPts] 由 [TrackPoint.toMap] 序列化而來：
   ///   [{'x': int, 'y': int, 'pts': int (μs)}, ...]
   ///
+  /// [roiSize] - 可選，ROI 尺寸（像素），若 > 0 則繪製 ROI 邊界框，預設 = 0（不繪製）
+  ///
   /// 成功回傳 [outputPath]，失敗回傳 null。
   static Future<String?> renderOverlay({
     required String inputPath,
     required String outputPath,
     required List<Map<String, dynamic>> trackPts,
+    int roiSize = 0,
   }) async {
     try {
       final ok = await _channel.invokeMethod<bool>(
@@ -83,6 +116,7 @@ class BallTrajectoryService {
           'inputPath':  inputPath,
           'outputPath': outputPath,
           'trackPts':   trackPts,
+          'roiSize':    roiSize,
         },
       );
       return ok == true ? outputPath : null;

@@ -45,12 +45,34 @@ class BallBlobExtractor {
     companion object {
         private const val TAG = "BallBlobExtractor"
 
-        // ── 寬鬆偵測門檻（Dart 會在其上疊動態門檻）──
-        private const val DIFF_THRESH = 18        // 幀差最小值（提高以濾掉身體/背景噪訊）
-        private const val AREA_LO    = 5          // blob 最小面積（像素）
-        private const val AREA_HI    = 600        // blob 最大面積（像素）
-        private const val CIRC_MIN   = 0.30       // 最低圓度
-        private const val MORPH_K    = 3          // 形態開運算 kernel 尺寸
+        // ── 默認偵測門檻（Dart 會透過 MethodChannel 動態調整）──
+        private const val DIFF_THRESH_DEFAULT = 18        // 幀差最小值
+        private const val AREA_LO_DEFAULT    = 5          // blob 最小面積（像素）
+        private const val AREA_HI_DEFAULT    = 600        // blob 最大面積（像素）
+        private const val CIRC_MIN_DEFAULT   = 0.30       // 最低圓度
+        private const val MORPH_K            = 3          // 形態開運算 kernel 尺寸
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 動態檢測配置
+    // ────────────────────────────────────────────────────────────
+    data class DetectionConfig(
+        val diffThresh: Int = DIFF_THRESH_DEFAULT,
+        val areaLo: Int = AREA_LO_DEFAULT,
+        val areaHi: Int = AREA_HI_DEFAULT,
+        val circMin: Double = CIRC_MIN_DEFAULT,
+    ) {
+        companion object {
+            fun fromMap(map: Map<String, Any?>?): DetectionConfig {
+                if (map == null) return DetectionConfig()
+                return DetectionConfig(
+                    diffThresh = (map["diffThresh"] as? Number)?.toInt() ?: DIFF_THRESH_DEFAULT,
+                    areaLo = (map["areaLo"] as? Number)?.toInt() ?: AREA_LO_DEFAULT,
+                    areaHi = (map["areaHi"] as? Number)?.toInt() ?: AREA_HI_DEFAULT,
+                    circMin = (map["circMin"] as? Number)?.toDouble() ?: CIRC_MIN_DEFAULT,
+                )
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────
@@ -59,13 +81,19 @@ class BallBlobExtractor {
 
     /**
      * 對 [inputPath] 的影片做逐幀偵測，回傳每幀的 blob 資料列表。
+     * [config] - 由 Dart 層動態計算傳入的檢測配置
      * 失敗時回傳 null。
      */
-    fun extract(inputPath: String): Map<String, Any>? {
+    fun extract(inputPath: String, config: Map<String, Any?>? = null): Map<String, Any>? {
         if (!File(inputPath).exists()) {
             Log.w(TAG, "輸入檔不存在: $inputPath")
             return null
         }
+
+        val detectionConfig = DetectionConfig.fromMap(config)
+        Log.d(TAG, "[extract] 使用檢測配置: diffThresh=${detectionConfig.diffThresh}, " +
+            "areaLo=${detectionConfig.areaLo}, areaHi=${detectionConfig.areaHi}, " +
+            "circMin=${detectionConfig.circMin}")
 
         // ── 1. 建立 MediaExtractor ──────────────────────────────
         val extractor = MediaExtractor()
@@ -175,7 +203,7 @@ class BallBlobExtractor {
                     // blob 座標最後再轉換到 display-space
                     val prevY = prevYData
                     val codedBlobs = if (prevY != null && prevY.size == yRaw.size) {
-                        detectBlobs(yRaw, prevY, videoW, videoH, yStride)
+                        detectBlobs(yRaw, prevY, videoW, videoH, yStride, detectionConfig)
                     } else {
                         emptyList()
                     }
@@ -249,6 +277,7 @@ class BallBlobExtractor {
     private fun detectBlobs(
         cur: ByteArray, prev: ByteArray,
         w: Int, h: Int, stride: Int,
+        config: DetectionConfig = DetectionConfig(),
     ): List<Map<String, Any>> {
 
         // 1. 幀差 + 二值化
@@ -262,7 +291,7 @@ class BallBlobExtractor {
                     (prev[j * stride + i].toInt() and 0xFF)
                 )
                 diff[j * w + i]   = d.toByte()
-                binary[j * w + i] = d >= DIFF_THRESH
+                binary[j * w + i] = d >= config.diffThresh  // ← 使用動態參數
             }
         }
 
@@ -310,13 +339,13 @@ class BallBlobExtractor {
                 if (isBorder) perim++
             }
 
-            // 面積篩選
-            if (area !in AREA_LO..AREA_HI) continue
+            // 面積篩選（使用動態參數）
+            if (area !in config.areaLo..config.areaHi) continue
 
             // 圓度
             val circ = if (perim < 1) 0.0
                        else 4.0 * Math.PI * area / (perim.toDouble() * perim)
-            if (circ < CIRC_MIN) continue
+            if (circ < config.circMin) continue  // ← 使用動態參數
 
             val cx       = (sumX / area).toInt()
             val cy       = (sumY / area).toInt()

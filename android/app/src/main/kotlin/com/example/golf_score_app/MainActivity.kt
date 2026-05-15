@@ -280,12 +280,41 @@ class MainActivity: FlutterActivity() {
                         }
                     }
 
+                    // ── [Week 3] Step 1b：動態配置版本 → 每幀 blob ──────────────
+                    "extractBlobsWithConfig" -> {
+                        val inputPath = call.argument<String>("inputPath")
+                        @Suppress("UNCHECKED_CAST")
+                        val configMap = call.argument<Map<String, Any?>>("config")
+                        val roiSize = call.argument<Int>("roiSize") ?: 400
+                        
+                        if (inputPath.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 inputPath", null)
+                            return@setMethodCallHandler
+                        }
+                        
+                        ballTrajExecutor.execute {
+                            try {
+                                // 直接傳遞 configMap，extract() 會自己內部調用 DetectionConfig.fromMap
+                                val data = ballBlobExtractor.extract(inputPath, configMap)
+                                
+                                runOnUiThread {
+                                    if (data != null) result.success(data)
+                                    else result.error("extract_failed", "blob 偵測失敗", null)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "blob 偵測例外: ${e.message}", e)
+                                runOnUiThread { result.error("extract_failed", e.message, null) }
+                            }
+                        }
+                    }
+
                     // ── Step 2：Kotlin I/O 層 → 疊加軌跡 ───────────────
                     "renderOverlay" -> {
                         val inputPath  = call.argument<String>("inputPath")
                         val outputPath = call.argument<String>("outputPath")
                         @Suppress("UNCHECKED_CAST")
                         val trackPts   = call.argument<List<Map<String, Any>>>("trackPts")
+                        val roiSize    = call.argument<Int>("roiSize") ?: 0  // 可選，預設 0（不繪製 ROI）
 
                         if (inputPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
                             result.error("invalid_args", "缺少 inputPath / outputPath", null)
@@ -298,6 +327,7 @@ class MainActivity: FlutterActivity() {
                                     inputPath  = inputPath,
                                     outputPath = outputPath,
                                     trackPts   = trackPts ?: emptyList(),
+                                    roiSize    = roiSize,
                                 )
                                 runOnUiThread { result.success(ok) }
                             } catch (e: Exception) {
