@@ -2,9 +2,9 @@
 
 /// 視頻錄製配置選項
 enum VideoQuality {
-  low(480, 1500000, '低 (480p)'),
-  standard(720, 3000000, '標準 (720p)'),
-  hd(1080, 6000000, '高 (1080p)');
+  low(480, 8000000, '低 (480p)'),
+  standard(720, 18000000, '標準 (720p)'),
+  hd(1080, 30000000, '高 (1080p)');
 
   final int height;
   final int bitrate;

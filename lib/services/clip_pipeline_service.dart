@@ -8,7 +8,6 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import 'ball_tracker.dart';
-import 'enhanced_ball_tracker.dart';
 import 'ball_trajectory_service.dart';
 import 'skeleton_overlay_service.dart';
 import 'video_analysis_service.dart';
@@ -300,8 +299,6 @@ class ClipPipelineService {
     if (skeletonPath != null) {
       onProgress?.call('追蹤球軌跡中...');
       final trajOut = p.join(sessionDir, 'final.mp4');
-      
-      final tracker = EnhancedBallTracker(dt: 1.0 / 30.0);
 
       final extraction =
           await BallTrajectoryService.extractBlobs(inputPath: clipPath);
@@ -314,19 +311,15 @@ class ClipPipelineService {
             'fps=${extraction.fps.toStringAsFixed(1)}，'
             '${extraction.width}×${extraction.height}');
 
-        for (int i = 0; i < extraction.frames.length; i++) {
-          if (!tracker.processFrame(
-            extraction.frames[i],
-            i,
-            videoW: extraction.width,
-            videoH: extraction.height,
-          )) {
-            debugPrint('[Pipeline.analyze] ⚠️ 追蹤凍結於幀 $i');
-            break;
-          }
-        }
-
-        final trackPts = tracker.trackPoints;
+        // 使用新的 BallTracker（一次性處理所有幀）
+        final tracker = BallTracker();
+        final trackPts = tracker.track(
+          frames: extraction.frames,
+          fps: extraction.fps,
+          videoW: extraction.width,
+          videoH: extraction.height,
+        );
+        
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
         
         // 🔍 追蹤統計
@@ -337,17 +330,10 @@ class ClipPipelineService {
   • 總幀數: ${extraction.frames.length}
   • 成功追蹤: ${trackPts.length}
   • 成功率: $successRate%
-  • 異常計數: ${tracker.outlierStrikes}
-  • 追蹤凍結: ${tracker.trackingFrozen ? '是' : '否'}
-  • Y方向: ${tracker.yDir == 1 ? '⬇向下' : (tracker.yDir == -1 ? '⬆向上' : '?未決定')}
 ''');
 
         if (trackPts.length >= 2) {
-          final roiSize = tracker.getDynamicRoiSize(
-            EnhancedBallTracker.baseRoiSize,
-            videoW: extraction.width,
-            videoH: extraction.height,
-          );
+          const int roiSize = 400;
           
           // 🔍 DEBUG: 打印所有軌跡點位置
           debugPrint('[轨跡調試] 軌跡點詳細信息 (共 ${trackPts.length} 點)：');

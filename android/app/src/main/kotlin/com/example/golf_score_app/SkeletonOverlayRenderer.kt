@@ -147,25 +147,25 @@ class SkeletonOverlayRenderer(private val context: Context) {
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
         // 骨架疊加限制在 720p（長邊），避免 JVM 像素迴圈在 1080p 耗費過久
-        // 1080p：2,073,600 pixels → 720p：291,600 pixels（~7x 加速）
-        val maxLongSide = 720
-        val srcLong = maxOf(displayW, displayH)
-        val sc = if (srcLong > maxLongSide) maxLongSide.toFloat() / srcLong else 1.0f
-        fun scaleEven(v: Int) = if (sc < 1f) ((v * sc).roundToInt().let { if (it % 2 != 0) it + 1 else it }) else v
-        val skelW = scaleEven(displayW)
-        val skelH = scaleEven(displayH)
+        // ✅ 高質量編碼：根據解析度動態調整係數
+        // 從 0.25-0.8 bpp 改為 0.8-1.0 bpp，保留清晰度
+        val bitRateCoeff = when {
+            displayW >= 1440 -> 1.0   // 2K+ 解析度
+            displayW >= 1080 -> 0.8   // 1080p
+            else              -> 0.6   // 720p 以下
+        }
+        val bitRate = (displayW.toLong() * displayH * fps * bitRateCoeff)
+            .toLong().coerceIn(8_000_000L, 25_000_000L).toInt()
         // 部分硬體編碼器要求寬高為 16 的倍數
-        val encW = (skelW + 15) and -16
-        val encH = (skelH + 15) and -16
-        val bitRate = (skelW.toLong() * skelH * fps * 0.8)
-            .toLong().coerceIn(2_000_000L, 8_000_000L).toInt()
+        val encW = (displayW + 15) and -16
+        val encH = (displayH + 15) and -16
         val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
-        Log.d(TAG, "骨架編碼: ${encW}x${encH}（display=${displayW}x${displayH}，scale=%.2f）bitRate=${bitRate/1_000_000}Mbps".format(sc))
+        Log.d(TAG, "骨架編碼: ${encW}x${encH}（display=${displayW}x${displayH}）bitRate=${bitRate/1_000_000}Mbps (coeff=$bitRateCoeff)")
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 

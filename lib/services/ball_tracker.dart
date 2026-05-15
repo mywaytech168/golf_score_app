@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 // ============================================================
 // Data types (MethodChannel 雙向傳遞)
@@ -218,5 +219,515 @@ class Kalman2D {
       for (int j = 0; j < 4; j++) B[i * 4 + j] = A[j * 4 + i];
     }
     return B;
+  }
+}
+
+// ============================================================
+// BallTracker
+// 完整移植 Python trajectory_tracker_v3_stable.py 的狀態機與決策邏輯
+// ============================================================
+enum _TrackState { waitP0, waitP1, tracking, stopped }
+
+class BallTracker {
+  // ── 基礎偵測設定（對應 Python DETECT_CFG_BASE）────────────
+  static const int _areaLoBase = 6;
+  static const int _areaHiBase = 150;
+  static const double _circBase = 0.55;
+
+  // ── 動態放寬下限（Python 各 XXX_MIN 常數）────────────────
+  static const double _cfgSpeed = 0.4;
+  static const double _circMin = 0.45;
+  static const int _areaLoMin = 6;
+
+  // ── 遠球自適應（FAR_*）────────────────────────────────────
+  static const bool _enableFarAdaptive = true;
+  static const double _farCircFloor = 0.35;
+  static const int _farAreaLoFloor = 1;
+  static const double _farRelaxGain = 1.0;
+  static const double _farAreaEmaAlpha = 0.20;
+  static const int _farFewCandsMax = 3;
+  static const int _farManyCandsStop = 25;
+
+  // ── ROI 篩選（Python FIXED_ROI_MODE + ROI_CENTER_LOCK_TO_LAST）──────────
+  // ROI 中心位置（歸一化坐標）
+  static const double _fixedRoiCenterRatioX = 0.6519;
+  static const double _fixedRoiCenterRatioY = 0.5646;
+  // ROI 尺寸（相對於視頻解析度的比例）
+  static const double _roiFixedSizeRatioW = 0.3704;
+  static const double _roiFixedSizeRatioH = 0.2083;
+  // 追蹤中 ROI 動態增長（每 miss 增加該比例）
+  static const double _roiGrowPerMiss = 35.0;
+  static const double _roiHalfMax     = 200.0;
+
+  // ── P0 / P1 ──────────────────────────────────────────────
+  static const int _p1DeadlineFrames = 3;
+  static const int _waitMaxFrames = 180;
+
+  // ── Tracking ─────────────────────────────────────────────
+  static const bool _stopWhenNoCand = true;
+  static const int _noCandPatience = 4;
+  static const int _tooManyCandsThreshold = 4;
+  static const bool _tooManyUseBlue = true;
+  static const int _bluePOffset = -2;
+  static const double _blueToLastPMaxDist = 150.0;
+
+  // ── Y 方向過濾（USE_Y_DIRECTION）─────────────────────────
+  static const bool _useYDirection = true;
+  static const bool _strictYDirection = false;
+  static const int _yTol = 1;
+  static const int _yMaxStep = 80;
+
+  // ── 步長守衛（USE_STEP_DIST_GUARD）───────────────────────
+  static const bool _useStepDistGuard = true;
+  static const double _stepEmaAlpha = 0.25;
+  static const double _stepGrowthFactor = 1.9;
+  static const double _stepAbsMax = 140.0;
+  static const double _stepAbsHardMax = 200.0;
+  static const double _predDistHardMax = 250.0;
+  static const int _outlierStrikesToFreeze = 8;
+
+  // ── 執行狀態（每次 track() 重置）─────────────────────────
+  _TrackState _state = _TrackState.waitP0;
+  final List<TrackPoint> _trackPts = [];
+  int _p0FrameIdx = -1;
+  int _noCandCount = 0;
+  int _waitFrames = 0;
+  double? _stepEma;
+  double? _areaEma;
+  int? _yDir;
+  final List<(double, double)> _blueHist = [];
+  int _outlierStrikes = 0;
+  late Kalman2D _kf;
+
+  // ── 擊球時間視窗（由 hitSec 計算，避免在揮桿前偵測到球桿頭）──────────
+  int _hitWindowStart = 0;
+  int _hitWindowEnd   = -1;
+
+  /// 對整段影片的逐幀 blob 資料執行追蹤，回傳軌跡點列表。
+  List<TrackPoint> track({
+    required List<FrameBlobs> frames,
+    required double fps,
+    required int videoW,
+    required int videoH,
+    double? hitSec,
+  }) {
+    // 重置所有狀態
+    _state = _TrackState.waitP0;
+    _trackPts.clear();
+    _p0FrameIdx = -1;
+    _noCandCount = 0;
+    _waitFrames = 0;
+    _stepEma = null;
+    _areaEma = null;
+    _yDir = null;
+    _blueHist.clear();
+    _outlierStrikes = 0;
+    _kf = Kalman2D(dt: 1.0 / math.max(fps, 1.0));
+
+    // 🔍 ROI 調試：打印初始化資訊
+    final roiHalfW = videoW * _roiFixedSizeRatioW / 2;
+    final roiHalfH = videoH * _roiFixedSizeRatioH / 2;
+    final roiHalfBase = math.min(roiHalfW, roiHalfH);
+    final roiCenterX = (videoW * _fixedRoiCenterRatioX).round();
+    final roiCenterY = (videoH * _fixedRoiCenterRatioY).round();
+    debugPrint('''[BallTracker.track] 🎬 追蹤初始化
+  • 視頻解析度: ${videoW}×${videoH}
+  • ROI 中心: ($roiCenterX, $roiCenterY) [比例: ${_fixedRoiCenterRatioX.toStringAsFixed(4)}, ${_fixedRoiCenterRatioY.toStringAsFixed(4)}]
+  • ROI 尺寸: W=$roiHalfW, H=$roiHalfH
+  • ROI 半徑: $roiHalfBase px
+  • 總幀數: ${frames.length}
+''');
+
+    // 計算擊球時間視窗
+    if (hitSec != null) {
+      const double leadSec  = 0.5;
+      const double trailSec = 1.0;
+      _hitWindowStart = math.max(0, ((hitSec - leadSec) * fps).round());
+      _hitWindowEnd   = ((hitSec + trailSec) * fps).round();
+    } else {
+      _hitWindowStart = 0;
+      _hitWindowEnd   = -1;
+    }
+
+    for (int fi = 0; fi < frames.length; fi++) {
+      final frame = frames[fi];
+
+      // ── Kalman 預測（在 ROI 篩選前執行，提供 tracking 狀態的 ROI 中心）──
+      (double, double)? bluePred;
+      if (_state == _TrackState.tracking && _kf.initialized) {
+        _kf.predict();
+        bluePred = _kf.pos;
+        _blueHist.add(bluePred);
+        if (_blueHist.length > 10) _blueHist.removeAt(0);
+      }
+
+      // ── ROI 空間篩選（模擬 Python 400×400 視窗，大幅降低假陽性）──
+      final roiFiltered = _applyRoiFilter(frame.blobs, videoW, videoH, bluePred);
+
+      // ── 動態門檻篩選（Dart 層複製 Python 動態 circ/area 門檻）──
+      final pIndex = math.max(_trackPts.length - 1, 0);
+      final filtered = _applyDynamicFilter(
+        roiFiltered, pIndex, _noCandCount, _areaEma,
+      );
+
+      _processFrame(fi, frame.ptsUs, filtered, videoW, videoH, bluePred);
+    }
+
+    return List.unmodifiable(_trackPts);
+  }
+
+  /// 根據追蹤進度計算本幀的動態門檻，回傳 (areaLo, areaHi, circThresh)
+  ({int areaLo, int areaHi, double circThresh}) _getDynamicCfg(
+    int pIndex, {
+    int missCount = 0,
+    double? areaEma,
+  }) {
+    final t = math.max(pIndex - 1, 0).toDouble();
+    final tt = _cfgSpeed * t;
+    final relax = 1.0 / (1.0 + 0.45 * tt);
+
+    var lo = (_areaLoBase * relax).round().clamp(_areaLoMin, _areaLoBase);
+    var hi = (_areaHiBase * (0.80 + 0.20 * relax))
+        .round()
+        .clamp(lo + 2, _areaHiBase);
+    var circ = (_circBase * (0.90 * relax + 0.10)).clamp(_circMin, _circBase);
+
+    if (_enableFarAdaptive && missCount > 0) {
+      final k = missCount * _farRelaxGain;
+      lo = math.max(_farAreaLoFloor, (lo - 0.8 * k).round());
+      hi = (hi + 1.2 * k).round();
+      if (areaEma != null && areaEma > 0) {
+        lo = math.min(lo, math.max(_farAreaLoFloor, (areaEma * 0.35).round()));
+        hi = math.max(hi, (areaEma * 2.8).round());
+      }
+      hi = math.max(lo + 2, hi);
+      circ = math.max(_farCircFloor, circ - 0.03 * k);
+    }
+
+    return (areaLo: lo, areaHi: hi, circThresh: circ);
+  }
+
+  /// 對 Kotlin 傳來的寬鬆 blob 列表套用動態門檻（Dart 層過濾）
+  List<BlobData> _applyDynamicFilter(
+    List<BlobData> raw, int pIndex, int missCount, double? areaEma,
+  ) {
+    if (_state == _TrackState.waitP0 || _state == _TrackState.waitP1) {
+      return raw
+          .where((b) =>
+              b.area >= _areaLoBase &&
+              b.area <= _areaHiBase &&
+              b.circ >= _circBase)
+          .toList();
+    }
+
+    final cfg = _getDynamicCfg(pIndex, missCount: missCount, areaEma: areaEma);
+    return raw
+        .where((b) =>
+            b.area >= cfg.areaLo &&
+            b.area <= cfg.areaHi &&
+            b.circ >= cfg.circThresh)
+        .toList();
+  }
+
+  /// 根據追蹤狀態，只保留在 ROI 視窗內的 blob。
+  List<BlobData> _applyRoiFilter(
+    List<BlobData> blobs,
+    int w, int h,
+    (double, double)? bluePred,
+  ) {
+    if (blobs.isEmpty) return blobs;
+
+    // 計算基礎 ROI 尺寸（以較小的維度為準，確保ROI為正方形）
+    final roiHalfW = w * _roiFixedSizeRatioW / 2;
+    final roiHalfH = h * _roiFixedSizeRatioH / 2;
+    final roiHalfBase = math.min(roiHalfW, roiHalfH);
+
+    switch (_state) {
+      case _TrackState.waitP0:
+        final cx = (w * _fixedRoiCenterRatioX).round();
+        final cy = (h * _fixedRoiCenterRatioY).round();
+        final filtered = blobs
+            .where((b) => _dist(b.cx, b.cy, cx, cy) <= roiHalfBase)
+            .toList();
+        // 🔍 偶爾打印 P0 搜尋信息
+        if (blobs.length > 0 && blobs.length <= 15) {
+          debugPrint('[ROI.waitP0] 中心($cx, $cy) 半徑=$roiHalfBase | blob: ${blobs.length} → ${filtered.length}');
+        }
+        return filtered;
+
+      case _TrackState.waitP1:
+        if (_trackPts.isEmpty) return blobs;
+        final p0 = _trackPts.first;
+        final filtered = blobs
+            .where((b) => _dist(b.cx, b.cy, p0.x, p0.y) <= roiHalfBase)
+            .toList();
+        if (blobs.length > 0 && blobs.length <= 15) {
+          debugPrint('[ROI.waitP1] P0(${ p0.x}, ${p0.y}) 半徑=$roiHalfBase | blob: ${blobs.length} → ${filtered.length}');
+        }
+        return filtered;
+
+      case _TrackState.tracking:
+        final radius = math.min(
+          _roiHalfMax,
+          roiHalfBase + _noCandCount * _roiGrowPerMiss,
+        );
+        double cx, cy;
+        String centerSource = '';
+        if (_noCandCount > 0 && bluePred != null) {
+          cx = bluePred.$1;
+          cy = bluePred.$2;
+          centerSource = '[Kalman]';
+        } else if (_trackPts.isNotEmpty) {
+          cx = _trackPts.last.x.toDouble();
+          cy = _trackPts.last.y.toDouble();
+          centerSource = '[Last]';
+        } else {
+          return blobs;
+        }
+        final filtered = blobs
+            .where((b) => _dist(b.cx, b.cy, cx.round(), cy.round()) <= radius)
+            .toList();
+        // 只打印候選較少或有過濾時
+        if ((blobs.length > 0 && blobs.length <= 10) || filtered.isEmpty) {
+          debugPrint('[ROI.tracking] center${centerSource}(${cx.round()}, ${cy.round()}) r=$radius miss=$_noCandCount | blob: ${blobs.length} → ${filtered.length}');
+        }
+        return filtered;
+
+      case _TrackState.stopped:
+        return blobs;
+    }
+  }
+
+  void _processFrame(
+    int frameIdx, int ptsUs, List<BlobData> blobs, int w, int h,
+    (double, double)? bluePred,
+  ) {
+    switch (_state) {
+      case _TrackState.waitP0:
+        _handleWaitP0(frameIdx, ptsUs, blobs, w, h);
+      case _TrackState.waitP1:
+        _handleWaitP1(frameIdx, ptsUs, blobs);
+      case _TrackState.tracking:
+        _handleTracking(frameIdx, ptsUs, blobs, bluePred!);
+      case _TrackState.stopped:
+        break;
+    }
+  }
+
+  void _handleWaitP0(
+    int frameIdx, int ptsUs, List<BlobData> blobs, int w, int h,
+  ) {
+    if (frameIdx < _hitWindowStart) return;
+    if (_hitWindowEnd >= 0 && frameIdx > _hitWindowEnd) {
+      _state = _TrackState.stopped;
+      return;
+    }
+
+    _waitFrames++;
+    if (blobs.isEmpty) {
+      if (_waitFrames >= _waitMaxFrames) {
+        _state = _TrackState.stopped;
+      }
+      return;
+    }
+
+    final roiX = (w * _fixedRoiCenterRatioX).round();
+    final roiY = (h * _fixedRoiCenterRatioY).round();
+    final best = blobs.reduce((a, b) =>
+        _dist2(a.cx, a.cy, roiX, roiY) <= _dist2(b.cx, b.cy, roiX, roiY)
+            ? a
+            : b);
+
+    _trackPts.add(TrackPoint(
+      x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
+    ));
+    _state = _TrackState.waitP1;
+    _p0FrameIdx = frameIdx;
+    _waitFrames = 0;
+  }
+
+  void _handleWaitP1(int frameIdx, int ptsUs, List<BlobData> blobs) {
+    _waitFrames++;
+
+    if (frameIdx - _p0FrameIdx > _p1DeadlineFrames) {
+      _trackPts.clear();
+      _state = _TrackState.waitP0;
+      _waitFrames = 0;
+      _p0FrameIdx = -1;
+      return;
+    }
+
+    if (blobs.isEmpty) return;
+
+    final p0 = _trackPts.first;
+    final valid = blobs.where((b) => _dist(b.cx, b.cy, p0.x, p0.y) > 3).toList();
+    if (valid.isEmpty) return;
+
+    final best = valid.reduce((a, b) =>
+        _dist2(a.cx, a.cy, p0.x, p0.y) <= _dist2(b.cx, b.cy, p0.x, p0.y)
+            ? a
+            : b);
+
+    _trackPts.add(TrackPoint(
+      x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
+    ));
+    _kf.initFromPoints(
+        p0.x.toDouble(), p0.y.toDouble(),
+        best.cx.toDouble(), best.cy.toDouble());
+    _state = _TrackState.tracking;
+    _noCandCount = 0;
+    _blueHist.clear();
+    _outlierStrikes = 0;
+    _stepEma = null;
+    _waitFrames = 0;
+  }
+
+  void _handleTracking(
+    int frameIdx, int ptsUs, List<BlobData> blobs,
+    (double, double) bluePred,
+  ) {
+    if (blobs.isEmpty) {
+      _noCandCount++;
+      if (_stopWhenNoCand && _noCandCount > _noCandPatience) {
+        _state = _TrackState.stopped;
+      }
+      return;
+    }
+
+    if (blobs.length >= _farManyCandsStop) {
+      _state = _TrackState.stopped;
+      return;
+    }
+
+    _noCandCount = 0;
+    final tooMany = blobs.length >= _tooManyCandsThreshold;
+    bool appended = false;
+
+    if (tooMany && _tooManyUseBlue) {
+      final chosen = _pickBlueFromHistory(_bluePOffset);
+      if (chosen != null) {
+        bool ok = true;
+        if (_trackPts.isNotEmpty) {
+          final last = _trackPts.last;
+          final d = _dist(chosen.$1.round(), chosen.$2.round(), last.x, last.y);
+          if (d > _blueToLastPMaxDist) ok = false;
+        }
+        if (ok) {
+          _trackPts.add(TrackPoint(
+            x: chosen.$1.round(), y: chosen.$2.round(),
+            frameIdx: frameIdx, ptsUs: ptsUs,
+          ));
+          appended = true;
+        }
+      }
+    }
+
+    if (!appended && blobs.isNotEmpty) {
+      var pool = List<BlobData>.from(blobs);
+
+      if (_useYDirection && _yDir != null && _noCandCount == 0 && _trackPts.isNotEmpty) {
+        final lastY = _trackPts.last.y;
+        List<BlobData> poolY;
+        if (_yDir! < 0) {
+          poolY = pool.where((b) => b.cy <= lastY + _yTol).toList();
+        } else {
+          poolY = pool.where((b) => b.cy >= lastY - _yTol).toList();
+        }
+        poolY = poolY
+            .where((b) => (b.cy - lastY).abs() <= _yMaxStep)
+            .toList();
+        if (poolY.isNotEmpty) {
+          pool = poolY;
+        } else if (_strictYDirection) {
+          pool = [];
+        }
+      }
+
+      if (pool.isNotEmpty) {
+        final (px, py) = bluePred;
+        BlobData best;
+
+        if (pool.length <= _farFewCandsMax) {
+          best = pool.reduce((a, b) =>
+              _dist2(a.cx, a.cy, px.round(), py.round()) <=
+                      _dist2(b.cx, b.cy, px.round(), py.round())
+                  ? a
+                  : b);
+        } else {
+          best = pool.reduce((a, b) {
+            final scoreA = _dist(a.cx, a.cy, px.round(), py.round()) -
+                0.15 * a.diffMean;
+            final scoreB = _dist(b.cx, b.cy, px.round(), py.round()) -
+                0.15 * b.diffMean;
+            return scoreA <= scoreB ? a : b;
+          });
+        }
+
+        bool accept = true;
+        if (_useStepDistGuard && _trackPts.isNotEmpty) {
+          final last = _trackPts.last;
+          final step = _dist(best.cx, best.cy, last.x, last.y);
+          final baseLim = _stepEma == null
+              ? _stepAbsMax
+              : math.max(_stepAbsMax, _stepEma! * _stepGrowthFactor);
+          final lim = baseLim * (1.0 + 0.35 * _noCandCount);
+          final predDist = _dist(best.cx, best.cy, px.round(), py.round());
+          final hardLim = math.min(_stepAbsHardMax, lim);
+
+          if (step > hardLim || predDist > _predDistHardMax) {
+            accept = false;
+          } else {
+            _stepEma = _stepEma == null
+                ? step
+                : (1.0 - _stepEmaAlpha) * _stepEma! + _stepEmaAlpha * step;
+          }
+        }
+
+        if (accept) {
+          _outlierStrikes = 0;
+          _kf.update(best.cx.toDouble(), best.cy.toDouble());
+          _trackPts.add(TrackPoint(
+            x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
+          ));
+
+          final areaF = best.area.toDouble();
+          _areaEma = _areaEma == null
+              ? areaF
+              : (1.0 - _farAreaEmaAlpha) * _areaEma! +
+                  _farAreaEmaAlpha * areaF;
+
+          if (_useYDirection && _yDir == null && _trackPts.length >= 3) {
+            final dy = _trackPts.last.y - _trackPts.first.y;
+            if (dy.abs() >= 2) _yDir = dy > 0 ? 1 : -1;
+          }
+        } else {
+          _outlierStrikes++;
+          if (_outlierStrikes >= _outlierStrikesToFreeze &&
+              _trackPts.length >= 8) {
+            _state = _TrackState.stopped;
+          }
+        }
+      }
+    }
+  }
+
+  (double, double)? _pickBlueFromHistory(int offset) {
+    if (_blueHist.isEmpty) return null;
+    var idx = _blueHist.length - 1 + offset;
+    if (idx < 0) idx = 0;
+    if (idx >= _blueHist.length) return null;
+    return _blueHist[idx];
+  }
+
+  double _dist(int ax, int ay, int bx, int by) {
+    final dx = (ax - bx).toDouble();
+    final dy = (ay - by).toDouble();
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
+  double _dist2(int ax, int ay, int bx, int by) {
+    final dx = (ax - bx).toDouble();
+    final dy = (ay - by).toDouble();
+    return dx * dx + dy * dy;
   }
 }
