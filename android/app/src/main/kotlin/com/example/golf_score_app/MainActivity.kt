@@ -25,6 +25,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.Executors
 
 // ✅ Google ML Kit Pose Detection 相關導入
+import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.pose.Pose
 import com.google.mlkit.vision.pose.PoseDetection
@@ -408,9 +409,11 @@ class MainActivity: FlutterActivity() {
                 when (call.method) {
                     "analyzePoseVideo" -> {
                         val videoPath = call.argument<String>("videoPath")
-                        val targetFps = call.argument<Int>("targetFps") ?: 15
-                        val maxWidth = call.argument<Int>("maxWidth") ?: 480
+                        // Flutter MethodChannel 傳 Dart int 為 Java Long，不能直接用 call.argument<Int>()
+                        val targetFps = (call.argument<Any>("targetFps") as? Number)?.toInt() ?: 30
+                        val maxWidth  = (call.argument<Any>("maxWidth")  as? Number)?.toInt() ?: 720
                         val outputCsvPath = call.argument<String>("outputCsvPath")
+                        Log.i(logTag, "[PoseAnalyzer] targetFps=$targetFps maxWidth=$maxWidth")
                         
                         if (videoPath.isNullOrBlank() || outputCsvPath.isNullOrBlank()) {
                             result.error("invalid_args", "缺少 videoPath 或 outputCsvPath", null)
@@ -601,7 +604,8 @@ class MainActivity: FlutterActivity() {
     }
 
     
-    // ✅ 方案 B: 完整 Kotlin 原生方案 - 一次開啟 MediaExtractor/MediaCodec + ML Kit + CSV
+    // ✅ 原生全影片分析：一個 MediaCodec 實例 + ML Kit + 直接寫 CSV
+    // 比舊方案（每幀開一個 MediaMetadataRetriever + JNI 傳 1.3MB）快 3-5x
     private fun analyzeVideoNatively(
         videoPath: String,
         targetFps: Int,
@@ -611,188 +615,249 @@ class MainActivity: FlutterActivity() {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var csvWriter: java.io.FileWriter? = null
-        
+        var localDetector: com.google.mlkit.vision.pose.PoseDetector? = null
+
         try {
             extractor.setDataSource(videoPath)
-            
-            // 找到視頻軌道和時長
+
+            // 讀旋轉 metadata（portrait video 通常是 coded 1280×720 + rotation=90）
+            val rotation = MediaMetadataRetriever().use { mmr ->
+                mmr.setDataSource(videoPath)
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull() ?: 0
+            }
+
             var videoTrackIndex = -1
-            var videoDurationUs = 0L
             for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("video/")) {
-                    videoTrackIndex = i
-                    videoDurationUs = format.getLong(MediaFormat.KEY_DURATION)
-                    break
+                val fmt = extractor.getTrackFormat(i)
+                if ((fmt.getString(MediaFormat.KEY_MIME) ?: "").startsWith("video/")) {
+                    videoTrackIndex = i; break
                 }
             }
-            
-            if (videoTrackIndex < 0) {
-                Log.e(logTag, "[PoseAnalyzer] 找不到視頻軌道")
-                return null
-            }
-            
+            if (videoTrackIndex < 0) { Log.e(logTag, "[PoseAnalyzer] 找不到視頻軌道"); return null }
+
             val videoFormat = extractor.getTrackFormat(videoTrackIndex)
-            val videoWidth = videoFormat.getInteger(MediaFormat.KEY_WIDTH)
-            val videoHeight = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
-            val frameRate = if (videoFormat.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                videoFormat.getInteger(MediaFormat.KEY_FRAME_RATE)
-            } else {
-                30  // 默認假設 30fps
+            val codedW = videoFormat.getInteger(MediaFormat.KEY_WIDTH)
+            val codedH = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
+            val mime   = videoFormat.getString(MediaFormat.KEY_MIME) ?: ""
+
+            // display 尺寸（旋轉修正後的正確寬高）
+            val displayW = if (rotation == 90 || rotation == 270) codedH else codedW
+            val displayH = if (rotation == 90 || rotation == 270) codedW else codedH
+
+            val durationMs = MediaMetadataRetriever().use { mmr ->
+                mmr.setDataSource(videoPath)
+                mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             }
-            val mime = videoFormat.getString(MediaFormat.KEY_MIME) ?: ""
-            
-            Log.i(logTag, "[PoseAnalyzer] 視頻: ${videoWidth}x${videoHeight}, fps=$frameRate, duration=${videoDurationUs/1000}ms")
-            
+            val expectedFrames = (durationMs * targetFps / 1000L).toInt()
+            Log.i(logTag, "[PoseAnalyzer] coded=${codedW}x${codedH} display=${displayW}x${displayH} rotation=$rotation duration=${durationMs}ms targetFps=$targetFps expected≈$expectedFrames")
+
             extractor.selectTrack(videoTrackIndex)
-            
-            // 建立解碼器
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(videoFormat, null, null, 0)
             codec.start()
-            
-            // 計算採樣間隔（微秒）
-            val frameIntervalUs = (1000000L / targetFps)
-            var nextSampleTimeUs = 0L
-            
-            // 初始化 CSV
+
+            // SINGLE_IMAGE_MODE：每幀獨立推理，不觸發 PoseMiniBenchmarkWorker
+            // （STREAM_MODE 會在背景啟動 benchmark worker，已知在 beta 版本有 JNI crash 問題）
+            localDetector = PoseDetection.getClient(
+                PoseDetectorOptions.Builder()
+                    .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
+                    .build()
+            )
+
+            // CSV 標頭（格式與 PoseFrameModel.toCsvRow 完全對齊：6 值/關鍵點）
             val csvFile = java.io.File(outputCsvPath)
             csvFile.parentFile?.mkdirs()
             csvWriter = java.io.FileWriter(csvFile)
-            
-            // CSV 標頭
-            csvWriter.write("frame,time_sec,pose_update_id")
-            for (i in 0..32) {  // 33 個關鍵點 (0-32)
-                csvWriter.write(",lm${i}_x,lm${i}_y,lm${i}_z,lm${i}_confidence")
+            val header = buildString {
+                append("frame,time_sec,pose_update_id")
+                for (i in 0..32) append(",lm${i}_xNorm,lm${i}_yNorm,lm${i}_z,lm${i}_visibility,lm${i}_xPx,lm${i}_yPx")
             }
-            csvWriter.write("\n")
-            
+            csvWriter.write(header + "\n")
+
             val bufferInfo = MediaCodec.BufferInfo()
-            var frameCount = 0
+            var frameCount  = 0
             var poseUpdateId = 0
-            var lastPoseLandmarks: List<FloatArray>? = null
-            
-            // 解碼整支影片
-            var inputEOS = false
+            var lastLandmarks: List<com.google.mlkit.vision.pose.PoseLandmark>? = null
+            var mlKitFailures = 0
+
+            val frameIntervalUs = 1_000_000L / targetFps
+            var nextSampleUs   = 0L
+            var inputEOS  = false
             var outputEOS = false
-            var maxDecodeAttempts = 200
-            
-            while (!outputEOS && maxDecodeAttempts-- > 0) {
-                // 餵入數據
+
+            val sw = System.currentTimeMillis()
+
+            while (!outputEOS) {
+                // ── 餵解碼器 ────────────────────────────
                 if (!inputEOS) {
-                    val inputIndex = codec.dequeueInputBuffer(10000)
-                    if (inputIndex >= 0) {
-                        val inputBuffer = codec.getInputBuffer(inputIndex)
-                        if (inputBuffer != null) {
-                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
-                            if (sampleSize >= 0) {
-                                codec.queueInputBuffer(
-                                    inputIndex,
-                                    0,
-                                    sampleSize,
-                                    extractor.sampleTime,
-                                    0
-                                )
-                                extractor.advance()
-                            } else {
-                                codec.queueInputBuffer(
-                                    inputIndex,
-                                    0,
-                                    0,
-                                    0,
-                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                                )
-                                inputEOS = true
-                            }
+                    val inIdx = codec.dequeueInputBuffer(0L)
+                    if (inIdx >= 0) {
+                        val buf  = codec.getInputBuffer(inIdx)!!
+                        val size = extractor.readSampleData(buf, 0)
+                        if (size < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputEOS = true
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
                         }
                     }
                 }
-                
-                // 提取輸出
-                val outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
-                if (outputIndex >= 0) {
-                    val outputBuffer = codec.getOutputBuffer(outputIndex)
-                    if (outputBuffer != null && bufferInfo.size > 0) {
-                        val presentationTimeUs = bufferInfo.presentationTimeUs
-                        
-                        // ✅ 根據 targetFps 採樣
-                        if (presentationTimeUs >= nextSampleTimeUs) {
-                            nextSampleTimeUs = presentationTimeUs + frameIntervalUs
-                            
-                            // 解碼 YUV → RGB → ML Kit
-                            val bitmap = decodeYuvToRgb(outputBuffer, videoWidth, videoHeight, maxWidth)
-                            if (bitmap != null) {
-                                // ML Kit 骨架檢測
-                                val landmarks = detectPoseWithMLKit(bitmap)
-                                bitmap.recycle()
-                                
-                                // 檢查是否變化
-                                val hasChanged = if (lastPoseLandmarks != null && landmarks != null) {
-                                    isSamePose(lastPoseLandmarks!!, landmarks)
-                                } else {
-                                    landmarks != null
-                                }
-                                
-                                if (hasChanged) poseUpdateId++
-                                
-                                // 寫入 CSV
-                                if (landmarks != null) {
-                                    val timeMs = presentationTimeUs / 1000L
-                                    val timeSec = timeMs / 1000.0
-                                    csvWriter.write("$frameCount,$timeSec,$poseUpdateId")
-                                    
-                                    for (lm in landmarks) {
-                                        // 格式: x, y, z, confidence
-                                        val x = lm.getOrNull(0) ?: 0f
-                                        val y = lm.getOrNull(1) ?: 0f
-                                        val z = lm.getOrNull(2) ?: 0f
-                                        val confidence = lm.getOrNull(3) ?: 0f
-                                        csvWriter.write(",$x,$y,$z,$confidence")
+
+                // ── 取解碼輸出 ──────────────────────────
+                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 10_000L)
+                when {
+                    outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> { /* 繼續 */ }
+                    outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> { /* 繼續 */ }
+                    outIdx >= 0 -> {
+                        val ptsUs = bufferInfo.presentationTimeUs
+
+                        if (ptsUs >= nextSampleUs && bufferInfo.size > 0) {
+                            nextSampleUs = ptsUs + frameIntervalUs
+                            val timeSec  = ptsUs / 1_000_000.0
+
+                            val image = runCatching { codec.getOutputImage(outIdx) }.getOrNull()
+                            if (image != null) {
+                                try {
+                                    // fromMediaImage: ML Kit 直接消費 YUV_420_888 Image，
+                                    // 無需手動轉 NV21，rotation 由 ML Kit 內部處理。
+                                    // image 必須在 Tasks.await 返回後才能 close（finally 保證順序）。
+                                    val inputImage = InputImage.fromMediaImage(image, rotation)
+
+                                    val pose = try {
+                                        Tasks.await(localDetector!!.process(inputImage))
+                                    } catch (e: Exception) {
+                                        mlKitFailures++
+                                        Log.w(logTag, "[PoseAnalyzer] ML Kit fail frame=$frameCount (${mlKitFailures}x): ${e.message}")
+                                        null
                                     }
-                                    csvWriter.write("\n")
-                                    
-                                    Log.d(logTag, "[PoseAnalyzer] Frame $frameCount @ ${timeMs}ms, pose_id=$poseUpdateId")
-                                    frameCount++
-                                    lastPoseLandmarks = landmarks
+
+                                    val landmarks = pose?.allPoseLandmarks ?: emptyList()
+
+                                    if (landmarks.isNotEmpty()) {
+                                        val changed = if (lastLandmarks != null && landmarks.size == lastLandmarks!!.size) {
+                                            landmarks.zip(lastLandmarks!!).any { (a, b) ->
+                                                kotlin.math.abs(a.position.x - b.position.x) > 0.5f ||
+                                                kotlin.math.abs(a.position.y - b.position.y) > 0.5f
+                                            }
+                                        } else true
+                                        if (changed) poseUpdateId++
+                                        lastLandmarks = landmarks
+                                    }
+
+                                    // ML Kit position 座標在 fromMediaImage 傳入 rotation 後
+                                    // 已轉換到 display（旋轉後）的像素空間，用 displayW/H 正規化
+                                    val sb = StringBuilder("$frameCount,$timeSec,$poseUpdateId")
+                                    if (landmarks.isNotEmpty()) {
+                                        val lmMap = landmarks.associateBy { it.landmarkType }
+                                        for (idx in 0..32) {
+                                            val lm = lmMap[idx]
+                                            if (lm != null) {
+                                                val xPx = lm.position.x
+                                                val yPx = lm.position.y
+                                                val z   = runCatching { lm.position3D.z }.getOrElse { 0f }
+                                                val vis = lm.inFrameLikelihood
+                                                sb.append(",${xPx/displayW},${yPx/displayH},$z,$vis,$xPx,$yPx")
+                                            } else {
+                                                sb.append(",NaN,NaN,NaN,0.0,NaN,NaN")
+                                            }
+                                        }
+                                    } else {
+                                        repeat(33) { sb.append(",NaN,NaN,NaN,0.0,NaN,NaN") }
+                                    }
+                                    csvWriter.write(sb.toString() + "\n")
+
+                                } finally {
+                                    image.close()
                                 }
+                            } else {
+                                // getOutputImage 失敗（少數裝置）：寫空行保持 frameIndex 連貫
+                                val sb = StringBuilder("$frameCount,$timeSec,$poseUpdateId")
+                                repeat(33) { sb.append(",NaN,NaN,NaN,0.0,NaN,NaN") }
+                                csvWriter.write(sb.toString() + "\n")
                             }
+                            frameCount++
                         }
+
+                        codec.releaseOutputBuffer(outIdx, false)
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputEOS = true
                     }
-                    codec.releaseOutputBuffer(outputIndex, false)
-                }
-                
-                if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                    outputEOS = true
                 }
             }
-            
+
             csvWriter.flush()
-            Log.i(logTag, "[PoseAnalyzer] ✅ 完成：$frameCount 幀已寫入 $outputCsvPath")
-            
+            val elapsedMs = System.currentTimeMillis() - sw
+            val fps = if (elapsedMs > 0) "%.1f".format(frameCount * 1000.0 / elapsedMs) else "N/A"
+            Log.i(logTag, "[PoseAnalyzer] done: $frameCount frames, ${elapsedMs}ms, ${fps}fps, mlkit_fail=${mlKitFailures} -> $outputCsvPath")
+            if (mlKitFailures > 0) Log.w(logTag, "[PoseAnalyzer] mlkit_fail=${mlKitFailures} frames (version compat or hw accel issue)")
             return outputCsvPath
-            
+
         } catch (e: Exception) {
             Log.e(logTag, "[PoseAnalyzer] 分析失敗: ${e.message}", e)
             return null
         } finally {
-            try {
-                csvWriter?.close()
-            } catch (e: Exception) {
-                Log.e(logTag, "[PoseAnalyzer] 關閉 CSV 失敗: ${e.message}")
-            }
-            try {
-                codec?.stop()
-                codec?.release()
-            } catch (e: Exception) {
-                Log.e(logTag, "[PoseAnalyzer] 釋放 codec 失敗: ${e.message}")
-            }
-            try {
-                extractor.release()
-            } catch (e: Exception) {
-                Log.e(logTag, "[PoseAnalyzer] 釋放 extractor 失敗: ${e.message}")
+            runCatching { localDetector?.close() }
+            runCatching { csvWriter?.close() }
+            runCatching { codec?.stop(); codec?.release() }
+            runCatching { extractor.release() }
+        }
+    }
+
+    // YUV420 Image → NV21（含旋轉 + nearest-neighbor downscale）
+    // 回傳更新後的 yBuf/uBuf/vBuf（延遲擴容，避免每幀 GC）
+    private fun imageToNv21Scaled(
+        image: android.media.Image,
+        codedW: Int, codedH: Int, rotation: Int,
+        outW: Int, outH: Int,
+        nv21: ByteArray,
+        yBufIn: ByteArray, uBufIn: ByteArray, vBufIn: ByteArray
+    ): Array<ByteArray> {
+        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
+        val yStride      = yP.rowStride
+        val uvStride     = uP.rowStride
+        val uvPixStride  = uP.pixelStride
+
+        val ySize = yP.buffer.remaining()
+        val uSize = uP.buffer.remaining()
+        val vSize = vP.buffer.remaining()
+        val yBuf = if (yBufIn.size >= ySize) yBufIn else ByteArray(ySize)
+        val uBuf = if (uBufIn.size >= uSize) uBufIn else ByteArray(uSize)
+        val vBuf = if (vBufIn.size >= vSize) vBufIn else ByteArray(vSize)
+        yP.buffer.get(yBuf, 0, ySize)
+        uP.buffer.get(uBuf, 0, uSize)
+        vP.buffer.get(vBuf, 0, vSize)
+
+        // source display 尺寸（旋轉後的正確方向）
+        val srcW = if (rotation == 90 || rotation == 270) codedH else codedW
+        val srcH = if (rotation == 90 || rotation == 270) codedW else codedH
+
+        val uvBase = outW * outH
+        for (dy in 0 until outH) {
+            for (dx in 0 until outW) {
+                val sx = (dx.toLong() * srcW / outW).toInt()
+                val sy = (dy.toLong() * srcH / outH).toInt()
+                val ci: Int; val cj: Int
+                when (rotation) {
+                    90  -> { ci = sy;           cj = codedH - 1 - sx }
+                    270 -> { ci = codedW-1-sy;  cj = sx              }
+                    180 -> { ci = codedW-1-sx;  cj = codedH-1-sy    }
+                    else-> { ci = sx;           cj = sy              }
+                }
+                val yIdx = cj * yStride + ci
+                nv21[dy * outW + dx] = if (yIdx < ySize) yBuf[yIdx] else 16
+                if (dy % 2 == 0 && dx % 2 == 0) {
+                    val uvOff = (cj / 2) * uvStride + (ci / 2) * uvPixStride
+                    val base  = uvBase + (dy / 2) * outW + dx
+                    if (base + 1 < nv21.size) {
+                        // NV21: V 先，U 後
+                        nv21[base]     = if (uvOff < vSize) vBuf[uvOff] else 128.toByte()
+                        nv21[base + 1] = if (uvOff < uSize) uBuf[uvOff] else 128.toByte()
+                    }
+                }
             }
         }
+        return arrayOf(yBuf, uBuf, vBuf)
     }
     
     // ML Kit 骨架檢測
@@ -805,14 +870,7 @@ class MainActivity: FlutterActivity() {
             val inputImage = InputImage.fromBitmap(bitmap, 0)
             
             // 執行骨架檢測 (同步操作，在背景線程執行)
-            val pose: Pose = poseDetector.process(inputImage)
-                .addOnSuccessListener { detectedPose ->
-                    Log.d(logTag, "[MLKit] ✅ 檢測成功，找到 ${detectedPose.allPoseLandmarks.size} 個關鍵點")
-                }
-                .addOnFailureListener { e ->
-                    Log.e(logTag, "[MLKit] ❌ 檢測失敗: ${e.message}")
-                }
-                .getResult()  // 阻塞等待結果
+            val pose: Pose = Tasks.await(poseDetector.process(inputImage))
             
             // 轉換為 FloatArray 列表
             val landmarks = pose.allPoseLandmarks.map { landmark ->

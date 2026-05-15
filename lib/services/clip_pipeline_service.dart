@@ -104,21 +104,24 @@ class ClipPipelineService {
     await Directory(sessionDir).create(recursive: true);
 
     final clipPath = p.join(sessionDir, 'clip.mp4');
-    final trimmed = await VideoClipService.trimClip(
+    final trimResult = await VideoClipService.trimClip(
       srcPath: srcVideoPath,
       dstPath: clipPath,
       startSec: hit.startSec,
       endSec: hit.endSec,
     );
-    if (trimmed == null) {
+    if (trimResult == null) {
       debugPrint('[Pipeline] hit ${hit.hitIndex} → ❌ 裁切失敗');
       return null;
     }
+    final trimmed = trimResult.path;
+    // clip 實際從 key frame 開始，可能略早於 hit.startSec，用 actualStartSec 對齊 CSV
+    final clipActualStartSec = trimResult.actualStartSec;
 
     // 縮圖定位到擊球瞬間
     String? thumbPath;
     try {
-      final hitInClipMs = ((hit.hitSec - hit.startSec) * 1000).round().clamp(0, 999999);
+      final hitInClipMs = ((hit.hitSec - clipActualStartSec) * 1000).round().clamp(0, 999999);
       thumbPath = await vt.VideoThumbnail.thumbnailFile(
         video: trimmed,
         thumbnailPath: p.join(sessionDir, 'thumbnail.jpg'),
@@ -131,11 +134,12 @@ class ClipPipelineService {
     }
 
     // 從原始 CSV 擷取此球的骨架資料，存入 clip session 目錄
+    // 用 clipActualStartSec 而非 hit.startSec，對齊 clip 真實的 key frame 起點
     final dstCsvPath = p.join(sessionDir, 'pose_landmarks.csv');
     await _sliceCsv(
       srcCsvPath: srcCsvPath,
       dstCsvPath: dstCsvPath,
-      startSec: hit.startSec,
+      startSec: clipActualStartSec,
       endSec: hit.endSec,
     );
 
@@ -144,7 +148,7 @@ class ClipPipelineService {
     await _sliceAudio(
       srcAudioPath: srcAudioPath,
       dstAudioPath: dstAudioPath,
-      startSec: hit.startSec,
+      startSec: clipActualStartSec,
       endSec: hit.endSec,
     );
 
@@ -161,8 +165,8 @@ class ClipPipelineService {
         thumbnailPath: thumbPath,
         videoType: VideoType.localClip,
         sourceVideoPath: sourceEntry.filePath,
-        hitSecond: hit.hitSec - hit.startSec,
-        startSecond: hit.startSec,
+        hitSecond: hit.hitSec - clipActualStartSec,
+        startSecond: clipActualStartSec,
         endSecond: hit.endSec,
       ),
     );

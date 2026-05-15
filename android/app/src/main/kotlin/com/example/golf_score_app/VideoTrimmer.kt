@@ -1,19 +1,21 @@
 package com.example.golf_score_app
 
 import android.content.Context
-import android.net.Uri
-import androidx.media3.common.MediaItem
-import androidx.media3.transformer.Composition
-import androidx.media3.transformer.EditedMediaItem
-import androidx.media3.transformer.EditedMediaItemSequence
-import androidx.media3.transformer.ExportException
-import androidx.media3.transformer.ExportResult
-import androidx.media3.transformer.Transformer
+import android.media.MediaExtractor
+import android.media.MediaMetadataRetriever
+import android.media.MediaMuxer
+import android.util.Log
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.nio.ByteBuffer
 
 class VideoTrimmer(private val context: Context) {
+
+    companion object {
+        private const val TAG = "VideoTrimmer"
+        private const val BUFFER_SIZE = 2 * 1024 * 1024 // 2 MB
+    }
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         if (call.method != "trim") {
@@ -38,59 +40,97 @@ class VideoTrimmer(private val context: Context) {
             return
         }
 
-        // 1️⃣ MediaItem（裁切）
-        val mediaItem = MediaItem.Builder()
-            .setUri(Uri.fromFile(srcFile))
-            .setClippingConfiguration(
-                MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(startMs)
-                    .setEndPositionMs(endMs)
-                    .build()
-            )
-            .build()
+        Thread {
+            try {
+                val baseTimeMs = trimWithMuxer(srcPath, dstPath, startMs, endMs)
+                result.success(mapOf("ok" to true, "baseTimeMs" to baseTimeMs))
+            } catch (e: Exception) {
+                Log.e(TAG, "trim failed", e)
+                result.error("trim_error", e.message, null)
+            }
+        }.start()
+    }
 
-        // 2️⃣ EditedMediaItem
-        val editedMediaItem = EditedMediaItem.Builder(mediaItem).build()
+    // 回傳 clip 實際起始時間（ms），即首個寫入 sample 的 PTS（key frame 時間）
+    private fun trimWithMuxer(srcPath: String, dstPath: String, startMs: Long, endMs: Long): Long {
+        val startUs = startMs * 1000L
+        val endUs   = endMs  * 1000L
 
-        // 3️⃣ EditedMediaItemSequence
-        val sequence = EditedMediaItemSequence(editedMediaItem)
+        // Read rotation metadata from source
+        val rotation = MediaMetadataRetriever().use { mmr ->
+            mmr.setDataSource(srcPath)
+            mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+        }
+        Log.d(TAG, "src rotation=$rotation startMs=$startMs endMs=$endMs")
 
-        // 4️⃣ Composition（⚠️ 沒有 .build()）
-        val composition = Composition.Builder(listOf(sequence)).build()
-
-        // 確保輸出目錄存在
         File(dstPath).parentFile?.mkdirs()
 
-        val transformer = Transformer.Builder(context)
-            .addListener(
-                object : Transformer.Listener {
-
-                    override fun onCompleted(
-                        composition: Composition,
-                        exportResult: ExportResult
-                    ) {
-                        result.success(true)
-                    }
-
-                    override fun onError(
-                        composition: Composition,
-                        exportResult: ExportResult,
-                        exportException: ExportException
-                    ) {
-                        result.error(
-                            "transform_error",
-                            exportException.errorCodeName,
-                            null
-                        )
-                    }
-                }
-            )
-            .build()
-
+        val extractor = MediaExtractor()
+        val muxer = MediaMuxer(dstPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         try {
-            transformer.start(composition, dstPath)
-        } catch (e: Exception) {
-            result.error("transform_start_error", e.message, null)
+            extractor.setDataSource(srcPath)
+            if (rotation != 0) muxer.setOrientationHint(rotation)
+
+            // Map extractor track index → muxer track index
+            val trackMap = mutableMapOf<Int, Int>()
+            for (i in 0 until extractor.trackCount) {
+                val fmt  = extractor.getTrackFormat(i)
+                val mime = fmt.getString("mime") ?: continue
+                if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+                    trackMap[i] = muxer.addTrack(fmt)
+                    extractor.selectTrack(i)
+                }
+            }
+            if (trackMap.isEmpty()) throw IllegalStateException("no video/audio track found")
+
+            muxer.start()
+
+            // Seek to the nearest sync frame AT OR BEFORE startUs.
+            // We write from this key frame (not from startUs) so the clip
+            // always begins with an I-frame and is decodeable by any player.
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+
+            // baseTimeUs = PTS of the first sample actually written.
+            // All subsequent PTSs are rebased to this so the clip starts at PTS 0.
+            var baseTimeUs = Long.MIN_VALUE
+
+            val buf  = ByteBuffer.allocate(BUFFER_SIZE)
+            val info = android.media.MediaCodec.BufferInfo()
+
+            while (true) {
+                val trackIndex = extractor.sampleTrackIndex
+                if (trackIndex < 0) break                  // EOS
+
+                val sampleTimeUs = extractor.sampleTime
+                if (sampleTimeUs > endUs) break            // past end — stop immediately
+
+                val muxerTrack = trackMap[trackIndex]
+                if (muxerTrack == null) { extractor.advance(); continue }
+
+                if (baseTimeUs == Long.MIN_VALUE) baseTimeUs = sampleTimeUs
+
+                buf.clear()
+                val size = extractor.readSampleData(buf, 0)
+                if (size < 0) break
+
+                info.offset = 0
+                info.size   = size
+                info.presentationTimeUs = sampleTimeUs - baseTimeUs
+                info.flags  = if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0)
+                    android.media.MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+
+                muxer.writeSampleData(muxerTrack, buf, info)
+                extractor.advance()
+            }
+
+            muxer.stop()
+            val actualBaseMs = if (baseTimeUs == Long.MIN_VALUE) startMs else baseTimeUs / 1000L
+            Log.d(TAG, "trim done → $dstPath  baseMs=$actualBaseMs (requested startMs=$startMs)")
+            return actualBaseMs
+        } finally {
+            runCatching { muxer.release() }
+            runCatching { extractor.release() }
         }
     }
 }

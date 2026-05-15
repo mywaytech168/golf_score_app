@@ -30,8 +30,8 @@ class SkeletonOverlayRenderer(private val context: Context) {
     companion object {
         private const val TAG = "SkeletonOverlay"
 
-        /** 骨架分析取樣間隔（毫秒），對應 VideoAnalysisService 的 _frameIntervalMs = 67 */
-        private const val ANALYSIS_INTERVAL_MS = 67.0
+        /** 骨架分析取樣間隔（毫秒），對應 VideoAnalysisService 的 _frameIntervalMs = 33 */
+        private const val ANALYSIS_INTERVAL_MS = 33.0
 
         val CONNECTIONS = listOf(
             // 臉部
@@ -393,12 +393,12 @@ class SkeletonOverlayRenderer(private val context: Context) {
             var line = reader.readLine()
             while (line != null) {
                 val cols = line.split(",")
-                if (cols.size >= 200) {
+                if (cols.size >= 201) {
                     val frameIdx = cols[0].trim().toIntOrNull()
                     if (frameIdx != null) {
                         val landmarks = arrayOfNulls<LandmarkPoint>(33)
                         for (i in 0 until 33) {
-                            val base  = 2 + i * 6
+                            val base  = 3 + i * 6
                             val xNorm = cols[base + 0].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
                             val yNorm = cols[base + 1].trim().toFloatOrNull()?.takeIf { !it.isNaN() }
                             val vis   = cols[base + 3].trim().toFloatOrNull() ?: 0f

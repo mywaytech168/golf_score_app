@@ -15,8 +15,9 @@ import '../recording/pose_frame_model.dart';
 
 class VideoAnalysisService {
   static const _audioChannel = MethodChannel('audio_extractor_channel');
+  static const _poseAnalyzerChannel = MethodChannel('com.example.golf_score_app/pose_analyzer');
   static const _frameExtractorChannel = MethodChannel('com.example.golf_score_app/frame_extractor');
-  static const _frameIntervalMs = 33; // ~30fps
+  static const _frameIntervalMs = 33; // ~30fps（與 SkeletonOverlayRenderer.ANALYSIS_INTERVAL_MS 一致）
 
   Future<VideoAnalysisResult> analyze({
     required String videoPath,
@@ -26,20 +27,13 @@ class VideoAnalysisService {
   }) async {
     final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
     final audioPath = p.join(sessionDir, 'audio.wav');
-    final poseService = PoseDetectorService(mode: PoseDetectionMode.single);
-    
     final overallSw = Stopwatch()..start();
 
     try {
-      await _analyzePose(
+      await _analyzePoseNative(
         videoPath: videoPath,
         csvPath: csvPath,
-        durationSeconds: durationSeconds,
-        poseService: poseService,
-        onProgress: (prog) => onProgress?.call(
-          prog * 0.75,
-          '分析骨架中... ${(prog * 100).round()}%',
-        ),
+        onProgress: onProgress,
       );
 
       onProgress?.call(0.75, '提取音訊中...');
@@ -87,11 +81,41 @@ class VideoAnalysisService {
         hasAudio: hasAudio,
         hasSilence: hasSilence,
       );
-    } finally {
-      poseService.dispose();
+    } catch (e) {
+      overallSw.stop();
+      debugPrint('[VideoAnalysis] ❌ 分析失敗: $e');
+      rethrow;
     }
   }
 
+  // ──────────────────────────────────────────────────────
+  // Kotlin 原生分析路徑（單一 MethodChannel 呼叫）
+  // 比舊的 per-frame extractFrameRgb 快 3-5x：
+  //   舊：152 次 JNI 呼叫 × (150ms open + 30ms 轉換 + 15ms 傳輸 + 100ms ML Kit) ≈ 45s
+  //   新：1 次呼叫，Kotlin 內部 sequential decode → NV21 → ML Kit，全程無 JNI 往返 ≈ 10-15s
+  // ──────────────────────────────────────────────────────
+  Future<void> _analyzePoseNative({
+    required String videoPath,
+    required String csvPath,
+    void Function(double progress, String label)? onProgress,
+  }) async {
+    onProgress?.call(0.05, '分析骨架中...');
+    final result = await _poseAnalyzerChannel.invokeMethod<Map>(
+      'analyzePoseVideo',
+      {
+        'videoPath': videoPath,
+        'outputCsvPath': csvPath,
+        'targetFps': 1000 ~/ _frameIntervalMs, // 30fps
+        'maxWidth': 720,
+      },
+    );
+    if (result == null || result['status'] != 'completed') {
+      throw Exception('Kotlin 骨架分析失敗: $result');
+    }
+    onProgress?.call(0.75, '骨架分析完成');
+  }
+
+  // ── 以下保留供相容，已不被 analyze() 呼叫 ──────────────
   Future<void> _analyzePose({
     required String videoPath,
     required String csvPath,

@@ -69,18 +69,14 @@ flutter {
 }
 
 dependencies {
-    // ---------- 影片覆蓋處理所需的 Media3 元件 ----------
-    // 維持 1.4.1 版本以取得最新的覆蓋穩定性修正與效果 API，確保轉檔結果可被播放器解析
-    implementation("androidx.media3:media3-transformer:1.4.1")
-    implementation("androidx.media3:media3-effect:1.4.1")
-    implementation("androidx.media3:media3-extractor:1.4.1")
-    implementation("androidx.media3:media3-common:1.4.1")
+    // Media3 Transformer removed — VideoTrimmer now uses MediaExtractor+MediaMuxer directly
     // ---------- 圖片方向解析 ----------
     // 透過 ExifInterface 讀取頭像 EXIF 資訊，以修正相機拍攝的旋轉方向
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     
-    // ✅ Google ML Kit Pose Detection - 骨架檢測
-    // 使用直接的 ML Kit 庫而不是 play-services 包裝
-    implementation("com.google.mlkit:pose-detection:18.0.0-beta1")
+    // ✅ Google ML Kit Pose Detection
+    // 版本需與 Flutter plugin google_mlkit_pose_detection:^0.12.0 的傳遞依賴一致（beta5）
+    // 使用 beta1 會導致 mediapipe-internal 版本衝突 → JNI NoSuchFieldError
+    implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
     implementation("com.google.mlkit:vision-common:17.3.0")
 }
