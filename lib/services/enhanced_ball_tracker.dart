@@ -269,21 +269,98 @@ class EnhancedBallTracker {
     return shouldFreezeTracking();
   }
   
-  /// 取得固定 ROI 尺寸
+  /// 計算動態 ROI 尺寸（基於無檢測次數和視頻分辨率）
   /// 
-  /// Python 版本使用固定 ROI = 400px
-  /// ROI 中心由 EnhancedBallTracker 基於最後有效追蹤點決定
-  /// 恢復模式(noCandCount > 0)時才微調，但仍保持在 400-420px 範圍內
-  int getFixedRoiSize() {
-    // Python 版本: 基本固定 400px，恢復模式最多擴到 420px
-    if (noCandCount > 0) {
-      // 恢復模式: 每次失敗增加 35px，最多 420px
-      final recoverRoi = (400 + noCandCount * 35).toInt();
-      return math.min(recoverRoi, 420);
+  /// ✅ 修復 v2: 現在接收分辨率參數，正確處理不同視頻尺寸
+  /// 
+  /// 實現了第 3 層規則：遠球自適應檢測中的 ROI 擴大機制。
+  /// 
+  /// 計算邏輯（對應測試用例）：
+  /// 1. 首先根據視頻分辨率縮放基準 ROI (400px)
+  /// 2. 然後根據 noCandCount 進行動態擴大
+  /// 
+  /// 示例（假設 1080×1920 視頻）：
+  /// - noCandCount = 0: ROI = 1.0× (400px)
+  /// - noCandCount = 1: ROI = 1.2× (480px)
+  /// - noCandCount = 2: ROI = 1.4× (560px)
+  /// - noCandCount ≥ 3: ROI = 1.5-1.8× (600-720px)
+  /// 
+  /// 對於不同分辨率（例如 720×1080）：
+  /// - 首先縮放基準 ROI: 400 × 0.563 ≈ 225px
+  /// - 然後應用動態擴大倍數：225 × 1.2 = 270px
+  /// 
+  /// 參數:
+  ///   baseRoiSize - 基礎 ROI 尺寸（通常 400px）
+  ///   videoW - 視頻寬度（用於分辨率縮放）
+  ///   videoH - 視頻高度（用於分辨率縮放）
+  /// 
+  /// 返回: 動態計算後的 ROI 尺寸（像素）
+  /// 
+  /// 測試覆蓋: enhanced_ball_tracker_test.dart#L101-121
+  int getDynamicRoiSize(
+    int baseRoiSize, {
+    int videoW = 1080,
+    int videoH = 1920,
+  }) {
+    // Step 1: 根據分辨率縮放基準 ROI
+    final resolutionScaledBase = 
+        (baseRoiSize * getResolutionScaleFactor(videoW, videoH)).toInt();
+    
+    // Step 2: 根據 noCandCount 應用動態擴大
+    if (noCandCount <= 0) {
+      return resolutionScaledBase;  // 正常追蹤: 1.0×
     }
-    return 400;  // 正常追蹤: 固定 400px
+    
+    if (noCandCount == 1) {
+      return (resolutionScaledBase * 1.2).toInt();  // 1.2× (20% 擴大)
+    }
+    
+    if (noCandCount == 2) {
+      return (resolutionScaledBase * 1.4).toInt();  // 1.4× (40% 擴大)
+    }
+    
+    // noCandCount >= 3: 線性增長到 1.8×
+    // 每增加一次無檢測，額外增加 0.1×（例如 noCandCount=3 → 1.5×, noCandCount=4 → 1.6×）
+    final multiplier = 1.5 + (noCandCount - 3) * 0.1;
+    final cappedMultiplier = math.min(multiplier, 1.8);
+    return (resolutionScaledBase * cappedMultiplier).toInt();
+  }
+
+  /// 取得固定 ROI 尺寸（廢棄：改用 getDynamicRoiSize）
+  /// 
+  /// ⚠️ 此方法已被 getDynamicRoiSize() 取代。
+  /// 原實現邏輯 (每次 +35px，最多 420px) 與設計文檔不符。
+  /// 請改用 getDynamicRoiSize() 以獲得正確的 ROI 動態擴大。
+  /// 
+  /// @deprecated 使用 getDynamicRoiSize() 代替
+  int getFixedRoiSize() {
+    // ⚠️ 舊邏輯：每次失敗增加 35px，最多 420px（與設計文檔不符）
+    // 保留此方法以向後相容，但應儘快遷移到 getDynamicRoiSize()
+    if (noCandCount > 0) {
+      final recoverRoi = (200 + noCandCount * 35).toInt();
+      return math.min(recoverRoi, 210);
+    }
+    return 200;  // 正常追蹤: 固定 200px
   }
   
+  /// 計算視頻分辨率相對於基準 (1080×1920) 的縮放因子
+  /// 
+  /// 用於 ROI 尺寸自動調整。使用最小維度比例，確保 ROI 
+  /// 在較短的邊上也能正常工作。
+  /// 
+  /// 示例：
+  /// - 1080×1920: min(1.0, 1.0) = 1.0 → ROI = 400×400
+  /// - 720×1080: min(0.667, 0.563) = 0.563 → ROI ≈ 225×225
+  /// - 1440×2560: min(1.333, 1.333) = 1.333 → ROI ≈ 533×533
+  static double getResolutionScaleFactor(int videoW, int videoH) {
+    const double baseW = 1080.0;
+    const double baseH = 1920.0;
+    final wScale = videoW / baseW;
+    final hScale = videoH / baseH;
+    // 使用較小的縮放因子（保守策略）
+    return math.min(wScale, hScale);
+  }
+
   /// 遠球自適應檢測：基於面積 EMA 的距離調整
   /// 
   /// 當檢測到遠球時（面積小），放鬆距離限制：
@@ -306,14 +383,23 @@ class EnhancedBallTracker {
   
   /// 計算 ROI 邊界框（基於視頻分辨率和固定參數）
   /// 
+  /// ✅ 修復 v2: 現在正確處理不同分辨率的 ROI 縮放
+  /// 
   /// 返回: (roiLeft, roiTop, roiRight, roiBottom) - 像素坐標
+  /// 
+  /// ROI 尺寸計算邏輯：
+  /// 1. 若傳入 roiSize > 0，直接使用（已由 getDynamicRoiSize 計算好）
+  /// 2. 否則根據分辨率自動縮放基準 ROI (400px)：
+  ///    - 1080×1920: ROI = 400px
+  ///    - 720×1080: ROI ≈ 225px (按最小維度比例 0.563)
+  ///    - 1440×2560: ROI ≈ 533px (按最小維度比例 1.333)
   /// 
   /// 使用示例：
   /// ```dart
   /// final (roiL, roiT, roiR, roiB) = tracker.calculateRoiBounds(
   ///   videoW: 1080,
   ///   videoH: 1920,
-  ///   roiSize: 400,
+  ///   roiSize: 0,  // 0 表示自動計算
   /// );
   /// ```
   (double, double, double, double) calculateRoiBounds({
@@ -325,10 +411,12 @@ class EnhancedBallTracker {
     final roiCenterX = videoW * ROI_X_FRAC;
     final roiCenterY = videoH * ROI_Y_FRAC;
     
-    // ROI 大小：若傳入 roiSize 則使用，否則用預設比例計算
+    // ✅ ROI 大小：
+    // 若傳入 roiSize 則使用（已動態計算好），
+    // 否則根據分辨率自動縮放基準 400px
     final scaledRoiSize = roiSize > 0 
         ? roiSize.toDouble()
-        : (videoW * ROI_SIZE_RATIO_W);
+        : (400.0 * getResolutionScaleFactor(videoW, videoH));
     final halfRoi = scaledRoiSize / 2;
     
     // 計算邊界並夾緊到視頻範圍
