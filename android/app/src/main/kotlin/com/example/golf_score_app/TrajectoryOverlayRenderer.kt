@@ -46,10 +46,6 @@ class TrajectoryOverlayRenderer {
         // ROI 繪製參數
         private val ROI_COLOR      = Color.argb(150, 0, 255, 255)  // 青色半透明
         private const val ROI_STROKE   = 3f
-        private const val ROI_X_FRAC   = 0.6519  // 寬度的 65.1%
-        private const val ROI_Y_FRAC   = 0.5646  // 高度的 56.5%
-        private const val ROI_FIXED_SIZE_RATIO_W = 400.0 / 1080.0  // ≈ 0.3704
-        private const val ROI_FIXED_SIZE_RATIO_H = 400.0 / 1920.0  // ≈ 0.2083
 
         // 預快取 Paint（所有 render() 呼叫為序列，共用安全）
         private val shadowPaint by lazy {
@@ -263,26 +259,7 @@ class TrajectoryOverlayRenderer {
                     yuvFillPixels(image, videoW, videoH, yuvPixels)
                     frameBmp.setPixels(yuvPixels, 0, videoW, 0, 0, videoW, videoH)
 
-                    // ── 計算 ROI 邊界（如果指定了 roiSize）──
-                    var roiLeft = 0f
-                    var roiTop = 0f
-                    var roiRight = videoW.toFloat()
-                    var roiBottom = videoH.toFloat()
-                    
-                    if (roiSize > 0) {
-                        // ROI 中心 = 整個視頻尺寸的比例位置（不是小屏幕內的位置）
-                        val roiCenterX = (videoW * ROI_X_FRAC).toFloat()
-                        val roiCenterY = (videoH * ROI_Y_FRAC).toFloat()
-                        
-                        // ROI 大小 = Dart 傳過來的尺寸（已經考慮視頻分辨率）
-                        val scaledRoiSize = roiSize.toFloat()
-                        val halfRoi = scaledRoiSize / 2f
-                        
-                        roiLeft = (roiCenterX - halfRoi).coerceIn(0f, (videoW - 1).toFloat())
-                        roiTop = (roiCenterY - halfRoi).coerceIn(0f, (videoH - 1).toFloat())
-                        roiRight = (roiCenterX + halfRoi).coerceIn(0f, (videoW - 1).toFloat())
-                        roiBottom = (roiCenterY + halfRoi).coerceIn(0f, (videoH - 1).toFloat())
-                    }
+                    // ROI 中心 = 當幀最新軌跡點（沒有軌跡點時不繪製）
 
                     // ── 找出本幀應顯示的軌跡點（二分搜尋，O(log n)）──
                     val visibleEnd = sortedPts.binarySearchLast { it.first <= pts }
@@ -302,13 +279,10 @@ class TrajectoryOverlayRenderer {
                     if (visible.size >= 2) drawTrajectory(Canvas(frameBmp), visible)
                     else if (visible.isNotEmpty()) drawDot(Canvas(frameBmp), visible[0].second, visible[0].third)
 
-                    // ── 繪製 ROI 邊界框 ──
-                    if (roiSize > 0) {
-                        drawROI(Canvas(frameBmp), 
-                                ((roiLeft + roiRight) / 2).toInt(), 
-                                ((roiTop + roiBottom) / 2).toInt(), 
-                                (roiRight - roiLeft).toInt(), 
-                                videoW, videoH)
+                    // ── 繪製 ROI 邊界框（以最新軌跡點為中心）──
+                    if (roiSize > 0 && visible.isNotEmpty()) {
+                        val last = visible.last()
+                        drawROI(Canvas(frameBmp), last.second, last.third, roiSize, videoW, videoH)
                     }
 
                     // ── Bitmap → 編碼器（重用 encPixels + nv12Buf）──
