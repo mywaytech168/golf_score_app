@@ -315,11 +315,16 @@ class _RecordScreenState extends State<RecordScreen> {
             ? PoseFrameModel.fromPose(
                 frame: _frameCount,
                 timeSec: timeSec,
+                poseUpdateId: _frameCount,  // ✅ 實時錄影：每幀都是新推論
                 pose: poses.first,
                 imgWidth: image.width.toDouble(),
                 imgHeight: image.height.toDouble(),
               )
-            : PoseFrameModel.empty(frame: _frameCount, timeSec: timeSec);
+            : PoseFrameModel.empty(
+                frame: _frameCount,
+                timeSec: timeSec,
+                poseUpdateId: _frameCount,  // ✅ 即使檢測失敗也遞增
+              );
 
         _csvWriter?.addFrame(frameModel);
 

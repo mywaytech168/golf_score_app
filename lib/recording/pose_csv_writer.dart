@@ -9,7 +9,7 @@ class PoseCsvWriter {
   PoseCsvWriter(this.outputPath);
 
   static List<String> get header {
-    final h = ['frame', 'time_sec'];
+    final h = ['frame', 'time_sec', 'pose_update_id'];  // ✅ 新增
     for (int i = 0; i < 33; i++) {
       h.addAll([
         'lm${i}_x_norm',

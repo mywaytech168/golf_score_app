@@ -81,13 +81,27 @@ class SwingImpactDetector {
 // ── Isolate 入口（頂層函數） ─────────────────────────────────────────────────
 
 List<SwingHit> _detectIsolate(_DetectArgs args) {
+  debugPrint('[SwingDetect] 🔍 開始隔離檢測...');
+  
   // 1. 解析 CSV → 右手腕速度（同時取得實際 FPS）
   final csvResult = _parseWristSpeed(args.csvPath);
-  if (csvResult == null) return [];
+  if (csvResult == null) {
+    debugPrint('[SwingDetect] ❌ CSV 解析失敗');
+    return [];
+  }
   final speedRaw = csvResult.speed;
   final fps = csvResult.fps;
   final n = speedRaw.length;
-  if (n < 10) return [];
+  final xRaw = csvResult.x;
+  final yRaw = csvResult.y;
+  final vis = csvResult.vis;
+  
+  debugPrint('[SwingDetect] 📊 CSV 統計: $n 幀, FPS=$fps, 速度範圍=[${speedRaw.reduce((a, b) => a < b ? a : b).toStringAsFixed(2)}, ${speedRaw.reduce((a, b) => a > b ? a : b).toStringAsFixed(2)}]');
+  
+  if (n < 10) {
+    debugPrint('[SwingDetect] ❌ 幀數過少: $n < 10');
+    return [];
+  }
 
   // 根據實際 FPS 換算 kernel 幀數（確保奇數且 >= 3）
   final speedMk  = _toOddFrames(SwingImpactDetector._speedMedianSec,   fps);
@@ -99,10 +113,36 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
 
   // 2. PCM → 每幀 RMS 振幅
   final audioRaw = _pcmToFrameAmplitude(args.audioPcm, args.audioSampleRate, fps, n);
+  final audioRawValid = audioRaw.where((v) => !v.isNaN).toList();
+  debugPrint('[SwingDetect] 🔊 音訊統計: ${args.audioPcm.length} 樣本 @ ${args.audioSampleRate}Hz → $n 幀');
+  if (audioRawValid.isNotEmpty) {
+    debugPrint('[SwingDetect] 🔊 音訊幅度範圍: [${audioRawValid.reduce((a, b) => a < b ? a : b).toStringAsFixed(4)}, ${audioRawValid.reduce((a, b) => a > b ? a : b).toStringAsFixed(4)}]');
+  } else {
+    debugPrint('[SwingDetect] 🔊 音訊幅度範圍: [無效數據]');
+  }
 
   // 3. 去噪
   final speedDn = _denoiseSignal(speedRaw, speedMk, speedSw, speedBk);
   final audioDn = _denoiseSignal(audioRaw, audioMk, audioSw, audioBk);
+  
+  // 安全的 min/max（過濾 NaN）
+  final speedValid = speedDn.where((v) => !v.isNaN).toList();
+  final audioValid = audioDn.where((v) => !v.isNaN).toList();
+  
+  if (speedValid.isEmpty) {
+    debugPrint('[SwingDetect] ❌ 去噪後速度全是 NaN，無法繼續');
+    return [];
+  }
+  
+  final speedMinMax = speedValid.isEmpty 
+      ? [0.0, 0.0]
+      : [speedValid.reduce((a, b) => a < b ? a : b), speedValid.reduce((a, b) => a > b ? a : b)];
+  final audioMinMax = audioValid.isEmpty
+      ? [0.0, 0.0]
+      : [audioValid.reduce((a, b) => a < b ? a : b), audioValid.reduce((a, b) => a > b ? a : b)];
+  
+  debugPrint('[SwingDetect] 📉 去噪後 - 速度: [${speedMinMax[0].toStringAsFixed(2)}, ${speedMinMax[1].toStringAsFixed(2)}], 有效值 ${speedValid.length}/${speedDn.length}');
+  debugPrint('[SwingDetect] 📉 去噪後 - 音訊: [${audioMinMax[0].toStringAsFixed(4)}, ${audioMinMax[1].toStringAsFixed(4)}], 有效值 ${audioValid.length}/${audioDn.length}]');
 
   // 4. 找峰值
   final speedPeaks = _findPeaks(speedDn, fps,
@@ -116,19 +156,51 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
       minHeight: SwingImpactDetector._audioMinHeight,
       promScale: SwingImpactDetector._audioPromScale);
 
+  debugPrint('[SwingDetect] 📍 速度峰值: ${speedPeaks.length} 個');
+  debugPrint('[SwingDetect] 📍 音訊峰值: ${audioPeaks.length} 個');
+  if (speedPeaks.isNotEmpty) {
+    debugPrint('[SwingDetect]   速度峰值幀: $speedPeaks');
+  }
+  if (audioPeaks.isNotEmpty) {
+    debugPrint('[SwingDetect]   音訊峰值幀: $audioPeaks');
+    
+    // 🔍 診斷：音訊峰值位置的骨架信息
+    if (speedPeaks.isEmpty) {
+      debugPrint('[SwingDetect] 🔍 診斷：音訊峰值位置的骨架數據');
+      for (final audioFrame in audioPeaks) {
+        if (audioFrame >= 0 && audioFrame < n) {
+          final windowStart = (audioFrame - 2).clamp(0, n - 1);
+          final windowEnd = (audioFrame + 3).clamp(0, n);
+          
+          debugPrint('[SwingDetect] 🎯 音訊峰值 #$audioFrame (時間: ${(audioFrame / fps).toStringAsFixed(2)}s):');
+          for (int i = windowStart; i < windowEnd; i++) {
+            final marker = i == audioFrame ? '→' : ' ';
+            debugPrint('[SwingDetect] $marker 幀 $i: 速度=${speedRaw[i].toStringAsFixed(3)}, 位置=(${xRaw[i].toStringAsFixed(1)}, ${yRaw[i].toStringAsFixed(1)}), 信心=${vis[i].toStringAsFixed(3)}, 幅度=${audioDn[i].toStringAsFixed(4)}');
+          }
+        }
+      }
+    }
+  }
+
   // 5. 配對：有音頻峰值就交集，否則純速度後備
   if (audioPeaks.isEmpty) {
+    debugPrint('[SwingDetect] ⚠️ 無音訊峰值，使用純速度檢測');
     return _speedOnlyHits(speedPeaks, speedDn, fps, n);
   }
-  return _intersectPeaks(speedPeaks, audioPeaks, speedDn, audioDn, fps, n);
+  final result = _intersectPeaks(speedPeaks, audioPeaks, speedDn, audioDn, fps, n);
+  debugPrint('[SwingDetect] ✅ 最終檢測結果: ${result.length} 個擊球');
+  return result;
 }
 
 // ── CSV 解析 ─────────────────────────────────────────────────────────────────
 
 class _CsvResult {
   final List<double> speed;
+  final List<double> x;
+  final List<double> y;
+  final List<double> vis;
   final double fps;
-  _CsvResult(this.speed, this.fps);
+  _CsvResult(this.speed, this.x, this.y, this.vis, this.fps);
 }
 
 // 右手腕 = landmark 16
@@ -140,24 +212,33 @@ const int _colTimeSec = 1;
 const int _colRwVis = 101;
 const int _colRwXpx = 102;
 const int _colRwYpx = 103;
-const double _minVisibility = 0.2;
+const double _minVisibility = 0.1;  // 降低到 0.1 以捕捉更多幀
 const int _smoothWrist = 5;
 
 _CsvResult? _parseWristSpeed(String csvPath) {
   try {
+    debugPrint('[ParseCSV] 📂 讀取 CSV: $csvPath');
     final content = File(csvPath).readAsStringSync();
     final rows = const CsvToListConverter(eol: '\n').convert(content);
-    if (rows.length < 3) return null; // header + at least 2 data rows
+    debugPrint('[ParseCSV] 📄 CSV 行數: ${rows.length}');
+    
+    if (rows.length < 3) {
+      debugPrint('[ParseCSV] ❌ CSV 行數不足: ${rows.length} < 3');
+      return null;
+    }
 
     final data = rows.sublist(1); // skip header
     final xList = <double>[];
     final yList = <double>[];
+    final visList = <double>[];
     final times = <double>[];
 
+    int validCount = 0;
     for (final row in data) {
       if (row.length <= _colRwYpx) {
         xList.add(double.nan);
         yList.add(double.nan);
+        visList.add(0.0);
         if (times.isEmpty && row.length > _colTimeSec) {
           times.add(_toDouble(row[_colTimeSec]));
         }
@@ -168,16 +249,27 @@ _CsvResult? _parseWristSpeed(String csvPath) {
       final ypx = _toDouble(row[_colRwYpx]);
       final t = _toDouble(row[_colTimeSec]);
       times.add(t);
+      visList.add(vis);
       if (vis >= _minVisibility && !xpx.isNaN && !ypx.isNaN) {
         xList.add(xpx);
         yList.add(ypx);
+        validCount++;
       } else {
         xList.add(double.nan);
         yList.add(double.nan);
       }
     }
 
-    if (xList.length < 2) return null;
+    debugPrint('[ParseCSV] 📊 有效幀: $validCount/${xList.length} (可見度 ≥ $_minVisibility)');
+    
+    if (xList.length < 2) {
+      debugPrint('[ParseCSV] ❌ 無有效座標');
+      return null;
+    }
+    
+    // 診斷：檢查 NaN 分佈
+    int nanCount = xList.where((v) => v.isNaN).length;
+    debugPrint('[ParseCSV] 🔍 x 座標 NaN 數: $nanCount/${xList.length}');
 
     // 估計 FPS
     double fps = 30.0;
@@ -185,10 +277,16 @@ _CsvResult? _parseWristSpeed(String csvPath) {
       final dur = times.last - times.first;
       if (dur > 0) fps = (times.length - 1) / dur;
     }
+    debugPrint('[ParseCSV] ⏱️ 估計 FPS: $fps');
 
     // 插值 NaN
     final x = _interpNan(xList);
     final y = _interpNan(yList);
+    
+    // 檢查插值後是否還有 NaN（不應該有）
+    if (x.any((v) => v.isNaN) || y.any((v) => v.isNaN)) {
+      debugPrint('[ParseCSV] ⚠️ 警告：插值後仍有 NaN 值');
+    }
 
     // 移動平均平滑
     final xs = _movingAverage(x, _smoothWrist);
@@ -201,9 +299,26 @@ _CsvResult? _parseWristSpeed(String csvPath) {
       final dy = ys[i] - ys[i - 1];
       speed[i] = math.sqrt(dx * dx + dy * dy);
     }
+    
+    // 檢查速度是否包含 NaN（診斷用）
+    final speedNanCount = speed.where((v) => v.isNaN).length;
+    if (speedNanCount > 0) {
+      debugPrint('[ParseCSV] ⚠️ 速度中有 NaN: $speedNanCount/${speed.length}');
+    }
+    
     final speedSmooth = _movingAverage(speed, _smoothWrist);
-    return _CsvResult(speedSmooth, fps);
+    
+    // 二次 NaN 檢查
+    final speedSmoothedNanCount = speedSmooth.where((v) => v.isNaN).length;
+    if (speedSmoothedNanCount > 0) {
+      debugPrint('[ParseCSV] ❌ 平滑後仍有 NaN: $speedSmoothedNanCount/${speedSmooth.length}');
+    }
+    
+    debugPrint('[ParseCSV] ✅ 速度計算完成: ${speedSmooth.length} 幀');
+    
+    return _CsvResult(speedSmooth, xList, yList, visList, fps);
   } catch (e) {
+    debugPrint('[ParseCSV] ❌ 異常: $e');
     return null;
   }
 }
@@ -259,12 +374,21 @@ List<double> _pcmToFrameAmplitude(
 List<double> _interpNan(List<double> x) {
   final out = List<double>.from(x);
   final n = out.length;
+  if (n == 0) return out;
+  
   // 前向填充首段 NaN
   double? first;
   for (int i = 0; i < n; i++) {
     if (!out[i].isNaN) { first = out[i]; break; }
   }
-  if (first == null) return out;
+  
+  // 如果沒有找到有效值，使用 0.0 作為備用
+  if (first == null) {
+    for (int i = 0; i < n; i++) {
+      out[i] = 0.0;
+    }
+    return out;
+  }
   for (int i = 0; i < n; i++) {
     if (out[i].isNaN) { out[i] = first!; }
     else { first = out[i]; break; }

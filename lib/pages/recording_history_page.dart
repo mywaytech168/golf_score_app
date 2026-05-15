@@ -1,6 +1,7 @@
 ﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -787,8 +788,16 @@ class _HistoryTileState extends State<_HistoryTile> {
       List<double> audioPcm = [];
       const int sampleRate = 44100;
       final wavFile = File(audioPath);
+      bool audioHasSilence = false;
+      
+      debugPrint('[偵測擊球] 📂 WAV 路徑: $audioPath');
+      debugPrint('[偵測擊球] 📂 CSV 路徑: $csvPath');
+      debugPrint('[偵測擊球] 📂 CSV 存在: ${await File(csvPath).exists()}');
+      debugPrint('[偵測擊球] 📂 WAV 存在: ${await wavFile.exists()}');
+      
       if (await wavFile.exists()) {
         final wavBytes = await wavFile.readAsBytes();
+        debugPrint('[偵測擊球] 🔊 WAV 大小: ${wavBytes.length} bytes');
         
         if (wavBytes.length >= 44) {
           // 🔧 解析 WAV 头
@@ -801,27 +810,117 @@ class _HistoryTileState extends State<_HistoryTile> {
             }
           }
           
+          debugPrint('[偵測擊球] 🔧 WAV data 開始位置: $dataStart');
+          
           // 🔧 转换 int16 → float32
           final audioDataBytes = wavBytes.sublist(dataStart);
-          for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
-            final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
-            final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
-            audioPcm.add(signedInt16 / 32768.0);
+          debugPrint('[偵測擊球] 🔧 PCM 數據大小: ${audioDataBytes.length} bytes');
+          
+          if (audioDataBytes.isEmpty) {
+            debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV data 為空');
+            audioHasSilence = true;
+          } else {
+            double rmsSum = 0.0;
+            double peakVal = 0.0;
+            
+            for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
+              final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
+              final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
+              final normalized = signedInt16 / 32768.0;
+              audioPcm.add(normalized);
+              rmsSum += normalized * normalized;
+              if (normalized.abs() > peakVal) peakVal = normalized.abs();
+            }
+            
+            debugPrint('[偵測擊球] ✅ PCM 轉換完成: ${audioPcm.length} 樣本');
+            
+            // 📊 PCM 統計與無聲音檢測
+            if (audioPcm.isNotEmpty) {
+              final rms = math.sqrt(rmsSum / audioPcm.length);
+              final minVal = audioPcm.reduce((a, b) => a < b ? a : b);
+              final maxVal = audioPcm.reduce((a, b) => a > b ? a : b);
+              debugPrint('[偵測擊球] 📊 PCM 範圍: [$minVal, $maxVal], RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+              
+              // 檢測無聲音：RMS < 0.01 且峰值 < 0.05
+              if (rms < 0.01 && peakVal < 0.05) {
+                debugPrint('[偵測擊球] ⚠️ 【無聲音】RMS=${rms.toStringAsFixed(4)} < 0.01, Peak=${peakVal.toStringAsFixed(4)} < 0.05');
+                audioHasSilence = true;
+              }
+            }
           }
+        } else {
+          debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 檔案過小 (${wavBytes.length} < 44 bytes)');
+          audioHasSilence = true;
         }
+      } else {
+        debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 文件不存在: $audioPath');
+        audioHasSilence = true;
       }
 
-      // 3. 偵測擊球
+      // 3. 讀取 CSV 檢查骨架數據
+      debugPrint('[偵測擊球] 📋 讀取 CSV 文件...');
+      List<String> csvLines = [];
+      try {
+        csvLines = await File(csvPath).readAsLines();
+        debugPrint('[偵測擊球] 📋 CSV 行數: ${csvLines.length}');
+        
+        // 統計有效骨架
+        int validFrames = 0;
+        double maxConfidence = 0.0;
+        for (int i = 1; i < csvLines.length; i++) {
+          final parts = csvLines[i].split(',');
+          if (parts.length >= 3) {
+            try {
+              final conf = double.tryParse(parts[2]) ?? 0.0;
+              if (conf > 0) validFrames++;
+              if (conf > maxConfidence) maxConfidence = conf;
+            } catch (_) {}
+          }
+        }
+        debugPrint('[偵測擊球] 📊 骨架有效幀: $validFrames, 最高信心度: ${maxConfidence.toStringAsFixed(3)}');
+      } catch (e) {
+        debugPrint('[偵測擊球] ❌ CSV 讀取失敗: $e');
+      }
+      
+      // 4. 偵測擊球
+      debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
       progressNotifier.value = (0.5, '偵測擊球中...');
       final hits = await SwingImpactDetector.detect(
         csvPath: csvPath,
         audioPcm: audioPcm,
         audioSampleRate: sampleRate,
       );
+      debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
 
       if (!mounted) return;
 
+      // 📊 統計擊球峰值
+      if (hits.isNotEmpty) {
+        final avgSpeed = hits.fold<double>(0, (s, h) => s + h.speedValue) / hits.length;
+        final avgAudio = hits.fold<double>(0, (s, h) => s + h.audioValue) / hits.length;
+        final hitFrames = hits.map((h) => h.hitFrame).toList();
+        
+        debugPrint(
+          '[HitDetection] 📊 統計:\n'
+          '  偵測擊球數: ${hits.length}\n'
+          '  平均速度值: ${avgSpeed.toStringAsFixed(3)}\n'
+          '  平均音訊值: ${avgAudio.toStringAsFixed(3)}\n'
+          '  擊球幀位置: $hitFrames'
+        );
+      }
+
       if (hits.isEmpty) {
+        debugPrint('[偵測擊球] ⚠️ 未檢測到任何擊球');
+        
+        // 額外診斷
+        debugPrint('[偵測擊球] 🔧 診斷信息:');
+        debugPrint('  - CSV 有效: ${csvLines.isNotEmpty}');
+        debugPrint('  - PCM 樣本數: ${audioPcm.length}');
+        debugPrint('  - 期望樣本數 (30秒@44.1kHz): ${30 * 44100}');
+        debugPrint('  - 【無聲音】: $audioHasSilence');
+        debugPrint('  - 期望樣本數 (30秒@44.1kHz): ${30 * 44100}');
+        debugPrint('  - 【無聲音】: $audioHasSilence');
+        
         Navigator.pop(context);
         setState(() => _isDetecting = false);
         ScaffoldMessenger.of(context).showSnackBar(

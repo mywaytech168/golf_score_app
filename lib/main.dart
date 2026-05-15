@@ -73,7 +73,7 @@ class _MyAppState extends State<MyApp> {
   Future<void> _runVideoFrameExtractorTest() async {
     try {
       // 使用已有的視頻文件進行測試
-      const videoPath = '/sdcard/Movies/Screen Recorder/2025-06-17-15-42-35.mp4';
+      const videoPath = '/sdcard/Download/REC202512091023.mp4';
       debugPrint('📲 [DEBUG] 正在嘗試測試 VideoFrameExtractor...');
       debugPrint('📲 [DEBUG] 視頻路徑: $videoPath');
       

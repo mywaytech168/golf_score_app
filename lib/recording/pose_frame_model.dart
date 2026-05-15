@@ -3,17 +3,20 @@ import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 class PoseFrameModel {
   final int frame;
   final double timeSec;
+  final int poseUpdateId;  // ✅ 追踪骨架是否實際更新
   final List<LandmarkData> landmarks;
 
   PoseFrameModel({
     required this.frame,
     required this.timeSec,
+    required this.poseUpdateId,
     required this.landmarks,
   });
 
   factory PoseFrameModel.fromPose({
     required int frame,
     required double timeSec,
+    required int poseUpdateId,
     required Pose pose,
     required double imgWidth,
     required double imgHeight,
@@ -31,22 +34,29 @@ class PoseFrameModel {
         yPx: lm.y,
       );
     });
-    return PoseFrameModel(frame: frame, timeSec: timeSec, landmarks: lms);
+    return PoseFrameModel(
+      frame: frame,
+      timeSec: timeSec,
+      poseUpdateId: poseUpdateId,
+      landmarks: lms,
+    );
   }
 
   factory PoseFrameModel.empty({
     required int frame,
     required double timeSec,
+    int poseUpdateId = 0,
   }) {
     return PoseFrameModel(
       frame: frame,
       timeSec: timeSec,
+      poseUpdateId: poseUpdateId,
       landmarks: List.generate(33, (_) => LandmarkData.empty()),
     );
   }
 
   List<dynamic> toCsvRow() {
-    final row = <dynamic>[frame, timeSec.toStringAsFixed(6)];
+    final row = <dynamic>[frame, timeSec.toStringAsFixed(6), poseUpdateId];
     for (final lm in landmarks) {
       row.addAll([
         lm.xNorm.isNaN ? '' : lm.xNorm,

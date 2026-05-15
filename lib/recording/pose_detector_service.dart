@@ -2,14 +2,15 @@ import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
 /// 骨架偵測服務
 ///
-/// [stream] 模式（預設）：適合即時錄影，ML Kit 利用相鄰幀時序做追蹤平滑。
-/// [singleImage] 模式：適合影片匯入批次處理，每幀獨立偵測，
-///   避免 stream 模式因幀間隔不規律（67ms 取幀）而產生錯誤的時序預測。
+/// [single] 模式：適合影片匯入批次處理，每幀獨立偵測，
+///   不做時序追蹤。解決離散幀提取時 stream 模式的誤追蹤問題。
+/// [stream] 模式（棄用）：原本用於即時錄影（Camera Stream），
+///   會進行跨幀追蹤，但對 MediaMetadataRetriever 離散提取不適合。
 class PoseDetectorService {
   PoseDetector? _detector;
   final PoseDetectionMode mode;
 
-  PoseDetectorService({this.mode = PoseDetectionMode.stream});
+  PoseDetectorService({this.mode = PoseDetectionMode.single});
 
   Future<List<Pose>> detect(InputImage image) async {
     _detector ??= PoseDetector(

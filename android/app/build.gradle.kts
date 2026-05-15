@@ -57,6 +57,11 @@ android {
             )
         }
     }
+
+    // 🔧 Fix native library merging file system error
+    packaging {
+        exclude("lib/*/libVkLayer_*.so")
+    }
 }
 
 flutter {
@@ -73,4 +78,9 @@ dependencies {
     // ---------- 圖片方向解析 ----------
     // 透過 ExifInterface 讀取頭像 EXIF 資訊，以修正相機拍攝的旋轉方向
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+    
+    // ✅ Google ML Kit Pose Detection - 骨架檢測
+    // 使用直接的 ML Kit 庫而不是 play-services 包裝
+    implementation("com.google.mlkit:pose-detection:18.0.0-beta1")
+    implementation("com.google.mlkit:vision-common:17.3.0")
 }
