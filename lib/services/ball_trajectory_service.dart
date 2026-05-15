@@ -110,6 +110,15 @@ class BallTrajectoryService {
     int roiSize = 0,
   }) async {
     try {
+      // 🔍 DEBUG: 打印即將渲製的軌跡信息
+      debugPrint('[BallTraj] 開始渲製軌跡疊加...');
+      debugPrint('[BallTraj] 軌跡點數: ${trackPts.length}');
+      debugPrint('[BallTraj] ROI 尺寸: $roiSize px');
+      if (trackPts.isNotEmpty) {
+        debugPrint('[BallTraj] 首點: ${trackPts.first}');
+        debugPrint('[BallTraj] 末點: ${trackPts.last}');
+      }
+      
       final ok = await _channel.invokeMethod<bool>(
         'renderOverlay',
         {

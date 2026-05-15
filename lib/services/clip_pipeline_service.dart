@@ -328,6 +328,19 @@ class ClipPipelineService {
 
         final trackPts = tracker.trackPoints;
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
+        
+        // 🔍 追蹤統計
+        final successRate = extraction.frames.length > 0 
+            ? (trackPts.length / extraction.frames.length * 100).toStringAsFixed(1)
+            : '0.0';
+        debugPrint('''[追蹤統計]
+  • 總幀數: ${extraction.frames.length}
+  • 成功追蹤: ${trackPts.length}
+  • 成功率: $successRate%
+  • 異常計數: ${tracker.outlierStrikes}
+  • 追蹤凍結: ${tracker.trackingFrozen ? '是' : '否'}
+  • Y方向: ${tracker.yDir == 1 ? '⬇向下' : (tracker.yDir == -1 ? '⬆向上' : '?未決定')}
+''');
 
         if (trackPts.length >= 2) {
           final roiSize = tracker.getDynamicRoiSize(
@@ -335,6 +348,19 @@ class ClipPipelineService {
             videoW: extraction.width,
             videoH: extraction.height,
           );
+          
+          // 🔍 DEBUG: 打印所有軌跡點位置
+          debugPrint('[轨跡調試] 軌跡點詳細信息 (共 ${trackPts.length} 點)：');
+          for (int i = 0; i < trackPts.length; i++) {
+            final pt = trackPts[i];
+            final x = pt.x as int? ?? 0;
+            final y = pt.y as int? ?? 0;
+            final frameIdx = pt.frameIdx as int? ?? 0;
+            final ptsUs = pt.ptsUs as int? ?? 0;
+            final timeMs = (ptsUs / 1000.0).toStringAsFixed(2);
+            debugPrint('  [P$i] x=$x, y=$y, 幀=$frameIdx, 時間=${timeMs}ms');
+          }
+          
           final withTraj = await BallTrajectoryService.renderOverlay(
             inputPath: skeletonPath,
             outputPath: trajOut,

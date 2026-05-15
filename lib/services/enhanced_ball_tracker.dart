@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui' show Offset;
+import 'package:flutter/foundation.dart';
 
 import 'ball_tracker.dart';
 import 'detection_config.dart';
@@ -12,10 +13,10 @@ class EnhancedBallTracker {
   static const double ROI_Y_FRAC = 0.5646;
 
   // 每幀追蹤基準 ROI 尺寸（對應 1080×1920 原始解析度）
-  static const int baseRoiSize = 400;
+  static const int baseRoiSize = 300;  // ✅ 改為 300px（從 400px）
 
   // P1 必須在 P0 後 N 幀內出現，否則重置追蹤
-  static const int _p1DeadlineFrames = 5;
+  static const int _p1DeadlineFrames = 10;  // ✅ 增大從 5 → 10幀，給Kalman更多時間
 
   late Kalman2D kalman;
   final TrackingConfigManager configManager = TrackingConfigManager();
@@ -41,6 +42,9 @@ class EnhancedBallTracker {
     _yDir = null;
     _p0FrameIdx = null;
   }
+
+  /// 取得 Y 方向（1=向下, -1=向上, null=未決定）
+  int? get yDir => _yDir;
 
   // ── 核心：逐幀追蹤 ──────────────────────────────────────────
 
@@ -72,22 +76,32 @@ class EnhancedBallTracker {
     }
     recordFoundCandidates();
 
-    // 4. P0 確定後以 Kalman 預測（或上一點）為中心做 ROI 過濾
-    if (trackPoints.isNotEmpty) {
+    // 4. ROI 過濾：完全固定位置（不跟隨球）
+    // ✅ ROI始終在固定位置(ROI_X_FRAC, ROI_Y_FRAC)，不隨trackPoints移動
+    if (trackPoints.isNotEmpty || _p0FrameIdx == null) {  // 啟用ROI過濾
       final roiHalf = getDynamicRoiSize(
             baseRoiSize,
             videoW: videoW,
             videoH: videoH,
           ) /
           2.0;
-      final roiCenter = isKalmanInitialized
-          ? Offset(getKalmanPos().$1, getKalmanPos().$2)
-          : Offset(trackPoints.last.x.toDouble(), trackPoints.last.y.toDouble());
+      
+      // ✅ 固定位置：始終使用ROI_X_FRAC / ROI_Y_FRAC
+      final roiCenter = Offset(
+        videoW * ROI_X_FRAC,
+        videoH * ROI_Y_FRAC,
+      );
+      
+      final beforeRoi = candidates.length;
       candidates = candidates
           .where((c) =>
               (c.dx - roiCenter.dx).abs() <= roiHalf &&
               (c.dy - roiCenter.dy).abs() <= roiHalf)
           .toList();
+      final afterRoi = candidates.length;
+      if (beforeRoi > afterRoi && afterRoi == 0) {
+        debugPrint('[追蹤幀$frameIdx] 🔴 ROI過濾移除所有候選 ($beforeRoi → $afterRoi)');
+      }
     }
 
     if (candidates.isEmpty) {
@@ -96,12 +110,23 @@ class EnhancedBallTracker {
     }
 
     // 5. 步距衛士
+    final beforeStep = candidates.length;
     candidates = candidates.where(stepDistanceGuardCheck).toList();
+    final afterStep = candidates.length;
+    if (beforeStep > afterStep && afterStep == 0) {
+      debugPrint('[追蹤幀$frameIdx] 🔴 步距衛士移除所有候選 ($beforeStep → $afterStep)');
+    }
 
     // 6. Y 方向約束
+    final beforeY = candidates.length;
     candidates = filterByYDirection(candidates);
+    final afterY = candidates.length;
+    if (beforeY > afterY && afterY == 0) {
+      debugPrint('[追蹤幀$frameIdx] 🔴 Y方向約束移除所有候選 ($beforeY → $afterY)');
+    }
 
     if (candidates.isEmpty) {
+      debugPrint('[追蹤幀$frameIdx] ⚠️ 異常計數=$outlierStrikes');
       return !handleOutlierDetection(); // false = frozen → 停止迴圈
     }
 
@@ -175,7 +200,7 @@ class EnhancedBallTracker {
     }
 
     final limit = baseLim * (1.0 + 0.35 * noCandCount);
-    final hardLimit = math.min(130.0, limit);
+    final hardLimit = math.min(200.0, limit);  // ✅ 增大從 130 → 200px
     final accepted = step < hardLimit;
 
     if (accepted) configManager.updateStepEma(step);
@@ -186,9 +211,10 @@ class EnhancedBallTracker {
 
   List<Offset> filterByYDirection(List<Offset> candidates) {
     if (_yDir == null) {
-      if (trackPoints.length >= 3) {
-        final dy = trackPoints[2].y - trackPoints[0].y;
-        if (dy.abs() >= 2) _yDir = dy > 0 ? 1 : -1;
+      // ✅ 改為根據 P0→P1 判定Y方向（而非 P0→P2），更及時
+      if (trackPoints.length >= 2) {
+        final dy = trackPoints[1].y - trackPoints[0].y;
+        if (dy.abs() >= 1) _yDir = dy > 0 ? 1 : -1;  // 向下或向上
       }
       return candidates;
     }
@@ -197,7 +223,7 @@ class EnhancedBallTracker {
 
     final lastPt = trackPoints.last;
     const yTol = 1;
-    const yMaxStep = 80;
+    const yMaxStep = 200;  // ✅ 增大從 80 → 200px，允許更大的Y跳躍
 
     return candidates.where((c) {
       final dy = (c.dy - lastPt.y).toInt();
@@ -237,18 +263,14 @@ class EnhancedBallTracker {
 
   // ── ROI 計算 ─────────────────────────────────────────────────
 
-  /// 動態 ROI 尺寸：根據視頻解析度縮放基準 ROI，並隨 noCandCount 擴大搜尋範圍。
+  /// 固定 ROI 尺寸：禁用動態擴展
+  /// ✅ 原因：動態擴展導致ROI不斷變大（noCandCount++），影響追蹤穩定性
   int getDynamicRoiSize(
     int baseSize, {
     int videoW = 1080,
     int videoH = 1920,
   }) {
-    final base = (baseSize * getResolutionScaleFactor(videoW, videoH)).toInt();
-    if (noCandCount <= 0) return base;
-    if (noCandCount == 1) return (base * 1.2).toInt();
-    if (noCandCount == 2) return (base * 1.4).toInt();
-    final m = math.min(1.5 + (noCandCount - 3) * 0.1, 1.8);
-    return (base * m).toInt();
+    return 300;  // ✅ 改為 300px，完全固定，不隨 noCandCount 或分辨率變化
   }
 
   static double getResolutionScaleFactor(int videoW, int videoH) {
@@ -265,7 +287,7 @@ class EnhancedBallTracker {
     final cy = videoH * ROI_Y_FRAC;
     final size = roiSize > 0
         ? roiSize.toDouble()
-        : 400.0 * getResolutionScaleFactor(videoW, videoH);
+        : 300.0 * getResolutionScaleFactor(videoW, videoH);  // ✅ 改為 300px
     final half = size / 2;
     return (
       (cx - half).clamp(0.0, (videoW - 1).toDouble()),
