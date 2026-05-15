@@ -29,7 +29,12 @@ import '../models/swing_hit.dart';
 
 class SwingImpactDetector {
   // ── 片段截取範圍 ──────────────────────────────────────────────────────────
+  // 改為動態：clip 總長固定 5 秒，以擊球點為中心
+  static const double clipTotalDuration = 5.0;  // 總長 5 秒
+  // clipPreSec 和 clipPostSec 廢棄（保留向後兼容但不使用）
+  @Deprecated('改用 clipTotalDuration + 動態計算')
   static const double clipPreSec = 2.5;
+  @Deprecated('改用 clipTotalDuration + 動態計算')
   static const double clipPostSec = 2.5;
 
   // ── 峰值偵測共用參數（秒為單位，FPS 無關）────────────────────────────────
@@ -57,6 +62,35 @@ class SwingImpactDetector {
   static const double _audioHeightPct = 90.0;
   static const double _audioMinHeight = 0.04;
   static const double _audioPromScale = 2.0;
+
+  /// 動態計算 clip 的起點和終點，使擊球點成為 clip 中間
+  /// 
+  /// @param hitSec 擊球時間（秒）
+  /// @param totalDurationSec 總視頻長度（秒）
+  /// @return (startSec, endSec) 元組
+  static (double, double) calculateClipBoundaries({
+    required double hitSec,
+    required double totalDurationSec,
+  }) {
+    final halfDuration = clipTotalDuration / 2;  // 2.5 秒
+    
+    // 理想情況：以擊球點為中心，前後各 2.5 秒
+    var startSec = hitSec - halfDuration;
+    var endSec = hitSec + halfDuration;
+    
+    // 邊界調整：如果觸及影片邊界，反向調整
+    if (startSec < 0.0) {
+      // 觸及開始邊界 → 向後延伸
+      startSec = 0.0;
+      endSec = math.min(totalDurationSec, clipTotalDuration);
+    } else if (endSec > totalDurationSec) {
+      // 觸及結束邊界 → 向前退縮
+      endSec = totalDurationSec;
+      startSec = math.max(0.0, totalDurationSec - clipTotalDuration);
+    }
+    
+    return (startSec, endSec);
+  }
 
   /// 主入口：在 isolate 中執行，不阻塞 UI
   static Future<List<SwingHit>> detect({
@@ -558,9 +592,11 @@ List<SwingHit> _intersectPeaks(
 
     final hitFrame = ((s + a) / 2).round();
     final hitSec = hitFrame / fps;
-    final startSec = math.max(0.0, hitSec - SwingImpactDetector.clipPreSec);
-    final endSec = math.min(
-        totalFrames / fps, hitSec + SwingImpactDetector.clipPostSec);
+    final totalDurationSec = totalFrames / fps;
+    final (startSec, endSec) = SwingImpactDetector.calculateClipBoundaries(
+      hitSec: hitSec,
+      totalDurationSec: totalDurationSec,
+    );
 
     matches.add(SwingHit(
       hitIndex: 0,
@@ -598,8 +634,11 @@ List<SwingHit> _speedOnlyHits(
   final matches = <SwingHit>[];
   for (final s in speedPeaks) {
     final hitSec = s / fps;
-    final startSec = math.max(0.0, hitSec - SwingImpactDetector.clipPreSec);
-    final endSec = math.min(totalFrames / fps, hitSec + SwingImpactDetector.clipPostSec);
+    final totalDurationSec = totalFrames / fps;
+    final (startSec, endSec) = SwingImpactDetector.calculateClipBoundaries(
+      hitSec: hitSec,
+      totalDurationSec: totalDurationSec,
+    );
     matches.add(SwingHit(
       hitIndex: 0,
       hitFrame: s,

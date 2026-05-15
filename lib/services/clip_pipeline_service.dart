@@ -396,20 +396,50 @@ class ClipPipelineService {
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
 
         if (trackPts.length >= 2) {
-          // 計算當前的 ROI 尺寸用於視覺化
-          final baseRoiSize = 400;  // 基本 ROI 尺寸
-          final currentRoiSize = tracker.getDynamicRoiSize(baseRoiSize);
+          // 固定 ROI = 400px (符合 Python 版本)
+          final roiSize = 400;
+          
+          // ── 計算 ROI 邊界（小屏幕在右邊，占寬度的一半）──
+          final videoW = extraction.width;
+          final videoH = extraction.height;
+          final screenW = videoW / 2;
+          final screenH = videoH;
+          final screenX = videoW / 2;  // 右邊小屏幕的左邊界
+          
+          // ROI 中心相對位置
+          const roiXFrac = 0.6519;
+          const roiYFrac = 0.5646;
+          const roiSizeRatioW = 400.0 / 1080.0;  // ≈ 0.3704
+          const roiSizeRatioH = 400.0 / 1920.0;  // ≈ 0.2083
+          
+          final roiCenterX = screenX + screenW * roiXFrac;
+          final roiCenterY = screenH * roiYFrac;
+          final scaledRoiSize = ((videoW * roiSizeRatioW + videoH * roiSizeRatioH) / 2);
+          final halfRoi = scaledRoiSize / 2;
+          
+          final roiLeft = (roiCenterX - halfRoi).clamp(0, videoW - 1);
+          final roiTop = (roiCenterY - halfRoi).clamp(0, videoH - 1);
+          final roiRight = (roiCenterX + halfRoi).clamp(0, videoW - 1);
+          final roiBottom = (roiCenterY + halfRoi).clamp(0, videoH - 1);
+          
+          // ── 過濾軌跡點：只保留 ROI 內的點 ──
+          final roiFilteredPts = trackPts.where((pt) {
+            return pt.x >= roiLeft && pt.x <= roiRight && 
+                   pt.y >= roiTop && pt.y <= roiBottom;
+          }).toList();
+          
+          debugPrint('[Pipeline.analyze] 🎯 ROI 過濾：${trackPts.length} → ${roiFilteredPts.length} 點');
           
           final withTraj = await BallTrajectoryService.renderOverlay(
             inputPath: skeletonPath,
             outputPath: trajOut,
-            trackPts: trackPts.map((pt) => pt.toMap()).toList(),
-            roiSize: currentRoiSize,  // 傳遞 ROI 尺寸用於繪製邊界框
+            trackPts: roiFilteredPts.map((pt) => pt.toMap()).toList(),
+            roiSize: roiSize,  // 固定 400px
           );
           if (withTraj != null) {
             hasBallTrack = true;
             finalPath = withTraj;
-            debugPrint('[Pipeline.analyze] ✅ 球軌跡疊加成功 (ROI=$currentRoiSize px)');
+            debugPrint('[Pipeline.analyze] ✅ 球軌跡疊加成功 (固定 ROI=$roiSize px，${roiFilteredPts.length} 點)');
           } else {
             debugPrint('[Pipeline.analyze] ❌ 球軌跡疊加失敗');
             final bad = File(trajOut);

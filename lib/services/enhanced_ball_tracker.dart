@@ -15,6 +15,11 @@ import 'detection_config.dart';
 
 /// 增強型追蹤器（支援動態檢測配置）
 /// 
+/// ROI 參數（固定）：
+///   - 小屏幕在右邊，占視頻寬度的 50%
+///   - ROI 中心相對位置：(0.6519, 0.5646)
+///   - ROI 大小根據視頻分辨率自動縮放（基於 1080×1920 = 400×400）
+/// 
 /// 使用示例：
 /// ```dart
 /// final tracker = EnhancedBallTracker(dt: 1.0 / 30.0);
@@ -36,6 +41,12 @@ import 'detection_config.dart';
 /// ```
 class EnhancedBallTracker {
   final double dt;  // 時間差（幀時間）
+  
+  // ── ROI 配置常數（與 TrajectoryOverlayRenderer.kt 同步）──
+  static const double ROI_X_FRAC = 0.6519;        // 小屏幕內寬度的 65.1%
+  static const double ROI_Y_FRAC = 0.5646;        // 視頻高度的 56.5%
+  static const double ROI_SIZE_RATIO_W = 400.0 / 1080.0;  // ≈ 0.3704
+  static const double ROI_SIZE_RATIO_H = 400.0 / 1920.0;  // ≈ 0.2083
   
   // 核心追蹤器
   late final Kalman2D kalman;
@@ -258,30 +269,19 @@ class EnhancedBallTracker {
     return shouldFreezeTracking();
   }
   
-  /// 遠球自適應檢測：ROI 動態擴大
+  /// 取得固定 ROI 尺寸
   /// 
-  /// 當連續無檢測時，擴大搜尋區域：
-  /// - noCandCount = 0: ROI 保持原大小
-  /// - noCandCount = 1-2: ROI 擴大 20-40%
-  /// - noCandCount = 3+: ROI 擴大 50-80%
-  int getDynamicRoiSize(int baseRoiSize) {
-    double expandFactor = 1.0;
-    
-    switch (noCandCount) {
-      case 0:
-        expandFactor = 1.0;
-        break;
-      case 1:
-        expandFactor = 1.2;
-        break;
-      case 2:
-        expandFactor = 1.4;
-        break;
-      default:
-        expandFactor = 1.0 + math.min(0.5, noCandCount * 0.15);
+  /// Python 版本使用固定 ROI = 400px
+  /// ROI 中心由 EnhancedBallTracker 基於最後有效追蹤點決定
+  /// 恢復模式(noCandCount > 0)時才微調，但仍保持在 400-420px 範圍內
+  int getFixedRoiSize() {
+    // Python 版本: 基本固定 400px，恢復模式最多擴到 420px
+    if (noCandCount > 0) {
+      // 恢復模式: 每次失敗增加 35px，最多 420px
+      final recoverRoi = (400 + noCandCount * 35).toInt();
+      return math.min(recoverRoi, 420);
     }
-    
-    return (baseRoiSize * expandFactor).toInt();
+    return 400;  // 正常追蹤: 固定 400px
   }
   
   /// 遠球自適應檢測：基於面積 EMA 的距離調整
@@ -302,6 +302,61 @@ class EnhancedBallTracker {
       final t = (areaEma - 20) / 30;
       return 150.0 + (130.0 - 150.0) * t;
     }
+  }
+  
+  /// 計算 ROI 邊界框（基於視頻分辨率和固定參數）
+  /// 
+  /// 返回: (roiLeft, roiTop, roiRight, roiBottom) - 像素坐標
+  /// 
+  /// 使用示例：
+  /// ```dart
+  /// final (roiL, roiT, roiR, roiB) = tracker.calculateRoiBounds(
+  ///   videoW: 1080,
+  ///   videoH: 1920,
+  ///   roiSize: 400,
+  /// );
+  /// ```
+  (double, double, double, double) calculateRoiBounds({
+    required int videoW,
+    required int videoH,
+    int roiSize = 0,
+  }) {
+    // ROI 中心 = 整個視頻尺寸的比例位置（不是小屏幕內的位置）
+    final roiCenterX = videoW * ROI_X_FRAC;
+    final roiCenterY = videoH * ROI_Y_FRAC;
+    
+    // ROI 大小：若傳入 roiSize 則使用，否則用預設比例計算
+    final scaledRoiSize = roiSize > 0 
+        ? roiSize.toDouble()
+        : (videoW * ROI_SIZE_RATIO_W);
+    final halfRoi = scaledRoiSize / 2;
+    
+    // 計算邊界並夾緊到視頻範圍
+    final roiLeft = (roiCenterX - halfRoi).clamp(0.0, (videoW - 1).toDouble());
+    final roiTop = (roiCenterY - halfRoi).clamp(0.0, (videoH - 1).toDouble());
+    final roiRight = (roiCenterX + halfRoi).clamp(0.0, (videoW - 1).toDouble());
+    final roiBottom = (roiCenterY + halfRoi).clamp(0.0, (videoH - 1).toDouble());
+    
+    return (roiLeft, roiTop, roiRight, roiBottom);
+  }
+  
+  /// 檢查點是否在 ROI 內
+  /// 
+  /// 返回: true 如果點 (x, y) 在 ROI 邊界內
+  bool isPointInRoi({
+    required int x,
+    required int y,
+    required int videoW,
+    required int videoH,
+    int roiSize = 0,
+  }) {
+    final (roiL, roiT, roiR, roiB) = calculateRoiBounds(
+      videoW: videoW,
+      videoH: videoH,
+      roiSize: roiSize,
+    );
+    
+    return x >= roiL && x <= roiR && y >= roiT && y <= roiB;
   }
   
   // ========== 追蹤點管理 ==========
