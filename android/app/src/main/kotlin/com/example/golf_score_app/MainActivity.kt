@@ -297,7 +297,10 @@ class MainActivity: FlutterActivity() {
                 when (call.method) {
                     "extractFrameRgb" -> {
                         val videoPath = call.argument<String>("videoPath")
-                        val timeMs = call.argument<Long>("timeMs") ?: 0L
+                        // Dart int 在 32-bit 設備可能以 Int 傳入，兩者都嘗試轉為 Long
+                        val timeMs = (call.argument<Long>("timeMs")
+                            ?: call.argument<Int>("timeMs")?.toLong()
+                            ?: 0L)
                         val maxWidth = call.argument<Int>("maxWidth") ?: 720
 
                         if (videoPath.isNullOrBlank()) {
@@ -319,12 +322,13 @@ class MainActivity: FlutterActivity() {
                                     val bitmapHeight = bitmap.height
                                     val pixels = IntArray(bitmapWidth * bitmapHeight)
                                     bitmap.getPixels(pixels, 0, bitmapWidth, 0, 0, bitmapWidth, bitmapHeight)
+                                    // BGRA8888 順序：B, G, R, A（對應 ML Kit InputImageFormat.bgra8888）
                                     val bytes = ByteArray(pixels.size * 4)
                                     for (i in pixels.indices) {
-                                        bytes[i * 4] = (pixels[i] shr 24).toByte()
-                                        bytes[i * 4 + 1] = (pixels[i] shr 16).toByte()
-                                        bytes[i * 4 + 2] = (pixels[i] shr 8).toByte()
-                                        bytes[i * 4 + 3] = pixels[i].toByte()
+                                        bytes[i * 4]     = pixels[i].toByte()            // B
+                                        bytes[i * 4 + 1] = (pixels[i] shr 8).toByte()   // G
+                                        bytes[i * 4 + 2] = (pixels[i] shr 16).toByte()  // R
+                                        bytes[i * 4 + 3] = (pixels[i] shr 24).toByte()  // A
                                     }
                                     bitmap.recycle()
 

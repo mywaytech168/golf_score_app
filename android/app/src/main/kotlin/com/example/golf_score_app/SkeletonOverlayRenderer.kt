@@ -60,6 +60,14 @@ class SkeletonOverlayRenderer(private val context: Context) {
         val visibility: Float,
     )
 
+    // 每個 clip 生命週期內重用（避免每幀 new Paint GC 壓力）
+    private val linePaint = Paint().apply {
+        style = Paint.Style.STROKE; isAntiAlias = true; strokeCap = Paint.Cap.ROUND
+    }
+    private val dotPaint = Paint().apply {
+        style = Paint.Style.FILL; isAntiAlias = true
+    }
+
     // ────────────────────────────────────────────────────────────
     // 主入口
     // ────────────────────────────────────────────────────────────
@@ -134,28 +142,26 @@ class SkeletonOverlayRenderer(private val context: Context) {
             Log.e(TAG, "無法建立編碼器: $e")
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
-        // 部分硬體編碼器要求寬高為 16 的倍數，不足時補齊（例如 1080→1088）
-        val encW = (displayW + 15) and -16
-        val encH = (displayH + 15) and -16
-        // COLOR_FormatYUV420SemiPlanar = NV12，與 bitmapToNv12 完全對應，避免 Flexible 在不同裝置
-        // 映射到 I420 造成 UV 通道交換（粉/青色偏）
-        // ✅ 高質量編碼：根據解析度動態調整係數（0.8-1.0 bpp）
-        // 高爾夫揮桿視頻含高度動作和骨架信息，需要較高比特率
-        // 係數從 0.25 bpp 改為 0.8-1.0 bpp，大幅改善質量並減少多次編碼的累積損失
-        val bitRateCoeff = when {
-            displayW >= 1440 -> 1.0   // 2K+ 解析度：最高質量
-            displayW >= 1080 -> 0.8   // 1080p：中等質量
-            else              -> 0.6   // 720p 以下：實用質量
-        }
-        val bitRate = (displayW.toLong() * displayH * fps * bitRateCoeff)
-            .toLong().coerceIn(8_000_000L, 25_000_000L).toInt()
+        // 骨架疊加限制在 720p（長邊），避免 JVM 像素迴圈在 1080p 耗費過久
+        // 1080p：2,073,600 pixels → 720p：291,600 pixels（~7x 加速）
+        val maxLongSide = 720
+        val srcLong = maxOf(displayW, displayH)
+        val sc = if (srcLong > maxLongSide) maxLongSide.toFloat() / srcLong else 1.0f
+        fun scaleEven(v: Int) = if (sc < 1f) ((v * sc).roundToInt().let { if (it % 2 != 0) it + 1 else it }) else v
+        val skelW = scaleEven(displayW)
+        val skelH = scaleEven(displayH)
+        // 部分硬體編碼器要求寬高為 16 的倍數
+        val encW = (skelW + 15) and -16
+        val encH = (skelH + 15) and -16
+        val bitRate = (skelW.toLong() * skelH * fps * 0.8)
+            .toLong().coerceIn(2_000_000L, 8_000_000L).toInt()
         val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
-        Log.d(TAG, "編碼器尺寸: ${encW}x${encH}（display=${displayW}x${displayH}）bitRate=${bitRate/1_000_000}Mbps")
+        Log.d(TAG, "骨架編碼: ${encW}x${encH}（display=${displayW}x${displayH}，scale=%.2f）bitRate=${bitRate/1_000_000}Mbps".format(sc))
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 
@@ -174,15 +180,17 @@ class SkeletonOverlayRenderer(private val context: Context) {
         var samplesWritten = 0
         var success    = false
 
-        // ── 預配置可重用緩衝區（避免每幀 ~9MB GC 壓力）────────────
-        // yuvFillPixelsRotated 直接輸出 display-space 像素，省去 rawBmp + rotBmp
-        val yuvPixels  = IntArray(displayW * displayH)
-        val displayBmp = Bitmap.createBitmap(displayW, displayH, Bitmap.Config.ARGB_8888)
-        val padBmp     = if (encW != displayW || encH != displayH)
-                             Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
-                         else null
-        val encPixels  = IntArray(encW * encH)
-        val nv12Buf    = ByteArray(encW * encH + encW * encH / 2)
+        // ── 預配置可重用緩衝區 ────────────────────────────────────
+        // 優化：YUV → NV12 直接轉換，省去 YUV→RGB→NV12 的中間層
+        // 骨架單獨畫在透明 overlay，再 composite 進 NV12（稀疏操作）
+        val nv12Buf       = ByteArray(encW * encH + encW * encH / 2)
+        val overlayBmp    = Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
+        val overlayCanvas = Canvas(overlayBmp)
+        val overlayPixels = IntArray(encW * encH)
+        // 骨架繪製參數：基於編碼尺寸（Canvas 是 encW×encH）
+        val encShortSide = minOf(encW, encH).toFloat()
+        linePaint.strokeWidth = (encShortSide / 80f).coerceIn(2f, 7f)
+        val skeletonRadius = (encShortSide / 60f).coerceIn(3f, 9f)
 
         try {
             while (true) {
@@ -225,28 +233,24 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     val origTimeSec = startSec + clipTimeSec
                     val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
 
-                    // ── YUV → display-space pixels（含旋轉，單次像素迴圈，無中間 Bitmap）──
-                    yuvFillPixelsRotated(image, videoW, videoH, rotation, displayW, displayH, yuvPixels)
-                    displayBmp.setPixels(yuvPixels, 0, displayW, 0, 0, displayW, displayH)
+                    // ── 1. YUV → NV12 直接轉換 + downscale to encW×encH（~7x 加速）──
+                    yuvToNv12WithRotation(image, videoW, videoH, rotation, displayW, displayH, encW, encH, nv12Buf)
+                    // srcW=displayW, srcH=displayH：原始解析度作為 source
 
-                    // 若需要 16-alignment 補齊，將 displayBmp 畫入 padBmp（右/下補黑邊）
-                    val bmp = if (padBmp != null) {
-                        Canvas(padBmp).drawBitmap(displayBmp, 0f, 0f, null); padBmp
-                    } else displayBmp
-
-                    // ── 繪製骨架（bitmap 已是 display 方向，直接 scale）──
+                    // ── 2. 骨架疊加（透明 overlay → composite 進 NV12）──
+                    overlayBmp.eraseColor(android.graphics.Color.TRANSPARENT)
                     frameData[csvFrameIdx]?.let { landmarks ->
-                        drawSkeleton(Canvas(bmp), landmarks, poseW, poseH, displayW, displayH)
+                        drawSkeleton(overlayCanvas, landmarks, poseW, poseH, encW, encH, skeletonRadius)
                     }
+                    compositeSkeleton(overlayBmp, overlayPixels, encW, encH, nv12Buf)
 
-                    // ── Bitmap → NV12 → 編碼器 ───────────────────
+                    // ── 3. 餵編碼器 ─────────────────────────────
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
-                    // ✅ 使用浮點除法避免 fps.toLong() 截斷（如 29.97→29）
+                    // 使用浮點除法避免 fps.toLong() 截斷（如 29.97→29）
                     val ptsUs = (frameCount.toDouble() * 1_000_000.0 / fps).toLong()
 
                     if (encInIdx >= 0) {
                         val buf = encoder.getInputBuffer(encInIdx)!!
-                        bitmapFillNv12(bmp, encW, encH, encPixels, nv12Buf)
                         buf.clear()
                         buf.put(nv12Buf, 0, nv12Buf.size)
                         encoder.queueInputBuffer(encInIdx, 0, nv12Buf.size, ptsUs, 0)
@@ -254,7 +258,6 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     } else {
                         Log.w(TAG, "dequeueInputBuffer 返回 $encInIdx，略過幀 pts=$ptsUs")
                     }
-                    // 不 recycle —— displayBmp / padBmp 是預配置共用資源
 
                     drainEncoder(
                         encoder, muxer, encBufInfo,
@@ -321,8 +324,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "骨架渲染錯誤: $e", e)
         } finally {
-            runCatching { displayBmp.recycle() }
-            runCatching { padBmp?.recycle() }
+            runCatching { overlayBmp.recycle() }
             runCatching { decoder.stop(); decoder.release() }
             runCatching { encoder.stop(); encoder.release() }
             runCatching { extractor.release() }
@@ -348,24 +350,10 @@ class SkeletonOverlayRenderer(private val context: Context) {
         landmarks: Array<LandmarkPoint?>,
         poseW: Float, poseH: Float,
         displayW: Int, displayH: Int,
+        radius: Float,
     ) {
-        val scaleX  = displayW.toFloat() / poseW
-        val scaleY  = displayH.toFloat() / poseH
-        val shortSide = minOf(displayW, displayH).toFloat()
-        val strokeW = (shortSide / 80f).coerceIn(3f, 9f)
-        val radius  = (shortSide / 60f).coerceIn(4f, 12f)
-
-        // bitmap 已物理旋轉為 display 方向，CSV 也是 display-space，直接 scale 即可
-        val linePaint = Paint().apply {
-            strokeWidth = strokeW
-            style       = Paint.Style.STROKE
-            isAntiAlias = true
-            strokeCap   = Paint.Cap.ROUND
-        }
-        val dotPaint = Paint().apply {
-            style       = Paint.Style.FILL
-            isAntiAlias = true
-        }
+        val scaleX = displayW.toFloat() / poseW
+        val scaleY = displayH.toFloat() / poseH
 
         for ((a, b) in CONNECTIONS) {
             val la = landmarks.getOrNull(a) ?: continue
@@ -448,70 +436,96 @@ class SkeletonOverlayRenderer(private val context: Context) {
     }
 
     // ────────────────────────────────────────────────────────────
-    // YUV Image → display-space IntArray（含旋轉，無中間 Bitmap 分配）
+    // YUV → NV12 直接轉換（含旋轉，無 RGB 中間層）
     // ────────────────────────────────────────────────────────────
 
     /**
-     * 將 YUV420 Image 直接解碼並旋轉，寫入預配置的 [pixels] 陣列（display-space）。
-     * 旋轉在像素迴圈內以座標映射實現，省去 rawBmp + Matrix.postRotate Bitmap 的分配。
+     * 將 YUV420 Image 直接旋轉並寫入 NV12 緩衝區，完全跳過 RGB 中間層。
      *
-     * 旋轉映射（display(dx,dy) ← coded(ci, cj)）：
-     *   90°  → ci = dy,          cj = codedH-1-dx
-     *   270° → ci = codedW-1-dy, cj = dx
-     *   180° → ci = codedW-1-dx, cj = codedH-1-dy
-     *   0°   → ci = dx,          cj = dy
+     * 舊方法：YUV→RGB（6 mul/pixel）+ RGB→NV12（6 mul/pixel）= 12 mul/pixel
+     * 新方法：直接複製 Y byte + UV byte，含旋轉座標映射 = 0 mul/pixel
      */
-    private fun yuvFillPixelsRotated(
+    /**
+     * YUV420 → NV12，支援旋轉 + 降解析度（nearest-neighbor）。
+     * 迴圈以輸出 (encW×encH) 為準，每個輸出像素映射回 source (srcW×srcH) 再映射到 coded 空間。
+     * 無 RGB 中間層：Y/UV byte 直接複製，0 乘法/pixel。
+     */
+    private fun yuvToNv12WithRotation(
         image: Image,
         codedW: Int, codedH: Int,
         rotation: Int,
-        displayW: Int, displayH: Int,
-        pixels: IntArray,
+        srcW: Int, srcH: Int,    // 原始 display 解析度
+        encW: Int, encH: Int,    // 輸出編碼解析度（可小於 srcW×srcH）
+        nv12: ByteArray,
     ) {
         val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
         val yStride       = yP.rowStride
         val uvStride      = uP.rowStride
         val uvPixelStride = uP.pixelStride
-        // Bulk-copy ByteBuffers once — avoids per-pixel JVM virtual calls
         val yBytes = ByteArray(yP.buffer.remaining()).also { yP.buffer.get(it) }
         val uBytes = ByteArray(uP.buffer.remaining()).also { uP.buffer.get(it) }
         val vBytes = ByteArray(vP.buffer.remaining()).also { vP.buffer.get(it) }
 
-        for (dy in 0 until displayH) {
-            for (dx in 0 until displayW) {
+        val uvBase = encW * encH
+        for (dy in 0 until encH) {
+            for (dx in 0 until encW) {
+                // Nearest-neighbor downscaling: output pixel → source pixel
+                val sx = (dx.toLong() * srcW / encW).toInt()
+                val sy = (dy.toLong() * srcH / encH).toInt()
                 val ci: Int; val cj: Int
                 when (rotation) {
-                    90  -> { ci = dy;              cj = codedH - 1 - dx }
-                    270 -> { ci = codedW - 1 - dy; cj = dx              }
-                    180 -> { ci = codedW - 1 - dx; cj = codedH - 1 - dy }
-                    else -> { ci = dx;              cj = dy              }
+                    90  -> { ci = sy;           cj = codedH - 1 - sx }
+                    270 -> { ci = codedW-1-sy;  cj = sx               }
+                    180 -> { ci = codedW-1-sx;  cj = codedH-1-sy     }
+                    else-> { ci = sx;           cj = sy               }
                 }
-                val yv    = (yBytes[cj * yStride + ci].toInt() and 0xFF) - 16
-                val uvOff = (cj / 2) * uvStride + (ci / 2) * uvPixelStride
-                val u     = (uBytes[uvOff].toInt() and 0xFF) - 128
-                val v     = (vBytes[uvOff].toInt() and 0xFF) - 128
-                val r = ((298 * yv + 409 * v + 128) shr 8).coerceIn(0, 255)
-                val g = ((298 * yv - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
-                val b = ((298 * yv + 516 * u + 128) shr 8).coerceIn(0, 255)
-                pixels[dy * displayW + dx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                val yIdx = cj * yStride + ci
+                nv12[dy * encW + dx] = if (yIdx < yBytes.size) yBytes[yIdx] else 16
+                if (dy % 2 == 0 && dx % 2 == 0) {
+                    val uvOff = (cj / 2) * uvStride + (ci / 2) * uvPixelStride
+                    val base  = uvBase + (dy / 2) * encW + dx
+                    if (base + 1 < nv12.size) {
+                        nv12[base]     = if (uvOff < uBytes.size) uBytes[uvOff] else 128.toByte()
+                        nv12[base + 1] = if (uvOff < vBytes.size) vBytes[uvOff] else 128.toByte()
+                    }
+                }
             }
         }
     }
 
-    /** Bitmap → 已預配置的 NV12 ByteArray（無 heap 分配）*/
-    private fun bitmapFillNv12(bmp: Bitmap, w: Int, h: Int, pixels: IntArray, nv12: ByteArray) {
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+    /**
+     * 將骨架 overlay（ARGB Bitmap）composite 進已填好的 NV12 緩衝區。
+     * 只處理非透明像素（骨架線條），對完整幀而言是稀疏操作（<1% 像素）。
+     */
+    private fun compositeSkeleton(
+        overlay: Bitmap, pixels: IntArray,
+        w: Int, h: Int,
+        nv12: ByteArray,
+    ) {
+        overlay.getPixels(pixels, 0, w, 0, 0, w, h)
         val uvBase = w * h
         for (j in 0 until h) {
             for (i in 0 until w) {
-                val p = pixels[j * w + i]
-                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
-                nv12[j * w + i] = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).toByte()
+                val argb  = pixels[j * w + i]
+                val alpha = (argb ushr 24) and 0xFF
+                if (alpha < 16) continue
+                val r = (argb shr 16) and 0xFF
+                val g = (argb shr 8)  and 0xFF
+                val b = argb          and 0xFF
+                val yv = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).coerceIn(16, 235)
+                val yIdx = j * w + i
+                nv12[yIdx] = if (alpha >= 240) yv.toByte()
+                             else (((nv12[yIdx].toInt() and 0xFF) * (255 - alpha) + yv * alpha + 127) / 255).toByte()
                 if (j % 2 == 0 && i % 2 == 0) {
-                    val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
-                    val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val base = uvBase + (j / 2) * w + (i / 2) * 2
-                    if (base + 1 < nv12.size) { nv12[base] = u.toByte(); nv12[base + 1] = v.toByte() }
+                    val u    = (((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128).coerceIn(16, 240)
+                    val v    = (((112 * r - 94 * g - 18 * b + 128) shr 8) + 128).coerceIn(16, 240)
+                    val base = uvBase + (j / 2) * w + i
+                    if (base + 1 < nv12.size) {
+                        nv12[base]     = if (alpha >= 240) u.toByte()
+                                         else (((nv12[base].toInt()     and 0xFF) * (255 - alpha) + u * alpha + 127) / 255).toByte()
+                        nv12[base + 1] = if (alpha >= 240) v.toByte()
+                                         else (((nv12[base + 1].toInt() and 0xFF) * (255 - alpha) + v * alpha + 127) / 255).toByte()
+                    }
                 }
             }
         }
@@ -536,9 +550,6 @@ class SkeletonOverlayRenderer(private val context: Context) {
             when {
                 idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     tryAgainCount++
-                    Log.d(TAG, "drainEncoder: TRY_AGAIN_LATER ($tryAgainCount/$maxTryAgainCount), eos=$eos, drainedSamples=$drainedSamples")
-                    
-                    // ✅ EOS 模式下的 timeout 邏輯
                     if (eos && tryAgainCount > maxTryAgainCount) {
                         // 如果已經有輸出，即使 timeout 也視為成功
                         if (drainedSamples > 0) {
@@ -555,30 +566,22 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 }
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     tryAgainCount = 0
-                    Log.d(TAG, "drainEncoder: OUTPUT_FORMAT_CHANGED")
                     val t = muxer.addTrack(encoder.outputFormat)
                     muxer.start(); setTrack(t)
                 }
                 idx >= 0 -> {
                     tryAgainCount = 0
-                    Log.d(TAG, "drainEncoder: idx=$idx, size=${info.size}, flags=${info.flags}, pts=${info.presentationTimeUs}")
-                    
                     val buf = encoder.getOutputBuffer(idx)
                     if (buf != null && info.size > 0 && isMuxed()) {
                         buf.position(info.offset); buf.limit(info.offset + info.size)
                         muxer.writeSampleData(getTrack(), buf, info)
                         onSampleWritten()
-                        drainedSamples++  // ✅ 計數已輸出樣本
-                        Log.d(TAG, "writeSampleData: size=${info.size}, drainedSamples=$drainedSamples")
+                        drainedSamples++
                     } else {
                         Log.w(TAG, "writeSampleData skip: buf=$buf, size=${info.size}, isMuxed=${isMuxed()}")
                     }
-                    
                     encoder.releaseOutputBuffer(idx, false)
-                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        Log.d(TAG, "drainEncoder: EOS flag detected from encoder, breaking")
-                        break
-                    }
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
                 }
             }
         }
