@@ -49,7 +49,7 @@ class EnhancedBallTracker {
   static const double ROI_SIZE_RATIO_H = 400.0 / 1920.0;  // ≈ 0.2083
   
   // 核心追蹤器
-  late final Kalman2D kalman;
+  late Kalman2D kalman;
   
   // 配置管理器
   final TrackingConfigManager configManager = TrackingConfigManager();
