@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
@@ -39,10 +38,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   @override
   void initState() {
     super.initState();
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
     _init();
   }
 
@@ -143,9 +138,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     _ctrlA.removeListener(_onControllerUpdate);
     _ctrlA.dispose();
     _ctrlB.dispose();
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
     super.dispose();
   }
 
