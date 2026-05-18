@@ -79,6 +79,10 @@ class RecordingHistoryEntry {
   /// 切片來源影片路徑（videoType == localClip 時有值）
   final String? sourceVideoPath;
 
+  /// 音訊分析標籤（無聲音、無有效擊球等）
+  /// 例如：['no_audio']、['no_valid_hits']、['pro']
+  final List<String>? audioTags;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -96,6 +100,7 @@ class RecordingHistoryEntry {
     this.goodShot,
     this.audioLabel,
     this.sourceVideoPath,
+    this.audioTags,
   });
 
   /// 建立更新後的新實例，方便調整時長或其他欄位
@@ -116,6 +121,7 @@ class RecordingHistoryEntry {
     bool? goodShot,
     String? audioLabel,
     String? sourceVideoPath,
+    List<String>? audioTags,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -134,6 +140,7 @@ class RecordingHistoryEntry {
       goodShot: goodShot ?? this.goodShot,
       audioLabel: audioLabel ?? this.audioLabel,
       sourceVideoPath: sourceVideoPath ?? this.sourceVideoPath,
+      audioTags: audioTags ?? this.audioTags,
     );
   }
 
@@ -171,6 +178,7 @@ class RecordingHistoryEntry {
       'goodShot': goodShot,
       'audioLabel': audioLabel,
       'sourceVideoPath': sourceVideoPath,
+      'audioTags': audioTags,
     };
   }
 
@@ -187,6 +195,13 @@ class RecordingHistoryEntry {
       } catch (_) {
         // 舊資料可能含 cloudOriginal / cloudClip，一律回退為 original
       }
+    }
+
+    // 從 JSON 還原標籤列表
+    final rawTags = json['audioTags'];
+    List<String>? audioTags;
+    if (rawTags is List) {
+      audioTags = rawTags.whereType<String>().toList();
     }
 
     return RecordingHistoryEntry(
@@ -208,6 +223,7 @@ class RecordingHistoryEntry {
       goodShot: (json['goodShot'] as bool?),
       audioLabel: (json['audioLabel'] as String?),
       sourceVideoPath: (json['sourceVideoPath'] as String?),
+      audioTags: audioTags,
     );
   }
 }

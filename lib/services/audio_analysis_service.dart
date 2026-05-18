@@ -1,7 +1,7 @@
 ﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'audio_analyzer.dart';
 
@@ -23,6 +23,10 @@ class AudioAnalysisService {
   static const double _epsilon = 1e-12;
   // Approximate Python's PEAK_REL_STRENGTH; used for simple peak counting on waveform envelope.
   static const double _peakRelStrength = 1.0;
+  
+  // ------------------- 無聲音檢測閾值 -------------------
+  static const double _silenceRmsThreshold = 0.01;    // RMS 閾值
+  static const double _silencePeakThreshold = 0.05;   // 峰值閾值
 
   static Map<String, dynamic>? _modelStats;
 
@@ -100,9 +104,10 @@ class AudioAnalysisService {
   }
 
   static const Map<String, String> _classFeedbackLabels = {
-  'pro': 'Pro',
-  'good': 'Sweet',
-  'bad': 'Keep going!',
+    'pro': 'Pro',
+    'good': 'Sweet',
+    'bad': 'Keep going!',
+    'no_audio': '無聲音',
   };
 
   // --- Weighted z² distance ----
@@ -163,14 +168,45 @@ class AudioAnalysisService {
 
     if (wavPath == null || wavPath.isEmpty) {
       print('No valid WAV path found.');
-      return <String, dynamic>{'summary': {}, 'segments': <Map<String, dynamic>>[]};
+      return <String, dynamic>{
+        'summary': {
+          'audio_class': 'no_audio',
+          'audio_feedback': '無聲音',
+          'tags': ['no_audio'],
+        },
+        'segments': <Map<String, dynamic>>[],
+        'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
+      };
     }
 
     try {
       final _WavData wav = await _readWav(wavPath);
       if (wav.samples.isEmpty) {
         print('WAV file contains no samples.');
-        return <String, dynamic>{'summary': {}, 'segments': <Map<String, dynamic>>[]};
+        return <String, dynamic>{
+          'summary': {
+            'audio_class': 'no_audio',
+            'audio_feedback': '無聲音',
+            'tags': ['no_audio'],
+          },
+          'segments': <Map<String, dynamic>>[],
+          'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
+        };
+      }
+
+      // 檢測無聲音
+      final bool isSilent = _isSilentAudio(wav.samples);
+      if (isSilent) {
+        print('Audio is silent (RMS < $_silenceRmsThreshold and Peak < $_silencePeakThreshold).');
+        return <String, dynamic>{
+          'summary': {
+            'audio_class': 'no_audio',
+            'audio_feedback': '無聲音',
+            'tags': ['no_audio'],
+          },
+          'segments': <Map<String, dynamic>>[],
+          'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
+        };
       }
 
       // Detect peaks and segment audio
@@ -207,6 +243,7 @@ class AudioAnalysisService {
               'features': summary,
               'score': segmentScore,
               'distances': score.distances,
+              'tags': [score.predictedClass],
             };
           }
         } else {
@@ -215,26 +252,70 @@ class AudioAnalysisService {
       }
 
       final double elapsedSeconds = sw.elapsedMilliseconds / 1000.0;
+      
+      // 若未檢測到擊球但有聲音，標記為無有效擊球
+      if (bestSegment == null) {
+        return <String, dynamic>{
+          'summary': {
+            'audio_class': 'no_valid_hits',
+            'audio_feedback': 'No valid hits detected',
+            'tags': ['no_valid_hits'],
+          },
+          'segments': segments,
+          'analysis_seconds': elapsedSeconds,
+        };
+      }
+
       return <String, dynamic>{
-        'summary': bestSegment ??
-            {
-              'audio_class': 'unknown',
-              'audio_feedback': 'No valid hits detected',
-            },
+        'summary': bestSegment,
         'segments': segments,
         'analysis_seconds': elapsedSeconds,
       };
     } catch (e) {
       print('Error during analysis: $e');
-      return <String, dynamic>{'summary': {}, 'segments': <Map<String, dynamic>>[]};
+      return <String, dynamic>{
+        'summary': {
+          'audio_class': 'error',
+          'audio_feedback': 'Analysis error',
+          'tags': ['error'],
+        },
+        'segments': <Map<String, dynamic>>[],
+        'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
+      };
     }
+  }
+
+  /// 檢測音訊是否為無聲音（靜默）
+  /// RMS < 0.01 且峰值 < 0.05 表示無聲音
+  static bool _isSilentAudio(List<double> samples) {
+    if (samples.isEmpty) return true;
+
+    double rmsSum = 0.0;
+    double peakVal = 0.0;
+
+    for (final sample in samples) {
+      final normalized = sample.abs();
+      rmsSum += normalized * normalized;
+      if (normalized > peakVal) peakVal = normalized;
+    }
+
+    final double rms = math.sqrt(rmsSum / samples.length);
+    final bool isSilent = rms < _silenceRmsThreshold && peakVal < _silencePeakThreshold;
+    
+    if (isSilent) {
+      print('🔇 無聲音檢測：RMS=${rms.toStringAsFixed(4)} < $_silenceRmsThreshold, Peak=${peakVal.toStringAsFixed(4)} < $_silencePeakThreshold');
+    } else {
+      print('🔊 有聲音檢測：RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+    }
+
+    return isSilent;
   }
 
   static List<int> _detectPeaks(List<double> samples, int sampleRate) {
     final List<int> peaks = [];
     if (samples.isEmpty) return peaks;
-    final double maxAbs = samples.map((e) => e.abs()).reduce(max);
-    final double threshold = max(_peakRelStrength * maxAbs, _epsilon);
+    final double maxAbs = samples.map((e) => e.abs()).reduce(math.max);
+    final double threshold = math.max(_peakRelStrength * maxAbs, _epsilon);
     // simple local-max detector with min distance ~0.35s
     final int minDist = (0.35 * sampleRate).toInt();
     int lastPeak = -minDist;
@@ -261,8 +342,8 @@ class AudioAnalysisService {
     final int segmentSamples = (segmentDuration * sampleRate).toInt();
 
     for (final int peak in peakIndices) {
-      final int start = max(0, peak - segmentSamples ~/ 2);
-      final int end = min(samples.length, peak + segmentSamples ~/ 2);
+      final int start = math.max(0, peak - segmentSamples ~/ 2);
+      final int end = math.min(samples.length, peak + segmentSamples ~/ 2);
       segments.add({
         'start_time': start / sampleRate,
         'end_time': end / sampleRate,
@@ -314,7 +395,7 @@ Future<_WavData> _readWav(String path) async {
       final int chunkSize = u32(idx + 4);
       if (chunkId == 'data') {
         final int dataStart = idx + 8;
-        final int dataEnd = min(bytes.length, dataStart + chunkSize);
+        final int dataEnd = math.min(bytes.length, dataStart + chunkSize);
         final List<double> samples = <double>[];
         if (bitsPerSample == 16) {
           for (int i = dataStart; i + 1 < dataEnd; i += 2 * numChannels) {

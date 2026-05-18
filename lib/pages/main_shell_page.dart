@@ -134,6 +134,7 @@ class _MainShellPageState extends State<MainShellPage> {
     required int durationSeconds,
     required String? thumbnailPath,
     required String? audioLabel,
+    List<String>? audioTags,
   }) async {
     try {
       // 更新本地歷史記錄
@@ -146,6 +147,7 @@ class _MainShellPageState extends State<MainShellPage> {
         durationSeconds: durationSeconds,
         thumbnailPath: thumbnailPath,
         audioLabel: audioLabel,
+        audioTags: audioTags,
       );
       
       final updated = <RecordingHistoryEntry>[entry, ...existing];
@@ -155,7 +157,7 @@ class _MainShellPageState extends State<MainShellPage> {
         _recordingHistory.insert(0, entry);
       });
       
-      debugPrint('[MainShell] 錄製完成: ${videoPath.split('/').last}');
+      debugPrint('[MainShell] 錄製完成: ${videoPath.split('/').last}, Tags: $audioTags');
     } catch (e) {
       debugPrint('[MainShell] 處理錄製完成失敗: $e');
     }
@@ -193,6 +195,7 @@ class _MainShellPageState extends State<MainShellPage> {
               required durationSeconds,
               required thumbnailPath,
               required audioLabel,
+              List<String>? audioTags,
             }) {
               _handleRecordingComplete(
                 videoPath,
@@ -201,6 +204,7 @@ class _MainShellPageState extends State<MainShellPage> {
                 durationSeconds: durationSeconds,
                 thumbnailPath: thumbnailPath,
                 audioLabel: audioLabel,
+                audioTags: audioTags,
               );
               // 完成後返回 Home
               _pageController.animateToPage(

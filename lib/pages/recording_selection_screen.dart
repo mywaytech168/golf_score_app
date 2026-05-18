@@ -53,6 +53,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
             required durationSeconds,
             required thumbnailPath,
             required audioLabel,
+            List<String>? audioTags,
           }) {
             debugPrint('[RecordingSelection] 錄製完成，調用回調');
             // 調用父頁面的回調
@@ -63,6 +64,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
               durationSeconds: durationSeconds,
               thumbnailPath: thumbnailPath,
               audioLabel: audioLabel,
+              audioTags: audioTags,
             );
             // 返回到選擇屏幕
             Navigator.pop(context);

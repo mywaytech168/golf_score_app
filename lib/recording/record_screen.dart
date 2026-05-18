@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
+import '../services/audio_analysis_service.dart';
 import '../services/realtime_audio_service.dart';
 import '../services/video_analysis_service.dart';
 import 'mlkit_utils.dart';
@@ -26,6 +27,7 @@ typedef RecordCompleteCallback = void Function({
   required int durationSeconds,
   required String? thumbnailPath,
   required String? audioLabel,
+  List<String>? audioTags,
 });
 
 class RecordScreen extends StatefulWidget {
@@ -237,6 +239,7 @@ class _RecordScreenState extends State<RecordScreen> {
     }
 
     // 停止音频录制
+    List<String>? audioTags;
     try {
       await _audioService.stop();
       debugPrint('[RecordScreen] ✅ 音频录制已停止');
@@ -251,8 +254,12 @@ class _RecordScreenState extends State<RecordScreen> {
         }
         await audioFile.writeAsBytes(byteData.buffer.asUint8List());
         debugPrint('[RecordScreen] ✅ 音频文件已保存: $_audioPath (${rawSamples.length} samples)');
+        
+        // 分析音訊標籤
+        audioTags = await _extractAudioTags(_audioPath);
       } else {
         debugPrint('[RecordScreen] ⚠️ 没有音频样本');
+        audioTags = ['no_audio'];
       }
     } catch (e) {
       debugPrint('[RecordScreen] 音频处理错误: $e');
@@ -267,9 +274,35 @@ class _RecordScreenState extends State<RecordScreen> {
         durationSeconds: duration,
         thumbnailPath: thumbnailPath,
         audioLabel: null,
+        audioTags: audioTags,
       );
     } catch (e) {
       debugPrint('[RecordScreen] finishRecording error: $e');
+    }
+  }
+
+  /// 分析音訊並提取標籤
+  Future<List<String>?> _extractAudioTags(String audioPath) async {
+    try {
+      if (!File(audioPath).existsSync()) {
+        debugPrint('[RecordScreen] ⚠️ 音訊檔案不存在: $audioPath');
+        return ['no_audio'];
+      }
+
+      final result = await AudioAnalysisService.analyzeVideo(audioPath);
+      final summary = result['summary'] as Map<String, dynamic>?;
+      if (summary != null) {
+        final tags = summary['tags'] as List<dynamic>?;
+        if (tags != null && tags.isNotEmpty) {
+          final tagList = tags.whereType<String>().toList();
+          debugPrint('[RecordScreen] ✅ 提取音訊標籤: $tagList');
+          return tagList;
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[RecordScreen] 音訊標籤提取失敗: $e');
+      return null;
     }
   }
 
@@ -417,6 +450,13 @@ class _RecordScreenState extends State<RecordScreen> {
       Navigator.pop(context);
 
       final thumbnailPath = await _generateThumbnail(testVideoPath);
+      
+      // 分析測試視頻的音訊標籤
+      List<String>? audioTags;
+      if (result.audioPath.isNotEmpty && File(result.audioPath).existsSync()) {
+        audioTags = await _extractAudioTags(result.audioPath);
+      }
+      
       widget.onComplete?.call(
         videoPath: testVideoPath,
         csvPath: result.csvPath,
@@ -424,6 +464,7 @@ class _RecordScreenState extends State<RecordScreen> {
         durationSeconds: _selectedTestVideo!.durationSeconds.clamp(1, 86400),
         thumbnailPath: thumbnailPath,
         audioLabel: null,
+        audioTags: audioTags,
       );
 
       if (mounted) Navigator.pop(context);

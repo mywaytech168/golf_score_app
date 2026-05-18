@@ -160,6 +160,34 @@ def _get_tqdm_wrapper(iterable, description: str, total: Optional[int] = None):
         return iterable
 
 
+def _is_silent_audio(y: np.ndarray, rms_threshold: float = 0.01, peak_threshold: float = 0.05) -> bool:
+    """檢測音訊是否為無聲音（靜默）
+    
+    Args:
+        y: 音訊數組
+        rms_threshold: RMS 閾值（預設 0.01）
+        peak_threshold: 峰值閾值（預設 0.05）
+        
+    Returns:
+        True 如果是無聲音，False 否則
+    """
+    if y is None or len(y) == 0:
+        return True
+    
+    # 計算 RMS 和峰值
+    rms = np.sqrt(np.mean(y ** 2))
+    peak = np.max(np.abs(y))
+    
+    is_silent = (rms < rms_threshold) and (peak < peak_threshold)
+    
+    if is_silent:
+        print(f"🔇 無聲音檢測：RMS={rms:.6f} < {rms_threshold}, Peak={peak:.6f} < {peak_threshold}")
+    else:
+        print(f"🔊 有聲音檢測：RMS={rms:.6f}, Peak={peak:.6f}")
+    
+    return is_silent
+
+
 # =============================================================================
 # 核心函數 - 輸入/輸出
 # =============================================================================
@@ -580,10 +608,14 @@ def process_audio_analysis(config: AudioAnalysisConfig) -> Dict[str, Any]:
     
     if len(peaks_sec) == 0:
         print("⚠️ 未偵測到擊球峰值")
+        # 檢查音訊是否完全無聲音
+        is_silent = _is_silent_audio(y_float)
+        tag = "no_audio" if is_silent else "no_peaks"
         return {
-            "status": "no_peaks",
+            "status": tag,
             "video": video_name,
             "hits_detected": 0,
+            "tag": tag,
             "elapsed_time": ti.time() - start_time,
         }
     
@@ -601,6 +633,7 @@ def process_audio_analysis(config: AudioAnalysisConfig) -> Dict[str, Any]:
             "status": "peak_out_of_range",
             "video": video_name,
             "hits_detected": 0,
+            "tag": "peak_out_of_range",
             "elapsed_time": ti.time() - start_time,
         }
     
@@ -674,6 +707,7 @@ def process_audio_analysis(config: AudioAnalysisConfig) -> Dict[str, Any]:
             "audio_file": hit_wav,
             "bg_file": bg_wav,
             "denoised_file": den_wav,
+            "tag": "valid_hit",  # 有效擊球標籤
         }
         
         row_raw = dict(base)
@@ -711,6 +745,7 @@ def process_audio_analysis(config: AudioAnalysisConfig) -> Dict[str, Any]:
         "status": "success",
         "video": video_name,
         "hits_detected": len(all_rows_den),
+        "tag": "valid_hits",
         "raw_summary_path": raw_path if config.output_raw_csv else None,
         "denoised_summary_path": den_path,
         "segments_dir": segments_dir,
