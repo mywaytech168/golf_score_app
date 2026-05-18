@@ -31,8 +31,10 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   bool _playing = false;
   bool _seeking = false;
 
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
+  // 進度用 0.0~1.0 的相對百分比，不用絕對時間
+  double _progress = 0.0;
+  Duration _durationA = Duration.zero;
+  Duration _durationB = Duration.zero;
 
   StreamSubscription<Duration>? _posSub;
   Timer? _syncTimer;
@@ -55,7 +57,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
       _playerB.open(Media(widget.entryB.filePath), play: false),
     ]);
 
-    // state.duration may be zero immediately after open(); wait for real value
+    // 取得各自真實時長（若 open 後仍為 0 則等 stream）
     Duration durA = _playerA.state.duration;
     Duration durB = _playerB.state.duration;
     if (durA == Duration.zero) {
@@ -64,17 +66,17 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     if (durB == Duration.zero) {
       durB = await _playerB.stream.duration.firstWhere((d) => d > Duration.zero);
     }
-    _duration = durA < durB ? durA : durB;
+    _durationA = durA;
+    _durationB = durB;
 
-    // 用 A 的 position stream 更新進度條
+    // 監聽 A 的播放位置 → 換算成相對進度
     _posSub = _playerA.stream.position.listen((pos) {
-      if (!mounted || _seeking) return;
-      final clamped = pos > _duration ? _duration : pos;
-      if ((clamped - _position).abs() > const Duration(milliseconds: 33)) {
-        setState(() => _position = clamped);
+      if (!mounted || _seeking || _durationA == Duration.zero) return;
+      final p = (pos.inMilliseconds / _durationA.inMilliseconds).clamp(0.0, 1.0);
+      if ((p - _progress).abs() > 0.005) {
+        setState(() => _progress = p);
       }
-      // 結束偵測
-      if (_playing && pos >= _duration - const Duration(milliseconds: 100)) {
+      if (_playing && p >= 0.999) {
         _handleEnd();
       }
     });
@@ -86,32 +88,30 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     _playerA.pause();
     _playerB.pause();
     _stopSync();
-    if (mounted) setState(() { _playing = false; _position = _duration; });
+    if (mounted) setState(() { _playing = false; _progress = 1.0; });
   }
 
-  // ── 同步：速度補償為主 ────────────────────────────────────
+  // ── 同步：比較相對進度，速度補償 ────────────────────────────
 
   void _startSync() {
     _syncTimer?.cancel();
     _syncTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
       if (!_playing || _seeking || !mounted) return;
+      if (_durationA == Duration.zero || _durationB == Duration.zero) return;
 
-      final posA = _playerA.state.position;
-      final posB = _playerB.state.position;
-      final driftMs = (posB - posA).inMilliseconds; // 正 = B 超前
+      final progA = _playerA.state.position.inMilliseconds / _durationA.inMilliseconds;
+      final progB = _playerB.state.position.inMilliseconds / _durationB.inMilliseconds;
+      final drift = progB - progA; // 正 = B 超前
 
-      if (driftMs.abs() > 300) {
-        // 嚴重漂移：hard seek
-        await _playerB.seek(posA);
+      if (drift.abs() > 0.02) {
+        // 超過 2% 差距 → hard seek 對齊
+        await _playerB.seek(_durationB * progA.clamp(0.0, 1.0));
         await _playerB.setRate(1.0);
-      } else if (driftMs > 50) {
-        // B 超前：放慢
+      } else if (drift > 0.003) {
         await _playerB.setRate(0.92);
-      } else if (driftMs < -50) {
-        // B 落後：加速
+      } else if (drift < -0.003) {
         await _playerB.setRate(1.08);
       } else {
-        // 已對齊
         await _playerB.setRate(1.0);
       }
     });
@@ -130,36 +130,36 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
       await Future.wait([_playerA.pause(), _playerB.pause()]);
       if (mounted) setState(() => _playing = false);
     } else {
-      // 播放前對齊 B 到 A 的當前位置
+      // 播放前對齊 B 到 A 的當前進度對應位置
       final posA = _playerA.state.position;
-      await _playerB.seek(posA);
+      final progA = _durationA == Duration.zero
+          ? 0.0
+          : (posA.inMilliseconds / _durationA.inMilliseconds).clamp(0.0, 1.0);
+      await _playerB.seek(_durationB * progA);
       await Future.wait([_playerA.play(), _playerB.play()]);
       _startSync();
       if (mounted) setState(() => _playing = true);
     }
   }
 
-  Future<void> _seekTo(Duration pos) async {
+  Future<void> _seekToProgress(double progress) async {
     _seeking = true;
-    Duration target = pos;
-    if (target < Duration.zero) target = Duration.zero;
-    if (target > _duration) target = _duration;
-
-    if (mounted) setState(() => _position = target);
-    await Future.wait([_playerA.seek(target), _playerB.seek(target)]);
+    final p = progress.clamp(0.0, 1.0);
+    if (mounted) setState(() => _progress = p);
+    await Future.wait([
+      _playerA.seek(_durationA * p),
+      _playerB.seek(_durationB * p),
+    ]);
     _seeking = false;
   }
 
-  Future<void> _step(Duration delta) async {
+  Future<void> _step(double delta) async {
     if (_playing) {
       _stopSync();
       await Future.wait([_playerA.pause(), _playerB.pause()]);
       setState(() => _playing = false);
     }
-    Duration next = _position + delta;
-    if (next < Duration.zero) next = Duration.zero;
-    if (next > _duration) next = _duration;
-    await _seekTo(next);
+    await _seekToProgress(_progress + delta);
   }
 
   // ── 清理 ────────────────────────────────────────────────────
@@ -249,14 +249,18 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     }
     return Row(
       children: [
-        Expanded(child: _buildPanel(_ctrlA, 'A', isLeft: true)),
+        Expanded(child: _buildPanel(_ctrlA, 'A', _durationA, isLeft: true)),
         Container(width: 1, color: Colors.white24),
-        Expanded(child: _buildPanel(_ctrlB, 'B', isLeft: false)),
+        Expanded(child: _buildPanel(_ctrlB, 'B', _durationB, isLeft: false)),
       ],
     );
   }
 
-  Widget _buildPanel(VideoController ctrl, String label, {required bool isLeft}) {
+  Widget _buildPanel(VideoController ctrl, String label, Duration duration, {required bool isLeft}) {
+    // 各影片根據自身時長計算當前時間，顯示在角落
+    final currentMs = (_progress * duration.inMilliseconds).round();
+    final current = Duration(milliseconds: currentMs);
+
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -278,10 +282,10 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              label,
+              '$label  ${_fmt(current)}/${_fmt(duration)}',
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -292,8 +296,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   }
 
   Widget _buildControls() {
-    final total = _duration.inMilliseconds.toDouble();
-    final pos   = _position.inMilliseconds.toDouble().clamp(0.0, total > 0 ? total : 1.0);
+    final pct = (_progress * 100).round();
 
     return Container(
       color: Colors.black87,
@@ -312,8 +315,9 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               overlayColor: Colors.white24,
             ),
             child: Slider(
-              value: total > 0 ? pos : 0,
-              max: total > 0 ? total : 1,
+              value: _progress,
+              min: 0.0,
+              max: 1.0,
               onChangeStart: (_) {
                 _seeking = true;
                 if (_playing) {
@@ -323,18 +327,16 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
                   setState(() => _playing = false);
                 }
               },
-              onChanged: (v) =>
-                  setState(() => _position = Duration(milliseconds: v.round())),
-              onChangeEnd: (v) =>
-                  _seekTo(Duration(milliseconds: v.round())),
+              onChanged: (v) => setState(() => _progress = v),
+              onChangeEnd: (v) => _seekToProgress(v),
             ),
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _btn(Icons.replay_5,      () => _step(const Duration(seconds: -5))),
+              _btn(Icons.replay_5,      () => _step(-0.05)),
               const SizedBox(width: 16),
-              _btn(Icons.skip_previous, () => _step(const Duration(milliseconds: -33))),
+              _btn(Icons.skip_previous, () => _step(-0.01)),
               const SizedBox(width: 16),
               GestureDetector(
                 onTap: _togglePlay,
@@ -351,13 +353,13 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
                 ),
               ),
               const SizedBox(width: 16),
-              _btn(Icons.skip_next,  () => _step(const Duration(milliseconds: 33))),
+              _btn(Icons.skip_next,  () => _step(0.01)),
               const SizedBox(width: 16),
-              _btn(Icons.forward_5,  () => _step(const Duration(seconds: 5))),
+              _btn(Icons.forward_5,  () => _step(0.05)),
               const SizedBox(width: 24),
               Text(
-                '${_fmt(_position)} / ${_fmt(_duration)}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                '$pct%',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
             ],
           ),
