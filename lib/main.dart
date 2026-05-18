@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -25,6 +26,9 @@ Future<void> main() async {
   
   // 先初始化 Flutter 綁定，避免在呼叫可用鏡頭前發生錯誤
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化 media_kit（比較模式雙播放器）
+  MediaKit.ensureInitialized();
 
   // 啟動 Kotlin→Dart 進度回報 EventChannel
   AnalysisProgressService.instance.start();

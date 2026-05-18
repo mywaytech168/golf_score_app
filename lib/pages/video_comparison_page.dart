@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/recording_history_entry.dart';
 
@@ -21,8 +21,11 @@ class VideoComparisonPage extends StatefulWidget {
 }
 
 class _VideoComparisonPageState extends State<VideoComparisonPage> {
-  late VideoPlayerController _ctrlA;
-  late VideoPlayerController _ctrlB;
+  // ── media_kit ────────────────────────────────────────────────
+  late final Player _playerA;
+  late final Player _playerB;
+  late final VideoController _ctrlA;
+  late final VideoController _ctrlB;
 
   bool _initialized = false;
   bool _playing = false;
@@ -31,8 +34,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
 
-  // 分開：UI 位置刷新 vs 同步修正
-  Timer? _posTimer;
+  StreamSubscription<Duration>? _posSub;
   Timer? _syncTimer;
 
   // ── 初始化 ──────────────────────────────────────────────────
@@ -40,77 +42,84 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   @override
   void initState() {
     super.initState();
+    _playerA = Player();
+    _playerB = Player();
+    _ctrlA = VideoController(_playerA);
+    _ctrlB = VideoController(_playerB);
     _init();
   }
 
   Future<void> _init() async {
-    _ctrlA = VideoPlayerController.file(File(widget.entryA.filePath));
-    _ctrlB = VideoPlayerController.file(File(widget.entryB.filePath));
+    await Future.wait([
+      _playerA.open(Media(widget.entryA.filePath), play: false),
+      _playerB.open(Media(widget.entryB.filePath), play: false),
+    ]);
 
-    await Future.wait([_ctrlA.initialize(), _ctrlB.initialize()]);
-
-    final durA = _ctrlA.value.duration;
-    final durB = _ctrlB.value.duration;
-    // 以較短的為基準，避免 Slider 超出任一影片範圍
+    // state.duration may be zero immediately after open(); wait for real value
+    Duration durA = _playerA.state.duration;
+    Duration durB = _playerB.state.duration;
+    if (durA == Duration.zero) {
+      durA = await _playerA.stream.duration.firstWhere((d) => d > Duration.zero);
+    }
+    if (durB == Duration.zero) {
+      durB = await _playerB.stream.duration.firstWhere((d) => d > Duration.zero);
+    }
     _duration = durA < durB ? durA : durB;
 
-    _ctrlA.setLooping(false);
-    _ctrlB.setLooping(false);
-
-    // 每 100ms 刷新 UI 進度條（不做任何 seek，純讀取）
-    _posTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    // 用 A 的 position stream 更新進度條
+    _posSub = _playerA.stream.position.listen((pos) {
       if (!mounted || _seeking) return;
-      final pos = _ctrlA.value.position;
-      if ((pos - _position).abs() > const Duration(milliseconds: 33)) {
-        setState(() => _position = pos);
+      final clamped = pos > _duration ? _duration : pos;
+      if ((clamped - _position).abs() > const Duration(milliseconds: 33)) {
+        setState(() => _position = clamped);
       }
-      // 播放結束偵測
+      // 結束偵測
       if (_playing && pos >= _duration - const Duration(milliseconds: 100)) {
-        _handlePlaybackEnd();
+        _handleEnd();
       }
     });
 
     if (mounted) setState(() => _initialized = true);
   }
 
-  void _handlePlaybackEnd() {
-    _ctrlA.pause();
-    _ctrlB.pause();
+  void _handleEnd() {
+    _playerA.pause();
+    _playerB.pause();
     _stopSync();
     if (mounted) setState(() { _playing = false; _position = _duration; });
   }
 
-  // ── 同步：速度補償為主，seekTo 只做緊急修正 ──────────────
+  // ── 同步：速度補償為主 ────────────────────────────────────
 
   void _startSync() {
     _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(const Duration(milliseconds: 250), (_) async {
+    _syncTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
       if (!_playing || _seeking || !mounted) return;
 
-      final posA = _ctrlA.value.position;
-      final posB = _ctrlB.value.position;
+      final posA = _playerA.state.position;
+      final posB = _playerB.state.position;
       final driftMs = (posB - posA).inMilliseconds; // 正 = B 超前
 
       if (driftMs.abs() > 300) {
-        // 嚴重漂移：直接 seekTo 修正（5s 短片不該發生）
-        await _ctrlB.seekTo(posA);
-        await _ctrlB.setPlaybackSpeed(1.0);
+        // 嚴重漂移：hard seek
+        await _playerB.seek(posA);
+        await _playerB.setRate(1.0);
       } else if (driftMs > 50) {
-        // B 超前：稍微放慢
-        _ctrlB.setPlaybackSpeed(0.92);
+        // B 超前：放慢
+        await _playerB.setRate(0.92);
       } else if (driftMs < -50) {
-        // B 落後：稍微加速
-        _ctrlB.setPlaybackSpeed(1.08);
+        // B 落後：加速
+        await _playerB.setRate(1.08);
       } else {
-        // 已對齊：恢復正常速度
-        _ctrlB.setPlaybackSpeed(1.0);
+        // 已對齊
+        await _playerB.setRate(1.0);
       }
     });
   }
 
   void _stopSync() {
     _syncTimer?.cancel();
-    _ctrlB.setPlaybackSpeed(1.0);
+    _playerB.setRate(1.0);
   }
 
   // ── 控制 ────────────────────────────────────────────────────
@@ -118,13 +127,13 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   Future<void> _togglePlay() async {
     if (_playing) {
       _stopSync();
-      await Future.wait([_ctrlA.pause(), _ctrlB.pause()]);
+      await Future.wait([_playerA.pause(), _playerB.pause()]);
       if (mounted) setState(() => _playing = false);
     } else {
-      // 播放前先讓 B 對齊 A 的當前位置（唯一的 hard seekTo）
-      final posA = _ctrlA.value.position;
-      await _ctrlB.seekTo(posA);
-      await Future.wait([_ctrlA.play(), _ctrlB.play()]);
+      // 播放前對齊 B 到 A 的當前位置
+      final posA = _playerA.state.position;
+      await _playerB.seek(posA);
+      await Future.wait([_playerA.play(), _playerB.play()]);
       _startSync();
       if (mounted) setState(() => _playing = true);
     }
@@ -137,18 +146,14 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     if (target > _duration) target = _duration;
 
     if (mounted) setState(() => _position = target);
-    // 兩個一起 seek，不需要串行
-    await Future.wait([
-      _ctrlA.seekTo(target),
-      _ctrlB.seekTo(target),
-    ]);
+    await Future.wait([_playerA.seek(target), _playerB.seek(target)]);
     _seeking = false;
   }
 
   Future<void> _step(Duration delta) async {
     if (_playing) {
       _stopSync();
-      await Future.wait([_ctrlA.pause(), _ctrlB.pause()]);
+      await Future.wait([_playerA.pause(), _playerB.pause()]);
       setState(() => _playing = false);
     }
     Duration next = _position + delta;
@@ -161,10 +166,10 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
   @override
   void dispose() {
-    _posTimer?.cancel();
+    _posSub?.cancel();
     _stopSync();
-    _ctrlA.dispose();
-    _ctrlB.dispose();
+    _playerA.dispose();
+    _playerB.dispose();
     super.dispose();
   }
 
@@ -251,17 +256,14 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     );
   }
 
-  Widget _buildPanel(VideoPlayerController ctrl, String label, {required bool isLeft}) {
+  Widget _buildPanel(VideoController ctrl, String label, {required bool isLeft}) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        FittedBox(
+        Video(
+          controller: ctrl,
           fit: BoxFit.contain,
-          child: SizedBox(
-            width: ctrl.value.size.width,
-            height: ctrl.value.size.height,
-            child: VideoPlayer(ctrl),
-          ),
+          controls: NoVideoControls,
         ),
         Positioned(
           top: 6,
@@ -316,8 +318,8 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
                 _seeking = true;
                 if (_playing) {
                   _stopSync();
-                  _ctrlA.pause();
-                  _ctrlB.pause();
+                  _playerA.pause();
+                  _playerB.pause();
                   setState(() => _playing = false);
                 }
               },

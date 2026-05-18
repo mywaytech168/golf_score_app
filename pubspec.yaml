@@ -39,6 +39,9 @@ dependencies:
   permission_handler: ^12.0.1
   file_picker: ^10.2.0
   video_player: ^2.7.0
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.4
+  media_kit_libs_video: ^1.0.5
   tflite_flutter: ^0.11.0
   image: ^4.2.0
   video_thumbnail: ^0.5.3
