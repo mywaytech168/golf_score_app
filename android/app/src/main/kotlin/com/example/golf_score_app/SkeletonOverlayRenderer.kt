@@ -78,11 +78,12 @@ class SkeletonOverlayRenderer(private val context: Context) {
         startSec: Double,
         outputPath: String,
     ): Boolean {
-        // 1. 解析 CSV
-        val frameData = parseCsv(csvPath)
+        // 1. 解析 CSV + 時域平滑（消除 ML Kit 偵測雜訊抖動）
+        val frameData = smoothFrameData(parseCsv(csvPath))
         if (frameData.isEmpty()) {
             Log.w(TAG, "CSV 沒有資料：$csvPath"); return false
         }
+        val sortedFrameKeys = frameData.keys.sorted()
 
         // 2. 推算骨架影像尺寸（thumbnail 空間）
         val poseSize = inferPoseImageSize(frameData)
@@ -252,7 +253,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
 
                     // ── 2. 骨架疊加（透明 overlay → composite 進 NV12）──
                     overlayBmp.eraseColor(android.graphics.Color.TRANSPARENT)
-                    frameData[csvFrameIdx]?.let { landmarks ->
+                    getSmoothedLandmarks(frameData, csvFrameIdx, sortedFrameKeys)?.let { landmarks ->
                         drawSkeleton(overlayCanvas, landmarks, poseW, poseH, encW, encH, skeletonRadius)
                     }
                     compositeSkeleton(overlayBmp, overlayPixels, encW, encH, nv12Buf)
@@ -397,6 +398,75 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 else                                     -> Color.argb(230, 255, 200, 0)   // 黃色 - 其他
             }
             canvas.drawCircle(lm.xPx * scaleX, lm.yPx * scaleY, radius, dotPaint)
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 時域平滑 & 插值查詢
+    // ────────────────────────────────────────────────────────────
+
+    /**
+     * 雙向 EMA 平滑：前向 pass + 後向 pass，等效零延遲 Gaussian，消除 ML Kit 偵測抖動。
+     * alpha=0.35 → 有效時窗約 4 幀；調小更平滑，調大更接近原始。
+     */
+    private fun smoothFrameData(
+        raw: Map<Int, Array<LandmarkPoint?>>,
+        alpha: Float = 0.35f,
+    ): Map<Int, Array<LandmarkPoint?>> {
+        if (raw.size < 3) return raw
+        val sorted = raw.keys.sorted()
+        // 建立可修改副本
+        val result: MutableMap<Int, Array<LandmarkPoint?>> =
+            raw.mapValues { (_, lms) -> lms.copyOf() }.toMutableMap()
+
+        for (lmIdx in 0 until 33) {
+            // 前向 EMA
+            var px = Float.NaN; var py = Float.NaN
+            for (key in sorted) {
+                val lm = result[key]?.get(lmIdx) ?: continue
+                if (px.isNaN()) { px = lm.xPx; py = lm.yPx; continue }
+                px = alpha * lm.xPx + (1f - alpha) * px
+                py = alpha * lm.yPx + (1f - alpha) * py
+                result[key]!![lmIdx] = lm.copy(xPx = px, yPx = py)
+            }
+            // 後向 EMA（消除前向 EMA 的相位延遲）
+            px = Float.NaN; py = Float.NaN
+            for (key in sorted.reversed()) {
+                val lm = result[key]?.get(lmIdx) ?: continue
+                if (px.isNaN()) { px = lm.xPx; py = lm.yPx; continue }
+                px = alpha * lm.xPx + (1f - alpha) * px
+                py = alpha * lm.yPx + (1f - alpha) * py
+                result[key]!![lmIdx] = lm.copy(xPx = px, yPx = py)
+            }
+        }
+        return result
+    }
+
+    /**
+     * 查詢 targetIdx 對應的 landmarks；若不存在則對相鄰兩幀做線性插值，
+     * 避免因 CSV 缺幀造成骨架閃爍消失。
+     */
+    private fun getSmoothedLandmarks(
+        frameData: Map<Int, Array<LandmarkPoint?>>,
+        targetIdx: Int,
+        sortedKeys: List<Int>,
+    ): Array<LandmarkPoint?>? {
+        frameData[targetIdx]?.let { return it }
+        val prevKey = sortedKeys.lastOrNull { it < targetIdx } ?: return null
+        val nextKey = sortedKeys.firstOrNull { it > targetIdx } ?: return null
+        val prevLms = frameData[prevKey] ?: return null
+        val nextLms = frameData[nextKey] ?: return null
+        val t = (targetIdx - prevKey).toFloat() / (nextKey - prevKey).toFloat()
+        return Array(33) { i ->
+            val a = prevLms[i]; val b = nextLms[i]
+            when {
+                a != null && b != null -> a.copy(
+                    xPx = a.xPx + (b.xPx - a.xPx) * t,
+                    yPx = a.yPx + (b.yPx - a.yPx) * t,
+                    visibility = a.visibility * (1f - t) + b.visibility * t,
+                )
+                else -> a ?: b
+            }
         }
     }
 
