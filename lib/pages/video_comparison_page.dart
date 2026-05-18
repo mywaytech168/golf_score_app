@@ -334,8 +334,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _btn(Icons.replay_5,      () => _step(-0.05)),
-              const SizedBox(width: 16),
               _btn(Icons.skip_previous, () => _step(-0.01)),
               const SizedBox(width: 16),
               GestureDetector(
@@ -354,8 +352,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               ),
               const SizedBox(width: 16),
               _btn(Icons.skip_next,  () => _step(0.01)),
-              const SizedBox(width: 16),
-              _btn(Icons.forward_5,  () => _step(0.05)),
               const SizedBox(width: 24),
               Text(
                 '$pct%',
