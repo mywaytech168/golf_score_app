@@ -375,7 +375,32 @@ class BallTracker {
       _processFrame(fi, frame.ptsUs, filtered, videoW, videoH, bluePred);
     }
 
-    return List.unmodifiable(_trackPts);
+    return List.unmodifiable(_smoothTrackPts(_trackPts));
+  }
+
+  /// 對軌跡點做 3 點移動平均，消除 blob centroid 的高頻雜訊。
+  /// 頭尾保留原始值，避免起點與終點飄移。
+  List<TrackPoint> _smoothTrackPts(List<TrackPoint> pts, {int window = 3}) {
+    if (pts.length < window) return pts;
+    final half = window ~/ 2;
+    final result = <TrackPoint>[];
+    for (int i = 0; i < pts.length; i++) {
+      final lo = (i - half).clamp(0, pts.length - 1);
+      final hi = (i + half).clamp(0, pts.length - 1);
+      double sx = 0, sy = 0;
+      for (int j = lo; j <= hi; j++) {
+        sx += pts[j].x;
+        sy += pts[j].y;
+      }
+      final cnt = hi - lo + 1;
+      result.add(TrackPoint(
+        x: (sx / cnt).round(),
+        y: (sy / cnt).round(),
+        frameIdx: pts[i].frameIdx,
+        ptsUs: pts[i].ptsUs,
+      ));
+    }
+    return result;
   }
 
   /// 根據追蹤進度計算本幀的動態門檻，回傳 (areaLo, areaHi, circThresh)
@@ -590,13 +615,6 @@ class BallTracker {
   ) {
     if (blobs.isEmpty) {
       _noCandCount++;
-      // Kalman 預測填補缺幀，避免渲染時因缺點產生視覺跳躍
-      if (_noCandCount <= _noCandPatience) {
-        _trackPts.add(TrackPoint(
-          x: bluePred.$1.round(), y: bluePred.$2.round(),
-          frameIdx: frameIdx, ptsUs: ptsUs,
-        ));
-      }
       if (_stopWhenNoCand && _noCandCount > _noCandPatience) {
         _state = _TrackState.stopped;
       }
@@ -613,19 +631,21 @@ class BallTracker {
     bool appended = false;
 
     if (tooMany && _tooManyUseBlue) {
-      // 候選過多時直接用本幀 Kalman 預測位置，比 blue history offset 更即時
-      bool ok = true;
-      if (_trackPts.isNotEmpty) {
-        final last = _trackPts.last;
-        final d = _dist(bluePred.$1.round(), bluePred.$2.round(), last.x, last.y);
-        if (d > _blueToLastPMaxDist) ok = false;
-      }
-      if (ok) {
-        _trackPts.add(TrackPoint(
-          x: bluePred.$1.round(), y: bluePred.$2.round(),
-          frameIdx: frameIdx, ptsUs: ptsUs,
-        ));
-        appended = true;
+      final chosen = _pickBlueFromHistory(_bluePOffset);
+      if (chosen != null) {
+        bool ok = true;
+        if (_trackPts.isNotEmpty) {
+          final last = _trackPts.last;
+          final d = _dist(chosen.$1.round(), chosen.$2.round(), last.x, last.y);
+          if (d > _blueToLastPMaxDist) ok = false;
+        }
+        if (ok) {
+          _trackPts.add(TrackPoint(
+            x: chosen.$1.round(), y: chosen.$2.round(),
+            frameIdx: frameIdx, ptsUs: ptsUs,
+          ));
+          appended = true;
+        }
       }
     }
 
@@ -693,10 +713,8 @@ class BallTracker {
         if (accept) {
           _outlierStrikes = 0;
           _kf.update(best.cx.toDouble(), best.cy.toDouble());
-          // 使用 Kalman 更新後的平滑估計位置，而非原始 blob centroid
-          final (kx, ky) = _kf.pos;
           _trackPts.add(TrackPoint(
-            x: kx.round(), y: ky.round(), frameIdx: frameIdx, ptsUs: ptsUs,
+            x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
           ));
 
           final areaF = best.area.toDouble();
