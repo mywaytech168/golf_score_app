@@ -590,6 +590,13 @@ class BallTracker {
   ) {
     if (blobs.isEmpty) {
       _noCandCount++;
+      // Kalman 預測填補缺幀，避免渲染時因缺點產生視覺跳躍
+      if (_noCandCount <= _noCandPatience) {
+        _trackPts.add(TrackPoint(
+          x: bluePred.$1.round(), y: bluePred.$2.round(),
+          frameIdx: frameIdx, ptsUs: ptsUs,
+        ));
+      }
       if (_stopWhenNoCand && _noCandCount > _noCandPatience) {
         _state = _TrackState.stopped;
       }
@@ -606,21 +613,19 @@ class BallTracker {
     bool appended = false;
 
     if (tooMany && _tooManyUseBlue) {
-      final chosen = _pickBlueFromHistory(_bluePOffset);
-      if (chosen != null) {
-        bool ok = true;
-        if (_trackPts.isNotEmpty) {
-          final last = _trackPts.last;
-          final d = _dist(chosen.$1.round(), chosen.$2.round(), last.x, last.y);
-          if (d > _blueToLastPMaxDist) ok = false;
-        }
-        if (ok) {
-          _trackPts.add(TrackPoint(
-            x: chosen.$1.round(), y: chosen.$2.round(),
-            frameIdx: frameIdx, ptsUs: ptsUs,
-          ));
-          appended = true;
-        }
+      // 候選過多時直接用本幀 Kalman 預測位置，比 blue history offset 更即時
+      bool ok = true;
+      if (_trackPts.isNotEmpty) {
+        final last = _trackPts.last;
+        final d = _dist(bluePred.$1.round(), bluePred.$2.round(), last.x, last.y);
+        if (d > _blueToLastPMaxDist) ok = false;
+      }
+      if (ok) {
+        _trackPts.add(TrackPoint(
+          x: bluePred.$1.round(), y: bluePred.$2.round(),
+          frameIdx: frameIdx, ptsUs: ptsUs,
+        ));
+        appended = true;
       }
     }
 
@@ -688,8 +693,10 @@ class BallTracker {
         if (accept) {
           _outlierStrikes = 0;
           _kf.update(best.cx.toDouble(), best.cy.toDouble());
+          // 使用 Kalman 更新後的平滑估計位置，而非原始 blob centroid
+          final (kx, ky) = _kf.pos;
           _trackPts.add(TrackPoint(
-            x: best.cx, y: best.cy, frameIdx: frameIdx, ptsUs: ptsUs,
+            x: kx.round(), y: ky.round(), frameIdx: frameIdx, ptsUs: ptsUs,
           ));
 
           final areaF = best.area.toDouble();
