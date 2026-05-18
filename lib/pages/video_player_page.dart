@@ -3,105 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
-import '../models/recording_history_entry.dart';
-import '../services/recording_history_storage.dart';
-
-const double _portraitAspect = 16 / 9; // force a portrait container regardless of source video
-
-/// 自定义视频播放器 - 带进度条和控制按钮覆盖层
-class VideoPlayerWithControls extends StatefulWidget {
-  final VideoPlayerController controller;
-  final VoidCallback onPlayPauseToggle;
-
-  const VideoPlayerWithControls({
-    Key? key,
-    required this.controller,
-    required this.onPlayPauseToggle,
-  }) : super(key: key);
-
-  @override
-  State<VideoPlayerWithControls> createState() => _VideoPlayerWithControlsState();
-}
-
-class _VideoPlayerWithControlsState extends State<VideoPlayerWithControls> {
-  bool _showControls = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        setState(() => _showControls = !_showControls);
-      },
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // 视频播放器 - 填满容器
-          Container(
-            color: Colors.black,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: widget.controller.value.size.width == 0
-                      ? 1
-                      : widget.controller.value.size.width,
-                  height: widget.controller.value.size.height == 0
-                      ? 1
-                      : widget.controller.value.size.height,
-                  child: VideoPlayer(widget.controller),
-                ),
-              ),
-            ),
-          ),
-          // 控制层 (仅当 _showControls 为 true 时显示)
-          if (_showControls)
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Play/Pause 按钮 - 带阴影效果
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.5),
-                        blurRadius: 8,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: FloatingActionButton(
-                    backgroundColor: Colors.white,
-                    onPressed: widget.onPlayPauseToggle,
-                    child: Icon(
-                      widget.controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                      color: Colors.black,
-                      size: 32,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          // 底部进度条 (始终显示)
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: VideoProgressIndicator(
-              widget.controller,
-              allowScrubbing: true,
-              colors: VideoProgressColors(
-                playedColor: Colors.deepOrange,
-                bufferedColor: Colors.grey[400] ?? Colors.grey,
-                backgroundColor: Colors.grey[300] ?? Colors.grey,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
@@ -112,9 +13,9 @@ class VideoPlayerPage extends StatefulWidget {
     this.startPosition,
   });
 
-  final String videoPath; // swing.mp4 or clip.mp4
+  final String videoPath;
   final String? avatarPath;
-  final Duration? startPosition; // 初始播放位置（用於擊球跳轉）
+  final Duration? startPosition;
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -122,70 +23,57 @@ class VideoPlayerPage extends StatefulWidget {
 
 class _VideoPlayerPageState extends State<VideoPlayerPage> {
   VideoPlayerController? _controller;
-  Future<void>? _initializeFuture;
-  String? _errorMessage;
-  String? _currentVideoPath; // 当前播放的影片路径
-  String _currentVideoType = 'original'; // 当前影片类型: original/skeleton/analyzed
+  String _currentVideoType = 'original';
+  bool _initialized = false;
 
-  /// 获取会话目录路径
-  String get _sessionDir {
-    return widget.videoPath.replaceAll(RegExp(r'[^/\\]*$'), '');
-  }
+  String get _sessionDir =>
+      widget.videoPath.replaceAll(RegExp(r'[^/\\]*$'), '');
 
   @override
   void initState() {
     super.initState();
-    _currentVideoPath = widget.videoPath;
-    _initController();
+    _initController(widget.videoPath, isOriginal: true);
   }
 
-  void _initController() {
-    _initLocalController();
-  }
-
-  /// 初始化本地视频播放器
-  void _initLocalController() {
-    final file = File(_currentVideoPath!);
+  Future<void> _initController(String path, {bool isOriginal = false}) async {
+    final file = File(path);
     if (!file.existsSync()) {
-      setState(() => _errorMessage = 'Video file not found.');
+      _showSnack('找不到影片檔案');
       return;
     }
-    
-    // 释放旧的控制器
-    _controller?.dispose();
-    
-    final controller = VideoPlayerController.file(file);
-    _controller = controller;
-    _initializeFuture = controller.initialize().then((_) async {
-      controller.setLooping(true);
-      if (widget.startPosition != null && _currentVideoType == 'original') {
-        await controller.seekTo(widget.startPosition!);
-      }
-      controller.play();
-      setState(() {});
-    }).catchError((e) {
-      setState(() => _errorMessage = 'Unable to play: $e');
-    });
+
+    final old = _controller;
+    old?.removeListener(_onUpdate);
+
+    final ctrl = VideoPlayerController.file(file);
+    _controller = ctrl;
+    if (mounted) setState(() => _initialized = false);
+
+    await ctrl.initialize();
+    ctrl.addListener(_onUpdate);
+    ctrl.setLooping(true);
+
+    if (isOriginal && widget.startPosition != null) {
+      await ctrl.seekTo(widget.startPosition!);
+    }
+    ctrl.play();
+
+    if (mounted) setState(() => _initialized = true);
+    await old?.dispose();
   }
 
-  /// 切换影片
-  void _switchVideo(String videoPath, String videoType) {
-    if (videoPath.isEmpty || !File(videoPath).existsSync()) {
-      _showSnack('影片文件不存在');
-      return;
-    }
-    
-    setState(() {
-      _currentVideoPath = videoPath;
-      _currentVideoType = videoType;
-      _errorMessage = null;
-    });
-    
-    _initLocalController();
+  void _onUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  void _switchTo(String path, String type) {
+    setState(() => _currentVideoType = type);
+    _initController(path);
   }
 
   @override
   void dispose() {
+    _controller?.removeListener(_onUpdate);
     _controller?.dispose();
     super.dispose();
   }
@@ -195,166 +83,192 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  // ── 切換按鈕 ────────────────────────────────────────────────
+
+  void _viewOriginal() {
+    final path = File('${_sessionDir}swing.mp4').existsSync()
+        ? '${_sessionDir}swing.mp4'
+        : '${_sessionDir}clip.mp4';
+    if (!File(path).existsSync()) { _showSnack('原始影片不存在'); return; }
+    _switchTo(path, 'original');
+  }
+
+  void _viewSkeleton() {
+    final path = '${_sessionDir}skeleton.mp4';
+    if (!File(path).existsSync()) { _showSnack('骨架影片不存在'); return; }
+    _switchTo(path, 'skeleton');
+  }
+
+  void _viewAnalyzed() {
+    if (!File(widget.videoPath).existsSync()) { _showSnack('分析影片不存在'); return; }
+    _switchTo(widget.videoPath, 'analyzed');
+  }
+
+  // ── UI ──────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Video Review'),
-        actions: [
-          if (widget.avatarPath != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: CircleAvatar(backgroundImage: FileImage(File(widget.avatarPath!))),
-            ),
-        ],
-      ),
-      body: Center(
-        child: _errorMessage != null
-            ? Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(_errorMessage!, style: const TextStyle(color: Colors.redAccent)),
-              )
-            : controller == null
-                ? const CircularProgressIndicator()
-                : FutureBuilder<void>(
-                    future: _initializeFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.done &&
-                          controller.value.isInitialized) {
-                        return Column(
-                          children: [
-                            // 视频播放器 + 进度条 + 控制按钮 (占大部分空间)
-                            Expanded(
-                              flex: 9,
-                              child: VideoPlayerWithControls(
-                                controller: controller,
-                                onPlayPauseToggle: () {
-                                  setState(() {
-                                    if (controller.value.isPlaying) {
-                                      controller.pause();
-                                    } else {
-                                      controller.play();
-                                    }
-                                  });
-                                },
-                              ),
-                            ),
-                            // 底部操作按钮区 (占小部分空间)
-                            Expanded(
-                              flex: 1,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    // 原始影片按钮
-                                    ElevatedButton.icon(
-                                      onPressed: _viewOriginalVideo,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                      ),
-                                      icon: const Icon(Icons.videocam),
-                                      label: const Text('原始影片'),
-                                    ),
-                                    // 骨架影片按钮
-                                    ElevatedButton.icon(
-                                      onPressed: _viewSkeletonVideo,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.blue,
-                                      ),
-                                      icon: const Icon(Icons.person),
-                                      label: const Text('骨架影片'),
-                                    ),
-                                    // 分析影片按钮
-                                    ElevatedButton.icon(
-                                      onPressed: _viewAnalyzedVideo,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.orange,
-                                      ),
-                                      icon: const Icon(Icons.analytics),
-                                      label: const Text('分析影片'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      }
-                      if (snapshot.hasError) {
-                        return Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text('Unable to load video: ${snapshot.error}'),
-                        );
-                      }
-                      return const CircularProgressIndicator();
-                    },
-                  ),
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildTopBar(context),
+            Expanded(child: _buildVideo()),
+            if (_initialized) _buildControls(),
+          ],
+        ),
       ),
     );
   }
 
-  /// 查看原始影片 (swing.mp4 or clip.mp4)
-  Future<void> _viewOriginalVideo() async {
-    final swingPath = _sessionDir + 'swing.mp4';
-    final clipPath = _sessionDir + 'clip.mp4';
-    
-    final originalPath = File(swingPath).existsSync() ? swingPath : clipPath;
-    
-    if (!File(originalPath).existsSync()) {
-      _showSnack('原始影片不存在');
-      return;
-    }
-    
-    _switchVideo(originalPath, 'original');
+  Widget _buildTopBar(BuildContext context) {
+    return Container(
+      height: 48,
+      color: Colors.black87,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+            padding: EdgeInsets.zero,
+            onPressed: () => Navigator.pop(context),
+          ),
+          const SizedBox(width: 4),
+          _typeBtn(Icons.videocam,  '原始', 'original', const Color(0xFF1E8E5A), _viewOriginal),
+          const SizedBox(width: 6),
+          _typeBtn(Icons.person,    '骨架', 'skeleton',  const Color(0xFF1565C0), _viewSkeleton),
+          const SizedBox(width: 6),
+          _typeBtn(Icons.analytics, '分析', 'analyzed',  const Color(0xFFE65100), _viewAnalyzed),
+          if (widget.avatarPath != null) ...[
+            const Spacer(),
+            CircleAvatar(
+              radius: 14,
+              backgroundImage: FileImage(File(widget.avatarPath!)),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
   }
 
-  /// 查看骨架影片 (skeleton.mp4)
-  Future<void> _viewSkeletonVideo() async {
-    final skeletonPath = _sessionDir + 'skeleton.mp4';
-    
-    if (!File(skeletonPath).existsSync()) {
-      _showSnack('骨架影片不存在');
-      return;
-    }
-    
-    _switchVideo(skeletonPath, 'skeleton');
+  Widget _typeBtn(IconData icon, String label, String type, Color color, VoidCallback onTap) {
+    final active = _currentVideoType == type;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? color.withAlpha(220) : Colors.white12,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 14),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
   }
 
-  /// 查看分析影片 (final.mp4)
-  Future<void> _viewAnalyzedVideo() async {
-    if (!File(widget.videoPath).existsSync()) {
-      _showSnack('分析影片不存在');
-      return;
+  Widget _buildVideo() {
+    final ctrl = _controller;
+    if (ctrl == null || !_initialized) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white54));
     }
-    
-    _switchVideo(widget.videoPath, 'analyzed');
+    return Center(
+      child: AspectRatio(
+        aspectRatio: ctrl.value.aspectRatio,
+        child: VideoPlayer(ctrl),
+      ),
+    );
   }
 
-  /// 显示骨架覆盖层
-  Future<void> _showSkeletonOverlay() async {
-    if (!mounted) return;
-    
-    final csvPath = _sessionDir + 'pose_landmarks.csv';
-    
-    // 检查骨架数据是否存在
-    if (!await File(csvPath).exists()) {
-      _showSnack('骨架数据不存在，请先进行影片分析');
-      return;
-    }
+  Widget _buildControls() {
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) return const SizedBox.shrink();
 
-    if (!mounted) return;
-    // 骨架数据已加载，待实现可视化功能
+    final position = ctrl.value.position;
+    final duration = ctrl.value.duration;
+    final progress = duration.inMilliseconds > 0
+        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      color: Colors.black87,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              activeTrackColor: const Color(0xFF1E8E5A),
+              thumbColor: Colors.white,
+              inactiveTrackColor: Colors.white24,
+              overlayColor: Colors.white24,
+            ),
+            child: Slider(
+              value: progress,
+              onChanged: (v) => ctrl.seekTo(duration * v),
+            ),
+          ),
+          Row(
+            children: [
+              Text(_fmt(position),
+                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              const Spacer(),
+              _btn(Icons.skip_previous,
+                  () => ctrl.seekTo(position - const Duration(milliseconds: 33))),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: () => ctrl.value.isPlaying ? ctrl.pause() : ctrl.play(),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1E8E5A),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    ctrl.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              _btn(Icons.skip_next,
+                  () => ctrl.seekTo(position + const Duration(milliseconds: 33))),
+              const Spacer(),
+              Text(_fmt(duration),
+                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            ],
+          ),
+        ],
+      ),
+    );
   }
+
+  Widget _btn(IconData icon, VoidCallback onTap) =>
+      GestureDetector(onTap: onTap, child: Icon(icon, color: Colors.white70, size: 26));
 }
 
-/// Simple preview page for a generated highlight clip
+/// Simple preview page for a generated highlight clip.
 class HighlightPreviewPage extends StatefulWidget {
-  const HighlightPreviewPage({
-    super.key,
-    required this.videoPath,
-  });
+  const HighlightPreviewPage({super.key, required this.videoPath});
   final String videoPath;
 
   @override
@@ -363,45 +277,135 @@ class HighlightPreviewPage extends StatefulWidget {
 
 class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   VideoPlayerController? _ctrl;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
     _ctrl = VideoPlayerController.file(File(widget.videoPath))
       ..initialize().then((_) {
-        setState(() {});
+        _ctrl?.addListener(_onUpdate);
+        _ctrl?.setLooping(true);
         _ctrl?.play();
+        if (mounted) setState(() => _initialized = true);
       });
+  }
+
+  void _onUpdate() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _ctrl?.removeListener(_onUpdate);
     _ctrl?.dispose();
     super.dispose();
   }
 
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final controller = _ctrl;
+    final ctrl = _ctrl;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Preview Highlight'),
-      ),
-      body: Center(
-        child: controller == null || !controller.value.isInitialized
-            ? const CircularProgressIndicator()
-            : VideoPlayerWithControls(
-                controller: controller,
-                onPlayPauseToggle: () {
-                  setState(() {
-                    if (controller.value.isPlaying) {
-                      controller.pause();
-                    } else {
-                      controller.play();
-                    }
-                  });
-                },
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              height: 48,
+              color: Colors.black87,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                    padding: EdgeInsets.zero,
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('精彩片段預覽',
+                      style: TextStyle(color: Colors.white70, fontSize: 14)),
+                ],
               ),
+            ),
+            Expanded(
+              child: ctrl == null || !_initialized
+                  ? const Center(child: CircularProgressIndicator(color: Colors.white54))
+                  : Center(
+                      child: AspectRatio(
+                        aspectRatio: ctrl.value.aspectRatio,
+                        child: VideoPlayer(ctrl),
+                      ),
+                    ),
+            ),
+            if (_initialized && ctrl != null)
+              _buildControls(ctrl),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControls(VideoPlayerController ctrl) {
+    final position = ctrl.value.position;
+    final duration = ctrl.value.duration;
+    final progress = duration.inMilliseconds > 0
+        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      color: Colors.black87,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              activeTrackColor: const Color(0xFF1E8E5A),
+              thumbColor: Colors.white,
+              inactiveTrackColor: Colors.white24,
+              overlayColor: Colors.white24,
+            ),
+            child: Slider(
+              value: progress,
+              onChanged: (v) => ctrl.seekTo(duration * v),
+            ),
+          ),
+          Row(
+            children: [
+              Text(_fmt(position),
+                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => ctrl.value.isPlaying ? ctrl.pause() : ctrl.play(),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1E8E5A),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    ctrl.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(_fmt(duration),
+                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            ],
+          ),
+        ],
       ),
     );
   }
