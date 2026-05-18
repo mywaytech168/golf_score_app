@@ -338,10 +338,12 @@ class BallTracker {
   • 總幀數: ${frames.length}
 ''');
 
-    // 計算擊球時間視窗
+    // 計算擊球時間視窗（waitP0 只在此範圍內搜尋，避免揮桿前的白色衣物誤判）
+    // leadSec=1.0: 擊球前 1 秒開始（預留 hitSec 偵測誤差）
+    // trailSec=2.0: 擊球後 2 秒（球飛行期間）
     if (hitSec != null) {
-      const double leadSec  = 0.5;
-      const double trailSec = 1.0;
+      const double leadSec  = 1.0;
+      const double trailSec = 2.0;
       _hitWindowStart = math.max(0, ((hitSec - leadSec) * fps).round());
       _hitWindowEnd   = ((hitSec + trailSec) * fps).round();
     } else {

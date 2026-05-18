@@ -312,12 +312,14 @@ class ClipPipelineService {
             '${extraction.width}×${extraction.height}');
 
         // 使用新的 BallTracker（一次性處理所有幀）
+        // hitSec 限制 waitP0 只在擊球前後的時間視窗搜尋，大幅降低白色衣物等假陽性
         final tracker = BallTracker();
         final trackPts = tracker.track(
           frames: extraction.frames,
           fps: extraction.fps,
           videoW: extraction.width,
           videoH: extraction.height,
+          hitSec: hitSec,
         );
         
         debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點');
