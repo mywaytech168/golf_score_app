@@ -2,12 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
-import '../services/analysis_progress_service.dart';
-import '../services/video_comparison_service.dart';
 
 class VideoComparisonPage extends StatefulWidget {
   final RecordingHistoryEntry entryA;
@@ -24,128 +21,151 @@ class VideoComparisonPage extends StatefulWidget {
 }
 
 class _VideoComparisonPageState extends State<VideoComparisonPage> {
-  // ── 渲染階段 ──────────────────────────────────────────────────
-  bool _rendering = true;
-  String _renderLabel = '準備中…';
-  double _renderProgress = 0.0;
-  String? _renderError;
-  String? _mergedPath;
+  late VideoPlayerController _ctrlA;
+  late VideoPlayerController _ctrlB;
 
-  // ── 播放階段 ──────────────────────────────────────────────────
-  VideoPlayerController? _ctrl;
   bool _initialized = false;
   bool _playing = false;
   bool _seeking = false;
+
+  // 相對進度（0 = 兩支影片的 hit 時刻對齊點）
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+
+  // 對軸對齊：各影片的播放起始點（絕對）
+  Duration _startA = Duration.zero;
+  Duration _startB = Duration.zero;
+
+  Timer? _syncTimer;
+
+  // ── 初始化 ──────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _startRender();
+    _init();
   }
 
-  // ── 渲染 ─────────────────────────────────────────────────────
+  Future<void> _init() async {
+    _ctrlA = VideoPlayerController.file(File(widget.entryA.filePath));
+    _ctrlB = VideoPlayerController.file(File(widget.entryB.filePath));
 
-  Future<void> _startRender() async {
-    void onProgress() {
-      final (prog, label) = AnalysisProgressService.instance.progress.value;
-      if (mounted) setState(() { _renderProgress = prog; _renderLabel = label; });
-    }
-    AnalysisProgressService.instance.progress.addListener(onProgress);
+    await Future.wait([_ctrlA.initialize(), _ctrlB.initialize()]);
 
-    try {
-      final tmp = await getTemporaryDirectory();
-      final outPath = '${tmp.path}/cmp_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    final durA = _ctrlA.value.duration;
+    final durB = _ctrlB.value.duration;
 
-      final ok = await VideoComparisonService().renderComparison(
-        pathA: widget.entryA.filePath,
-        pathB: widget.entryB.filePath,
-        outputPath: outPath,
-        hitSecA: widget.entryA.hitSecond ?? 0.0,
-        hitSecB: widget.entryB.hitSecond ?? 0.0,
-      );
+    // hitSecond → Duration
+    final hitA = _secToDur(widget.entryA.hitSecond ?? 0.0);
+    final hitB = _secToDur(widget.entryB.hitSecond ?? 0.0);
 
-      if (!mounted) return;
-      if (!ok || !File(outPath).existsSync()) {
-        setState(() { _rendering = false; _renderError = '合成失敗，請稍後再試'; });
-        return;
-      }
+    // 對軸公式
+    // minT = -min(hitA, hitB)  → 最早的相對時刻
+    // maxT =  min(durA-hitA, durB-hitB) → 最晚的相對時刻
+    // startA = hitA + minT（可能 = 0 或 > 0）
+    // startB = hitB + minT
+    final minT  = hitA < hitB ? -hitA : -hitB;
+    final endT  = (durA - hitA) < (durB - hitB) ? (durA - hitA) : (durB - hitB);
+    _startA   = hitA + minT;
+    _startB   = hitB + minT;
+    _duration = endT - minT;
 
-      _mergedPath = outPath;
-      if (mounted) setState(() => _rendering = false);
-      await _initPlayer(outPath);
-    } catch (e) {
-      if (mounted) setState(() { _rendering = false; _renderError = '錯誤：$e'; });
-    } finally {
-      AnalysisProgressService.instance.progress.removeListener(onProgress);
-    }
+    await _ctrlA.seekTo(_startA);
+    await _ctrlB.seekTo(_startB);
+
+    _ctrlA.setLooping(false);
+    _ctrlB.setLooping(false);
+    _ctrlA.addListener(_onCtrlUpdate);
+
+    if (mounted) setState(() => _initialized = true);
   }
 
-  Future<void> _initPlayer(String path) async {
-    final ctrl = VideoPlayerController.file(File(path));
-    await ctrl.initialize();
-    ctrl.setLooping(false);
-    ctrl.addListener(_onCtrlUpdate);
-    if (mounted) {
-      setState(() {
-        _ctrl = ctrl;
-        _duration = ctrl.value.duration;
-        _initialized = true;
-      });
-    }
-  }
+  Duration _secToDur(double sec) =>
+      Duration(microseconds: (sec * 1e6).round());
 
-  // ── 播放回調 ─────────────────────────────────────────────────
+  // ── 同步邏輯 ─────────────────────────────────────────────────
 
   void _onCtrlUpdate() {
-    if (!mounted || _seeking || _ctrl == null) return;
-    final pos = _ctrl!.value.position;
-    if ((pos - _position).abs() > const Duration(milliseconds: 33)) {
-      setState(() => _position = pos);
+    if (!mounted || _seeking) return;
+    final rel = _ctrlA.value.position - _startA;
+    final clampedRel = rel < Duration.zero ? Duration.zero : rel;
+    if ((clampedRel - _position).abs() > const Duration(milliseconds: 33)) {
+      setState(() => _position = clampedRel);
     }
-    if (_playing && !_ctrl!.value.isPlaying) {
+    if (_playing && !_ctrlA.value.isPlaying) {
+      _stopSync();
       setState(() => _playing = false);
     }
   }
 
+  void _startSync() {
+    _syncTimer?.cancel();
+    // 每 150ms 比對一次，誤差超過 1 幀就把 B 拉回對齊
+    _syncTimer = Timer.periodic(const Duration(milliseconds: 150), (_) async {
+      if (!_playing || _seeking) return;
+      final absA     = _ctrlA.value.position;
+      final absB     = _ctrlB.value.position;
+      final targetB  = absA - _startA + _startB;
+      final drift    = (absB - targetB).abs();
+      if (drift > const Duration(milliseconds: 80)) {
+        await _ctrlB.seekTo(targetB);
+      }
+    });
+  }
+
+  void _stopSync() => _syncTimer?.cancel();
+
+  // ── 控制 ────────────────────────────────────────────────────
+
   Future<void> _togglePlay() async {
-    final ctrl = _ctrl;
-    if (ctrl == null) return;
     if (_playing) {
-      await ctrl.pause();
+      await _ctrlA.pause();
+      await _ctrlB.pause();
+      _stopSync();
     } else {
-      await ctrl.play();
+      // 先讓 B 對齊當前 A 的相對位置，再同時播放
+      final targetB = _ctrlA.value.position - _startA + _startB;
+      await _ctrlB.seekTo(targetB);
+      await _ctrlA.play();
+      await _ctrlB.play();
+      _startSync();
     }
     setState(() => _playing = !_playing);
   }
 
-  Future<void> _seekTo(Duration pos) async {
+  Future<void> _seekTo(Duration relPos) async {
     _seeking = true;
-    await _ctrl?.seekTo(pos);
+    await _ctrlA.seekTo(_startA + relPos);
+    await _ctrlB.seekTo(_startB + relPos);
     _seeking = false;
-    if (mounted) setState(() => _position = pos);
+    if (mounted) setState(() => _position = relPos);
   }
 
   Future<void> _step(Duration delta) async {
-    if (_playing) { await _ctrl?.pause(); setState(() => _playing = false); }
+    if (_playing) {
+      await _ctrlA.pause();
+      await _ctrlB.pause();
+      _stopSync();
+      setState(() => _playing = false);
+    }
     Duration next = _position + delta;
     if (next < Duration.zero) next = Duration.zero;
     if (next > _duration) next = _duration;
     await _seekTo(next);
   }
 
-  // ── 清理 ─────────────────────────────────────────────────────
+  // ── 清理 ────────────────────────────────────────────────────
 
   @override
   void dispose() {
-    _ctrl?.removeListener(_onCtrlUpdate);
-    _ctrl?.dispose();
-    if (_mergedPath != null) File(_mergedPath!).delete().ignore();
+    _stopSync();
+    _ctrlA.removeListener(_onCtrlUpdate);
+    _ctrlA.dispose();
+    _ctrlB.dispose();
     super.dispose();
   }
 
-  // ── 格式化 ───────────────────────────────────────────────────
+  // ── 格式化 ──────────────────────────────────────────────────
 
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -153,7 +173,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     return '$m:$s';
   }
 
-  // ── UI ───────────────────────────────────────────────────────
+  // ── UI ──────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +183,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
         child: Column(
           children: [
             _buildTopBar(context),
-            Expanded(child: _buildBody()),
+            Expanded(child: _buildVideoRow()),
             if (_initialized) _buildControls(),
           ],
         ),
@@ -173,7 +193,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
   Widget _buildTopBar(BuildContext context) {
     return Container(
-      height: 44,
+      height: 40,
       color: Colors.black87,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -191,7 +211,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               textAlign: TextAlign.center,
             ),
           ),
-          const Icon(Icons.compare_arrows, color: Colors.white38, size: 18),
+          const Icon(Icons.compare_arrows, color: Colors.white54, size: 18),
           Expanded(
             child: Text(
               widget.entryB.displayTitle,
@@ -206,78 +226,63 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     );
   }
 
-  Widget _buildBody() {
-    if (_renderError != null) return _buildError();
-    if (_rendering) return _buildLoading();
-    if (_initialized && _ctrl != null) return _buildPlayer();
-    return const Center(child: CircularProgressIndicator(color: Colors.white54));
-  }
-
-  Widget _buildLoading() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
+  Widget _buildVideoRow() {
+    if (!_initialized) {
+      return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.movie_creation_outlined, color: Colors.white38, size: 48),
-            const SizedBox(height: 20),
-            Text(
-              _renderLabel,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            LinearProgressIndicator(
-              value: _renderProgress > 0 ? _renderProgress : null,
-              backgroundColor: Colors.white12,
-              valueColor: const AlwaysStoppedAnimation(Color(0xFF1E8E5A)),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${(_renderProgress * 100).toInt()}%',
-              style: const TextStyle(color: Colors.white38, fontSize: 11),
-            ),
+            CircularProgressIndicator(color: Colors.white54),
+            SizedBox(height: 12),
+            Text('載入影片中…', style: TextStyle(color: Colors.white54, fontSize: 12)),
           ],
         ),
-      ),
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: _buildPanel(_ctrlA, 'A', isLeft: true)),
+        Container(width: 1, color: Colors.white24),
+        Expanded(child: _buildPanel(_ctrlB, 'B', isLeft: false)),
+      ],
     );
   }
 
-  Widget _buildError() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
-            const SizedBox(height: 16),
-            Text(
-              _renderError!,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('返回', style: TextStyle(color: Color(0xFF1E8E5A))),
-            ),
-          ],
+  Widget _buildPanel(VideoPlayerController ctrl, String label, {required bool isLeft}) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: ctrl.value.size.width,
+            height: ctrl.value.size.height,
+            child: VideoPlayer(ctrl),
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildPlayer() {
-    final ctrl = _ctrl!;
-    return FittedBox(
-      fit: BoxFit.contain,
-      child: SizedBox(
-        width: ctrl.value.size.width,
-        height: ctrl.value.size.height,
-        child: VideoPlayer(ctrl),
-      ),
+        Positioned(
+          top: 6,
+          left: isLeft ? 8 : null,
+          right: isLeft ? null : 8,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: isLeft
+                  ? const Color(0xFF1E8E5A).withAlpha(200)
+                  : const Color(0xFF1565C0).withAlpha(200),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -305,8 +310,10 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               value: total > 0 ? pos : 0,
               max: total > 0 ? total : 1,
               onChangeStart: (_) => _seeking = true,
-              onChanged: (v) => setState(() => _position = Duration(milliseconds: v.round())),
-              onChangeEnd: (v) async => _seekTo(Duration(milliseconds: v.round())),
+              onChanged: (v) => setState(
+                  () => _position = Duration(milliseconds: v.round())),
+              onChangeEnd: (v) async =>
+                  _seekTo(Duration(milliseconds: v.round())),
             ),
           ),
           Row(
