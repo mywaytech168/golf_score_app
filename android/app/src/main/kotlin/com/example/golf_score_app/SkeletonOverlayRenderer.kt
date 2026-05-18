@@ -77,6 +77,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
         csvPath: String,
         startSec: Double,
         outputPath: String,
+        onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
     ): Boolean {
         // 1. 解析 CSV + 時域平滑（消除 ML Kit 偵測雜訊抖動）
         val frameData = smoothFrameData(parseCsv(csvPath))
@@ -129,7 +130,12 @@ class SkeletonOverlayRenderer(private val context: Context) {
         // 輸出以 display 尺寸編碼（旋轉後的正方向），不在 MP4 寫 rotation metadata
         val displayW = if (rotation == 90 || rotation == 270) videoH else videoW
         val displayH = if (rotation == 90 || rotation == 270) videoW else videoH
-        Log.d(TAG, "片段: coded=${videoW}x${videoH} display=${displayW}x${displayH} fps=$fps poseSize=${poseW}x${poseH} rotation=$rotation°")
+        val durationMs = android.media.MediaMetadataRetriever().use { mmr ->
+            mmr.setDataSource(clipPath)
+            mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        }
+        val totalFrames = if (fps > 0 && durationMs > 0) (durationMs * fps / 1000.0).toInt().coerceAtLeast(1) else 0
+        Log.d(TAG, "片段: coded=${videoW}x${videoH} display=${displayW}x${displayH} fps=$fps poseSize=${poseW}x${poseH} rotation=$rotation° totalFrames≈$totalFrames")
 
         // 4. 建立解碼器
         val decoder = try {
@@ -269,6 +275,12 @@ class SkeletonOverlayRenderer(private val context: Context) {
                         buf.put(nv12Buf, 0, nv12Buf.size)
                         encoder.queueInputBuffer(encInIdx, 0, nv12Buf.size, ptsUs, 0)
                         frameCount++
+                        // 每 10 幀推送一次骨架渲染進度
+                        if (frameCount % 10 == 0 && totalFrames > 0) {
+                            val prog = (frameCount.toDouble() / totalFrames).coerceIn(0.0, 0.95)
+                            onProgress?.invoke("renderSkeleton", prog,
+                                "骨架渲染中 ${(prog * 100).toInt()}%", frameCount, totalFrames)
+                        }
                     } else {
                         Log.w(TAG, "dequeueInputBuffer 返回 $encInIdx，略過幀 pts=$ptsUs")
                     }
@@ -327,6 +339,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
             // ✅ 驗證編碼幀數：已有輸出即視為成功
             if (encodedFrames > 0 && samplesWritten > 0) {
                 success = muxStarted
+                onProgress?.invoke("renderSkeleton", 1.0, "骨架渲染完成", frameCount, frameCount)
                 Log.d(TAG, "✅ SUCCESS: renderedFrames=$frameCount, encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
                 Log.d(TAG, "骨架渲染完成: $frameCount 幀 → $outputPath")
             } else {

@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import '../recording/pose_csv_writer.dart';
 import '../recording/pose_detector_service.dart';
 import '../recording/pose_frame_model.dart';
+import 'analysis_progress_service.dart';
 
 class VideoAnalysisService {
   static const _audioChannel = MethodChannel('audio_extractor_channel');
@@ -100,17 +101,30 @@ class VideoAnalysisService {
     void Function(double progress, String label)? onProgress,
   }) async {
     onProgress?.call(0.05, '分析骨架中...');
-    final result = await _poseAnalyzerChannel.invokeMethod<Map>(
-      'analyzePoseVideo',
-      {
-        'videoPath': videoPath,
-        'outputCsvPath': csvPath,
-        'targetFps': 1000 ~/ _frameIntervalMs, // 30fps
-        'maxWidth': 720,
-      },
-    );
-    if (result == null || result['status'] != 'completed') {
-      throw Exception('Kotlin 骨架分析失敗: $result');
+    final progressSvc = AnalysisProgressService.instance;
+    progressSvc.reset('分析骨架中...');
+    void _listenPose() {
+      final (pct, label) = progressSvc.progress.value;
+      if (progressSvc.currentOp == 'analyzePose') {
+        onProgress?.call(pct * 0.7, label); // scale to 5%–70% of outer range
+      }
+    }
+    progressSvc.progress.addListener(_listenPose);
+    try {
+      final result = await _poseAnalyzerChannel.invokeMethod<Map>(
+        'analyzePoseVideo',
+        {
+          'videoPath': videoPath,
+          'outputCsvPath': csvPath,
+          'targetFps': 1000 ~/ _frameIntervalMs, // 30fps
+          'maxWidth': 720,
+        },
+      );
+      if (result == null || result['status'] != 'completed') {
+        throw Exception('Kotlin 骨架分析失敗: $result');
+      }
+    } finally {
+      progressSvc.progress.removeListener(_listenPose);
     }
     onProgress?.call(0.75, '骨架分析完成');
   }

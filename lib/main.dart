@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'services/analysis_progress_service.dart';
 import 'services/auth_token_storage.dart';
 import 'services/ad_service.dart';
 import 'services/purchase_service.dart';
@@ -24,6 +25,9 @@ Future<void> main() async {
   
   // 先初始化 Flutter 綁定，避免在呼叫可用鏡頭前發生錯誤
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 啟動 Kotlin→Dart 進度回報 EventChannel
+  AnalysisProgressService.instance.start();
   
   // 初始化 Google Mobile Ads
   await MobileAds.instance.initialize();

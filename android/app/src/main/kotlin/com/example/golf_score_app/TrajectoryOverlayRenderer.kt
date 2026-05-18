@@ -111,6 +111,7 @@ class TrajectoryOverlayRenderer {
         outputPath: String,
         trackPts: List<Map<String, Any>>,
         roiSize: Int = 0,
+        onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
     ): Boolean {
         if (!File(inputPath).exists()) {
             Log.w(TAG, "輸入檔不存在: $inputPath"); return false
@@ -160,7 +161,14 @@ class TrajectoryOverlayRenderer {
         // 🎬 明確記錄 fps 來源
         val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
         Log.d(TAG, "[TrajectoryOverlay] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
-        
+
+        val totalFrames = android.media.MediaMetadataRetriever().use { mmr ->
+            mmr.setDataSource(inputPath)
+            val durationMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            if (fps > 0) (durationMs * fps / 1000.0).toInt() else 0
+        }
+
         val encW = (videoW + 15) and -16
         val encH = (videoH + 15) and -16
 
@@ -201,9 +209,10 @@ class TrajectoryOverlayRenderer {
 
         File(outputPath).parentFile?.mkdirs()
         val muxer   = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var muxTrack   = -1
+        var muxTrack      = -1
         var muxStarted    = false
         var encodedFrames = 0
+        var decodedFrames = 0
 
         val decBufInfo = MediaCodec.BufferInfo()
         val encBufInfo = MediaCodec.BufferInfo()
@@ -307,6 +316,12 @@ class TrajectoryOverlayRenderer {
                         eos        = false,
                     )
 
+                    decodedFrames++
+                    if (decodedFrames % 10 == 0 && totalFrames > 0) {
+                        val prog = (decodedFrames.toDouble() / totalFrames).coerceIn(0.0, 0.95)
+                        onProgress?.invoke("renderOverlay", prog, "軌跡渲染中 ${(prog * 100).toInt()}%", decodedFrames, totalFrames)
+                    }
+
                 } finally {
                     image.close()
                     decoder.releaseOutputBuffer(outIdx, false)
@@ -340,6 +355,7 @@ class TrajectoryOverlayRenderer {
 
             success = encodedFrames > 0
             Log.d(TAG, "完成 → $outputPath (encodedFrames=$encodedFrames)")
+            onProgress?.invoke("renderOverlay", 1.0, "軌跡渲染完成", decodedFrames, decodedFrames)
 
         } catch (e: Exception) {
             Log.e(TAG, "渲染失敗: $e", e)

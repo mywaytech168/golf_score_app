@@ -84,7 +84,11 @@ class BallBlobExtractor {
      * [config] - 由 Dart 層動態計算傳入的檢測配置
      * 失敗時回傳 null。
      */
-    fun extract(inputPath: String, config: Map<String, Any?>? = null): Map<String, Any>? {
+    fun extract(
+        inputPath: String,
+        config: Map<String, Any?>? = null,
+        onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
+    ): Map<String, Any>? {
         if (!File(inputPath).exists()) {
             Log.w(TAG, "輸入檔不存在: $inputPath")
             return null
@@ -130,10 +134,14 @@ class BallBlobExtractor {
         val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
         Log.d(TAG, "[BallBlobExtractor] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
 
-        val rotation = android.media.MediaMetadataRetriever().use { mmr ->
+        val (rotation, totalFrames) = android.media.MediaMetadataRetriever().use { mmr ->
             mmr.setDataSource(inputPath)
-            mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            val rot = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                 ?.toIntOrNull() ?: 0
+            val durationMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            val frames = if (fps > 0) (durationMs * fps / 1000.0).toInt() else 0
+            Pair(rot, frames)
         }
 
         val displayW = if (rotation == 90 || rotation == 270) videoH else videoW
@@ -157,6 +165,7 @@ class BallBlobExtractor {
         val bufInfo    = MediaCodec.BufferInfo()
         var inputEos   = false
         var prevYData  : ByteArray? = null
+        var frameCount = 0
 
         try {
             while (true) {
@@ -230,6 +239,12 @@ class BallBlobExtractor {
                     ))
 
                     prevYData = yRaw
+                    frameCount++
+
+                    if (frameCount % 10 == 0 && totalFrames > 0) {
+                        val prog = (frameCount.toDouble() / totalFrames).coerceIn(0.0, 0.95)
+                        onProgress?.invoke("extractBlobs", prog, "球追蹤分析中 ${(prog * 100).toInt()}%", frameCount, totalFrames)
+                    }
 
                 } finally {
                     image.close()
@@ -247,6 +262,7 @@ class BallBlobExtractor {
         }
 
         Log.d(TAG, "完成: ${frameList.size} 幀，合計 ${frameList.sumOf { (it["blobs"] as List<*>).size }} 個 blob")
+        onProgress?.invoke("extractBlobs", 1.0, "球追蹤分析完成", frameCount, frameCount)
 
         return mapOf(
             "fps"    to fps,

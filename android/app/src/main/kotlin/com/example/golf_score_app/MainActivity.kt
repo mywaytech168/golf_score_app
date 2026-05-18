@@ -15,6 +15,7 @@ import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
@@ -43,12 +44,30 @@ class MainActivity: FlutterActivity() {
     private val BALL_TRAJECTORY_CHANNEL = "com.example.golf_score_app/ball_trajectory"
     private val FRAME_EXTRACTOR_CHANNEL = "com.example.golf_score_app/frame_extractor"
     private val POSE_ANALYZER_CHANNEL = "com.example.golf_score_app/pose_analyzer"
+    private val PROGRESS_CHANNEL = "com.example.golf_score_app/analysis_progress"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
     private val ballTrajExecutor = Executors.newSingleThreadExecutor()
     private val frameExtractorExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
+
+    // EventChannel sink：背景執行緒透過 sendProgress() 推送進度到 Dart
+    @Volatile private var progressSink: EventChannel.EventSink? = null
+
+    /** 從任意執行緒安全地推送進度事件到 Dart。*/
+    private fun sendProgress(op: String, progress: Double, label: String,
+                              current: Int = 0, total: Int = 0) {
+        runOnUiThread {
+            progressSink?.success(mapOf(
+                "op"       to op,
+                "progress" to progress,
+                "label"    to label,
+                "current"  to current,
+                "total"    to total,
+            ))
+        }
+    }
     private val videoTrimmer by lazy { VideoTrimmer(this) }
     private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
     private val ballBlobExtractor      by lazy { BallBlobExtractor() }
@@ -64,6 +83,18 @@ class MainActivity: FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // ── 分析進度 EventChannel ────────────────────────────────
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, PROGRESS_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    progressSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    progressSink = null
+                }
+            })
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { _, _ -> }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL)
@@ -240,7 +271,8 @@ class MainActivity: FlutterActivity() {
                                 clipPath = clipPath,
                                 csvPath = csvPath,
                                 startSec = startSec,
-                                outputPath = outputPath
+                                outputPath = outputPath,
+                                onProgress = ::sendProgress,
                             )
                             if (!ok) {
                                 Log.e(logTag, "骨架渲染失敗，不執行後續流程")
@@ -268,7 +300,7 @@ class MainActivity: FlutterActivity() {
                         }
                         ballTrajExecutor.execute {
                             try {
-                                val data = ballBlobExtractor.extract(inputPath)
+                                val data = ballBlobExtractor.extract(inputPath, onProgress = ::sendProgress)
                                 runOnUiThread {
                                     if (data != null) result.success(data)
                                     else result.error("extract_failed", "blob 偵測失敗", null)
@@ -286,16 +318,16 @@ class MainActivity: FlutterActivity() {
                         @Suppress("UNCHECKED_CAST")
                         val configMap = call.argument<Map<String, Any?>>("config")
                         val roiSize = call.argument<Int>("roiSize") ?: 400
-                        
+
                         if (inputPath.isNullOrBlank()) {
                             result.error("invalid_args", "缺少 inputPath", null)
                             return@setMethodCallHandler
                         }
-                        
+
                         ballTrajExecutor.execute {
                             try {
                                 // 直接傳遞 configMap，extract() 會自己內部調用 DetectionConfig.fromMap
-                                val data = ballBlobExtractor.extract(inputPath, configMap)
+                                val data = ballBlobExtractor.extract(inputPath, configMap, onProgress = ::sendProgress)
                                 
                                 runOnUiThread {
                                     if (data != null) result.success(data)
@@ -328,6 +360,7 @@ class MainActivity: FlutterActivity() {
                                     outputPath = outputPath,
                                     trackPts   = trackPts ?: emptyList(),
                                     roiSize    = roiSize,
+                                    onProgress = ::sendProgress,
                                 )
                                 runOnUiThread { result.success(ok) }
                             } catch (e: Exception) {
@@ -843,6 +876,14 @@ class MainActivity: FlutterActivity() {
                             frameCount++
                         }
 
+                        // ── 每 10 幀推送一次進度到 Dart ─────────────
+                        if (decodedFrames % 10 == 0 && expectedFrames > 0) {
+                            val prog = (decodedFrames.toDouble() / expectedFrames).coerceIn(0.0, 0.95)
+                            sendProgress("analyzePose", prog,
+                                "骨架分析中 ${(prog * 100).toInt()}%",
+                                decodedFrames, expectedFrames)
+                        }
+
                         codec.releaseOutputBuffer(outIdx, false)
                         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputEOS = true
                     }
@@ -859,6 +900,7 @@ class MainActivity: FlutterActivity() {
             Log.i(logTag, "[PoseAnalyzer]   預期幀數: $expectedFrames")
             Log.i(logTag, "[PoseAnalyzer]   差異: ${expectedFrames - frameCount} 幀 (${(frameCount * 100.0 / maxOf(1, expectedFrames)).toInt()}% of expected)")
             Log.i(logTag, "[PoseAnalyzer] done: $frameCount frames, ${elapsedMs}ms, ${fps}fps, mlkit_fail=${mlKitFailures} -> $outputCsvPath")
+            sendProgress("analyzePose", 1.0, "骨架分析完成", frameCount, frameCount)
             if (mlKitFailures > 0) Log.w(logTag, "[PoseAnalyzer] mlkit_fail=${mlKitFailures} frames (version compat or hw accel issue)")
             if (frameCount < expectedFrames * 0.8) {
                 Log.w(logTag, "[PoseAnalyzer] ⚠️ 幀數異常: 只寫入 ${(frameCount * 100.0 / maxOf(1, expectedFrames)).toInt()}% 的預期幀數！")

@@ -7,6 +7,7 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
+import 'analysis_progress_service.dart';
 import 'ball_tracker.dart';
 import 'ball_trajectory_service.dart';
 import 'skeleton_overlay_service.dart';
@@ -244,12 +245,17 @@ class ClipPipelineService {
   }) async {
     final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
 
+    final progressSvc = AnalysisProgressService.instance;
+
     // 1. Pose 分析（若 CSV 已由切片繼承則略過，節省重複 ML Kit 推理）
     if (await File(csvPath).exists()) {
       onProgress?.call('使用骨架資料...');
       debugPrint('[Pipeline.analyze] ✅ CSV 已繼承，略過 VideoAnalysis：$csvPath');
     } else {
       onProgress?.call('分析骨架中...');
+      progressSvc.reset('分析骨架中...');
+      void _listenPose() => onProgress?.call(progressSvc.progress.value.$2);
+      progressSvc.progress.addListener(_listenPose);
       try {
         await VideoAnalysisService().analyze(
           videoPath: clipPath,
@@ -258,9 +264,11 @@ class ClipPipelineService {
           onProgress: (_, label) => onProgress?.call(label),
         );
       } catch (e) {
+        progressSvc.progress.removeListener(_listenPose);
         debugPrint('[Pipeline.analyze] VideoAnalysis 失敗: $e');
         return null;
       }
+      progressSvc.progress.removeListener(_listenPose);
       if (!await File(csvPath).exists()) {
         debugPrint('[Pipeline.analyze] ❌ VideoAnalysis 完成但 CSV 不存在：$csvPath');
         return null;
@@ -269,6 +277,9 @@ class ClipPipelineService {
 
     // 2. 疊加骨架（startSec=0，CSV 已相對於切片）
     onProgress?.call('疊加骨架中...');
+    progressSvc.reset('疊加骨架中...');
+    void _listenSkeleton() => onProgress?.call(progressSvc.progress.value.$2);
+    progressSvc.progress.addListener(_listenSkeleton);
     bool hasSkeleton = false;
     String? skeletonPath;
     final skelOut = p.join(sessionDir, 'skeleton.mp4');
@@ -279,6 +290,7 @@ class ClipPipelineService {
       startSec: 0,
       outputPath: skelOut,
     );
+    progressSvc.progress.removeListener(_listenSkeleton);
     if (overlaid != null && !await File(overlaid).exists()) {
       debugPrint('[Pipeline.analyze] ❌ 骨架輸出檔不存在，視為失敗');
       overlaid = null;
@@ -298,10 +310,14 @@ class ClipPipelineService {
     String? finalPath;
     if (skeletonPath != null) {
       onProgress?.call('追蹤球軌跡中...');
+      progressSvc.reset('球追蹤分析中...');
+      void _listenBlobs() => onProgress?.call(progressSvc.progress.value.$2);
+      progressSvc.progress.addListener(_listenBlobs);
       final trajOut = p.join(sessionDir, 'final.mp4');
 
       final extraction =
           await BallTrajectoryService.extractBlobs(inputPath: clipPath);
+      progressSvc.progress.removeListener(_listenBlobs);
 
       if (extraction == null) {
         debugPrint('[Pipeline.analyze] ❌ blob 提取失敗');
@@ -349,12 +365,17 @@ class ClipPipelineService {
             debugPrint('  [P$i] x=$x, y=$y, 幀=$frameIdx, 時間=${timeMs}ms');
           }
           
+          onProgress?.call('軌跡渲染中...');
+          progressSvc.reset('軌跡渲染中...');
+          void _listenOverlay() => onProgress?.call(progressSvc.progress.value.$2);
+          progressSvc.progress.addListener(_listenOverlay);
           final withTraj = await BallTrajectoryService.renderOverlay(
             inputPath: skeletonPath,
             outputPath: trajOut,
             trackPts: trackPts.map((pt) => pt.toMap()).toList(),
             roiSize: roiSize,
           );
+          progressSvc.progress.removeListener(_listenOverlay);
           if (withTraj != null) {
             hasBallTrack = true;
             finalPath = withTraj;
