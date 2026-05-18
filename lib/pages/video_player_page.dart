@@ -21,10 +21,17 @@ class VideoPlayerPage extends StatefulWidget {
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
 }
 
-class _VideoPlayerPageState extends State<VideoPlayerPage> {
+class _VideoPlayerPageState extends State<VideoPlayerPage>
+    with SingleTickerProviderStateMixin {
   VideoPlayerController? _controller;
-  String _currentVideoType = 'original';
+  late final TabController _tabController;
   bool _initialized = false;
+
+  static const _tabs = [
+    (icon: Icons.videocam,  label: '原始',  type: 'original'),
+    (icon: Icons.person,    label: '骨架',  type: 'skeleton'),
+    (icon: Icons.analytics, label: '分析',  type: 'analyzed'),
+  ];
 
   String get _sessionDir =>
       widget.videoPath.replaceAll(RegExp(r'[^/\\]*$'), '');
@@ -32,6 +39,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: _tabs.length, vsync: this)
+      ..addListener(() {
+        if (!_tabController.indexIsChanging) return;
+        switch (_tabController.index) {
+          case 0: _viewOriginal();
+          case 1: _viewSkeleton();
+          case 2: _viewAnalyzed();
+        }
+      });
     _initController(widget.videoPath, isOriginal: true);
   }
 
@@ -66,13 +82,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     if (mounted) setState(() {});
   }
 
-  void _switchTo(String path, String type) {
-    setState(() => _currentVideoType = type);
+  void _switchTo(String path) {
     _initController(path);
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _controller?.removeListener(_onUpdate);
     _controller?.dispose();
     super.dispose();
@@ -96,18 +112,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
         ? '${_sessionDir}swing.mp4'
         : '${_sessionDir}clip.mp4';
     if (!File(path).existsSync()) { _showSnack('原始影片不存在'); return; }
-    _switchTo(path, 'original');
+    _switchTo(path);
   }
 
   void _viewSkeleton() {
     final path = '${_sessionDir}skeleton.mp4';
     if (!File(path).existsSync()) { _showSnack('骨架影片不存在'); return; }
-    _switchTo(path, 'skeleton');
+    _switchTo(path);
   }
 
   void _viewAnalyzed() {
     if (!File(widget.videoPath).existsSync()) { _showSnack('分析影片不存在'); return; }
-    _switchTo(widget.videoPath, 'analyzed');
+    _switchTo(widget.videoPath);
   }
 
   // ── UI ──────────────────────────────────────────────────────
@@ -130,24 +146,37 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
 
   Widget _buildTopBar(BuildContext context) {
     return Container(
-      height: 48,
       color: Colors.black87,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
           IconButton(
             icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
-            padding: EdgeInsets.zero,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             onPressed: () => Navigator.pop(context),
           ),
-          const SizedBox(width: 4),
-          _typeBtn(Icons.videocam,  '原始', 'original', const Color(0xFF1E8E5A), _viewOriginal),
-          const SizedBox(width: 6),
-          _typeBtn(Icons.person,    '骨架', 'skeleton',  const Color(0xFF1565C0), _viewSkeleton),
-          const SizedBox(width: 6),
-          _typeBtn(Icons.analytics, '分析', 'analyzed',  const Color(0xFFE65100), _viewAnalyzed),
+          Expanded(
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: const Color(0xFF1E8E5A),
+              indicatorWeight: 2,
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white54,
+              labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              unselectedLabelStyle: const TextStyle(fontSize: 13),
+              tabs: _tabs.map((t) => Tab(
+                height: 40,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(t.icon, size: 14),
+                    const SizedBox(width: 4),
+                    Text(t.label),
+                  ],
+                ),
+              )).toList(),
+            ),
+          ),
           if (widget.avatarPath != null) ...[
-            const Spacer(),
             CircleAvatar(
               radius: 14,
               backgroundImage: FileImage(File(widget.avatarPath!)),
@@ -155,28 +184,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
             const SizedBox(width: 8),
           ],
         ],
-      ),
-    );
-  }
-
-  Widget _typeBtn(IconData icon, String label, String type, Color color, VoidCallback onTap) {
-    final active = _currentVideoType == type;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? color.withAlpha(220) : Colors.white12,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 14),
-            const SizedBox(width: 4),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
-          ],
-        ),
       ),
     );
   }
