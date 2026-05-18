@@ -1267,7 +1267,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     // 候選影片：短影片、不是自己、檔案存在
     final candidates = widget.allEntries.where((e) =>
         e.filePath != widget.entry.filePath &&
-        e.durationSeconds <= 30 &&
+        e.durationSeconds <= 5 &&
         File(e.filePath).existsSync()).toList();
 
     if (candidates.isEmpty) {
@@ -1616,7 +1616,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                     // 比較模式：限短影片（≤ 30 秒），且列表中還有其他短影片可選
                     if (!_isLongVideo && widget.allEntries.where((e) =>
                         e.filePath != widget.entry.filePath &&
-                        e.durationSeconds <= 30 &&
+                        e.durationSeconds <= 5 &&
                         File(e.filePath).existsSync()).isNotEmpty)
                       const PopupMenuItem<_HistoryMenuAction>(
                         value: _HistoryMenuAction.compare,
