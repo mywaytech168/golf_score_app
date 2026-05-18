@@ -26,11 +26,13 @@ class AnalysisResult {
   final String finalPath;
   final bool hasSkeleton;
   final bool hasBallTrack;
+  final bool hasSilence;
 
   const AnalysisResult({
     required this.finalPath,
     required this.hasSkeleton,
     required this.hasBallTrack,
+    this.hasSilence = false,
   });
 }
 
@@ -246,6 +248,7 @@ class ClipPipelineService {
     final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
 
     final progressSvc = AnalysisProgressService.instance;
+    bool hasSilence = false;
 
     // 1. Pose 分析（若 CSV 已由切片繼承則略過，節省重複 ML Kit 推理）
     if (await File(csvPath).exists()) {
@@ -257,12 +260,13 @@ class ClipPipelineService {
       void _listenPose() => onProgress?.call(progressSvc.progress.value.$2);
       progressSvc.progress.addListener(_listenPose);
       try {
-        await VideoAnalysisService().analyze(
+        final vaResult = await VideoAnalysisService().analyze(
           videoPath: clipPath,
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
           onProgress: (_, label) => onProgress?.call(label),
         );
+        hasSilence = vaResult.hasSilence;
       } catch (e) {
         progressSvc.progress.removeListener(_listenPose);
         debugPrint('[Pipeline.analyze] VideoAnalysis 失敗: $e');
@@ -397,6 +401,7 @@ class ClipPipelineService {
       finalPath: finalPath ?? skeletonPath ?? clipPath,
       hasSkeleton: hasSkeleton,
       hasBallTrack: hasBallTrack,
+      hasSilence: hasSilence,
     );
   }
 

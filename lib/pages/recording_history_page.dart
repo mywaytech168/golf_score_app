@@ -962,6 +962,12 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
+      // 若偵測到無聲音，同步更新來源 entry 的 audioTags
+      if (audioHasSilence) {
+        final updatedSource = widget.entry.copyWith(audioTags: ['no_audio']);
+        widget.onEntryUpdated?.call(widget.entry, updatedSource);
+      }
+
       widget.onClipsGenerated?.call(
         widget.entry,
         results.map((r) => r.entry).toList(),
@@ -1080,9 +1086,11 @@ class _HistoryTileState extends State<_HistoryTile> {
           throw '視頻分析失敗';
         }
 
+        final silenceTags = result.hasSilence ? ['no_audio'] : null;
         updatedEntry = widget.entry.copyWith(
           filePath: result.finalPath,
           isAnalyzed: true,
+          audioTags: silenceTags,
         );
       }
 
@@ -1421,6 +1429,30 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 style: const TextStyle(
                                   fontSize: 10,
                                   color: Color(0xFFFF6F00),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          // 無聲音標籤
+                          if (widget.entry.audioTags?.contains('no_audio') == true)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF9E9E9E).withAlpha(40),
+                                border: Border.all(
+                                  color: const Color(0xFF757575),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                '🔇 無聲音',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF757575),
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
