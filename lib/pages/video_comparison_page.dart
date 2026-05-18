@@ -153,15 +153,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     _seeking = false;
   }
 
-  Future<void> _step(double delta) async {
-    if (_playing) {
-      _stopSync();
-      await Future.wait([_playerA.pause(), _playerB.pause()]);
-      setState(() => _playing = false);
-    }
-    await _seekToProgress(_progress + delta);
-  }
-
   // ── 清理 ────────────────────────────────────────────────────
 
   @override
@@ -296,14 +287,16 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   }
 
   Widget _buildControls() {
-    final pct = (_progress * 100).round();
+    final posA = _durationA * _progress;
+    final totalA = _durationA;
 
     return Container(
       color: Colors.black87,
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 進度列
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 3,
@@ -331,31 +324,35 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               onChangeEnd: (v) => _seekToProgress(v),
             ),
           ),
+          // 播放鈕 + 時間（對齊一般播放模式的底部列）
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _btn(Icons.skip_previous, () => _step(-0.01)),
-              const SizedBox(width: 16),
+              // 時間（左）
+              Text(
+                _fmt(posA),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const Spacer(),
+              // 播放 / 暫停
               GestureDetector(
                 onTap: _togglePlay,
                 child: Container(
-                  width: 48, height: 48,
+                  width: 44, height: 44,
                   decoration: const BoxDecoration(
                     color: Color(0xFF1E8E5A),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     _playing ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white, size: 28,
+                    color: Colors.white, size: 26,
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
-              _btn(Icons.skip_next,  () => _step(0.01)),
-              const SizedBox(width: 24),
+              const Spacer(),
+              // 總時長（右）
               Text(
-                '$pct%',
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                _fmt(totalA),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
             ],
           ),
@@ -364,6 +361,4 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     );
   }
 
-  Widget _btn(IconData icon, VoidCallback onTap) =>
-      GestureDetector(onTap: onTap, child: Icon(icon, color: Colors.white70, size: 26));
 }
