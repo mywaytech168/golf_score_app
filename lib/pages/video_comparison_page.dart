@@ -153,6 +153,15 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     _seeking = false;
   }
 
+  Future<void> _step(double delta) async {
+    if (_playing) {
+      _stopSync();
+      await Future.wait([_playerA.pause(), _playerB.pause()]);
+      setState(() => _playing = false);
+    }
+    await _seekToProgress(_progress + delta);
+  }
+
   // ── 清理 ────────────────────────────────────────────────────
 
   @override
@@ -324,7 +333,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               onChangeEnd: (v) => _seekToProgress(v),
             ),
           ),
-          // 播放鈕 + 時間（對齊一般播放模式的底部列）
+          // 播放鈕 + 逐格 + 時間（對齊一般播放模式的底部列）
           Row(
             children: [
               // 時間（左）
@@ -333,6 +342,8 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
               const Spacer(),
+              _btn(Icons.skip_previous, () => _step(-0.01)),
+              const SizedBox(width: 12),
               // 播放 / 暫停
               GestureDetector(
                 onTap: _togglePlay,
@@ -348,6 +359,8 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
                   ),
                 ),
               ),
+              const SizedBox(width: 12),
+              _btn(Icons.skip_next, () => _step(0.01)),
               const Spacer(),
               // 總時長（右）
               Text(
@@ -361,4 +374,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     );
   }
 
+  Widget _btn(IconData icon, VoidCallback onTap) =>
+      GestureDetector(onTap: onTap, child: Icon(icon, color: Colors.white70, size: 26));
 }
