@@ -269,7 +269,12 @@ def extract_pose_to_csv_and_video(
 
     first_idx, first_t, first_frame, fps, width, height = first
     print(f"   Output video dimensions: {width}x{height} @ {fps} fps")
-    writer = cv2.VideoWriter(str(out_video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    # avc1 (H.264) avoids the green last-frame bug that mp4v has on Windows
+    writer = cv2.VideoWriter(str(out_video_path), cv2.VideoWriter_fourcc(*"avc1"), fps, (width, height))
+    if not writer.isOpened():
+        # fallback to mp4v if avc1 is unavailable
+        writer = cv2.VideoWriter(str(out_video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        print(f"⚠️  [DEBUG] avc1 unavailable, falling back to mp4v")
     if not writer.isOpened():
         print(f"❌ [ERROR] Failed to open VideoWriter for {out_video_path}")
     else:
@@ -332,7 +337,10 @@ def render_video_from_pose_csv(
     _, _, first_frame, fps, width, height = first
 
     out_video_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(out_video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    # avc1 (H.264) avoids the green last-frame bug that mp4v has on Windows
+    writer = cv2.VideoWriter(str(out_video_path), cv2.VideoWriter_fourcc(*"avc1"), fps, (width, height))
+    if not writer.isOpened():
+        writer = cv2.VideoWriter(str(out_video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
     first_idx, first_t, first_frame, _, _, _ = first
     first_row = rows_by_frame.get(first_idx, _empty_landmarks_row(first_idx, first_t))

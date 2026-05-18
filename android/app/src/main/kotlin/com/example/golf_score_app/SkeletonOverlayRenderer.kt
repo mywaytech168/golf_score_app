@@ -222,11 +222,20 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) continue
                 if (outIdx < 0) continue
 
+                val isEos = (decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                 val image = runCatching { decoder.getOutputImage(outIdx) }.getOrNull()
                 if (image == null) {
                     decoder.releaseOutputBuffer(outIdx, false)
-                    if ((decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                    if (isEos) break
                     continue
+                }
+
+                // EOS 幀可能含有 zeroed/garbage 像素（Y=0,Cb=0,Cr=0 → 綠色）
+                // 若 decBufInfo.size==0 代表純標記幀，直接跳過不編碼
+                if (isEos && decBufInfo.size == 0) {
+                    image.close()
+                    decoder.releaseOutputBuffer(outIdx, false)
+                    break
                 }
 
                 try {
@@ -277,7 +286,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     decoder.releaseOutputBuffer(outIdx, false)
                 }
 
-                if ((decBufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                if (isEos) break
             }
 
             // ── EOS ─────────────────────────────────────────────
