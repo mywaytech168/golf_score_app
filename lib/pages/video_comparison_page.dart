@@ -27,14 +27,10 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   bool _initialized = false;
   bool _playing = false;
   bool _seeking = false;
+  bool _syncBusy = false;
 
-  // 相對進度（0 = 兩支影片的 hit 時刻對齊點）
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-
-  // 對軸對齊：各影片的播放起始點（絕對）
-  Duration _startA = Duration.zero;
-  Duration _startB = Duration.zero;
 
   Timer? _syncTimer;
 
@@ -55,23 +51,12 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     final durA = _ctrlA.value.duration;
     final durB = _ctrlB.value.duration;
 
-    // hitSecond → Duration
-    final hitA = _secToDur(widget.entryA.hitSecond ?? 0.0);
-    final hitB = _secToDur(widget.entryB.hitSecond ?? 0.0);
+    // 显示两支影片中较长的那个（确保能看完整）
+    _duration = durA > durB ? durA : durB;
 
-    // 對軸公式
-    // minT = -min(hitA, hitB)  → 最早的相對時刻
-    // maxT =  min(durA-hitA, durB-hitB) → 最晚的相對時刻
-    // startA = hitA + minT（可能 = 0 或 > 0）
-    // startB = hitB + minT
-    final minT  = hitA < hitB ? -hitA : -hitB;
-    final endT  = (durA - hitA) < (durB - hitB) ? (durA - hitA) : (durB - hitB);
-    _startA   = hitA + minT;
-    _startB   = hitB + minT;
-    _duration = endT - minT;
-
-    await _ctrlA.seekTo(_startA);
-    await _ctrlB.seekTo(_startB);
+    // 两支影片都从 0 开始播放
+    await _ctrlA.seekTo(Duration.zero);
+    await _ctrlB.seekTo(Duration.zero);
 
     _ctrlA.setLooping(false);
     _ctrlB.setLooping(false);
@@ -80,18 +65,20 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     if (mounted) setState(() => _initialized = true);
   }
 
-  Duration _secToDur(double sec) =>
-      Duration(microseconds: (sec * 1e6).round());
-
   // ── 同步邏輯 ─────────────────────────────────────────────────
 
   void _onCtrlUpdate() {
     if (!mounted || _seeking) return;
-    final rel = _ctrlA.value.position - _startA;
-    final clampedRel = rel < Duration.zero ? Duration.zero : rel;
-    if ((clampedRel - _position).abs() > const Duration(milliseconds: 33)) {
-      setState(() => _position = clampedRel);
+    
+    // 使用 A 的当前位置作为相对位置（两支影片同时开始）
+    final currentPos = _ctrlA.value.position;
+    
+    // 只在位置改变超过 1 帧时更新（减少 setState 调用）
+    if ((currentPos - _position).abs() > const Duration(milliseconds: 33)) {
+      setState(() => _position = currentPos);
     }
+    
+    // 检查是否播放完成
     if (_playing && !_ctrlA.value.isPlaying) {
       _stopSync();
       setState(() => _playing = false);
@@ -100,15 +87,15 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
   void _startSync() {
     _syncTimer?.cancel();
-    // 每 150ms 比對一次，誤差超過 1 幀就把 B 拉回對齊
+    _syncBusy = false;
     _syncTimer = Timer.periodic(const Duration(milliseconds: 150), (_) async {
-      if (!_playing || _seeking) return;
-      final absA     = _ctrlA.value.position;
-      final absB     = _ctrlB.value.position;
-      final targetB  = absA - _startA + _startB;
-      final drift    = (absB - targetB).abs();
-      if (drift > const Duration(milliseconds: 80)) {
-        await _ctrlB.seekTo(targetB);
+      if (!_playing || _seeking || _syncBusy || !mounted) return;
+      final posA = _ctrlA.value.position;
+      final posB = _ctrlB.value.position;
+      if ((posB - posA).abs() > const Duration(milliseconds: 100)) {
+        _syncBusy = true;
+        await _ctrlB.seekTo(posA);
+        _syncBusy = false;
       }
     });
   }
@@ -119,38 +106,59 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
   Future<void> _togglePlay() async {
     if (_playing) {
-      await _ctrlA.pause();
-      await _ctrlB.pause();
+      // 暂停：立即停止同步定时器
       _stopSync();
+      
+      // 并行暂停两个影片
+      await Future.wait([
+        _ctrlA.pause(),
+        _ctrlB.pause(),
+      ]);
+      
+      if (mounted) setState(() => _playing = false);
     } else {
-      // 先讓 B 對齊當前 A 的相對位置，再同時播放
-      final targetB = _ctrlA.value.position - _startA + _startB;
-      await _ctrlB.seekTo(targetB);
-      await _ctrlA.play();
-      await _ctrlB.play();
+      // 播放：同时播放两支影片
+      await Future.wait([
+        _ctrlA.play(),
+        _ctrlB.play(),
+      ]);
       _startSync();
+      
+      if (mounted) setState(() => _playing = true);
     }
-    setState(() => _playing = !_playing);
   }
 
-  Future<void> _seekTo(Duration relPos) async {
+  Future<void> _seekTo(Duration pos) async {
     _seeking = true;
-    await _ctrlA.seekTo(_startA + relPos);
-    await _ctrlB.seekTo(_startB + relPos);
+    // 立即更新 UI 显示新位置
+    if (mounted) setState(() => _position = pos);
+    
+    // 同时 seek 两支影片到相同位置
+    await Future.wait([
+      _ctrlA.seekTo(pos),
+      _ctrlB.seekTo(pos),
+    ]);
+    
     _seeking = false;
-    if (mounted) setState(() => _position = relPos);
   }
 
   Future<void> _step(Duration delta) async {
+    // 如果正在播放，先暂停
     if (_playing) {
-      await _ctrlA.pause();
-      await _ctrlB.pause();
       _stopSync();
+      await Future.wait([
+        _ctrlA.pause(),
+        _ctrlB.pause(),
+      ]);
       setState(() => _playing = false);
     }
+    
+    // 计算目标位置
     Duration next = _position + delta;
     if (next < Duration.zero) next = Duration.zero;
     if (next > _duration) next = _duration;
+    
+    // 同时 seek 两支影片
     await _seekTo(next);
   }
 
@@ -312,8 +320,10 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               onChangeStart: (_) => _seeking = true,
               onChanged: (v) => setState(
                   () => _position = Duration(milliseconds: v.round())),
-              onChangeEnd: (v) async =>
-                  _seekTo(Duration(milliseconds: v.round())),
+              onChangeEnd: (v) {
+                // 在后台进行 seek，不阻塞 UI
+                unawaited(_seekTo(Duration(milliseconds: v.round())));
+              },
             ),
           ),
           Row(
