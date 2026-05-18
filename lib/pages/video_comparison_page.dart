@@ -2,9 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
+import '../services/analysis_progress_service.dart';
+import '../services/video_comparison_service.dart';
 
 class VideoComparisonPage extends StatefulWidget {
   final RecordingHistoryEntry entryA;
@@ -21,127 +24,128 @@ class VideoComparisonPage extends StatefulWidget {
 }
 
 class _VideoComparisonPageState extends State<VideoComparisonPage> {
-  late VideoPlayerController _ctrlA;
-  late VideoPlayerController _ctrlB;
+  // ── 渲染階段 ──────────────────────────────────────────────────
+  bool _rendering = true;
+  String _renderLabel = '準備中…';
+  double _renderProgress = 0.0;
+  String? _renderError;
+  String? _mergedPath;
 
+  // ── 播放階段 ──────────────────────────────────────────────────
+  VideoPlayerController? _ctrl;
   bool _initialized = false;
   bool _playing = false;
   bool _seeking = false;
-
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-
-  Timer? _syncTimer;
-
-  // ── 初始化 ──────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _startRender();
   }
 
-  Future<void> _init() async {
-    _ctrlA = VideoPlayerController.file(File(widget.entryA.filePath));
-    _ctrlB = VideoPlayerController.file(File(widget.entryB.filePath));
+  // ── 渲染 ─────────────────────────────────────────────────────
 
-    await Future.wait([
-      _ctrlA.initialize(),
-      _ctrlB.initialize(),
-    ]);
+  Future<void> _startRender() async {
+    void onProgress() {
+      final (prog, label) = AnalysisProgressService.instance.progress.value;
+      if (mounted) setState(() { _renderProgress = prog; _renderLabel = label; });
+    }
+    AnalysisProgressService.instance.progress.addListener(onProgress);
 
-    // 以較短的影片為基準時長
-    final durA = _ctrlA.value.duration;
-    final durB = _ctrlB.value.duration;
-    _duration = durA < durB ? durA : durB;
+    try {
+      final tmp = await getTemporaryDirectory();
+      final outPath = '${tmp.path}/cmp_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
-    _ctrlA.setLooping(false);
-    _ctrlB.setLooping(false);
+      final ok = await VideoComparisonService().renderComparison(
+        pathA: widget.entryA.filePath,
+        pathB: widget.entryB.filePath,
+        outputPath: outPath,
+        hitSecA: widget.entryA.hitSecond ?? 0.0,
+        hitSecB: widget.entryB.hitSecond ?? 0.0,
+      );
 
-    _ctrlA.addListener(_onControllerUpdate);
+      if (!mounted) return;
+      if (!ok || !File(outPath).existsSync()) {
+        setState(() { _rendering = false; _renderError = '合成失敗，請稍後再試'; });
+        return;
+      }
 
-    if (mounted) setState(() => _initialized = true);
+      _mergedPath = outPath;
+      if (mounted) setState(() => _rendering = false);
+      await _initPlayer(outPath);
+    } catch (e) {
+      if (mounted) setState(() { _rendering = false; _renderError = '錯誤：$e'; });
+    } finally {
+      AnalysisProgressService.instance.progress.removeListener(onProgress);
+    }
   }
 
-  // ── 同步邏輯 ─────────────────────────────────────────────
+  Future<void> _initPlayer(String path) async {
+    final ctrl = VideoPlayerController.file(File(path));
+    await ctrl.initialize();
+    ctrl.setLooping(false);
+    ctrl.addListener(_onCtrlUpdate);
+    if (mounted) {
+      setState(() {
+        _ctrl = ctrl;
+        _duration = ctrl.value.duration;
+        _initialized = true;
+      });
+    }
+  }
 
-  void _onControllerUpdate() {
-    if (!mounted || _seeking) return;
-    final pos = _ctrlA.value.position;
-    if ((pos - _position).abs() > const Duration(milliseconds: 50)) {
+  // ── 播放回調 ─────────────────────────────────────────────────
+
+  void _onCtrlUpdate() {
+    if (!mounted || _seeking || _ctrl == null) return;
+    final pos = _ctrl!.value.position;
+    if ((pos - _position).abs() > const Duration(milliseconds: 33)) {
       setState(() => _position = pos);
     }
-    // 影片結束 → 暫停同步
-    if (_playing && !_ctrlA.value.isPlaying) {
-      _stopSync();
+    if (_playing && !_ctrl!.value.isPlaying) {
       setState(() => _playing = false);
     }
   }
 
-  void _startSync() {
-    _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
-      if (!_playing || _seeking) return;
-      final posA = _ctrlA.value.position;
-      final posB = _ctrlB.value.position;
-      final diff = (posA - posB).abs();
-      if (diff > const Duration(milliseconds: 200)) {
-        await _ctrlB.seekTo(posA);
-      }
-    });
-  }
-
-  void _stopSync() => _syncTimer?.cancel();
-
-  // ── 控制 ────────────────────────────────────────────────
-
   Future<void> _togglePlay() async {
+    final ctrl = _ctrl;
+    if (ctrl == null) return;
     if (_playing) {
-      await _ctrlA.pause();
-      await _ctrlB.pause();
-      _stopSync();
+      await ctrl.pause();
     } else {
-      await _ctrlB.seekTo(_position);
-      await _ctrlA.play();
-      await _ctrlB.play();
-      _startSync();
+      await ctrl.play();
     }
     setState(() => _playing = !_playing);
   }
 
   Future<void> _seekTo(Duration pos) async {
     _seeking = true;
-    await _ctrlA.seekTo(pos);
-    await _ctrlB.seekTo(pos);
+    await _ctrl?.seekTo(pos);
     _seeking = false;
-    setState(() => _position = pos);
+    if (mounted) setState(() => _position = pos);
   }
 
   Future<void> _step(Duration delta) async {
+    if (_playing) { await _ctrl?.pause(); setState(() => _playing = false); }
     Duration next = _position + delta;
     if (next < Duration.zero) next = Duration.zero;
     if (next > _duration) next = _duration;
-    if (_playing) {
-      await _ctrlA.pause();
-      await _ctrlB.pause();
-      _stopSync();
-      setState(() => _playing = false);
-    }
     await _seekTo(next);
   }
 
-  // ── 清理 ────────────────────────────────────────────────
+  // ── 清理 ─────────────────────────────────────────────────────
 
   @override
   void dispose() {
-    _stopSync();
-    _ctrlA.removeListener(_onControllerUpdate);
-    _ctrlA.dispose();
-    _ctrlB.dispose();
+    _ctrl?.removeListener(_onCtrlUpdate);
+    _ctrl?.dispose();
+    if (_mergedPath != null) File(_mergedPath!).delete().ignore();
     super.dispose();
   }
 
-  // ── 格式化 ──────────────────────────────────────────────
+  // ── 格式化 ───────────────────────────────────────────────────
 
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -149,7 +153,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     return '$m:$s';
   }
 
-  // ── UI ──────────────────────────────────────────────────
+  // ── UI ───────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -158,11 +162,8 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // ── 頂部 bar ──
             _buildTopBar(context),
-            // ── 雙影片區 ──
-            Expanded(child: _buildVideoRow()),
-            // ── 底部控制 ──
+            Expanded(child: _buildBody()),
             if (_initialized) _buildControls(),
           ],
         ),
@@ -172,7 +173,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
   Widget _buildTopBar(BuildContext context) {
     return Container(
-      height: 40,
+      height: 44,
       color: Colors.black87,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -190,7 +191,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               textAlign: TextAlign.center,
             ),
           ),
-          const Icon(Icons.compare_arrows, color: Colors.white54, size: 18),
+          const Icon(Icons.compare_arrows, color: Colors.white38, size: 18),
           Expanded(
             child: Text(
               widget.entryB.displayTitle,
@@ -205,70 +206,84 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     );
   }
 
-  Widget _buildVideoRow() {
-    if (!_initialized) {
-      return const Center(
+  Widget _buildBody() {
+    if (_renderError != null) return _buildError();
+    if (_rendering) return _buildLoading();
+    if (_initialized && _ctrl != null) return _buildPlayer();
+    return const Center(child: CircularProgressIndicator(color: Colors.white54));
+  }
+
+  Widget _buildLoading() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: Colors.white54),
-            SizedBox(height: 12),
-            Text('載入影片中...', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const Icon(Icons.movie_creation_outlined, color: Colors.white38, size: 48),
+            const SizedBox(height: 20),
+            Text(
+              _renderLabel,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(
+              value: _renderProgress > 0 ? _renderProgress : null,
+              backgroundColor: Colors.white12,
+              valueColor: const AlwaysStoppedAnimation(Color(0xFF1E8E5A)),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${(_renderProgress * 100).toInt()}%',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
           ],
         ),
-      );
-    }
-    return Row(
-      children: [
-        Expanded(child: _buildVideoPanel(_ctrlA, widget.entryA, isLeft: true)),
-        Container(width: 1, color: Colors.white24),
-        Expanded(child: _buildVideoPanel(_ctrlB, widget.entryB, isLeft: false)),
-      ],
+      ),
     );
   }
 
-  Widget _buildVideoPanel(VideoPlayerController ctrl, RecordingHistoryEntry entry, {required bool isLeft}) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        FittedBox(
-          fit: BoxFit.contain,
-          child: SizedBox(
-            width: ctrl.value.size.width,
-            height: ctrl.value.size.height,
-            child: VideoPlayer(ctrl),
-          ),
-        ),
-        // 角標
-        Positioned(
-          top: 6,
-          left: isLeft ? 8 : null,
-          right: isLeft ? null : 8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: isLeft
-                  ? const Color(0xFF1E8E5A).withAlpha(200)
-                  : const Color(0xFF1565C0).withAlpha(200),
-              borderRadius: BorderRadius.circular(8),
+  Widget _buildError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              _renderError!,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              textAlign: TextAlign.center,
             ),
-            child: Text(
-              isLeft ? 'A' : 'B',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('返回', style: TextStyle(color: Color(0xFF1E8E5A))),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildPlayer() {
+    final ctrl = _ctrl!;
+    return FittedBox(
+      fit: BoxFit.contain,
+      child: SizedBox(
+        width: ctrl.value.size.width,
+        height: ctrl.value.size.height,
+        child: VideoPlayer(ctrl),
+      ),
     );
   }
 
   Widget _buildControls() {
     final total = _duration.inMilliseconds.toDouble();
-    final pos = _position.inMilliseconds.toDouble().clamp(0.0, total > 0 ? total : 1.0);
+    final pos   = _position.inMilliseconds.toDouble().clamp(0.0, total > 0 ? total : 1.0);
 
     return Container(
       color: Colors.black87,
@@ -276,7 +291,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // seek bar
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 3,
@@ -292,59 +306,35 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               max: total > 0 ? total : 1,
               onChangeStart: (_) => _seeking = true,
               onChanged: (v) => setState(() => _position = Duration(milliseconds: v.round())),
-              onChangeEnd: (v) async {
-                await _seekTo(Duration(milliseconds: v.round()));
-              },
+              onChangeEnd: (v) async => _seekTo(Duration(milliseconds: v.round())),
             ),
           ),
-          // 按鈕行
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // -5s
-              _controlBtn(
-                icon: Icons.replay_5,
-                onTap: () => _step(const Duration(seconds: -5)),
-              ),
+              _btn(Icons.replay_5,      () => _step(const Duration(seconds: -5))),
               const SizedBox(width: 16),
-              // 逐幀後退
-              _controlBtn(
-                icon: Icons.skip_previous,
-                onTap: () => _step(const Duration(milliseconds: -33)),
-              ),
+              _btn(Icons.skip_previous, () => _step(const Duration(milliseconds: -33))),
               const SizedBox(width: 16),
-              // 播放/暫停
               GestureDetector(
                 onTap: _togglePlay,
                 child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E8E5A),
+                  width: 48, height: 48,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1E8E5A),
                     shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 6)],
                   ),
                   child: Icon(
                     _playing ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
-                    size: 28,
+                    color: Colors.white, size: 28,
                   ),
                 ),
               ),
               const SizedBox(width: 16),
-              // 逐幀前進
-              _controlBtn(
-                icon: Icons.skip_next,
-                onTap: () => _step(const Duration(milliseconds: 33)),
-              ),
+              _btn(Icons.skip_next,  () => _step(const Duration(milliseconds: 33))),
               const SizedBox(width: 16),
-              // +5s
-              _controlBtn(
-                icon: Icons.forward_5,
-                onTap: () => _step(const Duration(seconds: 5)),
-              ),
+              _btn(Icons.forward_5,  () => _step(const Duration(seconds: 5))),
               const SizedBox(width: 24),
-              // 時間標籤
               Text(
                 '${_fmt(_position)} / ${_fmt(_duration)}',
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
@@ -356,10 +346,6 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
     );
   }
 
-  Widget _controlBtn({required IconData icon, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Icon(icon, color: Colors.white70, size: 26),
-    );
-  }
+  Widget _btn(IconData icon, VoidCallback onTap) =>
+      GestureDetector(onTap: onTap, child: Icon(icon, color: Colors.white70, size: 26));
 }

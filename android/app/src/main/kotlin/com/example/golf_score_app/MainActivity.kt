@@ -44,12 +44,14 @@ class MainActivity: FlutterActivity() {
     private val BALL_TRAJECTORY_CHANNEL = "com.example.golf_score_app/ball_trajectory"
     private val FRAME_EXTRACTOR_CHANNEL = "com.example.golf_score_app/frame_extractor"
     private val POSE_ANALYZER_CHANNEL = "com.example.golf_score_app/pose_analyzer"
-    private val PROGRESS_CHANNEL = "com.example.golf_score_app/analysis_progress"
+    private val PROGRESS_CHANNEL    = "com.example.golf_score_app/analysis_progress"
+    private val COMPARISON_CHANNEL  = "com.example.golf_score_app/comparison"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
     private val ballTrajExecutor = Executors.newSingleThreadExecutor()
     private val frameExtractorExecutor = Executors.newSingleThreadExecutor()
+    private val comparisonExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
 
     // EventChannel sink：背景執行緒透過 sendProgress() 推送進度到 Dart
@@ -72,6 +74,7 @@ class MainActivity: FlutterActivity() {
     private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
     private val ballBlobExtractor      by lazy { BallBlobExtractor() }
     private val trajectoryOverlayRenderer by lazy { TrajectoryOverlayRenderer() }
+    private val comparisonVideoRenderer   by lazy { ComparisonVideoRenderer() }
     
     // ✅ ML Kit Pose Detector (延遲初始化)
     private val poseDetector: PoseDetector by lazy {
@@ -373,6 +376,41 @@ class MainActivity: FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // ── 並排比較影片合成 ─────────────────────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COMPARISON_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "renderComparison") {
+                    val pathA      = call.argument<String>("pathA")
+                    val pathB      = call.argument<String>("pathB")
+                    val outputPath = call.argument<String>("outputPath")
+                    val hitSecA    = (call.argument<Any>("hitSecA") as? Number)?.toDouble() ?: 0.0
+                    val hitSecB    = (call.argument<Any>("hitSecB") as? Number)?.toDouble() ?: 0.0
+
+                    if (pathA.isNullOrBlank() || pathB.isNullOrBlank() || outputPath.isNullOrBlank()) {
+                        result.error("invalid_args", "缺少必要參數", null)
+                        return@setMethodCallHandler
+                    }
+
+                    comparisonExecutor.execute {
+                        try {
+                            val ok = comparisonVideoRenderer.render(
+                                pathA      = pathA,
+                                pathB      = pathB,
+                                outputPath = outputPath,
+                                hitSecA    = hitSecA,
+                                hitSecB    = hitSecB,
+                                onProgress = ::sendProgress,
+                            )
+                            runOnUiThread { result.success(ok) }
+                        } catch (e: Exception) {
+                            Log.e(logTag, "比較渲染失敗: ${e.message}", e)
+                            runOnUiThread { result.error("render_failed", e.message, null) }
+                        }
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FRAME_EXTRACTOR_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -531,6 +569,7 @@ class MainActivity: FlutterActivity() {
         skeletonExecutor.shutdown()
         ballTrajExecutor.shutdown()
         frameExtractorExecutor.shutdown()
+        comparisonExecutor.shutdown()
     }
 
     private data class AudioExtractionResult(
