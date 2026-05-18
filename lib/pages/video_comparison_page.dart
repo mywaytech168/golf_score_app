@@ -27,11 +27,12 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   bool _initialized = false;
   bool _playing = false;
   bool _seeking = false;
-  bool _syncBusy = false;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
 
+  // 分開：UI 位置刷新 vs 同步修正
+  Timer? _posTimer;
   Timer? _syncTimer;
 
   // ── 初始化 ──────────────────────────────────────────────────
@@ -50,115 +51,109 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
     final durA = _ctrlA.value.duration;
     final durB = _ctrlB.value.duration;
-
-    // 显示两支影片中较长的那个（确保能看完整）
-    _duration = durA > durB ? durA : durB;
-
-    // 两支影片都从 0 开始播放
-    await _ctrlA.seekTo(Duration.zero);
-    await _ctrlB.seekTo(Duration.zero);
+    // 以較短的為基準，避免 Slider 超出任一影片範圍
+    _duration = durA < durB ? durA : durB;
 
     _ctrlA.setLooping(false);
     _ctrlB.setLooping(false);
-    _ctrlA.addListener(_onCtrlUpdate);
+
+    // 每 100ms 刷新 UI 進度條（不做任何 seek，純讀取）
+    _posTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted || _seeking) return;
+      final pos = _ctrlA.value.position;
+      if ((pos - _position).abs() > const Duration(milliseconds: 33)) {
+        setState(() => _position = pos);
+      }
+      // 播放結束偵測
+      if (_playing && pos >= _duration - const Duration(milliseconds: 100)) {
+        _handlePlaybackEnd();
+      }
+    });
 
     if (mounted) setState(() => _initialized = true);
   }
 
-  // ── 同步邏輯 ─────────────────────────────────────────────────
-
-  void _onCtrlUpdate() {
-    if (!mounted || _seeking) return;
-    
-    // 使用 A 的当前位置作为相对位置（两支影片同时开始）
-    final currentPos = _ctrlA.value.position;
-    
-    // 只在位置改变超过 1 帧时更新（减少 setState 调用）
-    if ((currentPos - _position).abs() > const Duration(milliseconds: 33)) {
-      setState(() => _position = currentPos);
-    }
-    
-    // 检查是否播放完成
-    if (_playing && !_ctrlA.value.isPlaying) {
-      _stopSync();
-      setState(() => _playing = false);
-    }
+  void _handlePlaybackEnd() {
+    _ctrlA.pause();
+    _ctrlB.pause();
+    _stopSync();
+    if (mounted) setState(() { _playing = false; _position = _duration; });
   }
+
+  // ── 同步：速度補償為主，seekTo 只做緊急修正 ──────────────
 
   void _startSync() {
     _syncTimer?.cancel();
-    _syncBusy = false;
-    _syncTimer = Timer.periodic(const Duration(milliseconds: 150), (_) async {
-      if (!_playing || _seeking || _syncBusy || !mounted) return;
+    _syncTimer = Timer.periodic(const Duration(milliseconds: 250), (_) async {
+      if (!_playing || _seeking || !mounted) return;
+
       final posA = _ctrlA.value.position;
       final posB = _ctrlB.value.position;
-      if ((posB - posA).abs() > const Duration(milliseconds: 100)) {
-        _syncBusy = true;
+      final driftMs = (posB - posA).inMilliseconds; // 正 = B 超前
+
+      if (driftMs.abs() > 300) {
+        // 嚴重漂移：直接 seekTo 修正（5s 短片不該發生）
         await _ctrlB.seekTo(posA);
-        _syncBusy = false;
+        await _ctrlB.setPlaybackSpeed(1.0);
+      } else if (driftMs > 50) {
+        // B 超前：稍微放慢
+        _ctrlB.setPlaybackSpeed(0.92);
+      } else if (driftMs < -50) {
+        // B 落後：稍微加速
+        _ctrlB.setPlaybackSpeed(1.08);
+      } else {
+        // 已對齊：恢復正常速度
+        _ctrlB.setPlaybackSpeed(1.0);
       }
     });
   }
 
-  void _stopSync() => _syncTimer?.cancel();
+  void _stopSync() {
+    _syncTimer?.cancel();
+    _ctrlB.setPlaybackSpeed(1.0);
+  }
 
   // ── 控制 ────────────────────────────────────────────────────
 
   Future<void> _togglePlay() async {
     if (_playing) {
-      // 暂停：立即停止同步定时器
       _stopSync();
-      
-      // 并行暂停两个影片
-      await Future.wait([
-        _ctrlA.pause(),
-        _ctrlB.pause(),
-      ]);
-      
+      await Future.wait([_ctrlA.pause(), _ctrlB.pause()]);
       if (mounted) setState(() => _playing = false);
     } else {
-      // 播放：同时播放两支影片
-      await Future.wait([
-        _ctrlA.play(),
-        _ctrlB.play(),
-      ]);
+      // 播放前先讓 B 對齊 A 的當前位置（唯一的 hard seekTo）
+      final posA = _ctrlA.value.position;
+      await _ctrlB.seekTo(posA);
+      await Future.wait([_ctrlA.play(), _ctrlB.play()]);
       _startSync();
-      
       if (mounted) setState(() => _playing = true);
     }
   }
 
   Future<void> _seekTo(Duration pos) async {
     _seeking = true;
-    // 立即更新 UI 显示新位置
-    if (mounted) setState(() => _position = pos);
-    
-    // 同时 seek 两支影片到相同位置
+    Duration target = pos;
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > _duration) target = _duration;
+
+    if (mounted) setState(() => _position = target);
+    // 兩個一起 seek，不需要串行
     await Future.wait([
-      _ctrlA.seekTo(pos),
-      _ctrlB.seekTo(pos),
+      _ctrlA.seekTo(target),
+      _ctrlB.seekTo(target),
     ]);
-    
     _seeking = false;
   }
 
   Future<void> _step(Duration delta) async {
-    // 如果正在播放，先暂停
     if (_playing) {
       _stopSync();
-      await Future.wait([
-        _ctrlA.pause(),
-        _ctrlB.pause(),
-      ]);
+      await Future.wait([_ctrlA.pause(), _ctrlB.pause()]);
       setState(() => _playing = false);
     }
-    
-    // 计算目标位置
     Duration next = _position + delta;
     if (next < Duration.zero) next = Duration.zero;
     if (next > _duration) next = _duration;
-    
-    // 同时 seek 两支影片
     await _seekTo(next);
   }
 
@@ -166,8 +161,8 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
 
   @override
   void dispose() {
+    _posTimer?.cancel();
     _stopSync();
-    _ctrlA.removeListener(_onCtrlUpdate);
     _ctrlA.dispose();
     _ctrlB.dispose();
     super.dispose();
@@ -317,13 +312,19 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
             child: Slider(
               value: total > 0 ? pos : 0,
               max: total > 0 ? total : 1,
-              onChangeStart: (_) => _seeking = true,
-              onChanged: (v) => setState(
-                  () => _position = Duration(milliseconds: v.round())),
-              onChangeEnd: (v) {
-                // 在后台进行 seek，不阻塞 UI
-                unawaited(_seekTo(Duration(milliseconds: v.round())));
+              onChangeStart: (_) {
+                _seeking = true;
+                if (_playing) {
+                  _stopSync();
+                  _ctrlA.pause();
+                  _ctrlB.pause();
+                  setState(() => _playing = false);
+                }
               },
+              onChanged: (v) =>
+                  setState(() => _position = Duration(milliseconds: v.round())),
+              onChangeEnd: (v) =>
+                  _seekTo(Duration(milliseconds: v.round())),
             ),
           ),
           Row(
