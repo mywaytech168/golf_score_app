@@ -19,10 +19,11 @@ import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
 import '../widgets/hits_summary_widget.dart';
+import 'video_comparison_page.dart';
 import 'video_player_page.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyze, resetAnalysisState, resetClippingState, delete }
+enum _HistoryMenuAction { rename, detectHits, analyze, compare, resetAnalysisState, resetClippingState, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -609,6 +610,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           onDelete: () => _deleteEntry(entry),
                           onClipsGenerated: _onClipsGenerated,
                           onEntryUpdated: _onEntryUpdated,
+                          allEntries: _entries,
                         );
                       },
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -660,6 +662,8 @@ class _HistoryTile extends StatefulWidget {
   final void Function(RecordingHistoryEntry original, List<RecordingHistoryEntry> clips)? onClipsGenerated;
   /// 影片分析完成後，以新版 entry 取代舊版
   final void Function(RecordingHistoryEntry old, RecordingHistoryEntry updated)? onEntryUpdated;
+  /// 用於比較模式的所有其他 entry（過濾後供選擇第二部影片）
+  final List<RecordingHistoryEntry> allEntries;
 
   const _HistoryTile({
     super.key,
@@ -670,6 +674,7 @@ class _HistoryTile extends StatefulWidget {
     required this.onDelete,
     this.onClipsGenerated,
     this.onEntryUpdated,
+    this.allEntries = const [],
   });
 
   @override
@@ -1257,6 +1262,44 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
+  /// 比較模式：先顯示第二部影片選擇器，再跳到比較頁面
+  Future<void> _runCompare() async {
+    // 候選影片：短影片、不是自己、檔案存在
+    final candidates = widget.allEntries.where((e) =>
+        e.filePath != widget.entry.filePath &&
+        e.durationSeconds <= 30 &&
+        File(e.filePath).existsSync()).toList();
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('沒有其他短影片可供比較')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<RecordingHistoryEntry>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ComparePickerSheet(
+        candidates: candidates,
+        currentEntry: widget.entry,
+      ),
+    );
+
+    if (picked == null || !mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VideoComparisonPage(
+          entryA: widget.entry,
+          entryB: picked,
+        ),
+      ),
+    );
+  }
+
   /// 重置切片狀態（測試功能）
   Future<void> _resetClippingState() async {
     final updatedEntry = widget.entry.copyWith(
@@ -1506,6 +1549,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                         case _HistoryMenuAction.analyze:
                           _runCombinedAnalysis();
                           break;
+                        case _HistoryMenuAction.compare:
+                          _runCompare();
+                          break;
                         case _HistoryMenuAction.resetAnalysisState:
                           _resetAnalysisState();
                           break;
@@ -1566,6 +1612,15 @@ class _HistoryTileState extends State<_HistoryTile> {
                             ],
                           ],
                         ),
+                      ),
+                    // 比較模式：限短影片（≤ 30 秒），且列表中還有其他短影片可選
+                    if (!_isLongVideo && widget.allEntries.where((e) =>
+                        e.filePath != widget.entry.filePath &&
+                        e.durationSeconds <= 30 &&
+                        File(e.filePath).existsSync()).isNotEmpty)
+                      const PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.compare,
+                        child: Text('⚖️ 與另一部影片比較'),
                       ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.resetAnalysisState,
@@ -1729,6 +1784,179 @@ class _HistoryPreview extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 比較模式：第二部影片選擇器（底部彈出）
+// ────────────────────────────────────────────────────────────────────────────
+
+class _ComparePickerSheet extends StatelessWidget {
+  final List<RecordingHistoryEntry> candidates;
+  final RecordingHistoryEntry currentEntry;
+
+  const _ComparePickerSheet({
+    required this.candidates,
+    required this.currentEntry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      minChildSize: 0.35,
+      maxChildSize: 0.85,
+      builder: (_, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 把手
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 4),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // 標題
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '⚖️ 選擇比較影片',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF123B70),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '將與「${currentEntry.displayTitle}」對軸比較',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 16),
+              // 列表
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  itemCount: candidates.length,
+                  itemBuilder: (_, i) => _CandidateCard(
+                    entry: candidates[i],
+                    onTap: () => Navigator.pop(context, candidates[i]),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CandidateCard extends StatelessWidget {
+  final RecordingHistoryEntry entry;
+  final VoidCallback onTap;
+
+  const _CandidateCard({required this.entry, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            // 縮圖
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: _buildThumb(),
+            ),
+            const SizedBox(width: 12),
+            // 資訊
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.displayTitle,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1A1A2E),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      const Icon(Icons.access_time, size: 12, color: Colors.grey),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${entry.durationSeconds} 秒',
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                      if (entry.isAnalyzed) ...[
+                        const SizedBox(width: 8),
+                        const Icon(Icons.check_circle, size: 12, color: Color(0xFF4CAF50)),
+                        const SizedBox(width: 2),
+                        const Text(
+                          '已分析',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF4CAF50)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThumb() {
+    final thumbPath = entry.thumbnailPath;
+    if (thumbPath != null && File(thumbPath).existsSync()) {
+      return Image.file(
+        File(thumbPath),
+        width: 64,
+        height: 48,
+        fit: BoxFit.cover,
+      );
+    }
+    return Container(
+      width: 64,
+      height: 48,
+      color: const Color(0xFFE8EDF2),
+      child: const Icon(Icons.videocam, size: 24, color: Colors.grey),
     );
   }
 }
