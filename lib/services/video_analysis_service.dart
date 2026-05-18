@@ -42,11 +42,12 @@ class VideoAnalysisService {
       bool hasSilence = false;
       try {
         hasAudio = await _extractAudio(videoPath: videoPath, audioPath: audioPath);
-        if (hasAudio) {
-          hasSilence = await _detectSilence(audioPath: audioPath);
-          if (hasSilence) {
-            debugPrint('[VideoAnalysis] ⚠️ 【無聲音】音訊檔案存在但無聲音數據');
-          }
+        // 無論音軌提取是否成功都跑靜默偵測：
+        // - 提取失敗 → WAV 不存在 → _detectSilence 回傳 true（無音軌 = 靜默）
+        // - 提取成功 → 分析 WAV 振幅
+        hasSilence = await _detectSilence(audioPath: audioPath);
+        if (hasSilence) {
+          debugPrint('[VideoAnalysis] ⚠️ 【無聲音】${hasAudio ? "音訊靜默" : "無音軌"}');
         }
       } catch (e) {
         debugPrint('[VideoAnalysis] audio extraction failed: $e');
@@ -508,6 +509,9 @@ class VideoAnalysisService {
       try { await wavFile.delete(); } catch (_) {}
     }
   }
+
+  /// 從已存在的 WAV 路徑直接檢測靜默（供外部在跳過 pose 分析時使用）
+  Future<bool> checkSilence({required String wavPath}) => _detectSilence(audioPath: wavPath);
 
   /// 檢測音訊是否為無聲音（靜默）
   Future<bool> _detectSilence({

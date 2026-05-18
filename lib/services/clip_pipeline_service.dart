@@ -251,9 +251,13 @@ class ClipPipelineService {
     bool hasSilence = false;
 
     // 1. Pose 分析（若 CSV 已由切片繼承則略過，節省重複 ML Kit 推理）
+    final wavPath = p.join(sessionDir, 'audio.wav');
     if (await File(csvPath).exists()) {
       onProgress?.call('使用骨架資料...');
       debugPrint('[Pipeline.analyze] ✅ CSV 已繼承，略過 VideoAnalysis：$csvPath');
+      // Pose 分析跳過，但靜默偵測仍需執行（WAV 不存在也視為靜默）
+      hasSilence = await VideoAnalysisService().checkSilence(wavPath: wavPath);
+      debugPrint('[Pipeline.analyze] 靜默偵測（WAV 獨立）: hasSilence=$hasSilence');
     } else {
       onProgress?.call('分析骨架中...');
       progressSvc.reset('分析骨架中...');
