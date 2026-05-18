@@ -25,6 +25,7 @@ namespace UploadServer.Data
         public DbSet<Video> Videos { get; set; }
         public DbSet<FileModel> Files { get; set; }
         public DbSet<ProcessQueueItem> ProcessQueueItems { get; set; }
+        public DbSet<ShareLink> ShareLinks { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -338,6 +339,60 @@ namespace UploadServer.Data
                     .WithMany(v => v.QueueItems)
                     .HasForeignKey(q => q.VideoId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // ShareLinks Table Configuration
+            // ============================================================
+            modelBuilder.Entity<ShareLink>(entity =>
+            {
+                entity.ToTable("share_links");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .ValueGeneratedOnAdd();
+
+                entity.Property(e => e.ShareCode)
+                    .HasColumnName("share_code")
+                    .HasMaxLength(16)
+                    .IsRequired();
+
+                entity.Property(e => e.B2FileName)
+                    .HasColumnName("b2_file_name")
+                    .HasMaxLength(255)
+                    .IsRequired();
+
+                entity.Property(e => e.Title)
+                    .HasColumnName("title")
+                    .HasMaxLength(255);
+
+                entity.Property(e => e.SizeBytes)
+                    .HasColumnName("size_bytes");
+
+                entity.Property(e => e.Confirmed)
+                    .HasColumnName("confirmed")
+                    .HasDefaultValue(false);
+
+                entity.Property(e => e.DownloadCount)
+                    .HasColumnName("download_count")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.ExpiresAt)
+                    .HasColumnName("expires_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.ShareCode)
+                    .IsUnique()
+                    .HasDatabaseName("idx_share_code");
+
+                entity.HasIndex(e => e.ExpiresAt)
+                    .HasDatabaseName("idx_share_expires_at");
             });
         }
     }

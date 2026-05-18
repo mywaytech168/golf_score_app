@@ -72,6 +72,8 @@ builder.Services.AddDbContext<VideoDbContext>(options =>
 // ============================================================
 builder.Services.AddScoped<VideoUploadService>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddSingleton<B2Service>();
+builder.Services.AddScoped<ShareService>();
 
 // HTTP 客戶端工廠配置
 builder.Services.AddHttpClient();

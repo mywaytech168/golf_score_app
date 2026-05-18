@@ -1,0 +1,303 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../services/share_service.dart';
+
+/// 從分享碼取得影片頁面
+class ShareImportPage extends StatefulWidget {
+  /// 下載完成後呼叫（通知首頁刷新歷史）
+  final VoidCallback? onImported;
+
+  const ShareImportPage({super.key, this.onImported});
+
+  @override
+  State<ShareImportPage> createState() => _ShareImportPageState();
+}
+
+class _ShareImportPageState extends State<ShareImportPage> {
+  final _codeCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  _ImportPhase _phase = _ImportPhase.input;
+  ShareGetResult? _info;
+  String _statusMsg = '';
+  double _downloadProgress = 0;
+  String? _error;
+
+  @override
+  void dispose() {
+    _codeCtrl.dispose();
+    super.dispose();
+  }
+
+  // ── 查詢分享碼 ───────────────────────────────────────────────
+
+  Future<void> _lookup() async {
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+
+    setState(() { _phase = _ImportPhase.looking; _error = null; });
+
+    try {
+      final code = _codeCtrl.text.trim();
+      final info = await ShareService.getShareInfo(code);
+      if (mounted) setState(() { _phase = _ImportPhase.preview; _info = info; });
+    } catch (e) {
+      if (mounted) setState(() { _phase = _ImportPhase.input; _error = e.toString(); });
+    }
+  }
+
+  // ── 下載並解壓縮 ────────────────────────────────────────────
+
+  Future<void> _download() async {
+    final info = _info!;
+    final code = _codeCtrl.text.trim();
+
+    setState(() { _phase = _ImportPhase.downloading; _downloadProgress = 0; _statusMsg = '準備下載…'; });
+
+    try {
+      await ShareService.downloadAndImport(
+        info: info,
+        shareCode: code,
+        onDownloadProgress: (p) {
+          if (mounted) setState(() => _downloadProgress = p);
+        },
+        onStatus: (s) {
+          if (mounted) setState(() => _statusMsg = s);
+        },
+      );
+
+      if (mounted) {
+        setState(() => _phase = _ImportPhase.done);
+        widget.onImported?.call();
+      }
+    } catch (e) {
+      if (mounted) setState(() { _phase = _ImportPhase.preview; _error = e.toString(); });
+    }
+  }
+
+  // ── UI ──────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('從分享連結取得'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black87,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    switch (_phase) {
+      case _ImportPhase.input:
+      case _ImportPhase.looking:
+        return _buildInputSection();
+      case _ImportPhase.preview:
+        return _buildPreviewSection();
+      case _ImportPhase.downloading:
+        return _buildDownloadingSection();
+      case _ImportPhase.done:
+        return _buildDoneSection();
+    }
+  }
+
+  // ── 輸入分享碼 ───────────────────────────────────────────────
+
+  Widget _buildInputSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 32),
+        const Icon(Icons.download_for_offline_outlined, size: 64, color: Color(0xFF1E8E5A)),
+        const SizedBox(height: 24),
+        const Text(
+          '輸入 16 碼分享碼',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          '對方分享後，輸入分享碼即可下載影片到本機',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: Colors.black54),
+        ),
+        const SizedBox(height: 32),
+        Form(
+          key: _formKey,
+          child: TextFormField(
+            controller: _codeCtrl,
+            autocorrect: false,
+            textCapitalization: TextCapitalization.none,
+            maxLength: 16,
+            decoration: InputDecoration(
+              hintText: 'xxxxxxxxxxxxxxxx',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              prefixIcon: const Icon(Icons.key_outlined),
+              counterText: '',
+            ),
+            style: const TextStyle(letterSpacing: 2, fontFamily: 'monospace', fontSize: 16),
+            validator: (v) {
+              if (v == null || v.trim().length != 16) return '請輸入完整的 16 碼分享碼';
+              return null;
+            },
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+        ],
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          onPressed: _phase == _ImportPhase.looking ? null : _lookup,
+          icon: _phase == _ImportPhase.looking
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.search),
+          label: Text(_phase == _ImportPhase.looking ? '查詢中…' : '查詢'),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF1E8E5A),
+            minimumSize: const Size.fromHeight(50),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── 預覽 ─────────────────────────────────────────────────────
+
+  Widget _buildPreviewSection() {
+    final info = _info!;
+    final sizeMb = (info.sizeBytes / 1024 / 1024).toStringAsFixed(1);
+    final expiryStr = DateFormat('MM/dd HH:mm').format(info.expiresAt.toLocal());
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 32),
+        const Icon(Icons.video_file_outlined, size: 64, color: Color(0xFF1565C0)),
+        const SizedBox(height: 20),
+        Text(
+          info.title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+        ),
+        const SizedBox(height: 20),
+        _infoRow(Icons.storage_outlined, '大小', '$sizeMb MB'),
+        _infoRow(Icons.schedule_outlined, '到期', expiryStr),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+        ],
+        const Spacer(),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => setState(() { _phase = _ImportPhase.input; _info = null; }),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('重新輸入'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _download,
+                icon: const Icon(Icons.download),
+                label: const Text('下載到本機'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1565C0),
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _infoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: Colors.black45),
+          const SizedBox(width: 8),
+          Text('$label：', style: const TextStyle(color: Colors.black54, fontSize: 14)),
+          Text(value, style: const TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+
+  // ── 下載中 ───────────────────────────────────────────────────
+
+  Widget _buildDownloadingSection() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_download_outlined, size: 64, color: Color(0xFF1565C0)),
+          const SizedBox(height: 24),
+          Text(_statusMsg, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87)),
+          const SizedBox(height: 16),
+          LinearProgressIndicator(
+            value: _statusMsg.contains('解壓') ? null : _downloadProgress,
+            backgroundColor: Colors.black12,
+            color: const Color(0xFF1565C0),
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(3),
+          ),
+          if (_downloadProgress > 0 && !_statusMsg.contains('解壓')) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${(_downloadProgress * 100).toStringAsFixed(0)}%',
+              style: const TextStyle(color: Colors.black54, fontSize: 13),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── 完成 ─────────────────────────────────────────────────────
+
+  Widget _buildDoneSection() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle_outline, size: 80, color: Color(0xFF1E8E5A)),
+          const SizedBox(height: 24),
+          const Text('下載完成！', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const SizedBox(height: 8),
+          const Text('影片已加入歷史記錄', style: TextStyle(color: Colors.black54)),
+          const SizedBox(height: 40),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1E8E5A),
+              minimumSize: const Size(200, 50),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('返回'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _ImportPhase { input, looking, preview, downloading, done }

@@ -8,6 +8,7 @@ import '../recording/record_screen.dart';
 import 'external_video_importer_local.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
+import 'share_import_page.dart';
 
 /// 通知類型枚舉
 enum NotificationType {
@@ -67,6 +68,21 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
               audioTags: audioTags,
             );
             // 返回到選擇屏幕
+            Navigator.pop(context);
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 選項 3: 從分享連結取得
+  void _importFromShare() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ShareImportPage(
+          onImported: () {
+            widget.onVideoImported?.call();
             Navigator.pop(context);
           },
         ),
@@ -362,6 +378,17 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                 description: 'Select Local Video',
                 onTap: _selectLocalVideo,
                 color: const Color(0xFF7C3AED),
+              ),
+              const SizedBox(height: 32),
+
+              // 選項 3: 從分享連結取得
+              _buildSelectionCard(
+                emoji: '🔗',
+                title: '從分享連結取得',
+                subtitle: '輸入 16 碼分享碼下載影片',
+                description: 'Import from Share Code',
+                onTap: _importFromShare,
+                color: const Color(0xFF1565C0),
               ),
             ],
           ),
