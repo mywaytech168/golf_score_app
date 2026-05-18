@@ -18,7 +18,7 @@ import '../models/recording_history_entry.dart';
 ///   ├─ audio.pcm (分析後產生)
 ///   └─ thumbnail.jpg (視頻封面)
 /// 
-/// 驗證規則：只接受 5-120 秒的影片
+/// 驗證規則：只接受 1-120 秒的影片
 class ExternalVideoImporter {
   const ExternalVideoImporter();
 
@@ -26,8 +26,8 @@ class ExternalVideoImporter {
   /// 分析（骨架、音訊、擊球偵測）在歷史頁面按鈕觸發時執行
   /// 
   /// 時長驗證：
-  ///   - < 5秒：拒絕
-  ///   - 5-120秒：接受
+  ///   - < 1秒：拒絕
+  ///   - 1-120秒：接受
   ///   - > 120秒：拒絕
   Future<RecordingHistoryEntry?> importVideo({
     required String sourcePath,
@@ -54,11 +54,11 @@ class ExternalVideoImporter {
 
       // 取得時長並驗證
       final durationSeconds = await _resolveDurationSeconds(videoPath);
-      if (durationSeconds < 5 || durationSeconds > 120) {
-        debugPrint('[Importer] ❌ 影片時長不符：$durationSeconds 秒 (需 5-120 秒)');
+      if (durationSeconds < 1 || durationSeconds > 120) {
+        debugPrint('[Importer] ❌ 影片時長不符：$durationSeconds 秒 (需 1-120 秒)');
         await File(videoPath).delete();
         await Directory(sessionDir).delete();
-        onProgress?.call(1.0, '影片時長不符 (需 5-120 秒)');
+        onProgress?.call(1.0, '影片時長不符 (需 1-120 秒)');
         return null;
       }
 
