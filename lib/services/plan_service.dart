@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'recording_history_storage.dart';
+import 'video_server_client.dart';
 
 // ────────────────────────────────────────────────────────────────
 // 方案定義
@@ -29,7 +29,7 @@ extension UserPlanX on UserPlan {
 
   bool get isUnlimited => dailyLimit == -1;
 
-  /// 用於 SharedPreferences 的儲存字串
+  /// SharedPreferences / API 使用的字串 key
   String get key {
     switch (this) {
       case UserPlan.free:  return 'free';
@@ -38,7 +38,7 @@ extension UserPlanX on UserPlan {
     }
   }
 
-  /// 顯示顏色（十六進制整數）
+  /// 顯示色值（ARGB int）
   int get colorValue {
     switch (this) {
       case UserPlan.free:  return 0xFF78909C;
@@ -46,70 +46,123 @@ extension UserPlanX on UserPlan {
       case UserPlan.elite: return 0xFFB8860B;
     }
   }
+
+  static UserPlan fromKey(String? key) => UserPlan.values.firstWhere(
+    (p) => p.key == key,
+    orElse: () => UserPlan.free,
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 方案狀態資料類別
+// ────────────────────────────────────────────────────────────────
+
+class PlanStatus {
+  final UserPlan plan;
+  final int todayUsed;
+  final int dailyLimit;  // -1 = 無限制
+  final bool fromCache;  // true = 後端不可用，來自本地 cache
+
+  const PlanStatus({
+    required this.plan,
+    required this.todayUsed,
+    required this.dailyLimit,
+    this.fromCache = false,
+  });
+
+  /// 今日剩餘球數；-1 = 無限制
+  int get remaining =>
+      dailyLimit < 0 ? -1 : (dailyLimit - todayUsed).clamp(0, dailyLimit);
 }
 
 // ────────────────────────────────────────────────────────────────
 // PlanService
 // ────────────────────────────────────────────────────────────────
 
+/// 方案管理服務
+///
+/// 主要資料來源：後端 API `/api/user/plan`（資料庫）
+/// 備援 cache  ：SharedPreferences（離線 / 後端失敗時，球數顯示為 0）
 class PlanService {
   PlanService._();
 
-  static const _prefKey = 'user_plan';
+  static const _prefKey = 'user_plan_cache';
+  static const _tag = '[PlanService]';
 
-  // ── 方案讀寫 ──────────────────────────────────────────────────
+  // ── 取得方案狀態 ──────────────────────────────────────────────
 
-  /// 取得目前方案（預設 Free）
-  static Future<UserPlan> getCurrentPlan() async {
+  /// 從後端取得方案與今日用量；後端不可用時回退本地 cache
+  static Future<PlanStatus> getPlanStatus() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefKey) ?? 'free';
-      return UserPlan.values.firstWhere(
-        (p) => p.key == raw,
-        orElse: () => UserPlan.free,
-      );
+      final data = await VideoServerClient.instance.getPlanStatus();
+      if (data != null) {
+        final plan      = UserPlanX.fromKey(data['plan'] as String?);
+        final todayUsed = (data['todayUsed'] as int?) ?? 0;
+        final limit     = (data['dailyLimit'] as int?) ?? plan.dailyLimit;
+
+        // 同步本地 cache
+        await _writeCachedPlan(plan);
+
+        debugPrint('$_tag ✅ 後端: ${plan.label} used=$todayUsed limit=$limit');
+        return PlanStatus(plan: plan, todayUsed: todayUsed, dailyLimit: limit);
+      }
+    } on UnauthorizedException {
+      rethrow;
     } catch (e) {
-      debugPrint('[PlanService] 讀取方案失敗: $e');
-      return UserPlan.free;
+      debugPrint('$_tag ⚠️ 後端不可用，使用 cache: $e');
+    }
+
+    // 後端失敗 → 讀本地 cache；球數未知，設 0
+    final cached = await _readCachedPlan();
+    debugPrint('$_tag 📦 cache: ${cached.label}');
+    return PlanStatus(
+      plan: cached,
+      todayUsed: 0,
+      dailyLimit: cached.dailyLimit,
+      fromCache: true,
+    );
+  }
+
+  // ── 更新方案 ──────────────────────────────────────────────────
+
+  /// 通知後端更新方案，同時寫入本地 cache
+  ///
+  /// 回傳 true = 後端成功；false = 後端失敗（cache 仍已更新）
+  static Future<bool> setPlan(UserPlan plan) async {
+    // 先更新 cache，確保 UI 即時反應
+    await _writeCachedPlan(plan);
+
+    try {
+      final ok = await VideoServerClient.instance.updatePlan(plan.key);
+      if (ok) {
+        debugPrint('$_tag ✅ 後端方案已更新: ${plan.label}');
+      } else {
+        debugPrint('$_tag ⚠️ 後端更新失敗，cache 已保留');
+      }
+      return ok;
+    } on UnauthorizedException {
+      rethrow;
+    } catch (e) {
+      debugPrint('$_tag ❌ 更新方案異常: $e');
+      return false;
     }
   }
 
-  /// 儲存方案
-  static Future<void> setPlan(UserPlan plan) async {
+  // ── 本地 cache 輔助 ───────────────────────────────────────────
+
+  static Future<void> _writeCachedPlan(UserPlan plan) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKey, plan.key);
-      debugPrint('[PlanService] 方案已更新: ${plan.label}');
-    } catch (e) {
-      debugPrint('[PlanService] 儲存方案失敗: $e');
-    }
+    } catch (_) {}
   }
 
-  // ── 今日用量 ──────────────────────────────────────────────────
-
-  /// 今日已使用球數（= 今天的錄影片段數）
-  static Future<int> getTodayUsedBalls() async {
+  static Future<UserPlan> _readCachedPlan() async {
     try {
-      final all = await RecordingHistoryStorage.instance.loadHistory();
-      final now = DateTime.now();
-      return all
-          .where((e) =>
-              e.recordedAt.year  == now.year &&
-              e.recordedAt.month == now.month &&
-              e.recordedAt.day   == now.day)
-          .length;
-    } catch (e) {
-      debugPrint('[PlanService] 取得今日用量失敗: $e');
-      return 0;
+      final prefs = await SharedPreferences.getInstance();
+      return UserPlanX.fromKey(prefs.getString(_prefKey));
+    } catch (_) {
+      return UserPlan.free;
     }
-  }
-
-  // ── 綜合查詢 ──────────────────────────────────────────────────
-
-  /// 同時取得方案與今日用量
-  static Future<({UserPlan plan, int used})> getPlanStatus() async {
-    final plan = await getCurrentPlan();
-    final used = await getTodayUsedBalls();
-    return (plan: plan, used: used);
   }
 }

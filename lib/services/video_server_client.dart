@@ -310,4 +310,75 @@ class VideoServerClient {
       return null;
     }
   }
+
+  // ============================================================
+  // 方案管理
+  // ============================================================
+
+  /// 取得目前方案與今日用量
+  ///
+  /// 回傳格式：
+  /// ```json
+  /// { "plan": "free|pro|elite", "dailyLimit": 10, "todayUsed": 3 }
+  /// ```
+  Future<Map<String, dynamic>?> getPlanStatus({bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/plan');
+
+      debugPrint('📋 取得方案狀態 → $url');
+      final response = await http.get(url, headers: headers);
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        // 支援 { data: {...} } 或直接回傳欄位
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getPlanStatus(isRetry: true);
+        throw UnauthorizedException('取得方案失敗: 401');
+      } else {
+        debugPrint('❌ 取得方案失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 取得方案異常: $e');
+      return null;
+    }
+  }
+
+  /// 更新使用者方案
+  ///
+  /// [plan] - 'free' | 'pro' | 'elite'
+  Future<bool> updatePlan(String plan, {bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/plan');
+
+      debugPrint('🔄 更新方案 → $plan');
+      final response = await http.put(
+        url,
+        headers: headers,
+        body: jsonEncode({'plan': plan}),
+      );
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        return true;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return updatePlan(plan, isRetry: true);
+        throw UnauthorizedException('更新方案失敗: 401');
+      } else {
+        debugPrint('❌ 更新方案失敗: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 更新方案異常: $e');
+      return false;
+    }
+  }
 }

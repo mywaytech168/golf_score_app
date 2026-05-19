@@ -28,8 +28,11 @@ class _HomePageState extends State<HomePage> {
   late final StatisticsService _statisticsService = StatisticsService();
   late final PurchaseService _purchaseService = PurchaseService();
 
-  UserPlan _plan = UserPlan.free;
-  int _todayUsed = 0;
+  PlanStatus _planStatus = const PlanStatus(
+    plan: UserPlan.free,
+    todayUsed: 0,
+    dailyLimit: 10,
+  );
 
   @override
   void initState() {
@@ -44,8 +47,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadPlanStatus() async {
-    final status = await PlanService.getPlanStatus();
-    if (mounted) setState(() { _plan = status.plan; _todayUsed = status.used; });
+    try {
+      final status = await PlanService.getPlanStatus();
+      if (mounted) setState(() => _planStatus = status);
+    } catch (_) {}
   }
 
   @override
@@ -189,9 +194,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   PreferredSizeWidget _buildAppBar() {
-    final plan = _plan;
-    final limit = plan.dailyLimit;
-    final used  = _todayUsed;
+    final plan  = _planStatus.plan;
+    final limit = _planStatus.dailyLimit;
+    final used  = _planStatus.todayUsed;
     final planColor = Color(plan.colorValue);
 
     // 用量文字：Free/Pro 顯示 used/limit，Elite 顯示無限制
