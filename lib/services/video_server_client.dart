@@ -124,12 +124,22 @@ class VideoServerClient {
 
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
-        if (result['data'] != null) {
+        // 支援兩種格式：根層級 {token, user} 或包裹在 data 內
+        final data = result['data'];
+        if (data != null) {
           await AuthTokenStorage.instance.saveTokens(
-            accessToken: result['data']['accessToken'] ?? '',
-            refreshToken: result['data']['refreshToken'],
-            userId: result['data']['userId'] ?? '',
-            userEmail: result['data']['email'],
+            accessToken: data['accessToken'] ?? data['token'] ?? '',
+            refreshToken: data['refreshToken'],
+            userId: data['userId'] ?? data['id'] ?? '',
+            userEmail: data['email'],
+          );
+        } else if (result['token'] != null) {
+          final user = result['user'];
+          await AuthTokenStorage.instance.saveTokens(
+            accessToken: result['token'] ?? '',
+            refreshToken: result['refreshToken'],
+            userId: user?['id']?.toString() ?? '',
+            userEmail: user?['email'],
           );
         }
         return result;

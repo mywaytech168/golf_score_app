@@ -94,7 +94,8 @@ namespace UploadServer.Services
         {
             try
             {
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == username);
+                var user = await _context.Users.FirstOrDefaultAsync(
+                    u => u.Username == username || u.Email == username);
                 if (user == null)
                 {
                     return (false, null, null, null, "用戶名或密碼錯誤");
