@@ -15,7 +15,6 @@ import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 
-/// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -39,533 +38,570 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// 初始化購買服務
+  @override
+  void dispose() {
+    _statisticsService.dispose();
+    super.dispose();
+  }
+
   Future<void> _initializePurchaseService() async {
     try {
       await _purchaseService.initialize();
-      debugPrint('✅ [購買服務] 已初始化');
     } catch (e) {
       debugPrint('❌ [購買服務] 初始化失敗: $e');
     }
   }
 
-  @override
-  void dispose() {
-    // 清理統計服務
-    _statisticsService.dispose();
-    super.dispose();
-  }
-
-  /// 初始化統計服務，同時加載後端 API 和本地計算的指標
-  /// 如果返回 401，跳轉到登入頁面
   Future<void> _initializeStatistics() async {
     try {
       await _statisticsService.loadAllStatistics();
     } on UnauthorizedException {
-      // Token 無效或過期，跳回登入頁
       if (mounted) {
-        debugPrint('🔐 統計數據未授權，跳轉到登入頁');
         Navigator.of(context).pushReplacementNamed('/login');
       }
     } catch (e) {
       debugPrint('⚠️ 初始化統計服務失敗: $e');
     }
-    // 本地指標會在 _refreshDashboardMetrics 中計算並更新
   }
 
-  Widget _buildTodayInfoCard() {
-    // 使用今天的後端數據
-    final todayStats = _statisticsService.todayStatistics;
-    final practice = todayStats?.totalCount ?? 0;
-    final goodHits = todayStats?.goodShot ?? 0;
-    final badHits = todayStats?.badShot ?? 0;
-    final sweetPct = todayStats?.sweetSpotPercentage ?? 0;
-    final sweetText = sweetPct > 0 ? '${sweetPct.toStringAsFixed(0)}%' : '--';
-    final crispnessText = todayStats != null && todayStats.audioCrispness.average > 0
-        ? todayStats.audioCrispness.average.toStringAsFixed(0)
-        : '--';
-    final bestSpeedDisplay = todayStats != null && todayStats.peakValue.maximum > 0
-        ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH'
-        : '--';
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SectionHeader(title: 'Today Info', actions: const []),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _miniStat(title: '好球', value: goodHits.toString())),
-              Expanded(child: _miniStat(title: '壞球', value: badHits.toString())),
-              Expanded(child: _miniStat(title: '練習次數', value: practice.toString())),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _miniStat(title: '最佳速度', value: bestSpeedDisplay)),
-              Expanded(child: _miniStat(title: '甜蜜點命中', value: sweetText)),
-              Expanded(child: _miniStat(title: '聲音清脆度', value: crispnessText)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _miniStat({required String title, required String value}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: const TextStyle(color: kTextSecondary, fontSize: 13)),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kPrimaryGreen),
-        ),
-      ],
-    );
-  }
-
-  // ---------- 方法區 ----------
-  /// 建立統計資訊卡片，方便重複使用與維持一致風格
-  /// 構建指標卡片網格
-  Widget _buildMetricsGrid(bool isLoadingStats, StatisticsResponse? backendStats) {
-    // 使用今天的後端統計數據
-    final todayStats = _statisticsService.todayStatistics;
-    final goodShotCount = todayStats?.goodShot ?? 0;
-    final badShotCount = todayStats?.badShot ?? 0;
-    
-    // 準備所有指標數據
-    final metricsCards = <Map<String, dynamic>>[
-      {
-        'title': '最佳速度',
-        'value': isLoadingStats
-            ? '載入中...'
-            : todayStats != null && todayStats.peakValue.maximum > 0
-                ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH'
-                : '尚無資料',
-        'color': kSpeedColor,
-        'highlight': true,
-      },
-      {
-        'title': '甜蜜點命中',
-        'value': isLoadingStats
-            ? '載入中...'
-            : todayStats != null
-                ? '${todayStats.sweetSpotPercentage.toStringAsFixed(0)} %'
-                : '尚無資料',
-        'color': kSweetColor,
-        'highlight': false,
-      },
-      {
-        'title': '好球',
-        'value': '$goodShotCount 次',
-        'color': kGoodColor,
-        'highlight': false,
-      },
-      {
-        'title': '壞球',
-        'value': '$badShotCount 次',
-        'color': kBadColor,
-        'highlight': false,
-      },
-      {
-        'title': '聲音清脆度',
-        'value': isLoadingStats
-            ? '載入中...'
-            : todayStats != null && todayStats.audioCrispness.average > 0
-                ? todayStats.audioCrispness.average.toStringAsFixed(0)
-                : '尚無資料',
-        'color': kBadColor,
-        'highlight': false,
-      },
-      {
-        'title': '練習次數',
-        'value': '${todayStats?.totalCount ?? 0} 次',
-        'color': kGoodColor,
-        'highlight': false,
-      },
-    ];
-
-    // 2×3 Grid 佈局
-    return GridView.count(
-      crossAxisCount: 2,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 1.5,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      children: List.generate(
-        metricsCards.length,
-        (index) {
-          final card = metricsCards[index];
-          return _buildMetricCard(card);
-        },
-      ),
-    );
-  }
-
-  /// 構建單個指標卡片 widget
-  Widget _buildMetricCard(Map<String, dynamic> card) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 6,
-            offset: Offset(0, 2),
-          ),
-        ],
-        border: card['highlight'] as bool
-            ? Border(
-                top: BorderSide(
-                  color: card['color'] as Color,
-                  width: 3,
-                ),
-              )
-            : null,
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            card['title'] as String,
-            style: const TextStyle(
-              fontSize: 13,
-              color: kTextSecondary,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Text(
-            card['value'] as String,
-            style: TextStyle(
-              fontSize: (card['highlight'] as bool) ? 24 : 22,
-              fontWeight: FontWeight.bold,
-              color: card['color'] as Color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 登出用戶
   Future<void> _logout() async {
-    // 顯示確認對話框
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('確認登出'),
-          content: const Text('您確定要登出嗎？'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('確定登出', style: TextStyle(color: Colors.red)),
-            ),
-          ],
-        );
-      },
+      builder: (_) => AlertDialog(
+        title: const Text('確認登出'),
+        content: const Text('您確定要登出嗎？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('確定登出', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
-
     if (confirmed != true) return;
 
-    // 清除令牌
     await AuthTokenStorage.instance.clearTokens();
-
-    // 清除本地存儲的用戶信息
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_email');
-
     if (!mounted) return;
-
-    // 返回登錄頁面
     Navigator.of(context).pushReplacementNamed('/login');
   }
 
-  /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
   Future<void> _loadInitialHistory() async {
     final entries = await RecordingHistoryStorage.instance.loadHistory();
     final regenerated = await _cleanInvalidThumbnails(entries);
     final finalEntries = regenerated ?? entries;
-
     if (!mounted) return;
     setState(() {
       _recordingHistory
         ..clear()
         ..addAll(finalEntries);
     });
-
     if (regenerated != null) {
       unawaited(RecordingHistoryStorage.instance.saveHistory(finalEntries));
     }
-
-    unawaited(_refreshDashboardMetrics());
   }
 
-  /// 檢查縮圖檔案是否存在，若遺失則將欄位清空避免顯示破圖
   Future<List<RecordingHistoryEntry>?> _cleanInvalidThumbnails(
     List<RecordingHistoryEntry> entries,
   ) async {
-    if (entries.isEmpty) {
-      return null; // 無資料時直接返回
-    }
-
+    if (entries.isEmpty) return null;
     final updated = <RecordingHistoryEntry>[];
     var hasChanges = false;
-
     for (final entry in entries) {
       var thumbnailPath = entry.thumbnailPath;
-      final needsGenerate = thumbnailPath == null ||
+      final missing = thumbnailPath == null ||
           thumbnailPath.isEmpty ||
           !(await File(thumbnailPath).exists());
-
-      if (needsGenerate) {
-        // ---------- 縮圖清理說明 ----------
-        // 舊版紀錄可能沒有縮圖檔案，或檔案被手動刪除。此時直接清空欄位
-        // 讓 UI 顯示預設樣式，避免再度啟動會造成緩衝區警告的擷取流程。
-        thumbnailPath = null;
-      }
-
-      if (thumbnailPath != entry.thumbnailPath) {
-        hasChanges = true;
-      }
-
+      if (missing) thumbnailPath = null;
+      if (thumbnailPath != entry.thumbnailPath) hasChanges = true;
       updated.add(entry.copyWith(thumbnailPath: thumbnailPath));
     }
-
     return hasChanges ? updated : null;
   }
 
-
-  Future<void> _refreshDashboardMetrics() async {
-    final snapshot = List<RecordingHistoryEntry>.from(_recordingHistory);
-    if (snapshot.isEmpty) {
-      _statisticsService.setLocalMetrics(
-        consistencyScore: null,
-        bestSpeedMph: null,
-        sweetSpotPercentage: null,
-        audioCrispness: null,
-        comparisonBefore: null,
-        comparisonAfter: null,
-      );
-      return;
-    }
-
-    try {
-      final metrics = await _MetricsCalculator.compute(snapshot);
-      if (!mounted) return;
-
-      double? latestAudioCrispness;
-      for (final entry in snapshot.reversed) {
-        if (entry.audioCrispness != null) {
-          latestAudioCrispness = (entry.audioCrispness as num).toDouble();
-          break;
-        }
-      }
-
-      _statisticsService.setLocalMetrics(
-        consistencyScore: null,
-        bestSpeedMph: metrics.bestSpeedMph,
-        sweetSpotPercentage: metrics.sweetSpotPercentage,
-        audioCrispness: latestAudioCrispness,
-        comparisonBefore: null,
-        comparisonAfter: null,
-      );
-    } catch (_) {
-      _statisticsService.setLocalMetrics(
-        consistencyScore: null,
-        bestSpeedMph: null,
-        sweetSpotPercentage: null,
-        audioCrispness: null,
-        comparisonBefore: null,
-        comparisonAfter: null,
-      );
-    }
-  }
-
-
-
+  // ── Build ────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kBgPage,
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: kBgPage,
-        toolbarHeight: 72,
-        automaticallyImplyLeading: false,
-        title: Consumer<UserProvider>(
-          builder: (context, user, _) => Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: kPrimaryGreen,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: user.avatarPath != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
-                      )
-                    : const Icon(Icons.golf_course_rounded, color: Colors.white),
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('嗨，${user.displayName} 👋',
-                      style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: kTextPrimary)),
-                  Text('今天也來練習吧！',
-                      style: TextStyle(
-                          fontSize: 12, color: kTextSecondary)),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded, color: kTextPrimary),
-            onSelected: (value) {
-              if (value == 'logout') _logout();
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout_rounded, size: 18, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('登出', style: TextStyle(color: Colors.red)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: StreamBuilder<StatisticsResponse?>(
-        stream: _statisticsService.watchStatistics(),
-        initialData: _statisticsService.statistics,
-        builder: (context, statsSnapshot) {
-          return StreamBuilder<LoadingState>(
-            stream: _statisticsService.watchLoadingState(),
-            initialData: _statisticsService.loadingState,
-            builder: (context, loadingSnapshot) {
-              final backendStats = statsSnapshot.data;
-              final loadingState = loadingSnapshot.data ?? LoadingState(isLoadingStatistics: false, isLoadingLocalMetrics: false);
-              final isLoadingStats = loadingState.isLoading;
+      appBar: _buildAppBar(),
+      body: StreamBuilder<LoadingState>(
+        stream: _statisticsService.watchLoadingState(),
+        initialData: _statisticsService.loadingState,
+        builder: (context, loadingSnap) {
+          return StreamBuilder<StatisticsResponse?>(
+            stream: _statisticsService.watchStatistics(),
+            initialData: _statisticsService.statistics,
+            builder: (context, statsSnap) {
+              final today = _statisticsService.todayStatistics;
+              final isLoading = loadingSnap.data?.isLoading ?? false;
 
-              return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionHeader(
-              title: 'Data Metrics',
-              actions: const [],
-            ),
-            const SizedBox(height: 16),
-            // 統計好球、壞球數量
-            _buildMetricsGrid(isLoadingStats, backendStats),
-            const SizedBox(height: 24),
-            _buildTodayInfoCard(),
-            const SizedBox(height: 32),
-          ],
-        ),
-      );
+              return RefreshIndicator(
+                onRefresh: _initializeStatistics,
+                color: kPrimaryGreen,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(
+                      kSpaceMD, kSpaceSM, kSpaceMD, kSpaceXL),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 今日快覽
+                      _TodayOverviewCard(stats: today, loading: isLoading),
+                      const SizedBox(height: kSpaceMD),
+
+                      // 三項核心指標
+                      _KeyMetricsRow(stats: today, loading: isLoading),
+                      const SizedBox(height: kSpaceMD),
+
+                      // 好球率
+                      if (!isLoading && (today?.totalCount ?? 0) > 0)
+                        _GoodRateCard(
+                          good: today?.goodShot ?? 0,
+                          bad: today?.badShot ?? 0,
+                        ),
+                    ],
+                  ),
+                ),
+              );
             },
           );
         },
       ),
     );
   }
-}
 
-/// 儀表板指標計算工具（簡化版，IMU 數據已移除）
-class _MetricsCalculator {
-  /// 不再計算任何指標，返回默認結果
-  static Future<_MetricsResult> compute(List<RecordingHistoryEntry> entries) async {
-    return const _MetricsResult(
-      averageSpeedMph: null,
-      bestSpeedMph: null,
-      consistencyScore: null,
-      averageImpactClarity: null,
-      sweetSpotPercentage: null,
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      elevation: 0,
+      backgroundColor: kBgPage,
+      toolbarHeight: 72,
+      automaticallyImplyLeading: false,
+      title: Consumer<UserProvider>(
+        builder: (context, user, _) => Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: kPrimaryGreen,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: user.avatarPath != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.file(File(user.avatarPath!),
+                          fit: BoxFit.cover),
+                    )
+                  : const Icon(Icons.golf_course_rounded,
+                      color: Colors.white),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '嗨，${user.displayName} 👋',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: kTextPrimary,
+                  ),
+                ),
+                const Text(
+                  '今天也來練習吧！',
+                  style: TextStyle(fontSize: 12, color: kTextSecondary),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert_rounded, color: kTextPrimary),
+          onSelected: (v) { if (v == 'logout') _logout(); },
+          itemBuilder: (_) => const [
+            PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, size: 18, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('登出', style: TextStyle(color: Colors.red)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
 
-/// 儀表板計算回傳的彙整結果
-class _MetricsResult {
-  final double? averageSpeedMph;
-  final double? bestSpeedMph;
-  final double? consistencyScore;
-  final double? averageImpactClarity;
-  final double? sweetSpotPercentage;
+// ── 今日快覽卡片 ──────────────────────────────────────────────────
 
-  const _MetricsResult({
-    required this.averageSpeedMph,
-    required this.bestSpeedMph,
-    required this.consistencyScore,
-    required this.averageImpactClarity,
-    required this.sweetSpotPercentage,
-  });
+class _TodayOverviewCard extends StatelessWidget {
+  final StatisticsResponse? stats;
+  final bool loading;
+  const _TodayOverviewCard({required this.stats, required this.loading});
+
+  @override
+  Widget build(BuildContext context) {
+    final practice = stats?.totalCount ?? 0;
+    final good = stats?.goodShot ?? 0;
+    final bad = stats?.badShot ?? 0;
+
+    final now = DateTime.now();
+    final weekdays = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'];
+    final label =
+        '${weekdays[now.weekday - 1]}  ${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
+
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: kPrimaryGradient,
+        borderRadius: BorderRadius.all(Radius.circular(kRadiusLG)),
+      ),
+      padding: const EdgeInsets.all(kSpaceLG),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                '今日概況',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Text(label,
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: kSpaceLG),
+          loading
+              ? _buildSkeleton()
+              : Row(
+                  children: [
+                    _OverviewStat(
+                        label: '練習次數',
+                        value: practice.toString(),
+                        icon: Icons.sports_golf_rounded),
+                    const _WhiteDivider(),
+                    _OverviewStat(
+                        label: '好球',
+                        value: good.toString(),
+                        icon: Icons.thumb_up_rounded),
+                    const _WhiteDivider(),
+                    _OverviewStat(
+                        label: '壞球',
+                        value: bad.toString(),
+                        icon: Icons.thumb_down_rounded),
+                  ],
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkeleton() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: List.generate(
+        3,
+        (_) => Column(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(height: kSpaceSM),
+            Container(
+              width: 28,
+              height: 18,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-/// 區塊標題元件，集中管理標題與右側操作按鈕
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final List<Widget> actions;
+class _OverviewStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  const _OverviewStat(
+      {required this.label, required this.value, required this.icon});
 
-  const _SectionHeader({
-    required this.title,
-    this.actions = const [],
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.white70, size: 22),
+          const SizedBox(height: kSpaceXS),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+class _WhiteDivider extends StatelessWidget {
+  const _WhiteDivider();
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 1, height: 52, color: Colors.white24);
+}
+
+// ── 三項核心指標橫排 ──────────────────────────────────────────────
+
+class _KeyMetricsRow extends StatelessWidget {
+  final StatisticsResponse? stats;
+  final bool loading;
+  const _KeyMetricsRow({required this.stats, required this.loading});
+
+  @override
+  Widget build(BuildContext context) {
+    final speed = (stats?.peakValue.maximum ?? 0) > 0
+        ? stats!.peakValue.maximum
+        : null;
+    final sweet = (stats?.sweetSpotPercentage ?? 0) > 0
+        ? stats!.sweetSpotPercentage
+        : null;
+    final crisp = (stats?.audioCrispness.average ?? 0) > 0
+        ? stats!.audioCrispness.average
+        : null;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _MetricMini(
+            label: '最佳速度',
+            value: speed != null
+                ? '${speed.toStringAsFixed(1)} MPH'
+                : '--',
+            icon: Icons.speed_rounded,
+            color: kSpeedColor,
+            loading: loading,
+          ),
+        ),
+        const SizedBox(width: kSpaceSM),
+        Expanded(
+          child: _MetricMini(
+            label: '甜蜜點',
+            value: sweet != null
+                ? '${sweet.toStringAsFixed(0)}%'
+                : '--',
+            icon: Icons.adjust_rounded,
+            color: kSweetColor,
+            loading: loading,
+          ),
+        ),
+        const SizedBox(width: kSpaceSM),
+        Expanded(
+          child: _MetricMini(
+            label: '清脆度',
+            value: crisp != null
+                ? crisp.toStringAsFixed(0)
+                : '--',
+            icon: Icons.graphic_eq_rounded,
+            color: kCrispColor,
+            loading: loading,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MetricMini extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final bool loading;
+  const _MetricMini({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+    required this.loading,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: kTextPrimary,
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: kSpaceSM, vertical: kSpaceMD),
+      decoration: kCardDecoration(radius: kRadiusMD),
+      child: loading
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(height: kSpaceSM),
+                Container(
+                  width: 40,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: kTextHint.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: color, size: 15),
+                ),
+                const SizedBox(height: kSpaceSM),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: value == '--' ? kTextHint : color,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 11, color: kTextSecondary),
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+    );
+  }
+}
+
+// ── 好球率卡片 ────────────────────────────────────────────────────
+
+class _GoodRateCard extends StatelessWidget {
+  final int good;
+  final int bad;
+  const _GoodRateCard({required this.good, required this.bad});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = good + bad;
+    final rate = total > 0 ? good / total : 0.0;
+    final pct = (rate * 100).round();
+
+    return Container(
+      padding: const EdgeInsets.all(kSpaceMD),
+      decoration: kCardDecoration(radius: kRadiusMD),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bar_chart_rounded,
+                  color: kPrimaryGreen, size: 18),
+              const SizedBox(width: kSpaceSM),
+              const Text(
+                '今日好球率',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: kTextPrimary,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$pct%',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                  color: kPrimaryGreen,
+                ),
+              ),
+            ],
           ),
-        ),
-        const Spacer(),
-        for (var i = 0; i < actions.length; i++) ...[
-          if (i > 0) const SizedBox(width: 12),
-          actions[i],
+          const SizedBox(height: kSpaceMD),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: rate,
+              backgroundColor: kBadColor.withValues(alpha: 0.15),
+              color: kGoodColor,
+              minHeight: 8,
+            ),
+          ),
+          const SizedBox(height: kSpaceSM),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _Dot(color: kGoodColor, label: '好球 $good 次'),
+              _Dot(color: kBadColor, label: '壞球 $bad 次'),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _Dot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: kSpaceXS),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: kTextSecondary)),
       ],
     );
   }

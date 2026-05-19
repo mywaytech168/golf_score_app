@@ -24,14 +24,6 @@ class _MainShellPageState extends State<MainShellPage> {
   int _currentIndex = 0; // 當前選中的底部導覽項序號
   late PageController _pageController; // 頁面控制器，便於平滑過渡
   
-  // 緩存頁面數據
-  int _practiceCount = 0;
-  double? _bestSpeedMph;
-  double? _sweetSpotPercentage;
-  double? _audioCrispness;
-  int _goodHits = 0;
-  int _badHits = 0;
-  String? _avatarPath;
   final List<RecordingHistoryEntry> _recordingHistory = [];
 
   @override
@@ -155,14 +147,7 @@ class _MainShellPageState extends State<MainShellPage> {
           const HomePage(),
           
           // 第 1 頁：今日信息頁
-          TodayInfoPage(
-            practiceCount: _practiceCount,
-            bestSpeedMph: _bestSpeedMph ?? 0,
-            sweetSpotPercentage: _sweetSpotPercentage ?? 0,
-            audioCrispness: _audioCrispness ?? 0,
-            goodHits: _goodHits,
-            badHits: _badHits,
-          ),
+          const TodayInfoPage(),
           
           // 第 2 頁：錄製選擇屏幕
           RecordingSelectionScreen(
@@ -197,7 +182,7 @@ class _MainShellPageState extends State<MainShellPage> {
           // 第 3 頁：數據指標頁
           RecordingHistoryPage(
             entries: _recordingHistory,
-            userAvatarPath: _avatarPath,
+            userAvatarPath: null,
             onDelete: _loadHistory,
           ),
           

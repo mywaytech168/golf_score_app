@@ -290,7 +290,7 @@ class _LoginPageState extends State<LoginPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.redAccent : const kPrimaryGreen,
+        backgroundColor: isError ? Colors.redAccent : kPrimaryGreen,
       ),
     );
   }
@@ -490,7 +490,7 @@ class _LoginPageState extends State<LoginPage> {
       children: [
         Text('登入帳號',
             style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold, color: const kPrimaryDark)),
+              fontWeight: FontWeight.bold, color: kPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _identifierController,
@@ -543,7 +543,7 @@ class _LoginPageState extends State<LoginPage> {
             onPressed: _isLoading ? null : _handleLogin,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: const kPrimaryGreen,
+              backgroundColor: kPrimaryGreen,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
             child: _isLoading
@@ -601,7 +601,7 @@ class _LoginPageState extends State<LoginPage> {
       children: [
         Text('建立帳號',
             style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold, color: const kPrimaryDark)),
+              fontWeight: FontWeight.bold, color: kPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _usernameController,
@@ -687,7 +687,7 @@ class _LoginPageState extends State<LoginPage> {
             onPressed: _isLoading ? null : _handleRegister,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: const kPrimaryGreen,
+              backgroundColor: kPrimaryGreen,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
             child: _isLoading
@@ -731,7 +731,7 @@ class _LoginPageState extends State<LoginPage> {
       return Chip(
         avatar: Icon(
           granted ? Icons.check_circle : Icons.error_outline,
-          color: granted ? const kPrimaryGreen : Colors.redAccent,
+          color: granted ? kPrimaryGreen : Colors.redAccent,
           size: 20,
         ),
         label: Text('${entry.value}${granted ? '：已允許' : '：尚未允許'}'),
@@ -749,10 +749,10 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             Text('請先授權藍牙與定位',
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: const kPrimaryDark, fontWeight: FontWeight.bold)),
+                  color: kPrimaryDark, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text('首次登入時需要取得藍牙權限。',
-                style: theme.textTheme.bodyMedium?.copyWith(color: const kPrimaryDark)),
+                style: theme.textTheme.bodyMedium?.copyWith(color: kPrimaryDark)),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: chips),
             const SizedBox(height: 16),
@@ -762,7 +762,7 @@ class _LoginPageState extends State<LoginPage> {
                 onPressed: () => _requestBlePermissions(showDeniedDialog: true),
                 icon: const Icon(Icons.security),
                 label: const Text('重新檢查權限'),
-                style: ElevatedButton.styleFrom(backgroundColor: const kPrimaryGreen),
+                style: ElevatedButton.styleFrom(backgroundColor: kPrimaryGreen),
               ),
             ),
           ],
