@@ -9,6 +9,9 @@ namespace UploadServer.DTOs
 
         /// <summary>zip 檔案大小（bytes），用於 pre-sign 驗證</summary>
         public long SizeBytes { get; set; }
+
+        /// <summary>分享者顯示名稱</summary>
+        public string? SharerName { get; set; }
     }
 
     public class SharePrepareResponse
@@ -46,5 +49,8 @@ namespace UploadServer.DTOs
 
         /// <summary>B2 pre-signed GET URL（5 分鐘有效）</summary>
         public string DownloadUrl { get; set; } = string.Empty;
+
+        /// <summary>分享者顯示名稱</summary>
+        public string? SharerName { get; set; }
     }
 }

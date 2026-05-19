@@ -39,9 +39,10 @@ namespace UploadServer.Services
                 B2FileName = b2FileName,
                 Title      = req.Title,
                 SizeBytes  = req.SizeBytes,
+                SharerName = req.SharerName,
                 Confirmed  = false,
-                CreatedAt  = DateTime.UtcNow,
-                ExpiresAt  = DateTime.UtcNow.AddDays(1),
+                CreatedAt  = DateTime.Now,
+                ExpiresAt  = DateTime.Now.AddDays(1),
             };
 
             _db.ShareLinks.Add(link);
@@ -92,6 +93,7 @@ namespace UploadServer.Services
                 SizeBytes   = link.SizeBytes,
                 ExpiresAt   = link.ExpiresAt,
                 DownloadUrl = downloadUrl,
+                SharerName  = link.SharerName,
             };
         }
 

@@ -13,6 +13,9 @@ namespace UploadServer.Models
         /// <summary>顯示標題（擊球時間戳）</summary>
         public string? Title { get; set; }
 
+        /// <summary>分享者顯示名稱</summary>
+        public string? SharerName { get; set; }
+
         /// <summary>zip 檔案大小（bytes）</summary>
         public long SizeBytes { get; set; }
 

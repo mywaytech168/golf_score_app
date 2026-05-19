@@ -31,12 +31,14 @@ class ShareGetResult {
   final int sizeBytes;
   final DateTime expiresAt;
   final String downloadUrl;
-  ShareGetResult({required this.title, required this.sizeBytes, required this.expiresAt, required this.downloadUrl});
+  final String? sharerName;
+  ShareGetResult({required this.title, required this.sizeBytes, required this.expiresAt, required this.downloadUrl, this.sharerName});
   factory ShareGetResult.fromJson(Map<String, dynamic> j) => ShareGetResult(
     title: j['title'] as String,
     sizeBytes: (j['sizeBytes'] as num).toInt(),
     expiresAt: DateTime.parse(j['expiresAt'] as String),
     downloadUrl: j['downloadUrl'] as String,
+    sharerName: j['sharerName'] as String?,
   );
 }
 
@@ -126,10 +128,11 @@ class ShareService {
   static Future<SharePrepareResult> prepare({
     required String title,
     required int sizeBytes,
+    String? sharerName,
   }) async {
     final resp = await _dio.post(
       '$_baseUrl/api/share/prepare',
-      data: {'title': title, 'sizeBytes': sizeBytes},
+      data: {'title': title, 'sizeBytes': sizeBytes, 'sharerName': sharerName},
       options: Options(headers: {'Content-Type': 'application/json'}),
     );
     if (resp.statusCode != 200) throw Exception('prepare 失敗 ${resp.statusCode}');
@@ -257,6 +260,7 @@ class ShareService {
         createdAt: DateTime.now(),   // 匯入時刻，確保出現在歷史最上方
         shareCode: null,
         shareExpiresAt: null,
+        sharerName: info.sharerName,
       );
     } else {
       // fallback：meta 不存在時用最基本資料建立

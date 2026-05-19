@@ -93,6 +93,9 @@ class RecordingHistoryEntry {
   /// 分享碼到期時間（UTC）；null 或過去時間代表已過期
   final DateTime? shareExpiresAt;
 
+  /// 從分享連結匯入時，記錄分享者的顯示名稱
+  final String? sharerName;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -114,6 +117,7 @@ class RecordingHistoryEntry {
     this.audioTags,
     this.shareCode,
     this.shareExpiresAt,
+    this.sharerName,
   });
 
   /// 排序用時間：優先用 createdAt，若無則 fallback 到 recordedAt
@@ -147,6 +151,7 @@ class RecordingHistoryEntry {
     String? shareCode,
     DateTime? shareExpiresAt,
     DateTime? createdAt,
+    String? sharerName,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -169,6 +174,7 @@ class RecordingHistoryEntry {
       audioTags: audioTags ?? this.audioTags,
       shareCode: shareCode ?? this.shareCode,
       shareExpiresAt: shareExpiresAt ?? this.shareExpiresAt,
+      sharerName: sharerName ?? this.sharerName,
     );
   }
 
@@ -210,6 +216,7 @@ class RecordingHistoryEntry {
       'shareCode': shareCode,
       'shareExpiresAt': shareExpiresAt?.toUtc().toIso8601String(),
       'createdAt': createdAt?.toIso8601String(),
+      'sharerName': sharerName,
     };
   }
 
@@ -262,6 +269,7 @@ class RecordingHistoryEntry {
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'] as String)
           : null,
+      sharerName: json['sharerName'] as String?,
     );
   }
 }

@@ -211,6 +211,8 @@ class _ShareImportPageState extends State<ShareImportPage> {
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
         ),
         const SizedBox(height: 20),
+        if (info.sharerName != null && info.sharerName!.isNotEmpty)
+          _infoRow(Icons.person_outline, '來自', info.sharerName!),
         _infoRow(Icons.storage_outlined, '大小', '$sizeMb MB'),
         _infoRow(Icons.schedule_outlined, '到期', expiryStr),
         if (_error != null) ...[

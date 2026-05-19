@@ -1694,7 +1694,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                       ),
                       if (widget.formattedImportTime != null)
                         Text(
-                          '📥 ${widget.formattedImportTime}',
+                          '📥 ${widget.formattedImportTime}${widget.entry.sharerName != null ? '  來自 ${widget.entry.sharerName}' : ''}',
                           style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

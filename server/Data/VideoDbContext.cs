@@ -368,6 +368,10 @@ namespace UploadServer.Data
                     .HasColumnName("title")
                     .HasMaxLength(255);
 
+                entity.Property(e => e.SharerName)
+                    .HasColumnName("sharer_name")
+                    .HasMaxLength(100);
+
                 entity.Property(e => e.SizeBytes)
                     .HasColumnName("size_bytes");
 

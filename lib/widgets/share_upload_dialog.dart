@@ -3,9 +3,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/recording_history_entry.dart';
+import '../providers/user_provider.dart';
 import '../services/share_service.dart';
 import '../services/recording_history_storage.dart';
 
@@ -14,6 +16,7 @@ import '../services/recording_history_storage.dart';
 /// - 否則 壓縮 → 上傳 → confirm → 顯示新分享碼，並回存到 entry
 class ShareUploadDialog extends StatefulWidget {
   final RecordingHistoryEntry entry;
+  final String? sharerName;
 
   /// 上傳完成後，將更新後的 entry 回傳給呼叫端（用於更新歷史列表）
   final void Function(RecordingHistoryEntry updated)? onShareSaved;
@@ -21,6 +24,7 @@ class ShareUploadDialog extends StatefulWidget {
   const ShareUploadDialog({
     super.key,
     required this.entry,
+    this.sharerName,
     this.onShareSaved,
   });
 
@@ -29,10 +33,11 @@ class ShareUploadDialog extends StatefulWidget {
     required RecordingHistoryEntry entry,
     void Function(RecordingHistoryEntry updated)? onShareSaved,
   }) {
+    final sharerName = context.read<UserProvider>().displayName;
     return showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => ShareUploadDialog(entry: entry, onShareSaved: onShareSaved),
+      builder: (_) => ShareUploadDialog(entry: entry, sharerName: sharerName, onShareSaved: onShareSaved),
     );
   }
 
@@ -85,6 +90,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
       final prepare = await ShareService.prepare(
         title: widget.entry.displayTitle,
         sizeBytes: zipSize,
+        sharerName: widget.sharerName,
       );
 
       await ShareService.uploadToB2(

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using UploadServer.Data;
 
@@ -11,9 +12,11 @@ using UploadServer.Data;
 namespace UploadServer.Migrations
 {
     [DbContext(typeof(VideoDbContext))]
-    partial class VideoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260519042029_AddShareLinksTable")]
+    partial class AddShareLinksTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -210,11 +213,6 @@ namespace UploadServer.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("varchar(16)")
                         .HasColumnName("share_code");
-
-                    b.Property<string>("SharerName")
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("sharer_name");
 
                     b.Property<long>("SizeBytes")
                         .HasColumnType("bigint")
