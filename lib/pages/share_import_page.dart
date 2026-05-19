@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/user_provider.dart';
 import '../services/share_service.dart';
 
 /// 從分享碼取得影片頁面
@@ -93,7 +95,16 @@ class _ShareImportPageState extends State<ShareImportPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('從分享連結取得'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('從分享連結取得', style: TextStyle(fontSize: 16)),
+            Text(
+              context.watch<UserProvider>().displayName ?? 'Golf Player',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.black54),
+            ),
+          ],
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.black87,

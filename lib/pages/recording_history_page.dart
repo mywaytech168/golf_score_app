@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:provider/provider.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
@@ -19,6 +20,7 @@ import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
 import '../widgets/hits_summary_widget.dart';
+import '../providers/user_provider.dart';
 import 'video_comparison_page.dart';
 import 'video_player_page.dart';
 import '../widgets/share_upload_dialog.dart';
@@ -503,7 +505,16 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('錄影歷史'),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('錄影歷史', style: TextStyle(fontSize: 16)),
+              Text(
+                context.watch<UserProvider>().displayName ?? 'Golf Player',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.white70),
+              ),
+            ],
+          ),
           leading: IconButton(
             onPressed: _finishWithResult,
             icon: const Icon(Icons.arrow_back),
