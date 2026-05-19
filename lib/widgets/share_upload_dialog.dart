@@ -4,31 +4,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../models/recording_history_entry.dart';
 import '../services/share_service.dart';
+import '../services/recording_history_storage.dart';
 
-/// 分享上傳 Dialog：壓縮 → 上傳 → 顯示分享碼
-///
-/// 使用方式：
-///   ShareUploadDialog.show(context, sessionDir: '...', title: '第 3 輪');
+/// 分享上傳 Dialog：
+/// - 若 entry 已有有效分享碼 → 直接顯示，不重新上傳
+/// - 否則 壓縮 → 上傳 → confirm → 顯示新分享碼，並回存到 entry
 class ShareUploadDialog extends StatefulWidget {
-  final String sessionDir;
-  final String title;
+  final RecordingHistoryEntry entry;
+
+  /// 上傳完成後，將更新後的 entry 回傳給呼叫端（用於更新歷史列表）
+  final void Function(RecordingHistoryEntry updated)? onShareSaved;
 
   const ShareUploadDialog({
     super.key,
-    required this.sessionDir,
-    required this.title,
+    required this.entry,
+    this.onShareSaved,
   });
 
   static Future<void> show(
     BuildContext context, {
-    required String sessionDir,
-    required String title,
+    required RecordingHistoryEntry entry,
+    void Function(RecordingHistoryEntry updated)? onShareSaved,
   }) {
     return showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => ShareUploadDialog(sessionDir: sessionDir, title: title),
+      builder: (_) => ShareUploadDialog(entry: entry, onShareSaved: onShareSaved),
     );
   }
 
@@ -37,10 +40,14 @@ class ShareUploadDialog extends StatefulWidget {
 }
 
 class _ShareUploadDialogState extends State<ShareUploadDialog> {
-  _Phase _phase = _Phase.compressing;
+  _Phase _phase = _Phase.checking;
   double _uploadProgress = 0;
   String? _shareCode;
+  bool _isReused = false;
   String? _error;
+
+  String get _sessionDir =>
+      widget.entry.filePath.replaceAll(RegExp(r'[^/\\]*$'), '');
 
   @override
   void initState() {
@@ -49,19 +56,32 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
   }
 
   Future<void> _run() async {
+    // 1. 檢查是否有尚未過期的分享碼
+    if (widget.entry.isShareValid) {
+      if (mounted) {
+        setState(() {
+          _phase = _Phase.done;
+          _shareCode = widget.entry.shareCode;
+          _isReused = true;
+        });
+      }
+      return;
+    }
+
+    // 2. 需要重新上傳
     try {
-      // 1. 壓縮
-      final zipPath = await ShareService.compressSession(widget.sessionDir);
+      if (mounted) setState(() => _phase = _Phase.compressing);
+
+      final zipPath = await ShareService.compressSession(_sessionDir);
       final zipSize = File(zipPath).lengthSync();
 
-      // 2. 取得 pre-signed URL
       if (mounted) setState(() => _phase = _Phase.uploading);
+
       final prepare = await ShareService.prepare(
-        title: widget.title,
+        title: widget.entry.displayTitle,
         sizeBytes: zipSize,
       );
 
-      // 3. 直傳 B2
       await ShareService.uploadToB2(
         uploadUrl: prepare.uploadUrl,
         zipPath: zipPath,
@@ -70,15 +90,38 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
         },
       );
 
-      // 4. 確認
       await ShareService.confirm(prepare.shareCode);
 
-      // 清理暫存 zip
       try { File(zipPath).deleteSync(); } catch (_) {}
 
-      if (mounted) setState(() { _phase = _Phase.done; _shareCode = prepare.shareCode; });
+      // 3. 將新分享碼存回 entry
+      final expiresAt = DateTime.now().toUtc().add(const Duration(days: 1));
+      final updated = widget.entry.copyWith(
+        shareCode: prepare.shareCode,
+        shareExpiresAt: expiresAt,
+      );
+      await _persistEntry(updated);
+      widget.onShareSaved?.call(updated);
+
+      if (mounted) {
+        setState(() {
+          _phase = _Phase.done;
+          _shareCode = prepare.shareCode;
+          _isReused = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() { _phase = _Phase.error; _error = e.toString(); });
+    }
+  }
+
+  /// 將 entry 更新寫入持久化儲存
+  Future<void> _persistEntry(RecordingHistoryEntry updated) async {
+    final all = await RecordingHistoryStorage.instance.loadHistory();
+    final idx = all.indexWhere((e) => e.filePath == updated.filePath);
+    if (idx >= 0) {
+      all[idx] = updated;
+      await RecordingHistoryStorage.instance.saveHistory(all);
     }
   }
 
@@ -98,10 +141,12 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
 
   Widget _buildContent() {
     switch (_phase) {
+      case _Phase.checking:
+        return _buildSpinner('檢查分享狀態…');
       case _Phase.compressing:
-        return _buildProgress('壓縮中…', null);
+        return _buildSpinner('壓縮中…');
       case _Phase.uploading:
-        return _buildProgress('上傳中…', _uploadProgress);
+        return _buildUploadProgress();
       case _Phase.done:
         return _buildResult();
       case _Phase.error:
@@ -109,18 +154,29 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
     }
   }
 
-  Widget _buildProgress(String label, double? value) {
+  Widget _buildSpinner(String label) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LinearProgressIndicator(value: null, backgroundColor: Colors.white12, color: const Color(0xFF1E8E5A)),
+        const SizedBox(height: 12),
+        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+      ],
+    );
+  }
+
+  Widget _buildUploadProgress() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         LinearProgressIndicator(
-          value: value,
+          value: _uploadProgress,
           backgroundColor: Colors.white12,
           color: const Color(0xFF1E8E5A),
         ),
         const SizedBox(height: 12),
         Text(
-          value != null ? '$label  ${(value * 100).toStringAsFixed(0)}%' : label,
+          '上傳中…  ${(_uploadProgress * 100).toStringAsFixed(0)}%',
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],
@@ -133,7 +189,18 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('分享碼（有效 1 天）', style: TextStyle(color: Colors.white54, fontSize: 12)),
+        Row(
+          children: [
+            Text(
+              _isReused ? '現有分享碼（尚未過期）' : '分享碼（有效 1 天）',
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            if (_isReused) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.recycling, color: Color(0xFF1E8E5A), size: 14),
+            ],
+          ],
+        ),
         const SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -199,4 +266,4 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
   }
 }
 
-enum _Phase { compressing, uploading, done, error }
+enum _Phase { checking, compressing, uploading, done, error }

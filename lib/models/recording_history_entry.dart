@@ -83,6 +83,12 @@ class RecordingHistoryEntry {
   /// 例如：['no_audio']、['no_valid_hits']、['pro']
   final List<String>? audioTags;
 
+  /// 分享碼（16 碼）；null 表示從未分享過
+  final String? shareCode;
+
+  /// 分享碼到期時間（UTC）；null 或過去時間代表已過期
+  final DateTime? shareExpiresAt;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -101,7 +107,15 @@ class RecordingHistoryEntry {
     this.audioLabel,
     this.sourceVideoPath,
     this.audioTags,
+    this.shareCode,
+    this.shareExpiresAt,
   });
+
+  /// 分享碼是否仍在有效期內
+  bool get isShareValid =>
+      shareCode != null &&
+      shareExpiresAt != null &&
+      shareExpiresAt!.isAfter(DateTime.now().toUtc());
 
   /// 建立更新後的新實例，方便調整時長或其他欄位
   RecordingHistoryEntry copyWith({
@@ -122,6 +136,8 @@ class RecordingHistoryEntry {
     String? audioLabel,
     String? sourceVideoPath,
     List<String>? audioTags,
+    String? shareCode,
+    DateTime? shareExpiresAt,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -141,6 +157,8 @@ class RecordingHistoryEntry {
       audioLabel: audioLabel ?? this.audioLabel,
       sourceVideoPath: sourceVideoPath ?? this.sourceVideoPath,
       audioTags: audioTags ?? this.audioTags,
+      shareCode: shareCode ?? this.shareCode,
+      shareExpiresAt: shareExpiresAt ?? this.shareExpiresAt,
     );
   }
 
@@ -179,6 +197,8 @@ class RecordingHistoryEntry {
       'audioLabel': audioLabel,
       'sourceVideoPath': sourceVideoPath,
       'audioTags': audioTags,
+      'shareCode': shareCode,
+      'shareExpiresAt': shareExpiresAt?.toUtc().toIso8601String(),
     };
   }
 
@@ -224,6 +244,10 @@ class RecordingHistoryEntry {
       audioLabel: (json['audioLabel'] as String?),
       sourceVideoPath: (json['sourceVideoPath'] as String?),
       audioTags: audioTags,
+      shareCode: json['shareCode'] as String?,
+      shareExpiresAt: json['shareExpiresAt'] != null
+          ? DateTime.tryParse(json['shareExpiresAt'] as String)
+          : null,
     );
   }
 }

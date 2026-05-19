@@ -1244,9 +1244,11 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   /// 測試用：重置分析狀態為 false
   void _shareSession() {
-    final sessionDir = p.dirname(widget.entry.filePath);
-    final title = widget.entry.displayTitle;
-    ShareUploadDialog.show(context, sessionDir: sessionDir, title: title);
+    ShareUploadDialog.show(
+      context,
+      entry: widget.entry,
+      onShareSaved: (updated) => widget.onEntryUpdated?.call(widget.entry, updated),
+    );
   }
 
   Future<void> _resetAnalysisState() async {
