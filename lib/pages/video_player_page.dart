@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
-import '../widgets/share_upload_dialog.dart';
 
 
 /// Lightweight player for reviewing a recorded swing video.
@@ -101,11 +100,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  void _shareSession() {
-    final title = '影片分享';
-    ShareUploadDialog.show(context, sessionDir: _sessionDir, title: title);
-  }
-
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -188,27 +182,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               radius: 14,
               backgroundImage: FileImage(File(widget.avatarPath!)),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 8),
           ],
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white70, size: 20),
-            color: const Color(0xFF2A2A2A),
-            onSelected: (value) {
-              if (value == 'share') _shareSession();
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: 'share',
-                child: Row(
-                  children: [
-                    Icon(Icons.share_outlined, color: Colors.white70, size: 18),
-                    SizedBox(width: 10),
-                    Text('分享連結', style: TextStyle(color: Colors.white)),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );

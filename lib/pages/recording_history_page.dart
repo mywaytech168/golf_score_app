@@ -21,9 +21,10 @@ import '../services/audio_extraction_service.dart';
 import '../widgets/hits_summary_widget.dart';
 import 'video_comparison_page.dart';
 import 'video_player_page.dart';
+import '../widgets/share_upload_dialog.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyze, compare, resetAnalysisState, resetClippingState, delete }
+enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, resetAnalysisState, resetClippingState, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -1242,6 +1243,12 @@ class _HistoryTileState extends State<_HistoryTile> {
   }
 
   /// 測試用：重置分析狀態為 false
+  void _shareSession() {
+    final sessionDir = p.dirname(widget.entry.filePath);
+    final title = widget.entry.displayTitle;
+    ShareUploadDialog.show(context, sessionDir: sessionDir, title: title);
+  }
+
   Future<void> _resetAnalysisState() async {
     final updatedEntry = widget.entry.copyWith(
       isAnalyzed: false,
@@ -1552,6 +1559,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                         case _HistoryMenuAction.compare:
                           _runCompare();
                           break;
+                        case _HistoryMenuAction.share:
+                          _shareSession();
+                          break;
                         case _HistoryMenuAction.resetAnalysisState:
                           _resetAnalysisState();
                           break;
@@ -1622,6 +1632,16 @@ class _HistoryTileState extends State<_HistoryTile> {
                         value: _HistoryMenuAction.compare,
                         child: Text('⚖️ 與另一部影片比較'),
                       ),
+                    const PopupMenuItem<_HistoryMenuAction>(
+                      value: _HistoryMenuAction.share,
+                      child: Row(
+                        children: [
+                          Icon(Icons.share_outlined, size: 16, color: Color(0xFF1E8E5A)),
+                          SizedBox(width: 8),
+                          Text('分享連結'),
+                        ],
+                      ),
+                    ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.resetAnalysisState,
                       child: Text('🧪 測試: 重置分析狀態'),
