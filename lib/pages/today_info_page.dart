@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/statistics_response.dart';
-import '../services/video_server_client.dart';
+import '../services/local_statistics_calculator.dart';
 import '../theme/app_theme.dart';
 
 class TodayInfoPage extends StatefulWidget {
@@ -41,7 +41,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
     setState(() => _loading = true);
     try {
       final isToday = _isToday(_selectedDate);
-      final stats = await VideoServerClient.instance.getStatistics(
+      final stats = await LocalStatisticsCalculator.compute(
         period: isToday ? 'today' : 'day',
         date: isToday ? null : _formatApi(_selectedDate),
       );

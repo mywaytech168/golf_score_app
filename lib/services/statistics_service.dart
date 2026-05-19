@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/statistics_response.dart';
-import 'video_server_client.dart';
+import 'local_statistics_calculator.dart';
 
 /// 統計數據服務 - 統一管理 Data Metrics 和 Analytics 的數據來源
-/// 
+///
 /// 數據層級：
-/// 1. 後端 API 數據 (getStatistics API)
+/// 1. 本地 JSON 計算數據 (recording_history.json)
 /// 2. 本地計算數據 (consistencyScore, comparisonSnapshots)
-/// 3. 緩存層 (避免重複請求)
+/// 3. 緩存層 (避免重複讀取)
 class StatisticsService {
   static final StatisticsService _instance = StatisticsService._internal();
 
@@ -109,35 +109,27 @@ class StatisticsService {
     ]);
   }
 
-  /// 同時加載全部、今天、昨天的統計數據
-  /// 如果返回 401 未授權，會拋出 UnauthorizedException
+  /// 同時加載全部、今天、昨天的統計數據（從本地 JSON）
   Future<void> loadAllStatistics() async {
     _setLoadingState(isLoadingStatistics: true);
 
     try {
-      final now = DateTime.now();
-      final yesterday = now.subtract(const Duration(days: 1));
-      
-      // 並行加載三個時期的數據
+      // 並行計算三個時期的數據
       final results = await Future.wait([
-        VideoServerClient.instance.getStatistics(period: 'all'),
-        VideoServerClient.instance.getStatistics(period: 'today'),
-        VideoServerClient.instance.getStatistics(period: 'yesterday'),
+        LocalStatisticsCalculator.compute(period: 'all'),
+        LocalStatisticsCalculator.compute(period: 'today'),
+        LocalStatisticsCalculator.compute(period: 'yesterday'),
       ]);
 
-      _cachedStatistics = results[0]; // 全部
-      _todayStatistics = results[1]; // 今天
+      _cachedStatistics    = results[0]; // 全部
+      _todayStatistics     = results[1]; // 今天
       _yesterdayStatistics = results[2]; // 昨天
       _lastStatisticsLoadTime = DateTime.now();
-      
+
       if (!_isDisposed && !_statisticsController.isClosed) {
         _statisticsController.add(_cachedStatistics);
       }
-      debugPrint('✅ 統計數據已從 API 加載（全部、今天、昨天）');
-    } on UnauthorizedException {
-      // 重新拋出授權異常，讓調用者處理
-      debugPrint('❌ 統計數據獲取失敗: 未授權（401）');
-      rethrow;
+      debugPrint('✅ 統計數據已從本地 JSON 計算（全部、今天、昨天）');
     } catch (e) {
       debugPrint('❌ 加載統計數據失敗: $e');
     } finally {
@@ -145,14 +137,17 @@ class StatisticsService {
     }
   }
 
-  /// 從後端 API 加載統計數據（帶緩存機制）
+  /// 從本地 JSON 計算統計數據（帶緩存機制）
   Future<StatisticsResponse?> loadStatisticsFromApi({
     String period = 'all',
     String? date,
     bool forceRefresh = false,
   }) async {
-    // 檢查緩存是否有效
-    if (!forceRefresh && _cachedStatistics != null && _lastStatisticsLoadTime != null) {
+    // 'all' period 使用緩存
+    if (!forceRefresh &&
+        period == 'all' &&
+        _cachedStatistics != null &&
+        _lastStatisticsLoadTime != null) {
       if (DateTime.now().difference(_lastStatisticsLoadTime!) < _cacheExpiration) {
         debugPrint('📦 使用緩存的統計數據');
         return _cachedStatistics;
@@ -162,25 +157,24 @@ class StatisticsService {
     _setLoadingState(isLoadingStatistics: true);
 
     try {
-      final stats = await VideoServerClient.instance.getStatistics(
+      final stats = await LocalStatisticsCalculator.compute(
         period: period,
         date: date,
       );
 
-      if (stats != null) {
-        if (period == 'all') {
-          _cachedStatistics = stats;
-        } else if (period == 'today') {
-          _todayStatistics = stats;
-        } else if (period == 'yesterday') {
-          _yesterdayStatistics = stats;
-        }
+      if (period == 'all') {
+        _cachedStatistics = stats;
         _lastStatisticsLoadTime = DateTime.now();
-        if (!_isDisposed && !_statisticsController.isClosed) {
-          _statisticsController.add(stats);
-        }
-        debugPrint('✅ 統計數據已從 API 加載');
+      } else if (period == 'today') {
+        _todayStatistics = stats;
+      } else if (period == 'yesterday') {
+        _yesterdayStatistics = stats;
       }
+
+      if (!_isDisposed && !_statisticsController.isClosed) {
+        _statisticsController.add(stats);
+      }
+      debugPrint('✅ 統計數據已從本地 JSON 計算');
 
       return stats;
     } catch (e) {
