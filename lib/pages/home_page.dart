@@ -1,25 +1,23 @@
 import 'dart:async';
-import 'dart:convert'; // 匯入文字編碼與換行工具，解析 CSV 時需要用到
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-// restored original local VideoPlayerPage usage
-import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
+import '../providers/user_provider.dart';
+import '../theme/app_theme.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
-import '../services/daily_ad_manager.dart';
-import '../widgets/purchase_test_panel.dart';
 import 'recording_history_page.dart';
 import 'video_player_page.dart' as video_player;
 
@@ -61,12 +59,11 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadInitialHistory();
-    // 初始化統計服務並加載後端和本地數據
     _initializeStatistics();
-    // 初始化購買服務
     _initializePurchaseService();
-    // 首頁不進行云端和本地視頻的匹配，只顯示本地列表
-    // 云端同步由 recording_history_page 統一處理
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<UserProvider>().loadProfile();
+    });
   }
 
   /// 初始化購買服務
@@ -156,11 +153,11 @@ class _HomePageState extends State<HomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(color: Color(0xFF7D8B9A), fontSize: 13)),
+        Text(title, style: const TextStyle(color: kTextSecondary, fontSize: 13)),
         const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E8E5A)),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kPrimaryGreen),
         ),
       ],
     );
@@ -184,7 +181,7 @@ class _HomePageState extends State<HomePage> {
             : todayStats != null && todayStats.peakValue.maximum > 0
                 ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH'
                 : '尚無資料',
-        'color': const Color(0xFF2E8EFF),
+        'color': kSpeedColor,
         'highlight': true,
       },
       {
@@ -194,19 +191,19 @@ class _HomePageState extends State<HomePage> {
             : todayStats != null
                 ? '${todayStats.sweetSpotPercentage.toStringAsFixed(0)} %'
                 : '尚無資料',
-        'color': const Color(0xFF8E4AF4),
+        'color': kSweetColor,
         'highlight': false,
       },
       {
         'title': '好球',
         'value': '$goodShotCount 次',
-        'color': const Color(0xFF1E8E5A),
+        'color': kGoodColor,
         'highlight': false,
       },
       {
         'title': '壞球',
         'value': '$badShotCount 次',
-        'color': const Color(0xFFDA4E5D),
+        'color': kBadColor,
         'highlight': false,
       },
       {
@@ -216,13 +213,13 @@ class _HomePageState extends State<HomePage> {
             : todayStats != null && todayStats.audioCrispness.average > 0
                 ? '${todayStats.audioCrispness.average.toStringAsFixed(0)}'
                 : '尚無資料',
-        'color': const Color(0xFFDA4E5D),
+        'color': kBadColor,
         'highlight': false,
       },
       {
         'title': '練習次數',
         'value': '${todayStats?.totalCount ?? 0} 次',
-        'color': const Color(0xFF1E8E5A),
+        'color': kGoodColor,
         'highlight': false,
       },
     ];
@@ -276,7 +273,7 @@ class _HomePageState extends State<HomePage> {
             card['title'] as String,
             style: const TextStyle(
               fontSize: 13,
-              color: Color(0xFF7D8B9A),
+              color: kTextSecondary,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -350,7 +347,7 @@ class _HomePageState extends State<HomePage> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             gradient: LinearGradient(
-              colors: [baseColor, baseColor.withOpacity(0.7)],
+              colors: [baseColor, baseColor.withValues(alpha: 0.7)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -372,7 +369,7 @@ class _HomePageState extends State<HomePage> {
                             return DecoratedBox(
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
+                                  colors: [baseColor.withValues(alpha: 0.95), baseColor.withValues(alpha: 0.55)],
                                   begin: Alignment.bottomLeft,
                                   end: Alignment.topRight,
                                 ),
@@ -383,7 +380,7 @@ class _HomePageState extends State<HomePage> {
                       : DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
-                              colors: [baseColor.withOpacity(0.95), baseColor.withOpacity(0.55)],
+                              colors: [baseColor.withValues(alpha: 0.95), baseColor.withValues(alpha: 0.55)],
                               begin: Alignment.bottomLeft,
                               end: Alignment.topRight,
                             ),
@@ -395,7 +392,7 @@ class _HomePageState extends State<HomePage> {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Colors.black.withOpacity(0.5), Colors.transparent],
+                        colors: [Colors.black.withValues(alpha: 0.5), Colors.transparent],
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                       ),
@@ -444,10 +441,10 @@ class _HomePageState extends State<HomePage> {
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: entry.goodShot == null
-                          ? Colors.grey.withOpacity(0.7)
+                          ? Colors.grey.withValues(alpha: 0.7)
                           : entry.goodShot == true
-                              ? Colors.green.withOpacity(0.8)
-                              : Colors.red.withOpacity(0.8),
+                              ? Colors.green.withValues(alpha: 0.8)
+                              : Colors.red.withValues(alpha: 0.8),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
@@ -953,34 +950,67 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
+      backgroundColor: kBgPage,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF5F7FB),
-        toolbarHeight: 88,
+        backgroundColor: kBgPage,
+        toolbarHeight: 72,
         automaticallyImplyLeading: false,
-        title: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E8E5A),
-                borderRadius: BorderRadius.circular(14),
+        title: Consumer<UserProvider>(
+          builder: (context, user, _) => Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: kPrimaryGreen,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: user.avatarPath != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
+                      )
+                    : const Icon(Icons.golf_course_rounded, color: Colors.white),
               ),
-              child: const Icon(Icons.golf_course_rounded, color: Colors.white),
-            ),
-            const SizedBox(width: 12),
-            IconButton(
-              onPressed: _logout,
-              tooltip: '登出',
-              icon: const Icon(Icons.logout_rounded, color: Color(0xFF0B2A2E)),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('嗨，${user.displayName ?? 'Golf Player'} 👋',
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: kTextPrimary)),
+                  Text('今天也來練習吧！',
+                      style: TextStyle(
+                          fontSize: 12, color: kTextSecondary)),
+                ],
+              ),
+            ],
+          ),
         ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded, color: kTextPrimary),
+            onSelected: (value) {
+              if (value == 'logout') _logout();
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout_rounded, size: 18, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('登出', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: StreamBuilder<StatisticsResponse?>(
         stream: _statisticsService.watchStatistics(),
@@ -1084,11 +1114,11 @@ class _RadarChartPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = math.min(size.width, size.height) / 2 * 0.85;
     final paint = Paint()
-      ..color = const Color(0xFF2E8EFF).withOpacity(0.2)
+      ..color = kSpeedColor.withValues(alpha: 0.2)
       ..style = PaintingStyle.fill;
 
     final borderPaint = Paint()
-      ..color = const Color(0xFF2E8EFF)
+      ..color = kSpeedColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
@@ -1161,7 +1191,7 @@ class _SectionHeader extends StatelessWidget {
           style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF0B2A2E),
+            color: kTextPrimary,
           ),
         ),
         const Spacer(),

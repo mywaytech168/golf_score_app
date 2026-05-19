@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import 'home_page.dart';
 import 'today_info_page.dart';
 import 'upgrade_page.dart';
@@ -301,7 +302,7 @@ class _BottomNavItem extends StatelessWidget {
         children: [
           Icon(
             icon,
-            color: isActive ? const Color(0xFF1E8E5A) : Colors.grey,
+            color: isActive ? kPrimaryGreen : Colors.grey,
             size: 24,
           ),
           const SizedBox(height: 4),
@@ -310,7 +311,7 @@ class _BottomNavItem extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: isActive ? const Color(0xFF1E8E5A) : Colors.grey,
+              color: isActive ? kPrimaryGreen : Colors.grey,
             ),
           ),
         ],
@@ -341,9 +342,9 @@ class _QuickStartNavItem extends StatelessWidget {
             height: 48,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: isActive 
+              gradient: isActive
                   ? const LinearGradient(
-                      colors: [Color(0xFF1E8E5A), Color(0xFF2DB86A)],
+                      colors: [kPrimaryGreen, kPrimaryLight],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     )
@@ -354,7 +355,7 @@ class _QuickStartNavItem extends StatelessWidget {
                     ),
               boxShadow: [
                 BoxShadow(
-                  color: (isActive ? const Color(0xFF1E8E5A) : Colors.grey).withValues(alpha: 0.3),
+                  color: (isActive ? kPrimaryGreen : Colors.grey).withValues(alpha: 0.3),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -374,7 +375,7 @@ class _QuickStartNavItem extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: isActive ? const Color(0xFF1E8E5A) : Colors.grey,
+              color: isActive ? kPrimaryGreen : Colors.grey,
             ),
           ),
         ],

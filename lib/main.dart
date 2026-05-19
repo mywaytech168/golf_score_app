@@ -4,6 +4,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'theme/app_theme.dart';
 import 'services/analysis_progress_service.dart';
 import 'services/auth_token_storage.dart';
 import 'services/ad_service.dart';
@@ -141,11 +142,7 @@ class _MyAppState extends State<MyApp> {
         builder: (context, appState, _) {
           return MaterialApp(
             title: 'Golf Score App',
-            theme: ThemeData(
-              colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E8E5A)),
-              scaffoldBackgroundColor: const Color(0xFFF5F7FB),
-              useMaterial3: true,
-            ),
+            theme: buildAppTheme(),
             home: _buildHome(),
             routes: {
               '/home': (context) => const MainShellPage(),
