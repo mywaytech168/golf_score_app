@@ -1,0 +1,381 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'login_page.dart';
+
+/// 首次啟動顯示使用者條款，同意後才進入登入流程
+class TermsOfServicePage extends StatefulWidget {
+  const TermsOfServicePage({super.key});
+
+  /// 檢查是否已同意條款
+  static Future<bool> isAccepted() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('terms_accepted') ?? false;
+  }
+
+  /// 記錄同意條款
+  static Future<void> markAccepted() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('terms_accepted', true);
+  }
+
+  @override
+  State<TermsOfServicePage> createState() => _TermsOfServicePageState();
+}
+
+class _TermsOfServicePageState extends State<TermsOfServicePage> {
+  final _scrollController = ScrollController();
+  bool _hasScrolledToBottom = false;
+  bool _agreed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_hasScrolledToBottom) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 40) {
+      setState(() => _hasScrolledToBottom = true);
+    }
+  }
+
+  Future<void> _accept() async {
+    await TermsOfServicePage.markAccepted();
+    if (!mounted) return;
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+    );
+  }
+
+  void _decline() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('確認離開'),
+        content: const Text('不同意使用者條款將無法使用 TekSwing。確定要離開嗎？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('返回'),
+          ),
+          FilledButton(
+            onPressed: () => exit(0),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('離開'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF1E8E5A), Color(0xFF0A3D2E)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // ── Header ──────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.golf_course_rounded, size: 36, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('TekSwing',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              color: Colors.white, fontWeight: FontWeight.bold)),
+                        Text('使用者條款與隱私政策',
+                            style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── 條款內文 ─────────────────────────────────────
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    children: [
+                      // 提示列
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF0FBF6),
+                          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.info_outline, size: 16, color: Color(0xFF1E8E5A)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '請閱讀以下條款後，勾選同意即可開始使用',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFF1E8E5A)),
+                              ),
+                            ),
+                            if (!_hasScrolledToBottom)
+                              const Icon(Icons.keyboard_arrow_down,
+                                  size: 18, color: Color(0xFF1E8E5A)),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+
+                      // 條款文字
+                      Expanded(
+                        child: Scrollbar(
+                          controller: _scrollController,
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.all(20),
+                            child: _buildTermsContent(theme),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // ── 底部操作區 ───────────────────────────────────
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 同意勾選
+                    GestureDetector(
+                      onTap: _hasScrolledToBottom
+                          ? () => setState(() => _agreed = !_agreed)
+                          : null,
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            value: _agreed,
+                            onChanged: _hasScrolledToBottom
+                                ? (v) => setState(() => _agreed = v ?? false)
+                                : null,
+                            activeColor: const Color(0xFF1E8E5A),
+                            checkColor: Colors.white,
+                            side: BorderSide(
+                              color: _hasScrolledToBottom
+                                  ? Colors.white
+                                  : Colors.white38,
+                              width: 1.5,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              '我已閱讀並同意《使用者條款》與《隱私政策》',
+                              style: TextStyle(
+                                color: _hasScrolledToBottom
+                                    ? Colors.white
+                                    : Colors.white54,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    if (!_hasScrolledToBottom)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, bottom: 8),
+                        child: Text(
+                          '請先滑動閱讀完整條款後方可勾選同意',
+                          style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+
+                    // 按鈕列
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _decline,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              side: const BorderSide(color: Colors.white54),
+                              foregroundColor: Colors.white70,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: const Text('不同意'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: FilledButton(
+                            onPressed: (_agreed && _hasScrolledToBottom) ? _accept : null,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              backgroundColor: Colors.white,
+                              foregroundColor: const Color(0xFF0A3D2E),
+                              disabledBackgroundColor: Colors.white24,
+                              disabledForegroundColor: Colors.white38,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: const Text('同意並繼續',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTermsContent(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _section('一、服務說明', '''
+TekSwing（以下簡稱「本服務」）由 TekSwing 團隊提供，旨在協助使用者透過行動裝置錄製、分析高爾夫揮桿動作，並提供相關數據統計與建議。
+
+使用本服務前，請仔細閱讀以下條款。一旦您開始使用本服務，即表示您已閱讀、理解並同意本條款之所有內容。'''),
+        _section('二、帳號與安全', '''
+1. 您須透過電子郵件或 Google 帳號完成註冊，方可使用完整功能。
+2. 您有責任妥善保管帳號密碼，並對所有使用您帳號進行的活動負責。
+3. 若發現帳號遭未授權使用，請立即通知我們。
+4. 您不得將帳號轉讓予他人。'''),
+        _section('三、使用者行為規範', '''
+使用本服務時，您同意：
+
+1. 僅上傳您本人拍攝或擁有合法授權的影片內容。
+2. 不上傳任何違法、侵權或不當內容。
+3. 不干擾或破壞本服務的正常運作。
+4. 不嘗試未授權存取本服務的系統或資料。'''),
+        _section('四、影片與資料處理', '''
+1. 您上傳的影片與分析資料將儲存於本服務的雲端系統，以提供揮桿分析功能。
+2. 分享功能產生的分享連結有效期為 1 天，到期後將自動刪除相關檔案。
+3. 您可隨時在 App 內刪除個人資料及錄影記錄。
+4. 我們不會將您的個人影片提供給未經授權的第三方。'''),
+        _section('五、隱私政策', '''
+我們重視您的隱私，並依照以下原則收集與使用您的資訊：
+
+收集的資訊：
+• 帳號資訊（電子郵件、顯示名稱）
+• 揮桿影片及分析結果
+• 裝置資訊與使用紀錄
+
+使用目的：
+• 提供揮桿分析與統計服務
+• 改善服務品質與使用者體驗
+• 必要時與您聯繫
+
+資料保護：
+• 所有資料傳輸採用 TLS 加密
+• 伺服器端資料進行加密儲存
+• 定期進行安全稽核'''),
+        _section('六、智慧財產權', '''
+1. 本服務的軟體、介面設計、商標及所有相關內容均屬 TekSwing 所有，受著作權法保護。
+2. 您上傳的影片著作權歸您所有，但您授予本服務使用這些內容以提供分析服務的有限授權。
+3. 未經授權，您不得複製、修改或散布本服務的任何部分。'''),
+        _section('七、免責聲明', '''
+1. 本服務提供的揮桿分析結果僅供參考，不構成專業運動指導建議。
+2. 本服務以「現狀」提供，不保證服務永遠不間斷或無誤差。
+3. 對於因使用本服務所產生的任何直接或間接損失，本服務不負賠償責任。
+4. 揮桿練習涉及身體活動，請在安全環境下進行，並自行評估身體狀況。'''),
+        _section('八、服務變更與終止', '''
+1. 我們保留在任何時間修改、暫停或終止本服務的權利。
+2. 若本條款有重大變更，我們將透過 App 通知您。
+3. 繼續使用本服務視為接受更新後的條款。'''),
+        _section('九、聯絡我們', '''
+若您對本條款有任何疑問，請透過以下方式聯絡我們：
+
+電子郵件：support@tekswing.com
+服務網站：https://tekswing.atk.tw
+
+本條款最後更新日期：2026 年 5 月 19 日'''),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF0FBF6),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF1E8E5A).withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_outline,
+                  size: 18, color: Color(0xFF1E8E5A)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('已閱讀至條款末端，請返回頂部勾選同意。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF1E8E5A))),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _section(String title, String body) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF0A3D2E),
+              )),
+          const SizedBox(height: 8),
+          Text(body,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF333333),
+                height: 1.65,
+              )),
+        ],
+      ),
+    );
+  }
+}

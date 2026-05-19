@@ -13,6 +13,7 @@ import 'services/daily_ad_manager.dart';
 import 'services/video_frame_extractor_test.dart';
 import 'pages/login_page.dart';
 import 'pages/main_shell_page.dart';
+import 'pages/terms_of_service_page.dart';
 import 'providers/auth_provider.dart';
 import 'providers/user_provider.dart';
 import 'providers/statistics_provider.dart';
@@ -156,36 +157,42 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  /// 根據 JWT token 判斷是否已登入，返回相應頁面
+  /// 啟動路由：先確認條款，再確認登入狀態
   Widget _buildHome() {
-    return FutureBuilder<bool>(
-      future: _isUserLoggedIn(),
+    return FutureBuilder<_StartupState>(
+      future: _resolveStartupState(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-
-        // 如果有登入token，進入首頁；否則進入登錄頁
-        if (snapshot.data == true) {
-          return const MainShellPage();
+        switch (snapshot.data ?? _StartupState.showTerms) {
+          case _StartupState.showTerms:
+            return const TermsOfServicePage();
+          case _StartupState.showLogin:
+            return const LoginPage();
+          case _StartupState.showHome:
+            return const MainShellPage();
         }
-
-        return const LoginPage();
       },
     );
   }
 
-  /// 檢查是否存在有效的 JWT token
-  Future<bool> _isUserLoggedIn() async {
+  Future<_StartupState> _resolveStartupState() async {
     try {
-      return await AuthTokenStorage.instance.isLoggedIn();
-    } catch (e) {
-      return false;
+      final accepted = await TermsOfServicePage.isAccepted();
+      if (!accepted) return _StartupState.showTerms;
+
+      final loggedIn = await AuthTokenStorage.instance.isLoggedIn();
+      return loggedIn ? _StartupState.showHome : _StartupState.showLogin;
+    } catch (_) {
+      return _StartupState.showTerms;
     }
   }
 }
+
+enum _StartupState { showTerms, showLogin, showHome }
 
 /// 屏蔽系统噪音日志
 void _filterSystemLogs() {
