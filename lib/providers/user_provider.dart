@@ -18,7 +18,7 @@ class UserProvider with ChangeNotifier {
 
   // Getters
   bool get isLoading => _isLoading;
-  String? get displayName => _displayName ?? _defaultDisplayName;
+  String get displayName => _displayName ?? _defaultDisplayName;
   String? get avatarPath => _avatarPath;
   String? get errorMessage => _errorMessage;
 

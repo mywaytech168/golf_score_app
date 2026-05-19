@@ -55,29 +55,6 @@ class _MainShellPageState extends State<MainShellPage> {
     super.dispose();
   }
 
-  /// 處理頁面數據更新（來自子頁面）
-  void _updatePageData({
-    int? practiceCount,
-    double? bestSpeedMph,
-    double? sweetSpotPercentage,
-    double? audioCrispness,
-    int? goodHits,
-    int? badHits,
-    String? avatarPath,
-    List<RecordingHistoryEntry>? recordingHistory,
-  }) {
-    setState(() {
-      if (practiceCount != null) _practiceCount = practiceCount;
-      if (bestSpeedMph != null) _bestSpeedMph = bestSpeedMph;
-      if (sweetSpotPercentage != null) _sweetSpotPercentage = sweetSpotPercentage;
-      if (audioCrispness != null) _audioCrispness = audioCrispness;
-      if (goodHits != null) _goodHits = goodHits;
-      if (badHits != null) _badHits = badHits;
-      if (avatarPath != null) _avatarPath = avatarPath;
-      if (recordingHistory != null) _recordingHistory.addAll(recordingHistory);
-    });
-  }
-
   /// 處理底部導覽點擊，切換頁面
   void _onBottomNavTap(int index) {
     setState(() => _currentIndex = index);

@@ -258,7 +258,7 @@ class _MetricGrid extends StatelessWidget {
     final items = [
       _MetricItem(
         label: '最佳速度',
-        value: speed != null ? '${speed!.toStringAsFixed(1)}' : '--',
+        value: speed != null ? speed!.toStringAsFixed(1) : '--',
         unit: speed != null ? 'MPH' : '',
         icon: Icons.speed_rounded,
         color: kSpeedColor,
@@ -266,7 +266,7 @@ class _MetricGrid extends StatelessWidget {
       ),
       _MetricItem(
         label: '甜蜜點命中',
-        value: sweet != null ? '${sweet!.clamp(0, 100).toStringAsFixed(0)}' : '--',
+        value: sweet != null ? sweet!.clamp(0, 100).toStringAsFixed(0) : '--',
         unit: sweet != null ? '%' : '',
         icon: Icons.adjust_rounded,
         color: kSweetColor,
@@ -274,7 +274,7 @@ class _MetricGrid extends StatelessWidget {
       ),
       _MetricItem(
         label: '聲音清脆度',
-        value: crisp != null ? '${crisp!.clamp(0, 100).toStringAsFixed(0)}' : '--',
+        value: crisp != null ? crisp!.clamp(0, 100).toStringAsFixed(0) : '--',
         unit: crisp != null ? '/100' : '',
         icon: Icons.graphic_eq_rounded,
         color: kCrispColor,

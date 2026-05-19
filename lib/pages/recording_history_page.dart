@@ -2,7 +2,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -498,10 +497,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     // 應用排序
     filteredEntries = _sortEntries(filteredEntries);
 
-    return WillPopScope(
-      onWillPop: () async {
-        _finishWithResult();
-        return false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _finishWithResult();
       },
       child: Scaffold(
         appBar: AppBar(
@@ -510,7 +509,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             children: [
               const Text('錄影歷史', style: TextStyle(fontSize: 16)),
               Text(
-                context.watch<UserProvider>().displayName ?? 'Golf Player',
+                context.watch<UserProvider>().displayName,
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.white70),
               ),
             ],
@@ -1216,7 +1215,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       // Stage 3: 合併結果並更新條目
       if (audioResult != null) {
-        updatedEntry = updatedEntry!.copyWith(
+        updatedEntry = updatedEntry.copyWith(
           audioCrispness: audioResult.features.isNotEmpty
               ? audioResult.features.first.sharpnessHfxLoud
               : null,
@@ -1225,7 +1224,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         );
       }
 
-      widget.onEntryUpdated?.call(widget.entry, updatedEntry!);
+      widget.onEntryUpdated?.call(widget.entry, updatedEntry);
 
       if (!mounted) return;
 
@@ -1825,7 +1824,7 @@ class _HistoryPreview extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.6),
+              color: Colors.black.withValues(alpha: 0.6),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(

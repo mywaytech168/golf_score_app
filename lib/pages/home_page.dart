@@ -1,9 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,17 +9,11 @@ import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
 import '../providers/user_provider.dart';
 import '../theme/app_theme.dart';
-import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
-import 'recording_history_page.dart';
-import 'video_player_page.dart' as video_player;
-
-/// 錄影卡片支援的操作種類
-enum _HistoryAction { rename, delete }
 
 /// 首頁提供完整儀表板，呈現揮桿統計、影片庫與分析摘要
 class HomePage extends StatefulWidget {
@@ -33,27 +24,9 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // ---------- 狀態管理區 ----------
-  final List<RecordingHistoryEntry> _recordingHistory = []; // 首頁內部維護的錄影紀錄
-  bool _isHistoryLoading = true; // 控制歷史載入狀態，避免 UI 閃爍
-  int _practiceCount = 0; // 累積練習次數
-  double? _bestSpeedMph; // 歷史紀錄中的最佳揮桿速度
-  double? _sweetSpotPercentage; // 甜蜜點命中率百分比
-  double? _audioCrispness; // 聲音清脆度（0-100）
-  bool _isMetricCalculating = false; // 是否正在重新計算儀表板數值
-  final ExternalVideoImporter _videoImporter = const ExternalVideoImporter(); // 匯入外部影片的工具實例
-  
-  // 統計服務相關
+  final List<RecordingHistoryEntry> _recordingHistory = [];
   late final StatisticsService _statisticsService = StatisticsService();
-  
-  // 購買服務相關
   late final PurchaseService _purchaseService = PurchaseService();
-  
-  String _formatDurationShort(int seconds) {
-    final m = (seconds ~/ 60).toString().padLeft(2, '0');
-    final s = (seconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
 
   @override
   void initState() {
@@ -108,11 +81,11 @@ class _HomePageState extends State<HomePage> {
     final badHits = todayStats?.badShot ?? 0;
     final sweetPct = todayStats?.sweetSpotPercentage ?? 0;
     final sweetText = sweetPct > 0 ? '${sweetPct.toStringAsFixed(0)}%' : '--';
-    final crispnessText = todayStats != null && todayStats.audioCrispness.average > 0 
-        ? '${todayStats.audioCrispness.average.toStringAsFixed(0)}' 
+    final crispnessText = todayStats != null && todayStats.audioCrispness.average > 0
+        ? todayStats.audioCrispness.average.toStringAsFixed(0)
         : '--';
     final bestSpeedDisplay = todayStats != null && todayStats.peakValue.maximum > 0
-        ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH' 
+        ? '${todayStats.peakValue.maximum.toStringAsFixed(1)} MPH'
         : '--';
 
     return Container(
@@ -131,9 +104,9 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _miniStat(title: '好球', value: '$goodHits')),
-              Expanded(child: _miniStat(title: '壞球', value: '$badHits')),
-              Expanded(child: _miniStat(title: '練習次數', value: '$practice')),
+              Expanded(child: _miniStat(title: '好球', value: goodHits.toString())),
+              Expanded(child: _miniStat(title: '壞球', value: badHits.toString())),
+              Expanded(child: _miniStat(title: '練習次數', value: practice.toString())),
             ],
           ),
           const SizedBox(height: 12),
@@ -211,7 +184,7 @@ class _HomePageState extends State<HomePage> {
         'value': isLoadingStats
             ? '載入中...'
             : todayStats != null && todayStats.audioCrispness.average > 0
-                ? '${todayStats.audioCrispness.average.toStringAsFixed(0)}'
+                ? todayStats.audioCrispness.average.toStringAsFixed(0)
                 : '尚無資料',
         'color': kBadColor,
         'highlight': false,
@@ -328,148 +301,6 @@ class _HomePageState extends State<HomePage> {
     Navigator.of(context).pushReplacementNamed('/login');
   }
 
-  /// 為網格顯示構建緊湊型影片卡片
-  Widget _buildCompactVideoTile({
-    required RecordingHistoryEntry entry,
-    required Color baseColor,
-  }) {
-    final thumbnailPath = entry.thumbnailPath;
-    final hasThumbnail = thumbnailPath != null && thumbnailPath.isNotEmpty;
-    final dateLabel = '${entry.recordedAt.month.toString().padLeft(2, '0')}/${entry.recordedAt.day.toString().padLeft(2, '0')}';
-
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => _playHistoryEntry(entry),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: LinearGradient(
-              colors: [baseColor, baseColor.withValues(alpha: 0.7)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Stack(
-              children: [
-                // 背景圖像
-                Positioned.fill(
-                  child: hasThumbnail
-                      ? Image.file(
-                          File(thumbnailPath),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) {
-                            return DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [baseColor.withValues(alpha: 0.95), baseColor.withValues(alpha: 0.55)],
-                                  begin: Alignment.bottomLeft,
-                                  end: Alignment.topRight,
-                                ),
-                              ),
-                            );
-                          },
-                        )
-                      : DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [baseColor.withValues(alpha: 0.95), baseColor.withValues(alpha: 0.55)],
-                              begin: Alignment.bottomLeft,
-                              end: Alignment.topRight,
-                            ),
-                          ),
-                        ),
-                ),
-                // 播放圖標遮罩
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.black.withValues(alpha: 0.5), Colors.transparent],
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                      ),
-                    ),
-                    child: const Align(
-                      alignment: Alignment.center,
-                      child: Icon(Icons.play_circle_fill, size: 32, color: Colors.white24),
-                    ),
-                  ),
-                ),
-                // 底部信息
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 8,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        entry.displayTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        dateLabel,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // 圖標標籤
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: entry.goodShot == null
-                          ? Colors.grey.withValues(alpha: 0.7)
-                          : entry.goodShot == true
-                              ? Colors.green.withValues(alpha: 0.8)
-                              : Colors.red.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      entry.goodShot == null
-                          ? '未分'
-                          : entry.goodShot == true
-                              ? '好球'
-                              : '壞球',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 將儀表板數值轉換為雷達圖比例，便於統一控制上限
   /// 載入既有錄影歷史，確保重新開啟 App 仍可看到舊資料
   Future<void> _loadInitialHistory() async {
     final entries = await RecordingHistoryStorage.instance.loadHistory();
@@ -481,8 +312,6 @@ class _HomePageState extends State<HomePage> {
       _recordingHistory
         ..clear()
         ..addAll(finalEntries);
-      _isHistoryLoading = false;
-      _practiceCount = finalEntries.length;
     });
 
     if (regenerated != null) {
@@ -526,322 +355,10 @@ class _HomePageState extends State<HomePage> {
     return hasChanges ? updated : null;
   }
 
-  /// 刪除指定的歷史紀錄，並詢問是否同步移除實體檔案
-  Future<void> _deleteHistoryEntry(RecordingHistoryEntry entry) async {
-    if (_recordingHistory.isEmpty) {
-      return; // 無資料時直接略過
-    }
 
-    final shouldRemove = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('刪除影片紀錄'),
-          content: Text('確定要刪除「${entry.displayTitle}」嗎？\n影片與對應 CSV 會一併從裝置移除。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('刪除'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldRemove != true) {
-      return; // 使用者取消刪除
-    }
-
-    final updatedEntries = List<RecordingHistoryEntry>.from(_recordingHistory)
-      ..removeWhere((item) =>
-          item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
-    if (updatedEntries.length == _recordingHistory.length) {
-      return; // 未找到對應項目
-    }
-
-    await _applyHistoryState(updatedEntries);
-    unawaited(_deleteEntryFiles(entry));
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已刪除 ${entry.fileName}')), // 告知刪除完成
-    );
-  }
-
-  /// 顯示輸入框讓使用者重新命名影片
-  Future<void> _renameHistoryEntry(RecordingHistoryEntry entry) async {
-    final initialText = entry.customName != null && entry.customName!.trim().isNotEmpty
-        ? entry.customName!.trim()
-        : entry.displayTitle;
-    String tempName = initialText; // 暫存輸入內容，避免 TextEditingController 釋放問題
-    final formKey = GlobalKey<FormState>();
-    debugPrint('[首頁歷史] 準備重新命名影片：${entry.fileName}'); // 紀錄流程起點
-    final newName = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('重新命名影片'),
-          content: Form(
-            key: formKey,
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            child: TextFormField(
-              initialValue: initialText,
-              maxLength: 40,
-              decoration: const InputDecoration(
-                labelText: '影片名稱',
-                helperText: '可留空以恢復預設名稱',
-              ),
-              onChanged: (value) => tempName = value,
-              validator: (value) {
-                final trimmed = value?.trim() ?? '';
-                if (trimmed.length > 40) {
-                  return '名稱需在 40 字以內';
-                }
-                return null;
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final isValid = formKey.currentState?.validate() ?? false;
-                if (!isValid) {
-                  return; // 驗證失敗時不關閉視窗
-                }
-                Navigator.of(dialogContext).pop(tempName.trim());
-              },
-              child: const Text('儲存'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (!mounted || newName == null) {
-      debugPrint('[首頁歷史] 重新命名流程取消或頁面已卸載');
-      return;
-    }
-
-    final normalizedName = newName.trim();
-    final storedName = normalizedName.isEmpty ? '' : normalizedName;
-    final originalName = (entry.customName ?? '').trim();
-    debugPrint('[首頁歷史] 重新命名輸入：stored="$storedName" original="$originalName"');
-    if (storedName == originalName) {
-      debugPrint('[首頁歷史] 名稱未變更，終止重新命名流程');
-      return; // 未變更名稱時不進行後續流程
-    }
-
-    final updatedEntries = List<RecordingHistoryEntry>.from(_recordingHistory);
-    final targetIndex = updatedEntries.indexWhere((item) =>
-        item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
-    if (targetIndex == -1) {
-      debugPrint('[首頁歷史] 找不到對應紀錄，無法重新命名');
-      return;
-    }
-
-    final defaultTitle = entry.copyWith(customName: '').displayTitle;
-    updatedEntries[targetIndex] =
-        updatedEntries[targetIndex].copyWith(customName: storedName);
-    debugPrint('[首頁歷史] 套用重新命名至索引 $targetIndex，準備立即寫回狀態');
-    await _applyHistoryState(updatedEntries);
-
-    if (!mounted) return;
-    final snackMessage = storedName.isEmpty
-        ? '已恢復影片名稱為 $defaultTitle'
-        : '已將影片命名為 $storedName';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(snackMessage)),
-    );
-  }
-
-  /// 移除影片與 CSV 實體檔案，避免資料殘留
-  Future<void> _deleteEntryFiles(RecordingHistoryEntry entry) async {
-    try {
-      final videoFile = File(entry.filePath);
-      if (await videoFile.exists()) {
-        await videoFile.delete();
-      }
-    } catch (_) {
-      // 保持靜默，避免 IO 例外影響主流程
-    }
-
-    final thumbnailPath = entry.thumbnailPath;
-    if (thumbnailPath != null && thumbnailPath.isNotEmpty) {
-      try {
-        final thumbFile = File(thumbnailPath);
-        if (await thumbFile.exists()) {
-          await thumbFile.delete();
-        }
-      } catch (_) {
-        // 縮圖刪除失敗時同樣忽略
-      }
-    }
-  }
-
-
-  /// 透過檔案挑選器挑選影片後匯入，提供 Data Metrics 與 Video Library 共同呼叫
-  Future<void> _pickExternalVideoForImport() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.video);
-    if (result == null || result.files.single.path == null) {
-      return; // 使用者取消挑選時直接結束
-    }
-
-    await _importExternalVideo(
-      path: result.files.single.path!,
-      fileName: result.files.single.name,
-    );
-  }
-
-  /// 實際執行影片匯入：複製檔案、建立歷史紀錄並刷新練習統計
-  Future<void> _importExternalVideo({
-    required String path,
-    String? fileName,
-  }) async {
-    if (!mounted) return;
-
-    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備匯入...'));
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          backgroundColor: Colors.grey[900],
-          title: const Text('導入影片中', style: TextStyle(color: Colors.white)),
-          content: ValueListenableBuilder<(double, String)>(
-            valueListenable: progressNotifier,
-            builder: (_, val, __) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: val.$1,
-                  backgroundColor: Colors.grey[700],
-                  color: Colors.blue,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  val.$2,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    try {
-      final nextRoundIndex =
-          ExternalVideoImporter.calculateNextRoundIndex(_recordingHistory);
-      final entry = await _videoImporter.importVideo(
-        sourcePath: path,
-        originalName: fileName,
-        nextRoundIndex: nextRoundIndex,
-        onProgress: (prog, label) {
-          progressNotifier.value = (prog, label);
-        },
-      );
-
-      if (!mounted) return;
-      Navigator.pop(context); // 關閉進度對話框
-
-      if (entry == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('匯入影片失敗，請確認檔案是否仍存在。')),
-        );
-        return;
-      }
-
-      final updatedEntries = <RecordingHistoryEntry>[entry, ..._recordingHistory];
-      
-      setState(() {
-        _recordingHistory
-          ..clear()
-          ..addAll(updatedEntries);
-      });
-
-      await RecordingHistoryStorage.instance.saveHistory(updatedEntries);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ 影片匯入成功：${entry.displayTitle}'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    } catch (e) {
-      debugPrint('[Home] 匯入影片錯誤: $e');
-      if (!mounted) return;
-      Navigator.pop(context); // 關閉進度對話框
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('匯入失敗: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      progressNotifier.dispose();
-    }
-  }
-
-  /// 將更新後的錄影紀錄套用到首頁狀態並觸發儲存與統計重算
-  Future<void> _applyHistoryState(List<RecordingHistoryEntry> entries) async {
-    if (!mounted) {
-      debugPrint('[首頁歷史] _applyHistoryState 略過：頁面已卸載');
-      return;
-    }
-
-    debugPrint('[首頁歷史] _applyHistoryState 套用 ${entries.length} 筆資料');
-    setState(() {
-      _recordingHistory
-        ..clear()
-        ..addAll(entries);
-      _isHistoryLoading = false;
-      _practiceCount = entries.length;
-      _isMetricCalculating = true;
-    });
-
-    await RecordingHistoryStorage.instance.saveHistory(
-      List<RecordingHistoryEntry>.from(_recordingHistory),
-    );
-
-    if (!mounted) {
-      debugPrint('[首頁歷史] 儲存完成時頁面已卸載，停止後續流程');
-      return;
-    }
-
-    await _refreshDashboardMetrics();
-  }
-
-  /// 接收錄影頁回傳的歷史紀錄，統一整理後套用到首頁狀態
-  void _handleHistoryUpdated(List<RecordingHistoryEntry> entries) {
-    unawaited(_prepareHistoryUpdate(entries));
-  }
-
-  /// 先確保縮圖完整再寫回狀態，避免畫面顯示灰階背景
-  Future<void> _prepareHistoryUpdate(List<RecordingHistoryEntry> entries) async {
-    final regenerated = await _cleanInvalidThumbnails(entries);
-    await _applyHistoryState(regenerated ?? entries);
-  }
-
-  /// 重新計算首頁儀表板指標，基於錄製歷史的音頻分析與擊球檢測結果
-  /// 並將計算結果存儲到 StatisticsService 中供 Data Metrics 和 Analytics 使用
   Future<void> _refreshDashboardMetrics() async {
     final snapshot = List<RecordingHistoryEntry>.from(_recordingHistory);
     if (snapshot.isEmpty) {
-      if (!mounted) return;
-      setState(() {
-        _isMetricCalculating = false;
-      });
       _statisticsService.setLocalMetrics(
         consistencyScore: null,
         bestSpeedMph: null,
@@ -853,47 +370,27 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() {
-      _isMetricCalculating = true;
-    });
-
     try {
       final metrics = await _MetricsCalculator.compute(snapshot);
       if (!mounted) return;
-      
-      // 從最新的錄影紀錄中取得聲音清脆度
+
       double? latestAudioCrispness;
       for (final entry in snapshot.reversed) {
         if (entry.audioCrispness != null) {
-          final crispValue = entry.audioCrispness;
-          latestAudioCrispness = (crispValue is int) ? (crispValue as int).toDouble() : crispValue as double?;
+          latestAudioCrispness = (entry.audioCrispness as num).toDouble();
           break;
         }
       }
-      
-      
-      setState(() {
-        _isMetricCalculating = false;
-        _bestSpeedMph = metrics.bestSpeedMph;
-        _sweetSpotPercentage = metrics.sweetSpotPercentage;
-        _audioCrispness = latestAudioCrispness;
-      });
-      
-      // 更新服務中的本地指標，供 Data Metrics 和 Analytics 共享
+
       _statisticsService.setLocalMetrics(
-        consistencyScore: null, // 不再使用 consistency score
+        consistencyScore: null,
         bestSpeedMph: metrics.bestSpeedMph,
         sweetSpotPercentage: metrics.sweetSpotPercentage,
         audioCrispness: latestAudioCrispness,
         comparisonBefore: null,
         comparisonAfter: null,
       );
-      
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isMetricCalculating = false;
-      });
+    } catch (_) {
       _statisticsService.setLocalMetrics(
         consistencyScore: null,
         bestSpeedMph: null,
@@ -905,46 +402,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 開啟獨立的錄影歷史頁面，讓使用者專注瀏覽過往影片
-  Future<void> _openRecordingHistoryPage() async {
-    final result = await Navigator.of(context).push<List<RecordingHistoryEntry>>(
-      MaterialPageRoute(
-        builder: (_) => RecordingHistoryPage(
-          entries: _recordingHistory,
-          userAvatarPath: null,
-          onDelete: _loadInitialHistory,
-        ),
-      ),
-    );
-    // 無論是否有回傳，重新載入儲存的歷史，確保分片/匯入後首頁同步
-    if (result != null) {
-      _handleHistoryUpdated(result);
-    } else {
-      await _loadInitialHistory();
-    }
-  }
-
-  /// 直接播放單筆歷史影片，並在檔案遺失時給予即時提示
-  Future<void> _playHistoryEntry(RecordingHistoryEntry entry) async {
-    final file = File(entry.filePath); // 建立檔案物件以檢查實際存在狀態
-    if (!await file.exists()) {
-      if (!mounted) return; // 若畫面已卸載則不再顯示訊息
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('找不到影片檔案 ${entry.fileName}，請確認檔案是否仍保留於裝置中。')),
-      );
-      return;
-    }
-
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => video_player.VideoPlayerPage(
-          videoPath: entry.filePath,
-          avatarPath: null,
-        ),
-      ),
-    );
-  }
 
 
 
@@ -978,7 +435,7 @@ class _HomePageState extends State<HomePage> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('嗨，${user.displayName ?? 'Golf Player'} 👋',
+                  Text('嗨，${user.displayName} 👋',
                       style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -1081,96 +538,6 @@ class _MetricsResult {
     required this.sweetSpotPercentage,
   });
 }
-
-/// 解析單支 CSV 後的即時統計
-class _SwingSnapshot {
-  final double? estimatedSpeedMph; // 估算出的揮桿速度
-  final double impactClarity; // 高加速度樣本占比，代表擊球清脆度
-  final double consistencyScore; // 平均與峰值的比例，代表穩定度
-
-  const _SwingSnapshot({
-    required this.estimatedSpeedMph,
-    required this.impactClarity,
-    required this.consistencyScore,
-  });
-}
-
-/// 將錄影紀錄與分析結果綁定，供比較與彙整使用
-class _EntrySnapshot {
-  final RecordingHistoryEntry entry; // 原始錄影資訊
-  final _SwingSnapshot? snapshot; // 解析後的感測數據
-
-  const _EntrySnapshot({required this.entry, required this.snapshot});
-}
-
-/// 雷達圖繪製器，呈現五個指標的相對表現
-class _RadarChartPainter extends CustomPainter {
-  final List<double> values; // 介於 0 到 1 的比例值
-
-  const _RadarChartPainter({required this.values});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) / 2 * 0.85;
-    final paint = Paint()
-      ..color = kSpeedColor.withValues(alpha: 0.2)
-      ..style = PaintingStyle.fill;
-
-    final borderPaint = Paint()
-      ..color = kSpeedColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-
-    final path = Path();
-    final angleStep = 2 * math.pi / values.length;
-    for (var i = 0; i < values.length; i++) {
-      final angle = -math.pi / 2 + angleStep * i;
-      final pointRadius = radius * values[i].clamp(0.0, 1.0);
-      final offset = Offset(
-        center.dx + pointRadius * math.cos(angle),
-        center.dy + pointRadius * math.sin(angle),
-      );
-      if (i == 0) {
-        path.moveTo(offset.dx, offset.dy);
-      } else {
-        path.lineTo(offset.dx, offset.dy);
-      }
-    }
-    path.close();
-
-    canvas.drawPath(path, paint);
-    canvas.drawPath(path, borderPaint);
-
-    final gridPaint = Paint()
-      ..color = const Color(0xFFE4E8F0)
-      ..style = PaintingStyle.stroke;
-
-    // 繪製背景網格，提供視覺上的比例參考
-    for (var layer = 1; layer <= 4; layer++) {
-      final layerRadius = radius * layer / 4;
-      final gridPath = Path();
-      for (var i = 0; i < values.length; i++) {
-        final angle = -math.pi / 2 + angleStep * i;
-        final offset = Offset(
-          center.dx + layerRadius * math.cos(angle),
-          center.dy + layerRadius * math.sin(angle),
-        );
-        if (i == 0) {
-          gridPath.moveTo(offset.dx, offset.dy);
-        } else {
-          gridPath.lineTo(offset.dx, offset.dy);
-        }
-      }
-      gridPath.close();
-      canvas.drawPath(gridPath, gridPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _RadarChartPainter oldDelegate) => !listEquals(oldDelegate.values, values);
-}
-
 
 /// 區塊標題元件，集中管理標題與右側操作按鈕
 class _SectionHeader extends StatelessWidget {

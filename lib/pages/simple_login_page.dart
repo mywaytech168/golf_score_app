@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/video_server_client.dart';
+import '../theme/app_theme.dart';
 
 /// 簡化版登入頁面 - 支持本地帳號和 Google OAuth
 class SimpleLoginPage extends StatefulWidget {
@@ -356,7 +357,7 @@ class _SimpleLoginPageState extends State<SimpleLoginPage> {
                       : (_isLoginMode ? _loginLocal : _registerLocal),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    backgroundColor: Colors.blue,
+                    backgroundColor: kPrimaryGreen,
                   ),
                   child: _isLoading
                       ? const SizedBox(

@@ -100,7 +100,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
           children: [
             const Text('從分享連結取得', style: TextStyle(fontSize: 16)),
             Text(
-              context.watch<UserProvider>().displayName ?? 'Golf Player',
+              context.watch<UserProvider>().displayName,
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.black54),
             ),
           ],

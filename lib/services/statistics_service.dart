@@ -116,7 +116,6 @@ class StatisticsService {
 
     try {
       final now = DateTime.now();
-      final today = now;
       final yesterday = now.subtract(const Duration(days: 1));
       
       // 並行加載三個時期的數據

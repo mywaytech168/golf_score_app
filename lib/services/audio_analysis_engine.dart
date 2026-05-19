@@ -1,10 +1,8 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 
-import 'audio_analyzer.dart' show AudioFeatures, analyzeFromSamples;
+import 'audio_analyzer.dart' show analyzeFromSamples;
 import 'audio_analysis_service.dart';
 import 'audio_export_models.dart';
 
