@@ -60,19 +60,24 @@ extension UserPlanX on UserPlan {
 class PlanStatus {
   final UserPlan plan;
   final int todayUsed;
-  final int dailyLimit;  // -1 = 無限制
-  final bool fromCache;  // true = 後端不可用，來自本地 cache
+  final int dailyLimit;   // -1 = 無限制
+  final int bonusBalls;   // 額外獎勵球數（看廣告、邀請、回饋、上傳）
+  final bool fromCache;   // true = 後端不可用，來自本地 cache
 
   const PlanStatus({
     required this.plan,
     required this.todayUsed,
     required this.dailyLimit,
+    this.bonusBalls = 0,
     this.fromCache = false,
   });
 
+  /// 今日總上限（方案球數 + 獎勵球數）；-1 = 無限制
+  int get totalLimit => dailyLimit < 0 ? -1 : dailyLimit + bonusBalls;
+
   /// 今日剩餘球數；-1 = 無限制
   int get remaining =>
-      dailyLimit < 0 ? -1 : (dailyLimit - todayUsed).clamp(0, dailyLimit);
+      totalLimit < 0 ? -1 : (totalLimit - todayUsed).clamp(0, totalLimit);
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -96,15 +101,21 @@ class PlanService {
     try {
       final data = await VideoServerClient.instance.getPlanStatus();
       if (data != null) {
-        final plan      = UserPlanX.fromKey(data['plan'] as String?);
-        final todayUsed = (data['todayUsed'] as int?) ?? 0;
-        final limit     = (data['dailyLimit'] as int?) ?? plan.dailyLimit;
+        final plan       = UserPlanX.fromKey(data['plan'] as String?);
+        final todayUsed  = (data['todayUsed']  as int?) ?? 0;
+        final limit      = (data['dailyLimit'] as int?) ?? plan.dailyLimit;
+        final bonusBalls = (data['bonusBalls'] as int?) ?? 0;
 
         // 同步本地 cache
         await _writeCachedPlan(plan);
 
-        debugPrint('$_tag ✅ 後端: ${plan.label} used=$todayUsed limit=$limit');
-        return PlanStatus(plan: plan, todayUsed: todayUsed, dailyLimit: limit);
+        debugPrint('$_tag ✅ 後端: ${plan.label} used=$todayUsed limit=$limit bonus=$bonusBalls');
+        return PlanStatus(
+          plan: plan,
+          todayUsed: todayUsed,
+          dailyLimit: limit,
+          bonusBalls: bonusBalls,
+        );
       }
     } on UnauthorizedException {
       rethrow;

@@ -381,4 +381,174 @@ class VideoServerClient {
       return false;
     }
   }
+
+  // ============================================================
+  // 獎勵系統
+  // ============================================================
+
+  /// 取得獎勵狀態
+  ///
+  /// 回傳格式：
+  /// ```json
+  /// { "bonusBalls": 8, "adClaimedToday": 2,
+  ///   "feedbackClaimedToday": false,
+  ///   "inviteCode": "ABC123", "inviteCount": 1 }
+  /// ```
+  Future<Map<String, dynamic>?> getRewardStatus({bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/rewards');
+      debugPrint('🎁 取得獎勵狀態 → $url');
+      final response = await http.get(url, headers: headers);
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getRewardStatus(isRetry: true);
+        throw UnauthorizedException('取得獎勵失敗: 401');
+      } else {
+        debugPrint('❌ 取得獎勵失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 取得獎勵異常: $e');
+      return null;
+    }
+  }
+
+  /// 認領看廣告獎勵（每日上限 5 次）
+  ///
+  /// 回傳格式：`{ "balls": 1, "adClaimedToday": 3 }`
+  Future<Map<String, dynamic>?> claimAdReward({bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/rewards/ad');
+      debugPrint('📺 認領廣告獎勵 → $url');
+      final response = await http.post(url, headers: headers);
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return claimAdReward(isRetry: true);
+        throw UnauthorizedException('廣告獎勵失敗: 401');
+      } else {
+        debugPrint('❌ 廣告獎勵失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 廣告獎勵異常: $e');
+      return null;
+    }
+  }
+
+  /// 取得使用者邀請碼
+  Future<String?> getInviteCode({bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/invite-code');
+      debugPrint('🔗 取得邀請碼 → $url');
+      final response = await http.get(url, headers: headers);
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        final data = (json['data'] as Map<String, dynamic>?) ?? json;
+        return data['code'] as String?;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getInviteCode(isRetry: true);
+        throw UnauthorizedException('取得邀請碼失敗: 401');
+      } else {
+        debugPrint('❌ 取得邀請碼失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 取得邀請碼異常: $e');
+      return null;
+    }
+  }
+
+  /// 提交問題回饋並認領獎勵（每日限 1 次）
+  ///
+  /// [type] = 'bug' | 'feature' | 'other'
+  /// 回傳格式：`{ "balls": 2 }`
+  Future<Map<String, dynamic>?> submitFeedback({
+    required String type,
+    required String text,
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/rewards/feedback');
+      debugPrint('💬 提交回饋 → $url');
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode({'type': type, 'text': text}),
+      );
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return submitFeedback(type: type, text: text, isRetry: true);
+        throw UnauthorizedException('提交回饋失敗: 401');
+      } else {
+        debugPrint('❌ 提交回饋失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 提交回饋異常: $e');
+      return null;
+    }
+  }
+
+  /// 上傳本地分析資料並認領獎勵
+  ///
+  /// [sessions] = 精簡錄影記錄清單（不含影片二進位）
+  /// 回傳格式：`{ "balls": 3, "uploaded": 5 }`
+  Future<Map<String, dynamic>?> claimUploadReward({
+    required List<Map<String, dynamic>> sessions,
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/rewards/upload');
+      debugPrint('☁️ 上傳資料獎勵 → $url (${sessions.length} 筆)');
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode({'sessions': sessions}),
+      );
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return claimUploadReward(sessions: sessions, isRetry: true);
+        throw UnauthorizedException('上傳獎勵失敗: 401');
+      } else {
+        debugPrint('❌ 上傳獎勵失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 上傳獎勵異常: $e');
+      return null;
+    }
+  }
 }

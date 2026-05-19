@@ -16,6 +16,7 @@ import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 import '../services/plan_service.dart';
 import '../widgets/green_page_header.dart';
+import 'reward_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -199,15 +200,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGreenHeader(BuildContext context) {
-    final plan  = _planStatus.plan;
-    final limit = _planStatus.dailyLimit;
-    final used  = _planStatus.todayUsed;
+    final plan   = _planStatus.plan;
+    final used   = _planStatus.todayUsed;
+    final total  = _planStatus.totalLimit;   // dailyLimit + bonusBalls
+    final bonus  = _planStatus.bonusBalls;
     final planColor = Color(plan.colorValue);
 
-    final overLimit = !plan.isUnlimited && used >= limit;
-    final quotaText = plan.isUnlimited
-        ? '今日無限制 🏆'
-        : '今日用量 $used / $limit 球${overLimit ? '  ⚠️ 已達上限' : ''}';
+    final overLimit = !plan.isUnlimited && used >= total;
+    String quotaText;
+    if (plan.isUnlimited) {
+      quotaText = '今日無限制 🏆';
+    } else {
+      quotaText = '今日用量 $used / $total 球';
+      if (bonus > 0) quotaText += '（含 +$bonus 獎勵）';
+      if (overLimit) quotaText += '  ⚠️ 已達上限';
+    }
 
     return Consumer<UserProvider>(
       builder: (context, user, _) {
@@ -257,6 +264,13 @@ class _HomePageState extends State<HomePage> {
           subtitle: quotaText,
           actions: [
             planBadge,
+            IconButton(
+              tooltip: '獎勵球數',
+              icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const RewardPage()),
+              ).then((_) => _loadPlanStatus()),
+            ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
               onSelected: (v) { if (v == 'logout') _logout(); },
