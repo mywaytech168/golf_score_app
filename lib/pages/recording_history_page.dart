@@ -1632,16 +1632,17 @@ class _HistoryTileState extends State<_HistoryTile> {
                         value: _HistoryMenuAction.compare,
                         child: Text('⚖️ 與另一部影片比較'),
                       ),
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.share,
-                      child: Row(
-                        children: [
-                          Icon(Icons.share_outlined, size: 16, color: Color(0xFF1E8E5A)),
-                          SizedBox(width: 8),
-                          Text('分享連結'),
-                        ],
+                    if (!_isLongVideo && _isAnalyzed)
+                      const PopupMenuItem<_HistoryMenuAction>(
+                        value: _HistoryMenuAction.share,
+                        child: Row(
+                          children: [
+                            Icon(Icons.share_outlined, size: 16, color: Color(0xFF1E8E5A)),
+                            SizedBox(width: 8),
+                            Text('分享連結'),
+                          ],
+                        ),
                       ),
-                    ),
                     const PopupMenuItem<_HistoryMenuAction>(
                       value: _HistoryMenuAction.resetAnalysisState,
                       child: Text('🧪 測試: 重置分析狀態'),
