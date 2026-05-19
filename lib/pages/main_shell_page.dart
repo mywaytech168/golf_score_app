@@ -209,13 +209,13 @@ class _MainShellPageState extends State<MainShellPage> {
         children: [
           _BottomNavItem(
             icon: Icons.home_rounded,
-            label: 'Home',
+            label: '首頁',
             isActive: _currentIndex == 0,
             onTap: () => _onBottomNavTap(0),
           ),
           _BottomNavItem(
             icon: Icons.calendar_today_rounded,
-            label: 'Today',
+            label: '數據',
             isActive: _currentIndex == 1,
             onTap: () => _onBottomNavTap(1),
           ),
@@ -225,13 +225,13 @@ class _MainShellPageState extends State<MainShellPage> {
           ),
           _BottomNavItem(
             icon: Icons.bar_chart_rounded,
-            label: 'Metrics',
+            label: '歷史',
             isActive: _currentIndex == 3,
             onTap: () => _onBottomNavTap(3),
           ),
           _BottomNavItem(
             icon: Icons.workspace_premium_rounded,
-            label: 'Upgrade',
+            label: '付費',
             isActive: _currentIndex == 4,
             onTap: () => _onBottomNavTap(4),
           ),
