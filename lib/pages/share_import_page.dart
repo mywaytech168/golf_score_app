@@ -19,8 +19,8 @@ class _ShareImportPageState extends State<ShareImportPage> {
   final _formKey = GlobalKey<FormState>();
 
   _ImportPhase _phase = _ImportPhase.input;
+  _DownloadSub _downloadSub = _DownloadSub.preparing;
   ShareGetResult? _info;
-  String _statusMsg = '';
   double _downloadProgress = 0;
   String? _error;
 
@@ -53,17 +53,28 @@ class _ShareImportPageState extends State<ShareImportPage> {
     final info = _info!;
     final code = _codeCtrl.text.trim();
 
-    setState(() { _phase = _ImportPhase.downloading; _downloadProgress = 0; _statusMsg = '準備下載…'; });
+    setState(() {
+      _phase = _ImportPhase.downloading;
+      _downloadSub = _DownloadSub.preparing;
+      _downloadProgress = 0;
+    });
 
     try {
       await ShareService.downloadAndImport(
         info: info,
         shareCode: code,
         onDownloadProgress: (p) {
-          if (mounted) setState(() => _downloadProgress = p);
+          if (mounted) {
+            setState(() {
+              _downloadSub = _DownloadSub.downloading;
+              _downloadProgress = p;
+            });
+          }
         },
         onStatus: (s) {
-          if (mounted) setState(() => _statusMsg = s);
+          if (mounted && s.contains('解壓')) {
+            setState(() => _downloadSub = _DownloadSub.extracting);
+          }
         },
       );
 
@@ -245,28 +256,43 @@ class _ShareImportPageState extends State<ShareImportPage> {
   // ── 下載中 ───────────────────────────────────────────────────
 
   Widget _buildDownloadingSection() {
+    final label = switch (_downloadSub) {
+      _DownloadSub.preparing   => '準備下載…',
+      _DownloadSub.downloading => '下載中…',
+      _DownloadSub.extracting  => '解壓縮中…',
+    };
+
+    // preparing / extracting → 不定式；downloading → 顯示百分比
+    final progressValue = _downloadSub == _DownloadSub.downloading
+        ? _downloadProgress
+        : null;
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.cloud_download_outlined, size: 64, color: Color(0xFF1565C0)),
           const SizedBox(height: 24),
-          Text(_statusMsg, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87)),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+          ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
-            value: _statusMsg.contains('解壓') ? null : _downloadProgress,
+            value: progressValue,
             backgroundColor: Colors.black12,
             color: const Color(0xFF1565C0),
             minHeight: 6,
             borderRadius: BorderRadius.circular(3),
           ),
-          if (_downloadProgress > 0 && !_statusMsg.contains('解壓')) ...[
-            const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          if (_downloadSub == _DownloadSub.downloading)
             Text(
               '${(_downloadProgress * 100).toStringAsFixed(0)}%',
               style: const TextStyle(color: Colors.black54, fontSize: 13),
-            ),
-          ],
+            )
+          else
+            const SizedBox(height: 16),
         ],
       ),
     );
@@ -301,3 +327,5 @@ class _ShareImportPageState extends State<ShareImportPage> {
 }
 
 enum _ImportPhase { input, looking, preview, downloading, done }
+
+enum _DownloadSub { preparing, downloading, extracting }
