@@ -606,6 +606,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           key: ValueKey(entry.filePath),
                           entry: entry,
                           formattedTime: _formatTimestamp(entry.recordedAt),
+                          formattedImportTime: entry.createdAt != null
+                              ? _formatTimestamp(entry.createdAt!)
+                              : null,
                           onTap: () => _playEntry(entry),
                           onRename: () => _renameEntry(entry),
                           onDelete: () => _deleteEntry(entry),
@@ -655,7 +658,8 @@ class _EmptyHistoryView extends StatelessWidget {
 /// 單筆歷史紀錄的呈現元件，包含標題、時間與檔名資訊
 class _HistoryTile extends StatefulWidget {
   final RecordingHistoryEntry entry; // 對應的錄影資料
-  final String formattedTime; // 已轉換好的顯示時間
+  final String formattedTime; // 原始錄製時間（已格式化）
+  final String? formattedImportTime; // 匯入本機時間；僅匯入影片有值
   final VoidCallback onTap; // 點擊後的播放行為
   final VoidCallback onRename; // 重新命名影片
   final VoidCallback onDelete; // 刪除影片紀錄
@@ -670,6 +674,7 @@ class _HistoryTile extends StatefulWidget {
     super.key,
     required this.entry,
     required this.formattedTime,
+    this.formattedImportTime,
     required this.onTap,
     required this.onRename,
     required this.onDelete,
@@ -1667,11 +1672,23 @@ class _HistoryTileState extends State<_HistoryTile> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text(
-                    '${widget.formattedTime} · ${widget.entry.durationSeconds} 秒',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '🎬 ${widget.formattedTime} · ${widget.entry.durationSeconds} 秒',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (widget.formattedImportTime != null)
+                        Text(
+                          '📥 ${widget.formattedImportTime}',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
                   ),
                 ),
                 GestureDetector(
