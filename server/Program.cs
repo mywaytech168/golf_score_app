@@ -80,6 +80,7 @@ builder.Services.AddHttpClient();
 
 // 後台服務 - 排程器
 builder.Services.AddHostedService<ProcessingSchedulerService>();
+builder.Services.AddHostedService<ShareCleanupService>();
 
 // ============================================================
 // 3. CORS 跨域配置
