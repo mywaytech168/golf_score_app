@@ -37,8 +37,12 @@ class RecordingHistoryEntry {
   /// 第幾輪錄影完成，從 1 開始編號
   final int roundIndex;
 
-  /// 錄影完成的時間戳記，提供排序與顯示
+  /// 影片原始錄製時間（顯示用）
   final DateTime recordedAt;
+
+  /// 加入本機歷史的時間（排序用）；null 時 fallback 到 recordedAt
+  /// 首次錄製時等於 recordedAt，從分享連結匯入時等於匯入時刻
+  final DateTime? createdAt;
 
   /// 本輪錄影的設定秒數，供提示與說明使用
   final int durationSeconds;
@@ -93,6 +97,7 @@ class RecordingHistoryEntry {
     required this.filePath,
     required this.roundIndex,
     required this.recordedAt,
+    this.createdAt,
     required this.durationSeconds,
     this.customName,
     this.thumbnailPath,
@@ -110,6 +115,9 @@ class RecordingHistoryEntry {
     this.shareCode,
     this.shareExpiresAt,
   });
+
+  /// 排序用時間：優先用 createdAt，若無則 fallback 到 recordedAt
+  DateTime get sortTime => createdAt ?? recordedAt;
 
   /// 分享碼是否仍在有效期內
   bool get isShareValid =>
@@ -138,11 +146,13 @@ class RecordingHistoryEntry {
     List<String>? audioTags,
     String? shareCode,
     DateTime? shareExpiresAt,
+    DateTime? createdAt,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
       roundIndex: roundIndex ?? this.roundIndex,
       recordedAt: recordedAt ?? this.recordedAt,
+      createdAt: createdAt ?? this.createdAt,
       durationSeconds: durationSeconds ?? this.durationSeconds,
       customName: customName ?? this.customName,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
@@ -199,6 +209,7 @@ class RecordingHistoryEntry {
       'audioTags': audioTags,
       'shareCode': shareCode,
       'shareExpiresAt': shareExpiresAt?.toUtc().toIso8601String(),
+      'createdAt': createdAt?.toIso8601String(),
     };
   }
 
@@ -247,6 +258,9 @@ class RecordingHistoryEntry {
       shareCode: json['shareCode'] as String?,
       shareExpiresAt: json['shareExpiresAt'] != null
           ? DateTime.tryParse(json['shareExpiresAt'] as String)
+          : null,
+      createdAt: json['createdAt'] != null
+          ? DateTime.tryParse(json['createdAt'] as String)
           : null,
     );
   }

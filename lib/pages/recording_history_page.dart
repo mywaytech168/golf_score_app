@@ -429,7 +429,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     switch (_sortBy) {
       case _SortBy.date:
         // 按時間排序（最新優先）
-        sorted.sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+        sorted.sort((a, b) => b.sortTime.compareTo(a.sortTime));
         break;
       
       case _SortBy.peakValue:
@@ -441,7 +441,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           
           // 如果都沒有數據，則按時間排序
           if (maxPeakA == null && maxPeakB == null) {
-            return b.recordedAt.compareTo(a.recordedAt);
+            return b.sortTime.compareTo(a.sortTime);
           }
           
           // 如果只有一個有數據，有數據的排前面
@@ -461,7 +461,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           
           // 如果都沒有數據，則按時間排序
           if (crispnessA == -1 && crispnessB == -1) {
-            return b.recordedAt.compareTo(a.recordedAt);
+            return b.sortTime.compareTo(a.sortTime);
           }
           
           // 較高的排前面

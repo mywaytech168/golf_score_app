@@ -254,7 +254,7 @@ class ShareService {
         filePath: mainVideo,
         roundIndex: nextIndex,
         thumbnailPath: remappedThumb,
-        // 清除分享碼，避免接收端用同一組碼再分享
+        createdAt: DateTime.now(),   // 匯入時刻，確保出現在歷史最上方
         shareCode: null,
         shareExpiresAt: null,
       );
@@ -268,6 +268,7 @@ class ShareService {
         filePath: mainVideo,
         roundIndex: nextIndex,
         recordedAt: DateTime.now(),
+        createdAt: DateTime.now(),
         durationSeconds: 0,
         customName: info.title,
         isAnalyzed: File('$sessionDir/analyzed.mp4').existsSync(),
