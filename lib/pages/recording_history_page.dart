@@ -16,6 +16,8 @@ import '../services/video_analysis_pipeline_service.dart';
 import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
+import '../services/ad_service.dart';
+import '../services/plan_service.dart';
 import '../widgets/hits_summary_widget.dart';
 import '../widgets/green_page_header.dart';
 import 'video_comparison_page.dart';
@@ -778,6 +780,12 @@ class _HistoryTileState extends State<_HistoryTile> {
       ),
     );
 
+    // Free 方案：在分析期間插播廣告（fire-and-forget，不阻塞進度）
+    final detectionPlan = await PlanService.getPlanStatus();
+    if (detectionPlan.plan == UserPlan.free) {
+      unawaited(AdService.showInterstitialAd());
+    }
+
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
@@ -1050,6 +1058,12 @@ class _HistoryTileState extends State<_HistoryTile> {
         ),
       ),
     );
+
+    // Free 方案：在分析期間插播廣告（fire-and-forget，不阻塞進度）
+    final analysisPlan = await PlanService.getPlanStatus();
+    if (analysisPlan.plan == UserPlan.free) {
+      unawaited(AdService.showInterstitialAd());
+    }
 
     try {
       final clipPath = widget.entry.filePath;

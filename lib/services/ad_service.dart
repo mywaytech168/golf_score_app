@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 /// 廣告服務 - 管理所有廣告操作
@@ -16,8 +17,7 @@ class AdService {
   
   static late InterstitialAd _interstitialAd;
   static late RewardedAd _rewardedAd;
-  static late BannerAd _bannerAd;
-  
+
   static bool _isInterstitialAdReady = false;
   static bool _isRewardedAdReady = false;
   
@@ -54,7 +54,7 @@ class AdService {
         },
         onAdFailedToLoad: (LoadAdError error) {
           _isInterstitialAdReady = false;
-          print('插頁廣告加載失敗: $error');
+          debugPrint('插頁廣告加載失敗: $error');
           // 重試加載
           Future.delayed(const Duration(seconds: 5), () {
             loadInterstitialAd();
@@ -92,7 +92,7 @@ class AdService {
         },
         onAdFailedToLoad: (LoadAdError error) {
           _isRewardedAdReady = false;
-          print('獎勵廣告加載失敗: $error');
+          debugPrint('獎勵廣告加載失敗: $error');
           // 重試加載
           Future.delayed(const Duration(seconds: 5), () {
             loadRewardedAd();
@@ -107,7 +107,7 @@ class AdService {
     if (_isInterstitialAdReady) {
       await _interstitialAd.show();
     } else {
-      print('插頁廣告還未準備好');
+      debugPrint('插頁廣告還未準備好');
       loadInterstitialAd();
     }
   }
@@ -121,11 +121,11 @@ class AdService {
         await _rewardedAd.show(
           onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
             rewarded = true;
-            print('用戶獲得獎勵: ${reward.amount} ${reward.type}');
+            debugPrint('用戶獲得獎勵: ${reward.amount} ${reward.type}');
           },
         );
       } catch (e) {
-        print('顯示廣告時出錯: $e');
+        debugPrint('顯示廣告時出錯: $e');
         return true; // 如果廣告顯示失敗，允許用戶繼續
       }
       
@@ -134,7 +134,7 @@ class AdService {
       
       return rewarded;
     } else {
-      print('獎勵廣告還未準備好，允許用戶繼續（可能是測試環境）');
+      debugPrint('獎勵廣告還未準備好，允許用戶繼續（可能是測試環境）');
       loadRewardedAd();
       return true; // 廣告未準備好時允許用戶繼續（這樣可以測試其他功能）
     }
@@ -148,10 +148,10 @@ class AdService {
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
-          print('橫幅廣告已加載');
+          debugPrint('橫幅廣告已加載');
         },
         onAdFailedToLoad: (ad, error) {
-          print('橫幅廣告加載失敗: $error');
+          debugPrint('橫幅廣告加載失敗: $error');
           ad.dispose();
         },
       ),
