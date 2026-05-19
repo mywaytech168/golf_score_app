@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -71,6 +72,10 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
     // 2. 需要重新上傳
     try {
       if (mounted) setState(() => _phase = _Phase.compressing);
+
+      // 壓縮前先寫入 session_meta.json（含完整 entry 資訊）
+      final metaFile = File('$_sessionDir/session_meta.json');
+      metaFile.writeAsStringSync(jsonEncode(widget.entry.toJson()));
 
       final zipPath = await ShareService.compressSession(_sessionDir);
       final zipSize = File(zipPath).lengthSync();

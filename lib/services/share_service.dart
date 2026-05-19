@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/recording_history_entry.dart';
@@ -228,21 +230,52 @@ class ShareService {
     }
     if (mainVideo == null) throw Exception('解壓縮後找不到影片檔案');
 
-    // 建立 RecordingHistoryEntry
+    // 讀取 session_meta.json 重建 entry（含原始分析結果）
+    RecordingHistoryEntry entry;
+    final metaFile = File('$sessionDir/session_meta.json');
+    if (metaFile.existsSync()) {
+      final json = jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>;
+      final original = RecordingHistoryEntry.fromJson(json);
+
+      // 路徑重映射：將原始 filePath 換成本機解壓縮後的路徑
+      // thumbnailPath 若存在於 sessionDir 也一起重映射，否則清空
+      String? remappedThumb;
+      if (original.thumbnailPath != null) {
+        final thumbName = p.basename(original.thumbnailPath!);
+        final localThumb = File('$sessionDir/$thumbName');
+        remappedThumb = localThumb.existsSync() ? localThumb.path : null;
+      }
+
+      final existing = await RecordingHistoryStorage.instance.loadHistory();
+      final nextIndex = existing.isEmpty ? 1
+          : existing.map((e) => e.roundIndex).reduce((a, b) => a > b ? a : b) + 1;
+
+      entry = original.copyWith(
+        filePath: mainVideo,
+        roundIndex: nextIndex,
+        thumbnailPath: remappedThumb,
+        // 清除分享碼，避免接收端用同一組碼再分享
+        shareCode: null,
+        shareExpiresAt: null,
+      );
+    } else {
+      // fallback：meta 不存在時用最基本資料建立
+      final existing = await RecordingHistoryStorage.instance.loadHistory();
+      final nextIndex = existing.isEmpty ? 1
+          : existing.map((e) => e.roundIndex).reduce((a, b) => a > b ? a : b) + 1;
+
+      entry = RecordingHistoryEntry(
+        filePath: mainVideo,
+        roundIndex: nextIndex,
+        recordedAt: DateTime.now(),
+        durationSeconds: 0,
+        customName: info.title,
+        isAnalyzed: File('$sessionDir/analyzed.mp4').existsSync(),
+      );
+    }
+
     final existing = await RecordingHistoryStorage.instance.loadHistory();
-    final nextIndex = (existing.isEmpty ? 0 : existing.map((e) => e.roundIndex).reduce((a, b) => a > b ? a : b)) + 1;
-
-    final entry = RecordingHistoryEntry(
-      filePath: mainVideo,
-      roundIndex: nextIndex,
-      recordedAt: DateTime.now(),
-      durationSeconds: 0,
-      customName: info.title,
-      isAnalyzed: File('$sessionDir/analyzed.mp4').existsSync(),
-    );
-
-    final updated = [entry, ...existing];
-    await RecordingHistoryStorage.instance.saveHistory(updated);
+    await RecordingHistoryStorage.instance.saveHistory([entry, ...existing]);
 
     return entry;
   }
