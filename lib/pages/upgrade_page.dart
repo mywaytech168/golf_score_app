@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pay/pay.dart';
 
 import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
@@ -625,9 +626,69 @@ class _CtaButton extends StatelessWidget {
 // 付款底頁
 // ════════════════════════════════════════════════════════════════
 
-class _PaySheet extends StatelessWidget {
+class _PaySheet extends StatefulWidget {
   final _Plan plan;
   const _PaySheet({required this.plan});
+
+  @override
+  State<_PaySheet> createState() => _PaySheetState();
+}
+
+class _PaySheetState extends State<_PaySheet> {
+  PaymentConfiguration? _googlePayConfig;
+  bool _configError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    PaymentConfiguration.fromAsset('assets/pay/google_pay_config.json').then((cfg) {
+      if (mounted) setState(() => _googlePayConfig = cfg);
+    }).catchError((_) {
+      if (mounted) setState(() => _configError = true);
+    });
+  }
+
+  String get _priceAmount {
+    switch (widget.plan) {
+      case _Plan.pro:   return '299.00';
+      case _Plan.elite: return '599.00';
+      default:          return '0.00';
+    }
+  }
+
+  List<PaymentItem> get _paymentItems => [
+    PaymentItem(
+      label: 'TekSwing ${widget.plan.label} 方案',
+      amount: _priceAmount,
+      status: PaymentItemStatus.final_price,
+    ),
+  ];
+
+  Future<void> _onGooglePayResult(Map<String, dynamic> result) async {
+    // result 包含 Google Pay payment token（TEST 環境無真實金流）
+    debugPrint('[GooglePay] result: $result');
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    await _activatePlan('Google Pay');
+  }
+
+  void _onGooglePayError(Object? error) {
+    debugPrint('[GooglePay] error: $error');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Google Pay 發生錯誤：$error')),
+    );
+  }
+
+  Future<void> _activatePlan(String method) async {
+    final userPlan = switch (widget.plan) {
+      _Plan.free  => UserPlan.free,
+      _Plan.pro   => UserPlan.pro,
+      _Plan.elite => UserPlan.elite,
+    };
+    await PlanService.setPlan(userPlan);
+    if (mounted) _showSuccess(method);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -641,15 +702,15 @@ class _PaySheet extends StatelessWidget {
             // 標頭
             Row(
               children: [
-                Icon(Icons.workspace_premium_rounded, color: plan.primaryColor, size: 24),
+                Icon(Icons.workspace_premium_rounded, color: widget.plan.primaryColor, size: 24),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('升級 ${plan.label} 方案',
+                    Text('升級 ${widget.plan.label} 方案',
                         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-                    Text('${plan.price}${plan.period}',
-                        style: TextStyle(fontSize: 13, color: plan.primaryColor, fontWeight: FontWeight.w600)),
+                    Text('${widget.plan.price}${widget.plan.period}',
+                        style: TextStyle(fontSize: 13, color: widget.plan.primaryColor, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ],
@@ -658,11 +719,28 @@ class _PaySheet extends StatelessWidget {
             const Divider(),
             const SizedBox(height: 8),
             const Text('選擇付款方式', style: TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
-            _payOption(context, Icons.phone_android_rounded, 'Google Pay', const Color(0xFF4285F4)),
-            _payOption(context, Icons.apple_rounded,          'Apple Pay',  Colors.black87),
-            _payOption(context, Icons.credit_card_rounded,    '信用卡',     const Color(0xFF7B1FA2)),
-            _payOption(context, Icons.chat_rounded,           'LINE Pay',   const Color(0xFF00B900)),
+            const SizedBox(height: 12),
+
+            // ── Google Pay ──────────────────────────────────────
+            if (_googlePayConfig != null)
+              _GooglePayRow(
+                config: _googlePayConfig!,
+                paymentItems: _paymentItems,
+                onPaymentResult: _onGooglePayResult,
+                onError: _onGooglePayError,
+              )
+            else if (_configError)
+              _payOptionMock(context, Icons.phone_android_rounded, 'Google Pay', const Color(0xFF4285F4))
+            else
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+              ),
+
+            // ── 其他付款方式（Mock）──────────────────────────────
+            _payOptionMock(context, Icons.apple_rounded,       'Apple Pay', Colors.black87),
+            _payOptionMock(context, Icons.credit_card_rounded, '信用卡',    const Color(0xFF7B1FA2)),
+            _payOptionMock(context, Icons.chat_rounded,        'LINE Pay',  const Color(0xFF00B900)),
             const SizedBox(height: 4),
           ],
         ),
@@ -670,7 +748,7 @@ class _PaySheet extends StatelessWidget {
     );
   }
 
-  Widget _payOption(BuildContext context, IconData icon, String label, Color color) {
+  Widget _payOptionMock(BuildContext context, IconData icon, String label, Color color) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Container(
@@ -682,33 +760,85 @@ class _PaySheet extends StatelessWidget {
       trailing: const Icon(Icons.chevron_right_rounded, color: Colors.black38),
       onTap: () async {
         Navigator.of(context).pop();
-        // 寫入選擇的方案
-        final userPlan = switch (plan) {
-          _Plan.free  => UserPlan.free,
-          _Plan.pro   => UserPlan.pro,
-          _Plan.elite => UserPlan.elite,
-        };
-        await PlanService.setPlan(userPlan);
-        if (context.mounted) _showSuccess(context, label);
+        await _activatePlan(label);
       },
     );
   }
 
-  void _showSuccess(BuildContext context, String method) {
+  void _showSuccess(String method) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(children: [
-          Icon(Icons.check_circle_rounded, color: plan.primaryColor),
+          Icon(Icons.check_circle_rounded, color: widget.plan.primaryColor),
           const SizedBox(width: 8),
           const Text('升級成功'),
         ]),
-        content: Text('已透過 $method 升級為 ${plan.label} 方案。\n感謝您的支持！'),
+        content: Text('已透過 $method 升級為 ${widget.plan.label} 方案。\n感謝您的支持！'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('確定', style: TextStyle(color: plan.primaryColor)),
+            child: Text('確定', style: TextStyle(color: widget.plan.primaryColor)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// Google Pay 按鈕列
+// ════════════════════════════════════════════════════════════════
+
+class _GooglePayRow extends StatelessWidget {
+  final PaymentConfiguration config;
+  final List<PaymentItem> paymentItems;
+  final void Function(Map<String, dynamic>) onPaymentResult;
+  final void Function(Object?) onError;
+
+  const _GooglePayRow({
+    required this.config,
+    required this.paymentItems,
+    required this.onPaymentResult,
+    required this.onError,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          // 左側圖示（仿 _payOptionMock 風格）
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFF4285F4).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.phone_android_rounded, color: Color(0xFF4285F4), size: 22),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Text('Google Pay', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
+          ),
+          // 官方 Google Pay 按鈕
+          SizedBox(
+            height: 44,
+            child: GooglePayButton(
+              paymentConfiguration: config,
+              paymentItems: paymentItems,
+              type: GooglePayButtonType.pay,
+              theme: GooglePayButtonTheme.dark,
+              cornerRadius: 10,
+              onPaymentResult: onPaymentResult,
+              onError: onError,
+              loadingIndicator: const SizedBox(
+                width: 80, height: 44,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+              ),
+            ),
           ),
         ],
       ),
