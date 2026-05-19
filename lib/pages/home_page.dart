@@ -14,6 +14,7 @@ import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
+import '../services/plan_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -27,15 +28,24 @@ class _HomePageState extends State<HomePage> {
   late final StatisticsService _statisticsService = StatisticsService();
   late final PurchaseService _purchaseService = PurchaseService();
 
+  UserPlan _plan = UserPlan.free;
+  int _todayUsed = 0;
+
   @override
   void initState() {
     super.initState();
     _loadInitialHistory();
     _initializeStatistics();
     _initializePurchaseService();
+    _loadPlanStatus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserProvider>().loadProfile();
     });
+  }
+
+  Future<void> _loadPlanStatus() async {
+    final status = await PlanService.getPlanStatus();
+    if (mounted) setState(() { _plan = status.plan; _todayUsed = status.used; });
   }
 
   @override
@@ -55,6 +65,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _initializeStatistics() async {
     try {
       await _statisticsService.loadAllStatistics();
+      await _loadPlanStatus(); // 統計刷新後同步用量
     } on UnauthorizedException {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/login');
@@ -178,6 +189,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   PreferredSizeWidget _buildAppBar() {
+    final plan = _plan;
+    final limit = plan.dailyLimit;
+    final used  = _todayUsed;
+    final planColor = Color(plan.colorValue);
+
+    // 用量文字：Free/Pro 顯示 used/limit，Elite 顯示無限制
+    final quotaText = plan.isUnlimited
+        ? '今日無限制 🏆'
+        : '今日用量 $used / $limit 球';
+
     return AppBar(
       elevation: 0,
       backgroundColor: kBgPage,
@@ -186,6 +207,7 @@ class _HomePageState extends State<HomePage> {
       title: Consumer<UserProvider>(
         builder: (context, user, _) => Row(
           children: [
+            // 頭像
             Container(
               width: 44,
               height: 44,
@@ -196,29 +218,62 @@ class _HomePageState extends State<HomePage> {
               child: user.avatarPath != null
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(14),
-                      child: Image.file(File(user.avatarPath!),
-                          fit: BoxFit.cover),
+                      child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
                     )
-                  : const Icon(Icons.golf_course_rounded,
-                      color: Colors.white),
+                  : const Icon(Icons.golf_course_rounded, color: Colors.white),
             ),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '嗨，${user.displayName} 👋',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: kTextPrimary,
+            // 名稱 + 方案 + 用量
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '嗨，${user.displayName} 👋',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: kTextPrimary,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // 方案 badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: planColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: planColor.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          plan.label,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: planColor,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const Text(
-                  '今天也來練習吧！',
-                  style: TextStyle(fontSize: 12, color: kTextSecondary),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  // 今日用量
+                  Text(
+                    quotaText,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: (!plan.isUnlimited && used >= limit)
+                          ? Colors.red
+                          : kTextSecondary,
+                      fontWeight: (!plan.isUnlimited && used >= limit)
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

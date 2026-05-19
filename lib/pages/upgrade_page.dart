@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
 
 // ════════════════════════════════════════════════════════════════
@@ -679,9 +680,16 @@ class _PaySheet extends StatelessWidget {
       ),
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
       trailing: const Icon(Icons.chevron_right_rounded, color: Colors.black38),
-      onTap: () {
+      onTap: () async {
         Navigator.of(context).pop();
-        _showSuccess(context, label);
+        // 寫入選擇的方案
+        final userPlan = switch (plan) {
+          _Plan.free  => UserPlan.free,
+          _Plan.pro   => UserPlan.pro,
+          _Plan.elite => UserPlan.elite,
+        };
+        await PlanService.setPlan(userPlan);
+        if (context.mounted) _showSuccess(context, label);
       },
     );
   }
