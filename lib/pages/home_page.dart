@@ -15,6 +15,7 @@ import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 import '../services/plan_service.dart';
+import '../widgets/green_page_header.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -146,161 +147,135 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kBgPage,
-      appBar: _buildAppBar(),
-      body: StreamBuilder<LoadingState>(
-        stream: _statisticsService.watchLoadingState(),
-        initialData: _statisticsService.loadingState,
-        builder: (context, loadingSnap) {
-          return StreamBuilder<StatisticsResponse?>(
-            stream: _statisticsService.watchStatistics(),
-            initialData: _statisticsService.statistics,
-            builder: (context, statsSnap) {
-              final today = _statisticsService.todayStatistics;
-              final isLoading = loadingSnap.data?.isLoading ?? false;
+      body: Column(
+        children: [
+          // ── 綠色頂部面板 ─────────────────────────────────────
+          _buildGreenHeader(context),
 
-              return RefreshIndicator(
-                onRefresh: _initializeStatistics,
-                color: kPrimaryGreen,
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(
-                      kSpaceMD, kSpaceSM, kSpaceMD, kSpaceXL),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 今日快覽
-                      _TodayOverviewCard(stats: today, loading: isLoading),
-                      const SizedBox(height: kSpaceMD),
+          // ── 可捲動主體 ───────────────────────────────────────
+          Expanded(
+            child: StreamBuilder<LoadingState>(
+              stream: _statisticsService.watchLoadingState(),
+              initialData: _statisticsService.loadingState,
+              builder: (context, loadingSnap) {
+                return StreamBuilder<StatisticsResponse?>(
+                  stream: _statisticsService.watchStatistics(),
+                  initialData: _statisticsService.statistics,
+                  builder: (context, statsSnap) {
+                    final today = _statisticsService.todayStatistics;
+                    final isLoading = loadingSnap.data?.isLoading ?? false;
 
-                      // 三項核心指標
-                      _KeyMetricsRow(stats: today, loading: isLoading),
-                      const SizedBox(height: kSpaceMD),
-
-                      // 好球率
-                      if (!isLoading && (today?.totalCount ?? 0) > 0)
-                        _GoodRateCard(
-                          good: today?.goodShot ?? 0,
-                          bad: today?.badShot ?? 0,
+                    return RefreshIndicator(
+                      onRefresh: _initializeStatistics,
+                      color: kPrimaryGreen,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(
+                            kSpaceMD, kSpaceSM, kSpaceMD, kSpaceXL),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _TodayOverviewCard(stats: today, loading: isLoading),
+                            const SizedBox(height: kSpaceMD),
+                            _KeyMetricsRow(stats: today, loading: isLoading),
+                            const SizedBox(height: kSpaceMD),
+                            if (!isLoading && (today?.totalCount ?? 0) > 0)
+                              _GoodRateCard(
+                                good: today?.goodShot ?? 0,
+                                bad: today?.badShot ?? 0,
+                              ),
+                          ],
                         ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
+  Widget _buildGreenHeader(BuildContext context) {
     final plan  = _planStatus.plan;
     final limit = _planStatus.dailyLimit;
     final used  = _planStatus.todayUsed;
     final planColor = Color(plan.colorValue);
 
-    // 用量文字：Free/Pro 顯示 used/limit，Elite 顯示無限制
+    final overLimit = !plan.isUnlimited && used >= limit;
     final quotaText = plan.isUnlimited
         ? '今日無限制 🏆'
-        : '今日用量 $used / $limit 球';
+        : '今日用量 $used / $limit 球${overLimit ? '  ⚠️ 已達上限' : ''}';
 
-    return AppBar(
-      elevation: 0,
-      backgroundColor: kBgPage,
-      toolbarHeight: 72,
-      automaticallyImplyLeading: false,
-      title: Consumer<UserProvider>(
-        builder: (context, user, _) => Row(
-          children: [
-            // 頭像
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: kPrimaryGreen,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: user.avatarPath != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
-                    )
-                  : const Icon(Icons.golf_course_rounded, color: Colors.white),
+    return Consumer<UserProvider>(
+      builder: (context, user, _) {
+        // 頭像
+        final avatar = Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white24,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white38, width: 1.5),
+          ),
+          child: user.avatarPath != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(11),
+                  child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
+                )
+              : const Icon(Icons.golf_course_rounded, color: Colors.white, size: 22),
+        );
+
+        // 方案 badge
+        final planBadge = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.20),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white38),
+          ),
+          child: Text(
+            plan.label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: planColor == const Color(0xFF1E8E5A)
+                  ? Colors.white
+                  : Color(plan.colorValue),
             ),
-            const SizedBox(width: 12),
-            // 名稱 + 方案 + 用量
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          ),
+        );
+
+        return GreenPageHeader(
+          leading: Padding(
+            padding: const EdgeInsets.only(left: kSpaceMD, right: kSpaceSM),
+            child: avatar,
+          ),
+          title: '嗨，${user.displayName} 👋',
+          subtitle: quotaText,
+          actions: [
+            planBadge,
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+              onSelected: (v) { if (v == 'logout') _logout(); },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'logout',
+                  child: Row(
                     children: [
-                      Text(
-                        '嗨，${user.displayName} 👋',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: kTextPrimary,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      // 方案 badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: planColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: planColor.withValues(alpha: 0.4)),
-                        ),
-                        child: Text(
-                          plan.label,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: planColor,
-                          ),
-                        ),
-                      ),
+                      Icon(Icons.logout_rounded, size: 18, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('登出', style: TextStyle(color: Colors.red)),
                     ],
                   ),
-                  const SizedBox(height: 2),
-                  // 今日用量
-                  Text(
-                    quotaText,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: (!plan.isUnlimited && used >= limit)
-                          ? Colors.red
-                          : kTextSecondary,
-                      fontWeight: (!plan.isUnlimited && used >= limit)
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
-        ),
-      ),
-      actions: [
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert_rounded, color: kTextPrimary),
-          onSelected: (v) { if (v == 'logout') _logout(); },
-          itemBuilder: (_) => const [
-            PopupMenuItem(
-              value: 'logout',
-              child: Row(
-                children: [
-                  Icon(Icons.logout_rounded, size: 18, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('登出', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
+        );
+      },
     );
   }
 }

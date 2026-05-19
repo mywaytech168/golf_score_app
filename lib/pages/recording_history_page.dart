@@ -4,9 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:provider/provider.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
@@ -19,7 +17,7 @@ import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
 import '../widgets/hits_summary_widget.dart';
-import '../providers/user_provider.dart';
+import '../widgets/green_page_header.dart';
 import 'video_comparison_page.dart';
 import 'video_player_page.dart';
 import 'recording_detail_page.dart';
@@ -483,13 +481,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('錄影歷史')),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
     // 根据选中的过滤条件过滤条目
     var filteredEntries = _selectedGoodShot == null
         ? _entries
@@ -498,37 +489,43 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     // 應用排序
     filteredEntries = _sortEntries(filteredEntries);
 
+    // 統計文字
+    final goodCount = _entries.where((e) => e.goodShot == true).length;
+    final badCount  = _entries.where((e) => e.goodShot == false).length;
+    final subtitle  = _isLoading
+        ? '載入中…'
+        : '共 ${_entries.length} 筆 · 好球 $goodCount · 壞球 $badCount';
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _finishWithResult();
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('錄影歷史', style: TextStyle(fontSize: 16)),
-              Text(
-                context.watch<UserProvider>().displayName,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.white70),
-              ),
-            ],
-          ),
-          leading: IconButton(
-            onPressed: _finishWithResult,
-            icon: const Icon(Icons.arrow_back),
-          ),
-          actions: [
-            IconButton(
-              onPressed: _showDebugJsonInfo,
-              tooltip: 'Debug: 紀錄 JSON',
-              icon: const Icon(Icons.bug_report_outlined),
-            ),
-          ],
-        ),
+        backgroundColor: const Color(0xFFF4F6F9),
         body: Column(
           children: [
+            // ── 綠色頂部面板 ─────────────────────────────────────
+            GreenPageHeader(
+              title: '歷史錄影',
+              subtitle: subtitle,
+              actions: [
+                if (_isLoading)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    ),
+                  )
+                else
+                  IconButton(
+                    onPressed: _showDebugJsonInfo,
+                    tooltip: 'Debug',
+                    icon: const Icon(Icons.bug_report_outlined, color: Colors.white),
+                  ),
+              ],
+            ),
             // 好球/壞球 TAB 選擇器
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -702,8 +699,6 @@ class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
   bool _isDetecting = false;
   bool _isAnalyzing = false;
-  AudioAnalysisResult? _audioResult;
-
   bool get _isLongVideo => widget.entry.durationSeconds > 5 && widget.entry.durationSeconds <= 120;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
   bool get _isClip => widget.entry.videoType == VideoType.localClip;
