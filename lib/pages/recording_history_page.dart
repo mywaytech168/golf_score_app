@@ -22,6 +22,7 @@ import '../widgets/hits_summary_widget.dart';
 import '../providers/user_provider.dart';
 import 'video_comparison_page.dart';
 import 'video_player_page.dart';
+import 'recording_detail_page.dart';
 import '../widgets/share_upload_dialog.dart';
 
 /// 列表操作選項
@@ -1702,9 +1703,20 @@ class _HistoryTileState extends State<_HistoryTile> {
                   ),
                 ),
                 GestureDetector(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => RecordingDetailPage(entry: widget.entry),
+                    ),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: Icon(Icons.bar_chart_rounded, color: Color(0xFF1565C0), size: 22),
+                  ),
+                ),
+                GestureDetector(
                   onTap: widget.onTap,
                   child: const Padding(
-                    padding: EdgeInsets.only(left: 12),
+                    padding: EdgeInsets.only(left: 8),
                     child: Icon(
                       Icons.play_arrow_rounded,
                       color: Color(0xFF1E8E5A),

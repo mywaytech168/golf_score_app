@@ -57,6 +57,7 @@ dependencies:
   in_app_purchase: ^3.2.3
   archive: ^3.6.1
   dio: ^5.7.0
+  fl_chart: ^0.68.0
   # ffmpeg_kit_flutter_min_gpl removed temporarily due to Android AGP namespace issue
  
   assets_audio_player:
