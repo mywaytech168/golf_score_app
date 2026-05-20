@@ -75,6 +75,61 @@ namespace UploadServer.Middleware
     }
 
     /// <summary>
+    /// IP 層速率限制：針對 register / login 等公開端點防爆破
+    /// </summary>
+    public class IpRateLimitMiddleware
+    {
+        private readonly RequestDelegate _next;
+        private readonly ILogger<IpRateLimitMiddleware> _logger;
+        private readonly Dictionary<string, UserRateLimit> _ipLimits = new();
+        private readonly object _lock = new();
+
+        private static readonly HashSet<string> _protectedPaths = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "/api/auth/register",
+            "/api/auth/login",
+            "/api/auth/google-login",
+        };
+
+        private const int MAX_REQUESTS = 10;
+        private const int WINDOW_MINUTES = 15;
+
+        public IpRateLimitMiddleware(RequestDelegate next, ILogger<IpRateLimitMiddleware> logger)
+        {
+            _next = next;
+            _logger = logger;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            if (_protectedPaths.Contains(context.Request.Path.Value ?? ""))
+            {
+                var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                UserRateLimit limit;
+                lock (_lock)
+                {
+                    if (!_ipLimits.TryGetValue(ip, out limit!))
+                        _ipLimits[ip] = limit = new UserRateLimit(MAX_REQUESTS, WINDOW_MINUTES);
+                }
+
+                if (limit.IsLimited())
+                {
+                    _logger.LogWarning("⚠️ IP {IP} 超過 auth 速率限制", ip);
+                    context.Response.StatusCode = 429;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"請求過於頻繁，請稍後再試\"}");
+                    return;
+                }
+
+                limit.IncrementRequest();
+            }
+
+            await _next(context);
+        }
+    }
+
+    /// <summary>
     /// 用戶級別的速率限制中間件 (修復 7️⃣)
     /// </summary>
     public class UserRateLimitMiddleware

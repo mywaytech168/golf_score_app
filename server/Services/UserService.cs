@@ -466,9 +466,8 @@ namespace UploadServer.Services
         private static string GenerateInviteCode()
         {
             const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 去掉易混淆字元
-            return new string(Enumerable.Range(0, 8)
-                .Select(_ => chars[Random.Shared.Next(chars.Length)])
-                .ToArray());
+            var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(8);
+            return new string(bytes.Select(b => chars[b % chars.Length]).ToArray());
         }
     }
 }

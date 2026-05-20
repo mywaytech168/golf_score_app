@@ -468,9 +468,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     return sorted;
   }
 
-  /// 從 peakValues Map 中獲取最高峰值
+  /// 使用 audioCrispness 作為音質峰值排序依據
   double? _getMaxPeakValue(RecordingHistoryEntry entry) {
-    return null;
+    return entry.audioCrispness;
   }
 
   // ---------- 畫面建構 ----------

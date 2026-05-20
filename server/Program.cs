@@ -116,8 +116,10 @@ builder.Services
             IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
                 System.Text.Encoding.UTF8.GetBytes(jwtSecret)
             ),
-            ValidateIssuer = false,
-            ValidateAudience = false,
+            ValidateIssuer = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidateAudience = true,
+            ValidAudience = builder.Configuration["Jwt:Audience"],
             ValidateLifetime = true,
             ClockSkew = System.TimeSpan.Zero,
         };
@@ -187,12 +189,24 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// 安全 HTTP headers
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    ctx.Response.Headers["X-Frame-Options"] = "DENY";
+    ctx.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+    ctx.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    ctx.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    await next();
+});
+
 app.UseCors();
 
 // ============================================================
 // 請求日誌 + 速率限制中間件
 // ============================================================
 app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseMiddleware<IpRateLimitMiddleware>();
 app.UseMiddleware<UserRateLimitMiddleware>();
 
 // ============================================================

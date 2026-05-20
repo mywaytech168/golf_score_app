@@ -47,7 +47,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   static const _chartTabs = [
     (label: '聲音峰值', color: Color(0xFFE53935)),
     (label: '手腕 Y',   color: Color(0xFF1565C0)),
-    (label: 'Speed',    color: Color(0xFF1E8E5A)),
+    (label: '速度',      color: Color(0xFF1E8E5A)),
   ];
 
   String get _sessionDir =>

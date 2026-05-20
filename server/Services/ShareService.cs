@@ -101,9 +101,7 @@ namespace UploadServer.Services
 
         private static string GenerateCode(int length)
         {
-            var rng  = System.Security.Cryptography.RandomNumberGenerator.Create();
-            var buf  = new byte[length];
-            rng.GetBytes(buf);
+            var buf = System.Security.Cryptography.RandomNumberGenerator.GetBytes(length);
             return new string(buf.Select(b => _chars[b % _chars.Length]).ToArray());
         }
     }

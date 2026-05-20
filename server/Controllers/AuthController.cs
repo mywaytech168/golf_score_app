@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Google.Apis.Auth;
@@ -39,10 +40,26 @@ namespace UploadServer.Controllers
             {
                 if (request == null)
                 {
+                    return BadRequest(new RegisterResponse { Success = false, Message = "請求體為空" });
+                }
+
+                // Email 格式驗證
+                if (!string.IsNullOrEmpty(request.Email) &&
+                    !Regex.IsMatch(request.Email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+                {
+                    return BadRequest(new RegisterResponse { Success = false, Message = "Email 格式不正確" });
+                }
+
+                // 密碼強度：至少 8 位，含大寫、小寫、數字
+                if (string.IsNullOrEmpty(request.Password) || request.Password.Length < 8 ||
+                    !Regex.IsMatch(request.Password, @"[A-Z]") ||
+                    !Regex.IsMatch(request.Password, @"[a-z]") ||
+                    !Regex.IsMatch(request.Password, @"[0-9]"))
+                {
                     return BadRequest(new RegisterResponse
                     {
                         Success = false,
-                        Message = "請求體為空",
+                        Message = "密碼須至少 8 位且包含大寫字母、小寫字母及數字",
                     });
                 }
 
@@ -187,10 +204,12 @@ namespace UploadServer.Controllers
                     });
                 }
 
-                // 驗證郵箱是否匹配
+                // 驗證郵箱是否匹配（不匹配視為偽造請求，硬性拒絕）
                 if (!string.IsNullOrEmpty(request.Email) && payload.Email != request.Email)
                 {
-                    _logger.LogWarning($"⚠️ Google token 郵箱不匹配: Token={payload.Email}, Request={request.Email}");
+                    _logger.LogWarning("⚠️ Google token 郵箱不匹配: Token={TokenEmail}, Request={RequestEmail}",
+                        payload.Email, request.Email);
+                    return BadRequest(new GoogleLoginResponse { Success = false, Message = "郵箱與 Google 帳號不符" });
                 }
 
                 // 使用 Google 返回的信息（Email 來自已驗證的 token）
@@ -291,6 +310,19 @@ namespace UploadServer.Controllers
                 var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                     return Unauthorized(new ChangePasswordResponse { Success = false, Message = "無效的身份驗證" });
+
+                // 新密碼強度驗證
+                if (string.IsNullOrEmpty(request.NewPassword) || request.NewPassword.Length < 8 ||
+                    !Regex.IsMatch(request.NewPassword, @"[A-Z]") ||
+                    !Regex.IsMatch(request.NewPassword, @"[a-z]") ||
+                    !Regex.IsMatch(request.NewPassword, @"[0-9]"))
+                {
+                    return BadRequest(new ChangePasswordResponse
+                    {
+                        Success = false,
+                        Message = "新密碼須至少 8 位且包含大寫字母、小寫字母及數字",
+                    });
+                }
 
                 var (success, error) = await _authService.ChangePasswordAsync(
                     userId,

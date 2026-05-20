@@ -241,7 +241,7 @@ class _ChartsBody extends StatelessWidget {
             invertY: false,
           )
         else
-          const _MissingDataCard(label: 'Speed', hint: '需完成姿勢分析'),
+          const _MissingDataCard(label: '速度', hint: '需完成姿勢分析'),
       ],
     );
   }

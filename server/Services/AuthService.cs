@@ -317,8 +317,10 @@ namespace UploadServer.Services
                 {
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = securityKey,
-                    ValidateIssuer = false,
-                    ValidateAudience = false,
+                    ValidateIssuer = true,
+                    ValidIssuer = _config["Jwt:Issuer"],
+                    ValidateAudience = true,
+                    ValidAudience = _config["Jwt:Audience"],
                     ValidateLifetime = false, // 允許過期 Token（用於刷新）
                 }, out SecurityToken securityToken);
 
