@@ -9,16 +9,14 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
-import '../models/recording_history_entry.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/realtime_audio_service.dart';
-import '../services/video_analysis_service.dart';
 import 'mlkit_utils.dart';
 import 'pose_csv_writer.dart';
 import 'pose_detector_service.dart';
 import 'pose_frame_model.dart';
+import 'recording_config.dart';
 import 'skeleton_painter.dart';
-import 'test_video_selector_dialog.dart';
 
 typedef RecordCompleteCallback = void Function({
   required String videoPath,
@@ -62,9 +60,8 @@ class _RecordScreenState extends State<RecordScreen> {
   Size _analysisImageSize = Size.zero;
   bool _showSkeleton = true;
 
-  // 測試模式
-  bool _isTestMode = false;
-  RecordingHistoryEntry? _selectedTestVideo;
+  // 錄製設定
+  RecordingConfig _config = RecordingConfig();
 
   @override
   void initState() {
@@ -113,77 +110,84 @@ class _RecordScreenState extends State<RecordScreen> {
         backgroundColor: Colors.black87,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: Text(_isTestMode ? '高爾夫揮桿錄製 (測試模式)' : '高爾夫揮桿錄製'),
+        title: const Text('高爾夫揮桿錄製'),
         actions: [
-          if (!_isTestMode)
-            IconButton(
-              tooltip: '骨架顯示切換',
-              icon: Icon(
-                Icons.accessibility_new,
-                color: _showSkeleton ? Colors.greenAccent : Colors.white38,
-              ),
-              onPressed: () => setState(() => _showSkeleton = !_showSkeleton),
+          IconButton(
+            tooltip: '骨架顯示切換',
+            icon: Icon(
+              Icons.accessibility_new,
+              color: _showSkeleton ? Colors.greenAccent : Colors.white38,
             ),
-          _TestModeChip(
-            isTestMode: _isTestMode,
-            disabled: _isRecording,
-            onTap: _toggleTestMode,
+            onPressed: () => setState(() => _showSkeleton = !_showSkeleton),
           ),
-          const SizedBox(width: 8),
+          IconButton(
+            tooltip: '錄製設定',
+            icon: const Icon(Icons.settings_rounded),
+            onPressed: _isRecording ? null : _showSettingsSheet,
+          ),
+          const SizedBox(width: 4),
         ],
       ),
-      body: _isTestMode ? _buildTestModeUI() : _buildCameraUI(),
+      body: _buildCameraUI(),
     );
   }
 
-  // ─── 即時錄製 UI ──────────────────────────────────────────────────────────
+  // ─── 相機 UI ─────────────────────────────────────────────────────────────
 
   Widget _buildCameraUI() {
-    return CameraAwesomeBuilder.custom(
-      saveConfig: SaveConfig.video(
-        pathBuilder: _buildCaptureRequest,
-      ),
-      onImageForAnalysis: _onImageAnalysis,
-      imageAnalysisConfig: AnalysisConfig(
-        androidOptions: const AndroidAnalysisOptions.nv21(width: 480),
-        maxFramesPerSecond: 10,
-        autoStart: true,
-      ),
-      builder: (state, preview) {
-        // preview 是 AnalysisPreview（座標元數據），相機畫面由 camerawesome 自動顯示在後方
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            // 骨架覆蓋層
-            if (_showSkeleton && _poses.isNotEmpty && _analysisImageSize != Size.zero)
-              CustomPaint(
-                painter: SkeletonPainter(
-                  poses: _poses,
-                  imageSize: _analysisImageSize,
+    return KeyedSubtree(
+      key: ValueKey(_config.cameraKey),
+      child: CameraAwesomeBuilder.custom(
+        saveConfig: SaveConfig.video(
+          pathBuilder: _buildCaptureRequest,
+          videoOptions: _config.toVideoOptions(),
+        ),
+        onImageForAnalysis: _onImageAnalysis,
+        imageAnalysisConfig: AnalysisConfig(
+          androidOptions: AndroidAnalysisOptions.nv21(
+            width: _config.quality == VideoQuality.sd ? 320 : 480,
+          ),
+          maxFramesPerSecond: _config.fps == FrameRate.fps60 ? 15 : 10,
+          autoStart: true,
+        ),
+        builder: (state, preview) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_showSkeleton && _poses.isNotEmpty && _analysisImageSize != Size.zero)
+                CustomPaint(
+                  painter: SkeletonPainter(
+                    poses: _poses,
+                    imageSize: _analysisImageSize,
+                  ),
                 ),
-              ),
-            // 錄影中指示器
-            if (_isRecording)
+              if (_isRecording)
+                Positioned(
+                  top: 16,
+                  right: 16,
+                  child: _RecordingBadge(elapsed: _elapsed, frameCount: _frameCount),
+                ),
+              // 左下：目前設定標籤
               Positioned(
-                top: 16,
-                right: 16,
-                child: _RecordingBadge(elapsed: _elapsed, frameCount: _frameCount),
+                bottom: 120,
+                left: 16,
+                child: _ConfigBadge(config: _config),
               ),
-            // 錄影按鈕
-            Positioned(
-              bottom: 40,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: _RecordButton(
-                  isRecording: _isRecording,
-                  onTap: () => _onRecordButtonTap(state),
+              Positioned(
+                bottom: 40,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _RecordButton(
+                    isRecording: _isRecording,
+                    onTap: () => _onRecordButtonTap(state),
+                  ),
                 ),
               ),
-            ),
-          ],
-        );
-      },
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -198,15 +202,13 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _startRecording(VideoCameraState videoState) async {
     _resetSession();
-    
-    // 启动音频捕获
+
     try {
       await _audioService.start();
-      debugPrint('[RecordScreen] ✅ 音频服务已启动');
     } catch (e) {
       debugPrint('[RecordScreen] ❌ 音频启动失败: $e');
     }
-    
+
     await videoState.startRecording();
     if (!mounted) return;
     _recordingStartTime = DateTime.now();
@@ -226,25 +228,22 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Future<void> _finishRecording() async {
     final duration = _elapsed.inSeconds.clamp(1, 86400);
-    if (mounted) setState(() {
-      _isRecording = false;
-      _poses = [];
-    });
-    
-    // 保存 CSV 数据
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        _poses = [];
+      });
+    }
+
     try {
       await _csvWriter?.flush();
     } catch (e) {
       debugPrint('[RecordScreen] CSV flush error: $e');
     }
 
-    // 停止音频录制
     List<String>? audioTags;
     try {
       await _audioService.stop();
-      debugPrint('[RecordScreen] ✅ 音频录制已停止');
-
-      // 保存 PCM 数据
       final rawSamples = _audioService.rawSamples;
       if (rawSamples.isNotEmpty) {
         final audioFile = File(_audioPath);
@@ -253,12 +252,8 @@ class _RecordScreenState extends State<RecordScreen> {
           byteData.setFloat32(i * 4, rawSamples[i].toDouble(), Endian.little);
         }
         await audioFile.writeAsBytes(byteData.buffer.asUint8List());
-        debugPrint('[RecordScreen] ✅ 音频文件已保存: $_audioPath (${rawSamples.length} samples)');
-        
-        // 分析音訊標籤
         audioTags = await _extractAudioTags(_audioPath);
       } else {
-        debugPrint('[RecordScreen] ⚠️ 没有音频样本');
         audioTags = ['no_audio'];
       }
     } catch (e) {
@@ -281,22 +276,15 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
-  /// 分析音訊並提取標籤
   Future<List<String>?> _extractAudioTags(String audioPath) async {
     try {
-      if (!File(audioPath).existsSync()) {
-        debugPrint('[RecordScreen] ⚠️ 音訊檔案不存在: $audioPath');
-        return ['no_audio'];
-      }
-
+      if (!File(audioPath).existsSync()) return ['no_audio'];
       final result = await AudioAnalysisService.analyzeVideo(audioPath);
       final summary = result['summary'] as Map<String, dynamic>?;
       if (summary != null) {
         final tags = summary['tags'] as List<dynamic>?;
         if (tags != null && tags.isNotEmpty) {
-          final tagList = tags.whereType<String>().toList();
-          debugPrint('[RecordScreen] ✅ 提取音訊標籤: $tagList');
-          return tagList;
+          return tags.whereType<String>().toList();
         }
       }
       return null;
@@ -336,19 +324,17 @@ class _RecordScreenState extends State<RecordScreen> {
           ? DateTime.now().difference(_recordingStartTime!).inMilliseconds / 1000.0
           : 0.0;
 
-      // 始終更新骨架以顯示預覽
       setState(() {
         _poses = poses;
         _analysisImageSize = Size(image.width.toDouble(), image.height.toDouble());
       });
 
-      // 只在錄影中才寫入 CSV 和累加幀數
       if (_isRecording) {
         final frameModel = poses.isNotEmpty
             ? PoseFrameModel.fromPose(
                 frame: _frameCount,
                 timeSec: timeSec,
-                poseUpdateId: _frameCount,  // ✅ 實時錄影：每幀都是新推論
+                poseUpdateId: _frameCount,
                 pose: poses.first,
                 imgWidth: image.width.toDouble(),
                 imgHeight: image.height.toDouble(),
@@ -356,16 +342,10 @@ class _RecordScreenState extends State<RecordScreen> {
             : PoseFrameModel.empty(
                 frame: _frameCount,
                 timeSec: timeSec,
-                poseUpdateId: _frameCount,  // ✅ 即使檢測失敗也遞增
+                poseUpdateId: _frameCount,
               );
-
         _csvWriter?.addFrame(frameModel);
-
-        if (mounted) {
-          setState(() {
-            _frameCount++;
-          });
-        }
+        if (mounted) { setState(() => _frameCount++); }
       }
     } catch (e) {
       debugPrint('[Pose] $e');
@@ -374,242 +354,192 @@ class _RecordScreenState extends State<RecordScreen> {
     }
   }
 
-  // ─── 測試模式 ─────────────────────────────────────────────────────────────
+  // ─── 設定面板 ─────────────────────────────────────────────────────────────
 
-  void _toggleTestMode() {
-    if (_isRecording) return;
-    setState(() {
-      _isTestMode = !_isTestMode;
-      _selectedTestVideo = null;
-    });
-  }
+  void _showSettingsSheet() {
+    // 暫存設定，確認後才套用
+    VideoQuality pendingQuality = _config.quality;
+    FrameRate pendingFps = _config.fps;
 
-  Future<void> _showTestVideoSelector() async {
-    final selected = await showDialog<RecordingHistoryEntry>(
+    showModalBottomSheet<void>(
       context: context,
-      builder: (_) => const TestVideoSelectorDialog(),
-    );
-    if (selected != null && mounted) {
-      setState(() => _selectedTestVideo = selected);
-    }
-  }
-
-  Future<void> _completeTestMode() async {
-    if (_selectedTestVideo == null) return;
-
-    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          backgroundColor: Colors.grey[900],
-          title: const Text('影片分析中', style: TextStyle(color: Colors.white)),
-          content: ValueListenableBuilder<(double, String)>(
-            valueListenable: progressNotifier,
-            builder: (_, val, __) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: val.$1,
-                  backgroundColor: Colors.grey[700],
-                  color: Colors.green,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  val.$2,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-    );
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 標題列
+                    Row(
+                      children: [
+                        const Icon(Icons.videocam_rounded, color: Color(0xFF1E8E5A), size: 20),
+                        const SizedBox(width: 8),
+                        const Text('錄製設定',
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const Divider(color: Colors.white12, height: 20),
 
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final testId = 'test_${DateTime.now().millisecondsSinceEpoch}';
-      final testDir = Directory(p.join(dir.path, 'golf_recordings', testId));
-      await testDir.create(recursive: true);
+                    // ── 畫質 ─────────────────────────────────────────
+                    const Text('影片畫質', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: VideoQuality.values.map((q) {
+                        final selected = pendingQuality == q;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: _SettingChip(
+                              label: q.label,
+                              selected: selected,
+                              onTap: () => setSheet(() => pendingQuality = q),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
 
-      final testVideoPath = p.join(testDir.path, 'swing.mp4');
-      await File(_selectedTestVideo!.filePath).copy(testVideoPath);
+                    // ── 幀率 ─────────────────────────────────────────
+                    const Text('幀率', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: FrameRate.values.map((f) {
+                        final selected = pendingFps == f;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: _SettingChip(
+                              label: f.label,
+                              selected: selected,
+                              onTap: () => setSheet(() => pendingFps = f),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    // 60fps 提示
+                    if (pendingFps == FrameRate.fps60)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.info_outline_rounded, color: Colors.amber, size: 14),
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                '60fps 需要設備支援，若不支援將自動降回 30fps',
+                                style: TextStyle(color: Colors.amber, fontSize: 11),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 24),
 
-      final result = await VideoAnalysisService().analyze(
-        videoPath: testVideoPath,
-        sessionDir: testDir.path,
-        durationSeconds: _selectedTestVideo!.durationSeconds.clamp(1, 86400),
-        onProgress: (prog, label) => progressNotifier.value = (prog, label),
-      );
-
-      if (!mounted) return;
-      Navigator.pop(context);
-
-      final thumbnailPath = await _generateThumbnail(testVideoPath);
-      
-      // 分析測試視頻的音訊標籤
-      List<String>? audioTags;
-      if (result.audioPath.isNotEmpty && File(result.audioPath).existsSync()) {
-        audioTags = await _extractAudioTags(result.audioPath);
-      }
-      
-      widget.onComplete?.call(
-        videoPath: testVideoPath,
-        csvPath: result.csvPath,
-        audioPath: result.audioPath,
-        durationSeconds: _selectedTestVideo!.durationSeconds.clamp(1, 86400),
-        thumbnailPath: thumbnailPath,
-        audioLabel: null,
-        audioTags: audioTags,
-      );
-
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      debugPrint('[TestMode] $e');
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('分析失敗: $e'), backgroundColor: Colors.red),
+                    // 確認按鈕
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E8E5A),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          final changed = pendingQuality != _config.quality ||
+                              pendingFps != _config.fps;
+                          if (changed) {
+                            setState(() {
+                              _config = RecordingConfig(
+                                quality: pendingQuality,
+                                fps: pendingFps,
+                              );
+                            });
+                          }
+                        },
+                        child: const Text('套用', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
         );
-      }
-    } finally {
-      progressNotifier.dispose();
-    }
-  }
-
-  Widget _buildTestModeUI() {
-    if (_selectedTestVideo == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.video_library_outlined, color: Colors.orange, size: 40),
-            ),
-            const SizedBox(height: 24),
-            const Text('測試模式', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            const Text(
-              '從已導入的影片中選擇一支\n作為測試錄製',
-              style: TextStyle(color: Colors.white54, fontSize: 16, height: 1.5),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 40),
-            FilledButton.icon(
-              onPressed: _showTestVideoSelector,
-              icon: const Icon(Icons.video_library_outlined),
-              label: const Text('選擇影片'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.orange,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final dur = Duration(seconds: _selectedTestVideo!.durationSeconds);
-    final durStr = '${dur.inMinutes}:${(dur.inSeconds % 60).toString().padLeft(2, '0')}';
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.videocam, color: Colors.white54, size: 60),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            _selectedTestVideo!.displayTitle,
-            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(20)),
-            child: Text(
-              '⏱️ $durStr • Round ${_selectedTestVideo!.roundIndex}',
-              style: const TextStyle(color: Colors.white54, fontSize: 14),
-            ),
-          ),
-          const SizedBox(height: 40),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () => setState(() => _selectedTestVideo = null),
-                icon: const Icon(Icons.clear),
-                label: const Text('取消'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
-              ),
-              const SizedBox(width: 16),
-              FilledButton.icon(
-                onPressed: _completeTestMode,
-                icon: const Icon(Icons.check),
-                label: const Text('完成'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+      },
     );
   }
 }
 
 // ─── 小元件 ───────────────────────────────────────────────────────────────────
 
-class _TestModeChip extends StatelessWidget {
-  final bool isTestMode;
-  final bool disabled;
+class _SettingChip extends StatelessWidget {
+  final String label;
+  final bool selected;
   final VoidCallback onTap;
 
-  const _TestModeChip({required this.isTestMode, required this.disabled, required this.onTap});
+  const _SettingChip({required this.label, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final color = isTestMode ? Colors.orange : Colors.grey;
     return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: disabled ? 0.1 : 0.25),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: disabled ? Colors.grey.withValues(alpha: 0.3) : color),
-        ),
-        child: Text(
-          isTestMode ? '🧪 測試' : '🎥 即時',
-          style: TextStyle(
-            color: disabled ? Colors.white24 : (isTestMode ? Colors.orange : Colors.white70),
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
+          color: selected ? const Color(0xFF1E8E5A) : const Color(0xFF2A2A2A),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? const Color(0xFF1E8E5A) : Colors.white12,
           ),
         ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : Colors.white54,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 左下角的目前設定標籤
+class _ConfigBadge extends StatelessWidget {
+  final RecordingConfig config;
+  const _ConfigBadge({required this.config});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '${config.quality.label}  ${config.fps.label}',
+        style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
       ),
     );
   }

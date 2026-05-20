@@ -1,79 +1,43 @@
-// Configuration enums for recording and pose detection
+import 'package:camerawesome/pigeon.dart';
 
-/// 視頻錄製配置選項
+/// 影片畫質（對應 camerawesome VideoRecordingQuality）
 enum VideoQuality {
-  low(480, 8000000, '低 (480p)'),
-  standard(720, 18000000, '標準 (720p)'),
-  hd(1080, 30000000, '高 (1080p)');
+  sd(VideoRecordingQuality.sd,   '480p'),
+  hd(VideoRecordingQuality.hd,   '720p'),
+  fhd(VideoRecordingQuality.fhd, '1080p');
 
-  final int height;
-  final int bitrate;
-  final String displayName;
-
-  const VideoQuality(this.height, this.bitrate, this.displayName);
+  final VideoRecordingQuality recordingQuality;
+  final String label;
+  const VideoQuality(this.recordingQuality, this.label);
 }
 
-/// 幀率選項
+/// 幀率選項（30fps / 60fps）
 enum FrameRate {
-  fps24(24, '24fps'),
   fps30(30, '30fps'),
   fps60(60, '60fps');
 
   final int value;
-  final String displayName;
-
-  const FrameRate(this.value, this.displayName);
+  final String label;
+  const FrameRate(this.value, this.label);
 }
 
-/// 分析圖像寬度選項（姿態檢測）
-enum AnalysisWidth {
-  low(320, '低精度 (320px)'),
-  medium(480, '中精度 (480px)'),
-  high(640, '高精度 (640px)'),
-  veryHigh(768, '超高精度 (768px)');
-
-  final int pixels;
-  final String displayName;
-
-  const AnalysisWidth(this.pixels, this.displayName);
-}
-
-/// 統合配置管理
-/// 
-/// 提供視頻錄製和圖像分析的配置選項
-/// 適用於 camerawesome 2.0.1 及 Google MLKit 集成
+/// 錄製設定
 class RecordingConfig {
-  VideoQuality videoQuality;
-  FrameRate frameRate;
-  AnalysisWidth analysisWidth;
-  bool enableAudio;
+  VideoQuality quality;
+  FrameRate fps;
 
   RecordingConfig({
-    this.videoQuality = VideoQuality.hd,
-    this.frameRate = FrameRate.fps30,
-    this.analysisWidth = AnalysisWidth.high,
-    this.enableAudio = true,
+    this.quality = VideoQuality.hd,
+    this.fps = FrameRate.fps30,
   });
 
-  /// 獲取視頻錄製選項
-  /// 
-  /// camerawesome 2.0.1 簡化了視頻 API，只保留 enableAudio
-  Map<String, dynamic> getVideoOptions() {
-    return {
-      'enableAudio': enableAudio,
-      'bitrate': videoQuality.bitrate,
-      'fps': frameRate.value,
-      'height': videoQuality.height,
-    };
-  }
+  /// 給 CameraAwesomeBuilder 的 key，設定變更時強制重建相機
+  String get cameraKey => '${quality.name}_${fps.value}';
 
-  /// 獲取圖像分析配置
-  /// 用於 MLKit 姿態檢測
-  Map<String, dynamic> getAnalysisConfig() {
-    return {
-      'width': analysisWidth.pixels,
-      'maxFramesPerSecond': frameRate.value,
-      'autoStart': true,
-    };
-  }
+  /// 轉為 camerawesome VideoOptions
+  VideoOptions toVideoOptions() => VideoOptions(
+        enableAudio: true,
+        quality: quality.recordingQuality,
+        ios: CupertinoVideoOptions(fps: fps.value),
+      );
 }
