@@ -108,7 +108,8 @@ namespace UploadServer.DTOs
         public string Email { get; set; }
         public string DisplayName { get; set; }
         public string AvatarUrl { get; set; }
-        public string Provider { get; set; }
+        /// <summary>已綁定的登入提供商清單，e.g. ["local"], ["google"], ["local","google"]</summary>
+        public List<string> Providers { get; set; } = new();
         public string Status { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastLoginAt { get; set; }

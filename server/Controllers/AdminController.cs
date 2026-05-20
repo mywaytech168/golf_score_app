@@ -92,7 +92,7 @@ namespace UploadServer.Controllers
                     u.BonusBalls,
                     u.TodayUsed,
                     u.InviteCount,
-                    u.Provider,
+                    Providers = u.UserAuths.Select(a => a.Provider).ToList(),
                     u.Status,
                     CreatedAt = u.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                 })

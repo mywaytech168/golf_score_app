@@ -1,15 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using UploadServer.Constants;
 using UploadServer.Data;
 using UploadServer.DTOs;
 using UploadServer.Models;
 
 namespace UploadServer.Services
 {
-    /// <summary>
-    /// 使用者方案與獎勵業務邏輯
-    /// </summary>
     public class UserService
     {
         private readonly VideoDbContext _db;
@@ -17,9 +15,7 @@ namespace UploadServer.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConfiguration _config;
 
-        // 廣告獎勵每日上限
-        private const int AdDailyCap = 5;
-        // 各獎勵球數
+        private const int AdDailyCap    = 5;
         private const int AdBalls       = 1;
         private const int FeedbackBalls = 2;
         private const int UploadBalls   = 3;
@@ -31,15 +27,12 @@ namespace UploadServer.Services
             IHttpClientFactory httpClientFactory,
             IConfiguration config)
         {
-            _db = db;
-            _logger = logger;
+            _db                = db;
+            _logger            = logger;
             _httpClientFactory = httpClientFactory;
-            _config = config;
+            _config            = config;
         }
 
-        // ── 輔助 ──────────────────────────────────────────────────
-
-        /// <summary>台灣時間（UTC+8）的今日日期</summary>
         private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(8));
 
         private static int DailyLimitFor(string plan) => plan switch
@@ -58,7 +51,6 @@ namespace UploadServer.Services
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return null;
 
-            // 跨日重置今日用量
             var today = Today;
             if (user.TodayUsedDate != today)
             {
@@ -86,7 +78,8 @@ namespace UploadServer.Services
         }
 
         /// <summary>
-        /// 增加今日用量（Flutter 每次分析後呼叫）
+        /// 每次 AI 分析後呼叫：判斷來源（每日配額 or 獎勵球），
+        /// 寫入 analysis_records，若消耗球數則一併寫入 ball_records。
         /// </summary>
         public async Task<IncrementUsageResponse?> IncrementUsageAsync(string userId)
         {
@@ -101,11 +94,50 @@ namespace UploadServer.Services
             }
 
             user.TodayUsed++;
-            await _db.SaveChangesAsync();
 
             var limit = DailyLimitFor(user.Plan);
-            var total = limit < 0 ? -1 : limit + user.BonusBalls;
-            var remaining = total < 0 ? -1 : Math.Max(0, total - user.TodayUsed);
+            // 判斷這次消耗來自配額還是球數
+            // elite (limit=-1) 永遠走 daily_quota
+            string source;
+            int ballsSpent;
+            if (limit < 0 || user.TodayUsed <= limit)
+            {
+                source     = AnalysisSource.DailyQuota;
+                ballsSpent = 0;
+            }
+            else
+            {
+                source     = AnalysisSource.BonusBall;
+                ballsSpent = 1;
+                user.BonusBalls = Math.Max(0, user.BonusBalls - 1);
+            }
+
+            var record = new AnalysisRecord
+            {
+                UserId     = userId,
+                Source     = source,
+                BallsSpent = ballsSpent,
+                UsedAt     = DateTime.UtcNow,
+            };
+            _db.AnalysisRecords.Add(record);
+
+            if (ballsSpent > 0)
+            {
+                _db.BallRecords.Add(new BallRecord
+                {
+                    UserId       = userId,
+                    Reason       = BallReason.Analysis,
+                    Delta        = -ballsSpent,
+                    BalanceAfter = user.BonusBalls,
+                    RefId        = record.Id,
+                    CreatedAt    = DateTime.UtcNow,
+                });
+            }
+
+            await _db.SaveChangesAsync();
+
+            var total     = limit < 0 ? -1 : limit + user.BonusBalls;
+            var remaining = total  < 0 ? -1 : Math.Max(0, total - user.TodayUsed);
             return new IncrementUsageResponse(user.TodayUsed, remaining);
         }
 
@@ -119,8 +151,6 @@ namespace UploadServer.Services
             if (user == null) return null;
 
             var today = Today;
-
-            // 跨日重置廣告計數
             if (user.AdClaimedDate != today)
             {
                 user.AdClaimedToday = 0;
@@ -128,7 +158,6 @@ namespace UploadServer.Services
                 await _db.SaveChangesAsync();
             }
 
-            // 若邀請碼為空，自動生成
             if (string.IsNullOrEmpty(user.InviteCode))
             {
                 user.InviteCode = GenerateInviteCode();
@@ -154,15 +183,12 @@ namespace UploadServer.Services
             if (user == null) return null;
 
             var today = Today;
-
-            // 跨日重置
             if (user.AdClaimedDate != today)
             {
                 user.AdClaimedToday = 0;
                 user.AdClaimedDate  = today;
             }
 
-            // 已達每日上限
             if (user.AdClaimedToday >= AdDailyCap)
             {
                 _logger.LogWarning("用戶 {UserId} 廣告獎勵已達每日上限", userId);
@@ -171,6 +197,16 @@ namespace UploadServer.Services
 
             user.AdClaimedToday++;
             user.BonusBalls += AdBalls;
+
+            _db.BallRecords.Add(new BallRecord
+            {
+                UserId       = userId,
+                Reason       = BallReason.Ad,
+                Delta        = AdBalls,
+                BalanceAfter = user.BonusBalls,
+                CreatedAt    = DateTime.UtcNow,
+            });
+
             await _db.SaveChangesAsync();
 
             _logger.LogInformation("用戶 {UserId} 廣告獎勵 +{Balls} 球 (今日第 {Count} 次)",
@@ -189,7 +225,6 @@ namespace UploadServer.Services
 
             if (!string.IsNullOrEmpty(user.InviteCode)) return user.InviteCode;
 
-            // 生成唯一邀請碼（重試直到無衝突）
             string code;
             do { code = GenerateInviteCode(); }
             while (await _db.Users.AnyAsync(u => u.InviteCode == code));
@@ -200,22 +235,19 @@ namespace UploadServer.Services
         }
 
         /// <summary>
-        /// 用邀請碼完成邀請（被邀請者註冊後呼叫）：
-        /// 邀請者 +InviteBalls，被邀請者 +InviteBalls
+        /// 完成邀請獎勵：雙方各得球數，寫入 invite_records 和 ball_records。
         /// </summary>
         public async Task ApplyInviteRewardAsync(string newUserId, string inviteCode)
         {
             var newUser = await _db.Users.FindAsync(newUserId);
             if (newUser == null) return;
 
-            // 防止重複套用：已使用過邀請碼則直接返回
             if (!string.IsNullOrEmpty(newUser.InvitedByCode))
             {
                 _logger.LogWarning("用戶 {UserId} 已套用過邀請碼，忽略重複請求", newUserId);
                 return;
             }
 
-            // 不能套用自己的邀請碼
             if (newUser.InviteCode == inviteCode)
             {
                 _logger.LogWarning("用戶 {UserId} 嘗試套用自己的邀請碼", newUserId);
@@ -225,10 +257,40 @@ namespace UploadServer.Services
             var inviter = await _db.Users.FirstOrDefaultAsync(u => u.InviteCode == inviteCode);
             if (inviter == null) return;
 
-            inviter.BonusBalls += InviteBalls;
+            inviter.BonusBalls  += InviteBalls;
             inviter.InviteCount++;
             newUser.BonusBalls   += InviteBalls;
             newUser.InvitedByCode = inviteCode;
+
+            var inviteRecord = new InviteRecord
+            {
+                InviterUserId = inviter.Id,
+                InviteeUserId = newUserId,
+                InviteCode    = inviteCode,
+                InviterBalls  = InviteBalls,
+                InviteeBalls  = InviteBalls,
+                CreatedAt     = DateTime.UtcNow,
+            };
+            _db.InviteRecords.Add(inviteRecord);
+
+            _db.BallRecords.Add(new BallRecord
+            {
+                UserId       = inviter.Id,
+                Reason       = BallReason.Invite,
+                Delta        = InviteBalls,
+                BalanceAfter = inviter.BonusBalls,
+                RefId        = inviteRecord.Id,
+                CreatedAt    = DateTime.UtcNow,
+            });
+            _db.BallRecords.Add(new BallRecord
+            {
+                UserId       = newUserId,
+                Reason       = BallReason.Invite,
+                Delta        = InviteBalls,
+                BalanceAfter = newUser.BonusBalls,
+                RefId        = inviteRecord.Id,
+                CreatedAt    = DateTime.UtcNow,
+            });
 
             await _db.SaveChangesAsync();
             _logger.LogInformation("邀請獎勵：邀請者 {InviterId} 與被邀請者 {NewUserId} 各 +{Balls} 球",
@@ -255,7 +317,6 @@ namespace UploadServer.Services
             if (string.IsNullOrWhiteSpace(text) || text.Length > 2000)
                 return new FeedbackRewardResponse(0);
 
-            // 儲存回饋
             _db.UserFeedbacks.Add(new UserFeedback
             {
                 Id        = Guid.NewGuid().ToString(),
@@ -267,6 +328,16 @@ namespace UploadServer.Services
 
             user.FeedbackClaimedDate = today;
             user.BonusBalls         += FeedbackBalls;
+
+            _db.BallRecords.Add(new BallRecord
+            {
+                UserId       = userId,
+                Reason       = BallReason.Feedback,
+                Delta        = FeedbackBalls,
+                BalanceAfter = user.BonusBalls,
+                CreatedAt    = DateTime.UtcNow,
+            });
+
             await _db.SaveChangesAsync();
 
             _logger.LogInformation("用戶 {UserId} 回饋獎勵 +{Balls} 球", userId, FeedbackBalls);
@@ -286,8 +357,17 @@ namespace UploadServer.Services
             if (sessions.Count == 0)
                 return new UploadRewardResponse(0, 0);
 
-            // 每次上傳固定 +UploadBalls（不論筆數，防止刷量）
             user.BonusBalls += UploadBalls;
+
+            _db.BallRecords.Add(new BallRecord
+            {
+                UserId       = userId,
+                Reason       = BallReason.Upload,
+                Delta        = UploadBalls,
+                BalanceAfter = user.BonusBalls,
+                CreatedAt    = DateTime.UtcNow,
+            });
+
             await _db.SaveChangesAsync();
 
             _logger.LogInformation("用戶 {UserId} 上傳 {Count} 筆資料，獎勵 +{Balls} 球",
@@ -307,14 +387,32 @@ namespace UploadServer.Services
             if (req.Plan is not ("pro" or "elite"))
                 return new PurchasePlanResponse(false, "無效的方案", null);
 
+            // 先建立 pending 記錄，確保驗證失敗也留下嘗試紀錄
+            var purchaseRecord = new PurchaseRecord
+            {
+                UserId        = userId,
+                Plan          = req.Plan,
+                Store         = req.Store,
+                ProductId     = req.ProductId,
+                PurchaseToken = req.PurchaseToken,
+                Status        = PurchaseStatus.Pending,
+                CreatedAt     = DateTime.UtcNow,
+            };
+            _db.PurchaseRecords.Add(purchaseRecord);
+            await _db.SaveChangesAsync();
+
             if (!await ValidatePurchaseTokenAsync(req))
             {
+                purchaseRecord.Status = PurchaseStatus.Failed;
+                await _db.SaveChangesAsync();
                 _logger.LogWarning("用戶 {UserId} 付款驗證失敗 store={Store}", userId, req.Store);
                 return new PurchasePlanResponse(false, "付款驗證失敗", null);
             }
 
-            user.Plan      = req.Plan;
-            user.UpdatedAt = DateTime.UtcNow;
+            user.Plan               = req.Plan;
+            user.UpdatedAt          = DateTime.UtcNow;
+            purchaseRecord.Status     = PurchaseStatus.Verified;
+            purchaseRecord.VerifiedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
 
             _logger.LogInformation("用戶 {UserId} 透過 {Store} 升級為 {Plan}", userId, req.Store, req.Plan);
@@ -340,13 +438,10 @@ namespace UploadServer.Services
 
             if (!testMode)
             {
-                // 生產環境必須串接金流商（Stripe / Braintree）進行真實扣款驗證。
-                // 尚未實作時拒絕所有 google_pay 請求，防止繞過付款。
                 _logger.LogError("Google Pay 生產環境驗證尚未實作，拒絕付款請求");
                 return false;
             }
 
-            // 測試模式：確認 token 為合法 JSON 物件即可（沙盒環境）
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(token);
@@ -357,7 +452,6 @@ namespace UploadServer.Services
 
         private async Task<bool> ValidateGooglePlayTokenAsync(string purchaseToken, string? productId)
         {
-            // 測試模式：接受預設測試 token（Google Play 靜態測試商品）
             var testMode   = _config.GetValue<bool>("GooglePlay:TestMode", false);
             var testTokens = _config.GetSection("GooglePlay:TestTokens").Get<string[]>() ?? [];
 
@@ -378,7 +472,6 @@ namespace UploadServer.Services
 
             try
             {
-                // 用服務帳戶取得 access token
                 var credential = Google.Apis.Auth.OAuth2.GoogleCredential
                     .FromJson(serviceAccountJson)
                     .CreateScoped("https://www.googleapis.com/auth/androidpublisher");
@@ -400,7 +493,6 @@ namespace UploadServer.Services
 
                 var json = await response.Content.ReadAsStringAsync();
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
-                // purchaseState: 0 = Purchased, 1 = Cancelled, 2 = Pending
                 return doc.RootElement.GetProperty("purchaseState").GetInt32() == 0;
             }
             catch (Exception ex)
@@ -413,8 +505,7 @@ namespace UploadServer.Services
         private async Task<bool> ValidateAppStoreReceiptAsync(string receiptData)
         {
             var sharedSecret = _config["AppStore:SharedSecret"];
-            // Sandbox: true = 沙盒測試；false = 正式
-            var isSandbox = _config.GetValue<bool>("AppStore:Sandbox", false);
+            var isSandbox    = _config.GetValue<bool>("AppStore:Sandbox", false);
 
             if (string.IsNullOrEmpty(sharedSecret))
             {
@@ -442,7 +533,6 @@ namespace UploadServer.Services
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
                 var status = doc.RootElement.GetProperty("status").GetInt32();
 
-                // 21007 = sandbox receipt 送到正式端點 → 切換 sandbox 重試
                 if (status == 21007 && !isSandbox)
                 {
                     _logger.LogInformation("App Store：偵測到 sandbox 收據，切換 sandbox 端點重試");
@@ -461,11 +551,9 @@ namespace UploadServer.Services
             }
         }
 
-        // ── 邀請碼生成 ────────────────────────────────────────────
-
         private static string GenerateInviteCode()
         {
-            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 去掉易混淆字元
+            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
             var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(8);
             return new string(bytes.Select(b => chars[b % chars.Length]).ToArray());
         }

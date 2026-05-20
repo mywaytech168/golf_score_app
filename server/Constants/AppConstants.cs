@@ -56,4 +56,28 @@ namespace UploadServer.Constants
         public const string Local  = "local";
         public const string Google = "google";
     }
+
+    public static class AnalysisSource
+    {
+        public const string DailyQuota = "daily_quota";
+        public const string BonusBall  = "bonus_ball";
+    }
+
+    public static class BallReason
+    {
+        public const string Ad       = "ad";
+        public const string Feedback = "feedback";
+        public const string Invite   = "invite";
+        public const string Upload   = "upload";
+        public const string Analysis = "analysis";
+        public const string Manual   = "manual";
+    }
+
+    public static class PurchaseStatus
+    {
+        public const string Pending  = "pending";
+        public const string Verified = "verified";
+        public const string Failed   = "failed";
+        public const string Refunded = "refunded";
+    }
 }

@@ -1,30 +1,20 @@
 using Microsoft.EntityFrameworkCore;
 using UploadServer.Models;
-using FileModel = UploadServer.Models.File;
 
 namespace UploadServer.Data
 {
-    /// <summary>
-    /// Code-First DbContext for Golf Video Management System
-    /// EF Core will generate database schema from these model definitions
-    /// 
-    /// Schema Design (All using UUID):
-    /// - users: 用戶帳戶
-    /// - videos: 影片主檔（原始錄影和切片）
-    /// - files: 檔案追蹤（原始影片、切片、軌跡數據）
-    /// - process_queue: 處理隊列（排隊中、處理中、已處理）
-    /// </summary>
     public class VideoDbContext : DbContext
     {
         public VideoDbContext(DbContextOptions<VideoDbContext> options) : base(options)
         {
         }
 
-        // DbSets for each entity
         public DbSet<User> Users { get; set; }
-        public DbSet<Video> Videos { get; set; }
-        public DbSet<FileModel> Files { get; set; }
-        public DbSet<ProcessQueueItem> ProcessQueueItems { get; set; }
+        public DbSet<UserAuth> UserAuths { get; set; }
+        public DbSet<AnalysisRecord> AnalysisRecords { get; set; }
+        public DbSet<BallRecord> BallRecords { get; set; }
+        public DbSet<InviteRecord> InviteRecords { get; set; }
+        public DbSet<PurchaseRecord> PurchaseRecords { get; set; }
         public DbSet<ShareLink> ShareLinks { get; set; }
         public DbSet<UserFeedback> UserFeedbacks { get; set; }
         public DbSet<AiCoachAnalysis> AiCoachAnalyses { get; set; }
@@ -34,7 +24,7 @@ namespace UploadServer.Data
             base.OnModelCreating(modelBuilder);
 
             // ============================================================
-            // Users Table Configuration
+            // Users
             // ============================================================
             modelBuilder.Entity<User>(entity =>
             {
@@ -57,27 +47,13 @@ namespace UploadServer.Data
                     .HasMaxLength(255)
                     .IsRequired();
 
-                entity.Property(e => e.PasswordHash)
-                    .HasColumnName("password_hash")
-                    .HasMaxLength(255)
-                    .IsRequired();
-
                 entity.Property(e => e.DisplayName)
                     .HasColumnName("display_name")
-                    .HasMaxLength(255);
-
-                entity.Property(e => e.GoogleId)
-                    .HasColumnName("google_id")
                     .HasMaxLength(255);
 
                 entity.Property(e => e.AvatarUrl)
                     .HasColumnName("avatar_url")
                     .HasMaxLength(500);
-
-                entity.Property(e => e.Provider)
-                    .HasColumnName("provider")
-                    .HasMaxLength(50)
-                    .HasDefaultValue("local");
 
                 entity.Property(e => e.Status)
                     .HasColumnName("status")
@@ -137,23 +113,17 @@ namespace UploadServer.Data
                     .HasColumnName("invited_by_code")
                     .HasMaxLength(16);
 
-                // Unique indexes
                 entity.HasIndex(e => e.Username).IsUnique().HasDatabaseName("uk_username");
                 entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("uk_email");
-                entity.HasIndex(e => e.GoogleId).IsUnique().HasDatabaseName("uk_google_id");
                 entity.HasIndex(e => e.InviteCode).IsUnique().HasDatabaseName("uk_invite_code");
-
-                // Regular indexes
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_user_status");
                 entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_user_created_at");
 
-                // One-to-Many relationship with Videos
-                entity.HasMany(u => u.Videos)
-                    .WithOne(v => v.User)
-                    .HasForeignKey(v => v.UserId)
+                entity.HasMany(u => u.UserAuths)
+                    .WithOne(a => a.User)
+                    .HasForeignKey(a => a.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
 
-                // One-to-Many relationship with UserFeedbacks
                 entity.HasMany(u => u.Feedbacks)
                     .WithOne(f => f.User)
                     .HasForeignKey(f => f.UserId)
@@ -161,11 +131,11 @@ namespace UploadServer.Data
             });
 
             // ============================================================
-            // Videos Table Configuration
+            // UserAuths
             // ============================================================
-            modelBuilder.Entity<Video>(entity =>
+            modelBuilder.Entity<UserAuth>(entity =>
             {
-                entity.ToTable("videos");
+                entity.ToTable("user_auths");
 
                 entity.HasKey(e => e.Id);
 
@@ -179,164 +149,51 @@ namespace UploadServer.Data
                     .HasMaxLength(36)
                     .IsRequired();
 
-                entity.Property(e => e.Name)
-                    .HasColumnName("name")
+                entity.Property(e => e.Provider)
+                    .HasColumnName("provider")
+                    .HasMaxLength(50)
+                    .IsRequired();
+
+                entity.Property(e => e.ProviderUserId)
+                    .HasColumnName("provider_user_id")
                     .HasMaxLength(255)
                     .IsRequired();
 
-                entity.Property(e => e.Status)
-                    .HasColumnName("status")
-                    .HasMaxLength(50)
-                    .HasDefaultValue("pending");
+                entity.Property(e => e.CredentialHash)
+                    .HasColumnName("credential_hash")
+                    .HasMaxLength(255);
 
-                entity.Property(e => e.Type)
-                    .HasColumnName("type")
-                    .HasMaxLength(50)
-                    .HasDefaultValue("original");
-
-                entity.Property(e => e.ParentVideoId)
-                    .HasColumnName("parent_video_id")
-                    .HasMaxLength(36);
-
-                entity.Property(e => e.HitSecond)
-                    .HasColumnName("hit_second")
-                    .HasColumnType("DOUBLE");
-
-                entity.Property(e => e.StartSecond)
-                    .HasColumnName("start_second")
-                    .HasColumnType("DOUBLE");
-
-                entity.Property(e => e.EndSecond)
-                    .HasColumnName("end_second")
-                    .HasColumnType("DOUBLE");
-
-                entity.Property(e => e.PeakValue)
-                    .HasColumnName("peak_value")
-                    .HasColumnType("DOUBLE");
-
-                entity.Property(e => e.GoodShot)
-                    .HasColumnName("good_shot");
-
-                entity.Property(e => e.AudioCrispness)
-                    .HasColumnName("audio_crispness")
-                    .HasColumnType("DOUBLE");
-
-                entity.Property(e => e.CreatedAt)
-                    .HasColumnName("created_at")
-                    .HasColumnType("datetime");
-
-                entity.Property(e => e.UpdatedAt)
-                    .HasColumnName("updated_at")
-                    .HasColumnType("datetime");
-
-                entity.Property(e => e.CompletedAt)
-                    .HasColumnName("completed_at")
-                    .HasColumnType("datetime");
-
-                // Indexes
-                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_video_user_id");
-                entity.HasIndex(e => e.Status).HasDatabaseName("idx_video_status");
-                entity.HasIndex(e => e.Type).HasDatabaseName("idx_video_type");
-                entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_video_created_at");
-                entity.HasIndex(e => e.ParentVideoId).HasDatabaseName("idx_video_parent_id");
-
-                // Foreign Key relationship with User
-                entity.HasOne(v => v.User)
-                    .WithMany(u => u.Videos)
-                    .HasForeignKey(v => v.UserId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                // One-to-Many relationship with Files
-                entity.HasMany(v => v.Files)
-                    .WithOne(f => f.Video)
-                    .HasForeignKey(f => f.VideoId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                // One-to-Many relationship with ProcessQueueItems
-                entity.HasMany(v => v.QueueItems)
-                    .WithOne(q => q.Video)
-                    .HasForeignKey(q => q.VideoId)
-                    .OnDelete(DeleteBehavior.Cascade);
-            });
-
-            // ============================================================
-            // Files Table Configuration
-            // ============================================================
-            modelBuilder.Entity<FileModel>(entity =>
-            {
-                entity.ToTable("files");
-
-                entity.HasKey(e => e.Id);
-
-                entity.Property(e => e.Id)
-                    .HasColumnName("id")
-                    .HasMaxLength(36)
-                    .IsRequired();
-
-                entity.Property(e => e.VideoId)
-                    .HasColumnName("video_id")
-                    .HasMaxLength(36)
-                    .IsRequired();
-
-                entity.Property(e => e.Type)
-                    .HasColumnName("type")
-                    .HasMaxLength(50)
-                    .IsRequired();
-
-                entity.Property(e => e.FileName)
-                    .HasColumnName("file_name")
-                    .HasMaxLength(255)
-                    .IsRequired();
-
-                entity.Property(e => e.FilePath)
-                    .HasColumnName("file_path")
-                    .HasMaxLength(500)
-                    .IsRequired();
-
-                entity.Property(e => e.FileSize)
-                    .HasColumnName("file_size")
-                    .HasDefaultValue(0);
-
-                entity.Property(e => e.MimeType)
-                    .HasColumnName("mime_type")
-                    .HasMaxLength(100);
-
-                entity.Property(e => e.Status)
-                    .HasColumnName("status")
-                    .HasMaxLength(50)
-                    .HasDefaultValue("pending");
-
-                entity.Property(e => e.CreatedAt)
-                    .HasColumnName("created_at")
-                    .HasColumnType("datetime");
-
-                entity.Property(e => e.CompletedAt)
-                    .HasColumnName("completed_at")
-                    .HasColumnType("datetime");
-
-                entity.Property(e => e.ErrorMessage)
-                    .HasColumnName("error_message")
+                entity.Property(e => e.MetadataJson)
+                    .HasColumnName("metadata_json")
                     .HasColumnType("TEXT");
 
-                // Indexes
-                entity.HasIndex(e => e.VideoId).HasDatabaseName("idx_file_video_id");
-                entity.HasIndex(e => e.Type).HasDatabaseName("idx_file_type");
-                entity.HasIndex(e => e.Status).HasDatabaseName("idx_file_status");
-                entity.HasIndex(e => new { e.VideoId, e.Type }).HasDatabaseName("idx_file_video_type");
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
 
-                // Foreign Key relationship with Video
-                entity.HasOne(f => f.Video)
-                    .WithMany(v => v.Files)
-                    .HasForeignKey(f => f.VideoId)
+                entity.Property(e => e.LastUsedAt)
+                    .HasColumnName("last_used_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => new { e.Provider, e.ProviderUserId })
+                    .IsUnique()
+                    .HasDatabaseName("uk_auth_provider_uid");
+
+                entity.HasIndex(e => e.UserId)
+                    .HasDatabaseName("idx_auth_user_id");
+
+                entity.HasOne(a => a.User)
+                    .WithMany(u => u.UserAuths)
+                    .HasForeignKey(a => a.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
             // ============================================================
-            // ProcessQueue Table Configuration
+            // AnalysisRecords
             // ============================================================
-            modelBuilder.Entity<ProcessQueueItem>(entity =>
+            modelBuilder.Entity<AnalysisRecord>(entity =>
             {
-                entity.ToTable("process_queue");
+                entity.ToTable("analysis_records");
 
                 entity.HasKey(e => e.Id);
 
@@ -345,54 +202,202 @@ namespace UploadServer.Data
                     .HasMaxLength(36)
                     .IsRequired();
 
-                entity.Property(e => e.VideoId)
-                    .HasColumnName("video_id")
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
                     .HasMaxLength(36)
                     .IsRequired();
 
-                entity.Property(e => e.Status)
-                    .HasColumnName("status")
-                    .HasMaxLength(50)
-                    .HasDefaultValue("queued");
+                entity.Property(e => e.Source)
+                    .HasColumnName("source")
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                entity.Property(e => e.BallsSpent)
+                    .HasColumnName("balls_spent")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.VideoId)
+                    .HasColumnName("video_id")
+                    .HasMaxLength(36);
+
+                entity.Property(e => e.UsedAt)
+                    .HasColumnName("used_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_ar_user_id");
+                entity.HasIndex(e => e.UsedAt).HasDatabaseName("idx_ar_used_at");
+                entity.HasIndex(e => new { e.UserId, e.UsedAt }).HasDatabaseName("idx_ar_user_used_at");
+
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // BallRecords
+            // ============================================================
+            modelBuilder.Entity<BallRecord>(entity =>
+            {
+                entity.ToTable("ball_records");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.Reason)
+                    .HasColumnName("reason")
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                entity.Property(e => e.Delta)
+                    .HasColumnName("delta");
+
+                entity.Property(e => e.BalanceAfter)
+                    .HasColumnName("balance_after");
+
+                entity.Property(e => e.RefId)
+                    .HasColumnName("ref_id")
+                    .HasMaxLength(36);
 
                 entity.Property(e => e.CreatedAt)
                     .HasColumnName("created_at")
                     .HasColumnType("datetime");
 
-                entity.Property(e => e.StartedAt)
-                    .HasColumnName("started_at")
-                    .HasColumnType("datetime");
+                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_br_user_id");
+                entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_br_created_at");
+                entity.HasIndex(e => new { e.UserId, e.CreatedAt }).HasDatabaseName("idx_br_user_created_at");
 
-                entity.Property(e => e.CompletedAt)
-                    .HasColumnName("completed_at")
-                    .HasColumnType("datetime");
-
-                entity.Property(e => e.RetryCount)
-                    .HasColumnName("retry_count")
-                    .HasDefaultValue(0);
-
-                entity.Property(e => e.IsSuccess)
-                    .HasColumnName("is_success")
-                    .HasDefaultValue(false);
-
-                // Indexes
-                entity.HasIndex(e => e.VideoId).HasDatabaseName("idx_queue_video_id");
-                entity.HasIndex(e => e.Status).HasDatabaseName("idx_queue_status");
-                entity.HasIndex(e => e.IsSuccess).HasDatabaseName("idx_queue_is_success");
-                entity.HasIndex(e => new { e.CompletedAt, e.Status })
-                    .HasDatabaseName("idx_queue_completed_status");
-                entity.HasIndex(e => new { e.Status, e.CreatedAt })
-                    .HasDatabaseName("idx_queue_status_created");
-
-                // Foreign Key relationship with Video
-                entity.HasOne(q => q.Video)
-                    .WithMany(v => v.QueueItems)
-                    .HasForeignKey(q => q.VideoId)
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
             // ============================================================
-            // ShareLinks Table Configuration
+            // InviteRecords
+            // ============================================================
+            modelBuilder.Entity<InviteRecord>(entity =>
+            {
+                entity.ToTable("invite_records");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.InviterUserId)
+                    .HasColumnName("inviter_user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.InviteeUserId)
+                    .HasColumnName("invitee_user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.InviteCode)
+                    .HasColumnName("invite_code")
+                    .HasMaxLength(16)
+                    .IsRequired();
+
+                entity.Property(e => e.InviterBalls)
+                    .HasColumnName("inviter_balls");
+
+                entity.Property(e => e.InviteeBalls)
+                    .HasColumnName("invitee_balls");
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.InviterUserId).HasDatabaseName("idx_ir_inviter");
+                entity.HasIndex(e => e.InviteeUserId).IsUnique().HasDatabaseName("uk_ir_invitee");
+
+                entity.HasOne(e => e.Inviter)
+                    .WithMany()
+                    .HasForeignKey(e => e.InviterUserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(e => e.Invitee)
+                    .WithMany()
+                    .HasForeignKey(e => e.InviteeUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // ============================================================
+            // PurchaseRecords
+            // ============================================================
+            modelBuilder.Entity<PurchaseRecord>(entity =>
+            {
+                entity.ToTable("purchase_records");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.Plan)
+                    .HasColumnName("plan")
+                    .HasMaxLength(50)
+                    .IsRequired();
+
+                entity.Property(e => e.Store)
+                    .HasColumnName("store")
+                    .HasMaxLength(50)
+                    .IsRequired();
+
+                entity.Property(e => e.ProductId)
+                    .HasColumnName("product_id")
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.PurchaseToken)
+                    .HasColumnName("purchase_token")
+                    .HasColumnType("TEXT")
+                    .IsRequired();
+
+                entity.Property(e => e.Status)
+                    .HasColumnName("status")
+                    .HasMaxLength(20)
+                    .HasDefaultValue("pending");
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.VerifiedAt)
+                    .HasColumnName("verified_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_pr_user_id");
+                entity.HasIndex(e => e.Status).HasDatabaseName("idx_pr_status");
+                entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_pr_created_at");
+
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // ShareLinks
             // ============================================================
             modelBuilder.Entity<ShareLink>(entity =>
             {
@@ -450,7 +455,7 @@ namespace UploadServer.Data
             });
 
             // ============================================================
-            // UserFeedbacks Table Configuration
+            // UserFeedbacks
             // ============================================================
             modelBuilder.Entity<UserFeedback>(entity =>
             {
@@ -492,7 +497,7 @@ namespace UploadServer.Data
             });
 
             // ============================================================
-            // AiCoachAnalyses Table Configuration
+            // AiCoachAnalyses
             // ============================================================
             modelBuilder.Entity<AiCoachAnalysis>(entity =>
             {
@@ -505,10 +510,14 @@ namespace UploadServer.Data
                     .HasMaxLength(36)
                     .IsRequired();
 
-                entity.Property(e => e.VideoId)
-                    .HasColumnName("video_id")
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
                     .HasMaxLength(36)
                     .IsRequired();
+
+                entity.Property(e => e.VideoId)
+                    .HasColumnName("video_id")
+                    .HasMaxLength(36);
 
                 entity.Property(e => e.Status)
                     .HasColumnName("status")
@@ -547,12 +556,12 @@ namespace UploadServer.Data
                     .HasColumnName("completed_at")
                     .HasColumnType("datetime");
 
-                entity.HasIndex(e => e.VideoId).HasDatabaseName("idx_ai_coach_video_id");
+                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_ai_coach_user_id");
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_ai_coach_status");
 
-                entity.HasOne(e => e.Video)
+                entity.HasOne(e => e.User)
                     .WithMany()
-                    .HasForeignKey(e => e.VideoId)
+                    .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
         }
