@@ -356,7 +356,24 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 嘗試播放指定的錄影紀錄，並在檔案遺失時提示使用者
   Future<void> _playEntry(RecordingHistoryEntry entry) async {
-    await _playVideoByPath(entry.filePath, missingFileName: entry.fileName);
+    final file = File(entry.filePath);
+    if (!await file.exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('找不到影片檔案 ${entry.fileName}，請確認檔案是否仍存在於裝置內。')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+          videoPath: entry.filePath,
+          avatarPath: widget.userAvatarPath,
+          entry: entry,
+        ),
+      ),
+    );
   }
 
   /// 顯示影片紀錄的 JSON debug 資訊
@@ -398,30 +415,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         SnackBar(content: Text('無法顯示 JSON：$e')),
       );
     }
-  }
-
-  /// 實際進行影片播放與檔案檢查的共用方法
-  Future<void> _playVideoByPath(String path, {String? missingFileName}) async {
-    // 检查档案
-    final file = File(path);
-    if (!await file.exists()) {
-      if (!mounted) return;
-      final fallbackName = missingFileName ?? path.split(RegExp(r'[\\/]')).last;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('找不到影片檔案 $fallbackName，請確認檔案是否仍存在於裝置內。')),
-      );
-      return;
-    }
-
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => VideoPlayerPage(
-          videoPath: path,
-          avatarPath: widget.userAvatarPath,
-        ),
-      ),
-    );
   }
 
   /// 根據排序選項對條目進行排序
