@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'auth_token_storage.dart';
-import '../models/statistics_response.dart';
 
 /// 授權異常 - 當 API 返回 401 時拋出
 class UnauthorizedException implements Exception {
@@ -68,12 +67,15 @@ class VideoServerClient {
 
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
-        if (result['data'] != null && result['data']['accessToken'] != null) {
+        // 後端回傳 { token, refreshToken }（camelCase，無 data wrapper）
+        final newToken = result['token'] as String?;
+        final newRefresh = result['refreshToken'] as String?;
+        if (newToken != null && newToken.isNotEmpty) {
           await AuthTokenStorage.instance.saveTokens(
-            accessToken: result['data']['accessToken'],
-            refreshToken: result['data']['refreshToken'],
-            userId: result['data']['userId'] ?? await AuthTokenStorage.instance.getUserId() ?? '',
-            userEmail: result['data']['email'],
+            accessToken: newToken,
+            refreshToken: newRefresh,
+            userId: await AuthTokenStorage.instance.getUserId() ?? '',
+            userEmail: await AuthTokenStorage.instance.getUserEmail(),
           );
           debugPrint('✅ Token 刷新成功');
           for (final w in _refreshWaiters) {
@@ -194,63 +196,6 @@ class VideoServerClient {
     }
   }
 
-  /// Google OAuth 登入
-  Future<Map<String, dynamic>> loginWithGoogle({
-    required String idToken,
-    required String email,
-    required String? displayName,
-    required String? avatarUrl,
-  }) async {
-    try {
-      final url = Uri.parse('$_baseUrl/api/auth/google-login');
-      debugPrint('🔍 Google 登入 → $url');
-      final response = await http
-          .post(
-            url,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'idToken': idToken,
-              'email': email,
-              'displayName': displayName ?? email,
-              'avatarUrl': avatarUrl ?? '',
-            }),
-          )
-          .timeout(const Duration(seconds: 10));
-
-      debugPrint('📥 Response: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        final result = jsonDecode(response.body);
-        if (result['token'] != null) {
-          final userId = result['user']?['id'] ?? '';
-          final userEmail = result['user']?['email'];
-          await AuthTokenStorage.instance.saveTokens(
-            accessToken: result['token'],
-            refreshToken: result['refreshToken'],
-            userId: userId,
-            userEmail: userEmail,
-          );
-        }
-        return result;
-      } else {
-        try {
-          final errorJson = jsonDecode(response.body);
-          return {
-            'success': false,
-            'message': errorJson['message'] ?? 'Google 登入失敗: ${response.statusCode}',
-          };
-        } catch (_) {
-          return {'success': false, 'message': 'Google 登入失敗: ${response.statusCode}'};
-        }
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'Google 登入超時，請檢查網絡連接'};
-    } catch (e) {
-      debugPrint('❌ Google 登入異常: $e');
-      return {'success': false, 'message': 'Google 登入錯誤: $e'};
-    }
-  }
-
   /// 刷新 Token
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     try {
@@ -266,48 +211,6 @@ class VideoServerClient {
       }
     } catch (e) {
       return {'success': false, 'message': '刷新 Token 錯誤: $e'};
-    }
-  }
-
-  // ============================================================
-  // 統計數據
-  // ============================================================
-
-  Future<StatisticsResponse?> getStatistics({
-    required String period,
-    String? date,
-    bool isRetry = false,
-  }) async {
-    try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/statistics').replace(
-        queryParameters: {
-          'period': period,
-          if (date != null) 'date': date,
-        },
-      );
-
-      debugPrint('📊 獲取統計數據: period=$period');
-      final response = await http.get(url, headers: headers);
-      debugPrint('📥 Response: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        final json = jsonDecode(response.body) as Map<String, dynamic>;
-        return StatisticsResponse.fromJson(json);
-      } else if (response.statusCode == 401 && !isRetry) {
-        final refreshSuccess = await _tryRefreshToken();
-        if (refreshSuccess) {
-          return getStatistics(period: period, date: date, isRetry: true);
-        }
-        throw UnauthorizedException('統計數據獲取失敗: ${response.statusCode}');
-      } else {
-        debugPrint('❌ 統計數據獲取失敗: ${response.statusCode}');
-        return null;
-      }
-    } catch (e) {
-      if (e is UnauthorizedException) rethrow;
-      debugPrint('❌ 統計數據異常: $e');
-      return null;
     }
   }
 
@@ -346,39 +249,6 @@ class VideoServerClient {
       if (e is UnauthorizedException) rethrow;
       debugPrint('❌ 取得方案異常: $e');
       return null;
-    }
-  }
-
-  /// 更新使用者方案
-  ///
-  /// [plan] - 'free' | 'pro' | 'elite'
-  Future<bool> updatePlan(String plan, {bool isRetry = false}) async {
-    try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/plan');
-
-      debugPrint('🔄 更新方案 → $plan');
-      final response = await http.put(
-        url,
-        headers: headers,
-        body: jsonEncode({'plan': plan}),
-      );
-      debugPrint('📥 Response: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        return true;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return updatePlan(plan, isRetry: true);
-        throw UnauthorizedException('更新方案失敗: 401');
-      } else {
-        debugPrint('❌ 更新方案失敗: ${response.statusCode}');
-        return false;
-      }
-    } catch (e) {
-      if (e is UnauthorizedException) rethrow;
-      debugPrint('❌ 更新方案異常: $e');
-      return false;
     }
   }
 
