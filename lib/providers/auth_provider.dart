@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:http/http.dart' as http;
 import '../services/auth_token_storage.dart';
 
 /// 認證狀態提供者
@@ -47,7 +49,7 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// 使用 Google 登入
+  /// 使用 Google 登入（向後端驗證後取得 JWT）
   Future<bool> signInWithGoogle() async {
     _isLoading = true;
     _errorMessage = null;
@@ -62,27 +64,47 @@ class AuthProvider with ChangeNotifier {
       }
 
       final googleAuth = await googleUser.authentication;
-      final accessToken = googleAuth.accessToken;
-
-      if (accessToken == null) {
-        throw Exception('無法獲取 Google 令牌');
+      final idToken = googleAuth.idToken;
+      if (idToken == null) {
+        throw Exception('無法取得 Google IdToken');
       }
 
-      // 保存令牌
+      // 送後端驗證，取得 JWT
+      final response = await http.post(
+        Uri.parse('https://tekswing.api.atk.tw/api/auth/google-login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'idToken': idToken,
+          'email': googleUser.email,
+          'displayName': googleUser.displayName,
+          'avatarUrl': googleUser.photoUrl,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        throw Exception(body['message'] ?? 'Google 登入失敗: ${response.statusCode}');
+      }
+
+      final result = jsonDecode(response.body) as Map<String, dynamic>;
+      final token = result['token'] as String?;
+      if (token == null || token.isEmpty) {
+        throw Exception('後端未返回認證令牌');
+      }
+
+      final user = result['user'] as Map<String, dynamic>?;
       await _tokenStorage.saveTokens(
-        accessToken: accessToken,
-        refreshToken: googleAuth.idToken,
-        userId: googleUser.id,
-        userEmail: googleUser.email,
+        accessToken: token,
+        refreshToken: result['refreshToken'] as String?,
+        userId: user?['id']?.toString() ?? googleUser.id,
+        userEmail: user?['email'] as String? ?? googleUser.email,
       );
 
-      // 更新狀態
-      _accessToken = accessToken;
-      _userId = googleUser.id;
-      _userEmail = googleUser.email;
+      _accessToken = token;
+      _userId = user?['id']?.toString() ?? googleUser.id;
+      _userEmail = user?['email'] as String? ?? googleUser.email;
       _isLoggedIn = true;
       _errorMessage = null;
-
       return true;
     } catch (e) {
       _errorMessage = 'Google 登入失敗: $e';

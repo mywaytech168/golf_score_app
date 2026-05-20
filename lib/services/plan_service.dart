@@ -134,31 +134,6 @@ class PlanService {
     );
   }
 
-  // ── 更新方案 ──────────────────────────────────────────────────
-
-  /// 通知後端更新方案，同時寫入本地 cache
-  ///
-  /// 回傳 true = 後端成功；false = 後端失敗（cache 仍已更新）
-  static Future<bool> setPlan(UserPlan plan) async {
-    // 先更新 cache，確保 UI 即時反應
-    await _writeCachedPlan(plan);
-
-    try {
-      final ok = await VideoServerClient.instance.updatePlan(plan.key);
-      if (ok) {
-        debugPrint('$_tag ✅ 後端方案已更新: ${plan.label}');
-      } else {
-        debugPrint('$_tag ⚠️ 後端更新失敗，cache 已保留');
-      }
-      return ok;
-    } on UnauthorizedException {
-      rethrow;
-    } catch (e) {
-      debugPrint('$_tag ❌ 更新方案異常: $e');
-      return false;
-    }
-  }
-
   // ── 付款購買 ──────────────────────────────────────────────────
 
   /// 付款後向後端驗證並升級方案

@@ -193,8 +193,6 @@ app.UseMiddleware<UserRateLimitMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseCors();
-
 // ============================================================
 // 8. 路由映射
 // ============================================================
