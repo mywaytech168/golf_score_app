@@ -70,6 +70,39 @@ namespace UploadServer.Services
             return _s3.GetPreSignedURL(request);
         }
 
+        // ── AI Coach clip 路徑規則 ──────────────────────────────────────
+        public static string AiCoachClipKey(string analysisId) =>
+            $"ai_coach/{analysisId}/clip.mp4";
+
+        /// <summary>產生 clip 上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
+        public string GenerateClipUploadUrl(string analysisId, int expiryMinutes = 20)
+        {
+            var key = AiCoachClipKey(analysisId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "video/mp4",
+            };
+            _logger.LogInformation("產生 clip PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
+        /// <summary>產生 clip 下載的 pre-signed GET URL（Worker 下載用）</summary>
+        public string GenerateClipDownloadUrl(string b2Path, int expiryMinutes = 10)
+        {
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName = _bucketName,
+                Key        = b2Path,
+                Verb       = HttpVerb.GET,
+                Expires    = DateTime.UtcNow.AddMinutes(expiryMinutes),
+            };
+            return _s3.GetPreSignedURL(request);
+        }
+
         /// <summary>刪除 B2 物件（過期清理用）</summary>
         public async Task DeleteObjectAsync(string objectKey)
         {

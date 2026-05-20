@@ -72,6 +72,14 @@ builder.Services.AddSingleton<UploadServer.Services.ITokenBlacklistService, Uplo
 
 // HTTP 客戶端工廠配置
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("gemini", c =>
+{
+    c.Timeout = TimeSpan.FromMinutes(5); // Gemini 影片分析可能較慢
+});
+
+// AI Coach 服務
+builder.Services.AddSingleton<GeminiService>();
+builder.Services.AddHostedService<AiCoachWorkerService>();
 
 // 後台服務 - 排程器
 builder.Services.AddHostedService<ShareCleanupService>();
