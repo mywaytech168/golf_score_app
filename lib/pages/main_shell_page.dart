@@ -333,7 +333,7 @@ class _QuickStartNavItem extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Record',
+            '錄製',
             style: TextStyle(
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,

@@ -137,12 +137,13 @@ class _UpgradePageState extends State<UpgradePage> {
 
   Widget _buildAppBar() {
     return SliverAppBar(
-      expandedHeight: 140,
+      expandedHeight: 160,
       pinned: true,
       backgroundColor: kPrimaryGreen,
       foregroundColor: Colors.white,
       automaticallyImplyLeading: false,
       flexibleSpace: FlexibleSpaceBar(
+        collapseMode: CollapseMode.pin,
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -151,30 +152,40 @@ class _UpgradePageState extends State<UpgradePage> {
               colors: [kPrimaryGreen, Color(0xFF0A5C3A)],
             ),
           ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.workspace_premium_rounded, color: Colors.amber, size: 32),
-                  const SizedBox(height: 8),
-                  const Text(
-                    '升級您的方案',
-                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '解鎖更多揮桿分析功能，精進您的球技',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
-                  ),
-                ],
-              ),
+          // 不用 SafeArea，讓 SliverAppBar 自己處理 status bar
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 72, 24, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.workspace_premium_rounded, color: Colors.amber, size: 28),
+                    SizedBox(width: 10),
+                    Text(
+                      '升級您的方案',
+                      style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '解鎖更多揮桿分析功能，精進您的球技',
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
+                ),
+              ],
             ),
           ),
         ),
-        title: const Text('升級方案', style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.workspace_premium_rounded, color: Colors.amber, size: 18),
+            SizedBox(width: 6),
+            Text('升級方案', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
         titlePadding: const EdgeInsets.only(left: 16, bottom: 14),
       ),
     );

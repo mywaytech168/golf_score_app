@@ -298,97 +298,111 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        leading: const SizedBox.shrink(),
-        centerTitle: true,
-        title: const Text(
-          '選擇錄製方式',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: Colors.black87,
-          ),
-        ),
-      ),
-      body: _isImporting 
-        ? _buildLoadingOverlay()
-        : _buildSelectionUI(),
+      backgroundColor: const Color(0xFFF4F6F9),
+      body: _isImporting ? _buildLoadingOverlay() : _buildSelectionUI(),
     );
   }
 
-  /// 加載中的覆蓋層
   Widget _buildLoadingOverlay() {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const CircularProgressIndicator(
+          CircularProgressIndicator(
             valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7C3AED)),
             strokeWidth: 3,
           ),
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
           Text(
             '正在導入影片...',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black54),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '請勿關閉應用',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[500],
-            ),
-          ),
+          SizedBox(height: 8),
+          Text('請勿關閉應用', style: TextStyle(fontSize: 14, color: Colors.black38)),
         ],
       ),
     );
   }
 
-  /// 選擇 UI
   Widget _buildSelectionUI() {
-    return Center(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // 選項 1: 開始錄製
-              _buildSelectionCard(
-                emoji: '🎥',
-                title: '開始錄製',
-                subtitle: '即時拍攝並分析',
-                description: 'Start Live Recording',
-                onTap: _startRecording,
-                color: const Color(0xFF2196F3),
-              ),
-              const SizedBox(height: 32),
-              
-              // 選項 2: 選擇本地影片
-              _buildSelectionCard(
-                emoji: '📂',
-                title: '選擇本地影片',
-                subtitle: '從設備選擇已有影片',
-                description: 'Select Local Video',
-                onTap: _selectLocalVideo,
-                color: const Color(0xFF7C3AED),
-              ),
-              const SizedBox(height: 32),
+    return Column(
+      children: [
+        // ── Header ────────────────────────────────────────────
+        _buildHeader(),
 
-              // 選項 3: 從分享連結取得
-              _buildSelectionCard(
-                emoji: '🔗',
-                title: '從分享連結取得',
-                subtitle: '輸入 16 碼分享碼下載影片',
-                description: 'Import from Share Code',
-                onTap: _importFromShare,
-                color: const Color(0xFF1565C0),
+        // ── 選項卡片 ──────────────────────────────────────────
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Column(
+              children: [
+                _buildCard(
+                  icon: Icons.videocam_rounded,
+                  title: '開始錄製',
+                  subtitle: '即時拍攝並進行揮桿分析',
+                  color: const Color(0xFF2196F3),
+                  onTap: _startRecording,
+                ),
+                const SizedBox(height: 16),
+                _buildCard(
+                  icon: Icons.folder_open_rounded,
+                  title: '選擇本地影片',
+                  subtitle: '從裝置中選擇已有影片（上限 2 分鐘）',
+                  color: const Color(0xFF7C3AED),
+                  onTap: _selectLocalVideo,
+                ),
+                const SizedBox(height: 16),
+                _buildCard(
+                  icon: Icons.link_rounded,
+                  title: '從分享連結取得',
+                  subtitle: '輸入 16 碼分享碼下載影片',
+                  color: const Color(0xFF1565C0),
+                  onTap: _importFromShare,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1976D2), Color(0xFF0D47A1)],
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.videocam_rounded, color: Colors.white70, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    '錄製',
+                    style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '選擇錄製方式',
+                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '即時拍攝、匯入本地影片或透過分享碼取得',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13),
               ),
             ],
           ),
@@ -397,90 +411,61 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     );
   }
 
-  Widget _buildSelectionCard({
-    required String emoji,
+  Widget _buildCard({
+    required IconData icon,
     required String title,
     required String subtitle,
-    required String description,
-    required VoidCallback onTap,
     required Color color,
+    required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              color.withValues(alpha: 0.1),
-              color.withValues(alpha: 0.05),
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
+            boxShadow: [
+              BoxShadow(color: color.withValues(alpha: 0.08), blurRadius: 10, offset: const Offset(0, 4)),
             ],
           ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: color.withValues(alpha: 0.3),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.15),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                children: [
-                  // 表情符號
-                  Text(
-                    emoji,
-                    style: const TextStyle(fontSize: 56),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // 標題
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  
-                  // 副標題
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  
-                  // 英文說明
-                  Text(
-                    description,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: color,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          child: Row(
+            children: [
+              // 圖示圓形背景
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 26),
               ),
-            ),
+              const SizedBox(width: 16),
+              // 文字
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600], height: 1.3),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.arrow_forward_ios_rounded, color: color.withValues(alpha: 0.6), size: 16),
+            ],
           ),
         ),
       ),
