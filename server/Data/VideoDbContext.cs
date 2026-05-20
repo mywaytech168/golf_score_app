@@ -27,6 +27,7 @@ namespace UploadServer.Data
         public DbSet<ProcessQueueItem> ProcessQueueItems { get; set; }
         public DbSet<ShareLink> ShareLinks { get; set; }
         public DbSet<UserFeedback> UserFeedbacks { get; set; }
+        public DbSet<AiCoachAnalysis> AiCoachAnalyses { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -487,6 +488,71 @@ namespace UploadServer.Data
                 entity.HasOne(f => f.User)
                     .WithMany(u => u.Feedbacks)
                     .HasForeignKey(f => f.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // AiCoachAnalyses Table Configuration
+            // ============================================================
+            modelBuilder.Entity<AiCoachAnalysis>(entity =>
+            {
+                entity.ToTable("ai_coach_analyses");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.VideoId)
+                    .HasColumnName("video_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.Status)
+                    .HasColumnName("status")
+                    .HasMaxLength(50)
+                    .HasDefaultValue("pending");
+
+                entity.Property(e => e.ErrorTypeHint)
+                    .HasColumnName("error_type_hint")
+                    .HasMaxLength(64);
+
+                entity.Property(e => e.ClipB2Path)
+                    .HasColumnName("clip_b2_path")
+                    .HasMaxLength(512);
+
+                entity.Property(e => e.ResultJson)
+                    .HasColumnName("result_json")
+                    .HasColumnType("LONGTEXT");
+
+                entity.Property(e => e.Summary)
+                    .HasColumnName("summary")
+                    .HasColumnType("TEXT");
+
+                entity.Property(e => e.Severity)
+                    .HasColumnName("severity")
+                    .HasMaxLength(16);
+
+                entity.Property(e => e.RetryCount)
+                    .HasColumnName("retry_count")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.CompletedAt)
+                    .HasColumnName("completed_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.VideoId).HasDatabaseName("idx_ai_coach_video_id");
+                entity.HasIndex(e => e.Status).HasDatabaseName("idx_ai_coach_status");
+
+                entity.HasOne(e => e.Video)
+                    .WithMany()
+                    .HasForeignKey(e => e.VideoId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
         }
