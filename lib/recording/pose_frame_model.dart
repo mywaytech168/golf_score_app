@@ -59,12 +59,12 @@ class PoseFrameModel {
     final row = <dynamic>[frame, timeSec.toStringAsFixed(6), poseUpdateId];
     for (final lm in landmarks) {
       row.addAll([
-        lm.xNorm.isNaN ? '' : lm.xNorm,
-        lm.yNorm.isNaN ? '' : lm.yNorm,
-        lm.z.isNaN ? '' : lm.z,
+        lm.xNorm.isNaN ? 0.0 : lm.xNorm,  // ✅ 用 0.0 代替空字符串，保持 CSV 完整性
+        lm.yNorm.isNaN ? 0.0 : lm.yNorm,
+        lm.z.isNaN ? 0.0 : lm.z,
         lm.visibility,
-        lm.xPx.isNaN ? '' : lm.xPx,
-        lm.yPx.isNaN ? '' : lm.yPx,
+        lm.xPx.isNaN ? 0.0 : lm.xPx,
+        lm.yPx.isNaN ? 0.0 : lm.yPx,
       ]);
     }
     return row;

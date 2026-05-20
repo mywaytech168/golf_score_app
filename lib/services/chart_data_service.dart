@@ -101,7 +101,10 @@ class ChartDataService {
       }
 
       final lines = await file.readAsLines();
-      if (lines.length < 2) return empty;
+      if (lines.length < 2) {
+        debugPrint('$_tag pose CSV 行數不足: ${lines.length} < 2');
+        return empty;
+      }
 
       final headers = lines[0].split(',');
       final timeIdx = headers.indexOf('time_sec');
@@ -110,8 +113,13 @@ class ChartDataService {
       final xwIdx = headers.indexOf('lm16_x_px');
       final visIdx = headers.indexOf('lm16_visibility');
 
+      // ✅ 診斷：顯示實際的 header
+      debugPrint('$_tag pose CSV header 數量: ${headers.length}');
+      debugPrint('$_tag pose CSV 字段位置: timeIdx=$timeIdx, ywIdx=$ywIdx, xwIdx=$xwIdx, visIdx=$visIdx');
       if (timeIdx < 0 || ywIdx < 0 || xwIdx < 0) {
         debugPrint('$_tag pose CSV 缺少手腕欄位');
+        debugPrint('$_tag 預期欄位: time_sec, lm16_y_px, lm16_x_px');
+        debugPrint('$_tag 實際 header: ${headers.join(", ")}');
         return empty;
       }
 
@@ -119,11 +127,16 @@ class ChartDataService {
       final speedPts = <ChartPoint>[];
 
       double? prevX, prevY;
+      int validRows = 0;
+      int skippedRows = 0;
 
       for (int i = 1; i < lines.length; i++) {
         final cols = lines[i].split(',');
         final maxIdx = [timeIdx, ywIdx, xwIdx, visIdx].reduce(max);
-        if (cols.length <= maxIdx) continue;
+        if (cols.length <= maxIdx) {
+          skippedRows++;
+          continue;
+        }
 
         final t   = double.tryParse(cols[timeIdx].trim());
         final yw  = double.tryParse(cols[ywIdx].trim());
@@ -132,12 +145,23 @@ class ChartDataService {
             ? double.tryParse(cols[visIdx].trim())
             : null;
 
-        if (t == null || yw == null || xw == null) continue;
-        if (vis != null && vis < 0.4) {
-          prevX = null; prevY = null;
+        // ✅ 跳過無效或低信心的數據
+        if (t == null || yw == null || xw == null) {
+          skippedRows++;
+          continue;
+        }
+        // ✅ 跳過低可見度或全零坐標（未檢測）
+        if (vis != null && vis < 0.1) {
+          skippedRows++;
+          continue;
+        }
+        if ((yw == 0.0 && xw == 0.0) && vis != null && vis > 0) {
+          // 非零可見度但座標為 0，這通常表示檢測失敗
+          skippedRows++;
           continue;
         }
 
+        validRows++;
         wristY.add(ChartPoint(t, yw));
 
         if (prevX != null && prevY != null) {
@@ -150,7 +174,7 @@ class ChartDataService {
         prevY = yw;
       }
 
-      debugPrint('$_tag pose: wristY=${wristY.length}, speed=${speedPts.length}');
+      debugPrint('$_tag pose: wristY=${wristY.length}, speed=${speedPts.length}, validRows=$validRows, skipped=$skippedRows');
       return [wristY, speedPts];
     } catch (e) {
       debugPrint('$_tag pose CSV 解析失敗: $e');
