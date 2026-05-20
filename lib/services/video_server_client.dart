@@ -382,6 +382,52 @@ class VideoServerClient {
     }
   }
 
+  /// 付款後向後端驗證並升級方案
+  ///
+  /// [plan]          - 'pro' | 'elite'
+  /// [store]         - 'google_pay' | 'google_play' | 'app_store'
+  /// [purchaseToken] - Google Pay token / Play purchase token / App Store receipt
+  Future<bool> purchasePlan(
+    String plan,
+    String store,
+    String purchaseToken, {
+    String? productId,
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/plan/purchase');
+
+      debugPrint('💳 購買方案 → plan=$plan store=$store');
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode({
+          'plan': plan,
+          'store': store,
+          'purchaseToken': purchaseToken,
+          if (productId != null) 'productId': productId,
+        }),
+      );
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        return true;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return purchasePlan(plan, store, purchaseToken, productId: productId, isRetry: true);
+        throw UnauthorizedException('購買方案失敗: 401');
+      } else {
+        debugPrint('❌ 購買方案失敗: ${response.statusCode} ${response.body}');
+        return false;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 購買方案異常: $e');
+      return false;
+    }
+  }
+
   // ============================================================
   // 獎勵系統
   // ============================================================

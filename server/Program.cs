@@ -1,11 +1,10 @@
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using NLog;
 using NLog.Web;
 using Swashbuckle.AspNetCore.SwaggerGen;
-using UploadServer.Configuration;
 using UploadServer.Data;
 using UploadServer.Services;
 using System.Text;
@@ -43,12 +42,6 @@ try
     logger.Info($"🔧 環境: {builder.Environment.EnvironmentName}");
     logger.Info("════════════════════════════════════════════════════════════");
 
-    // ============================================================
-    // 0. 文件存儲配置
-    // ============================================================
-    builder.Services.Configure<FileStorageOptions>(
-        builder.Configuration.GetSection(FileStorageOptions.SectionName));
-
 // ============================================================
 // 1. EF Core DbContext 配置 (Code-First)
 // ============================================================
@@ -74,12 +67,13 @@ builder.Services.AddScoped<VideoUploadService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton<B2Service>();
 builder.Services.AddScoped<ShareService>();
+builder.Services.AddScoped<UserService>();
+builder.Services.AddSingleton<UploadServer.Services.ITokenBlacklistService, UploadServer.Services.TokenBlacklistService>();
 
 // HTTP 客戶端工廠配置
 builder.Services.AddHttpClient();
 
 // 後台服務 - 排程器
-builder.Services.AddHostedService<ProcessingSchedulerService>();
 builder.Services.AddHostedService<ShareCleanupService>();
 
 // ============================================================
@@ -118,6 +112,18 @@ builder.Services
             ValidateAudience = false,
             ValidateLifetime = true,
             ClockSkew = System.TimeSpan.Zero,
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = ctx =>
+            {
+                var blacklist = ctx.HttpContext.RequestServices
+                    .GetRequiredService<UploadServer.Services.ITokenBlacklistService>();
+                var jti = ctx.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+                if (jti != null && blacklist.IsRevoked(jti))
+                    ctx.Fail("Token has been revoked");
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -184,59 +190,9 @@ app.UseAuthorization();
 app.UseCors();
 
 // ============================================================
-// 8. 靜態檔案服務
-// ============================================================
-var fileStorageOptions = builder.Configuration.GetSection(FileStorageOptions.SectionName)
-    .Get<FileStorageOptions>() ?? new FileStorageOptions();
-
-var uploadDir = fileStorageOptions.GetUploadPath();
-Directory.CreateDirectory(uploadDir);
-
-// 提供靜態檔案服務，影片可直接由 /videos/{檔名} 取得
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new PhysicalFileProvider(uploadDir),
-    RequestPath = "/videos"
-});
-
-// ============================================================
-// 9. 路由映射
+// 8. 路由映射
 // ============================================================
 app.MapControllers();
-
-// ============================================================
-// 10. 測試端點（保留原有功能）
-// ============================================================
-// 取得影片檔案清單
-app.MapGet("/videos", () =>
-{
-    var files = Directory.GetFiles(uploadDir)
-        .Select(Path.GetFileName)
-        .Where(name => name != null)
-        .ToArray();
-    return Results.Json(files);
-});
-
-// 上傳影片檔案
-app.MapPost("/upload", async (HttpRequest request) =>
-{
-    if (!request.HasFormContentType)
-    {
-        return Results.BadRequest("缺少表單資料");
-    }
-
-    var form = await request.ReadFormAsync();
-    var file = form.Files.FirstOrDefault();
-    if (file == null)
-    {
-        return Results.BadRequest("找不到檔案");
-    }
-
-    var filePath = Path.Combine(uploadDir, file.FileName);
-    using var stream = File.Create(filePath);
-    await file.CopyToAsync(stream);
-    return Results.Ok(new { file.FileName });
-});
 
 // ============================================================
 // 11. 應用啟動
@@ -245,7 +201,7 @@ logger.Info("══════════════════════�
 logger.Info("✅ TekSwing 高爾夫揮桿分析伺服器啟動");
 logger.Info("════════════════════════════════════════════════════════════");
 logger.Info($"📊 數據庫: {(connectionString != null ? "已配置" : "使用默認本地配置")}");
-logger.Info($"📁 上傳目錄: {uploadDir}");
+logger.Info($"☁️  存儲: Backblaze B2");
 logger.Info($"🔌 服務埠: https://localhost:5000");
 logger.Info($"📚 API 文檔: https://localhost:5000/swagger");
 logger.Info("════════════════════════════════════════════════════════════");

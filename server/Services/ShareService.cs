@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using UploadServer.Data;
 using UploadServer.DTOs;
 using UploadServer.Models;
@@ -41,8 +41,8 @@ namespace UploadServer.Services
                 SizeBytes  = req.SizeBytes,
                 SharerName = req.SharerName,
                 Confirmed  = false,
-                CreatedAt  = DateTime.Now,
-                ExpiresAt  = DateTime.Now.AddDays(1),
+                CreatedAt  = DateTime.UtcNow,
+                ExpiresAt  = DateTime.UtcNow.AddDays(1),
             };
 
             _db.ShareLinks.Add(link);

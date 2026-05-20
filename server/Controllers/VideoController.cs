@@ -1,10 +1,8 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
+using UploadServer.Constants;
 using UploadServer.Data;
 using UploadServer.DTOs;
 using UploadServer.Models;
@@ -22,18 +20,15 @@ namespace UploadServer.Controllers
         private readonly VideoDbContext _context;
         private readonly VideoUploadService _uploadService;
         private readonly ILogger<VideoController> _logger;
-        private readonly IConfiguration _configuration;
 
         public VideoController(
             VideoDbContext context,
             VideoUploadService uploadService,
-            ILogger<VideoController> logger,
-            IConfiguration configuration)
+            ILogger<VideoController> logger)
         {
-            _context = context;
+            _context       = context;
             _uploadService = uploadService;
-            _logger = logger;
-            _configuration = configuration;
+            _logger        = logger;
         }
 
         /// <summary>
@@ -50,36 +45,6 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
-        /// 從查詢參數驗證 JWT Token
-        /// </summary>
-        private ClaimsPrincipal? ValidateTokenFromQuery(string token)
-        {
-            try
-            {
-                var jwtSecret = _configuration["Jwt:Secret"] ?? "default-secret-key-please-change-in-production";
-                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
-
-                var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-                var principal = tokenHandler.ValidateToken(token, new TokenValidationParameters
-                {
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = key,
-                    ValidateIssuer = false,
-                    ValidateAudience = false,
-                    ValidateLifetime = true,
-                    ClockSkew = TimeSpan.Zero,
-                }, out SecurityToken validatedToken);
-
-                return principal;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning($"Token 驗證失敗: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
         /// 健康檢查端點
         /// GET: /api/health
         /// </summary>
@@ -89,7 +54,7 @@ namespace UploadServer.Controllers
             return Ok(new
             {
                 status = "healthy",
-                timestamp = DateTime.Now,
+                timestamp = DateTime.UtcNow,
                 database = "connected",
                 uploadEndpointExample = "POST /api/videos/{videoId}/files",
             });
@@ -237,12 +202,11 @@ namespace UploadServer.Controllers
                 }
 
                 var (success, fileRecord, error) = await _uploadService.UploadFileAsync(
-                    userId, 
-                    videoId, 
-                    fileType, 
-                    file, 
-                    sourceLocalFilePath: sourceLocalFilePath,
-                    saveToStorage: true);  // 手機端上傳，需要保存檔案
+                    userId,
+                    videoId,
+                    fileType,
+                    file,
+                    sourceLocalFilePath: sourceLocalFilePath);
 
                 if (!success)
                 {
@@ -321,37 +285,37 @@ namespace UploadServer.Controllers
                 _logger.LogInformation($"📂 影片包含 {files.Count} 個檔案");
 
                 // 檢查是否所有檔案都已上傳完成
-                var allFilesCompleted = files.All(f => f.Status == "completed" || f.CompletedAt != null);
+                var allFilesCompleted = files.All(f => f.Status == VideoStatus.Completed || f.CompletedAt != null);
                 if (!allFilesCompleted)
                 {
-                    var incompleteCount = files.Count(f => f.Status != "completed" && f.CompletedAt == null);
+                    var incompleteCount = files.Count(f => f.Status != VideoStatus.Completed && f.CompletedAt == null);
                     _logger.LogWarning($"⚠️ 還有 {incompleteCount} 個檔案未完成上傳");
                     return BadRequest(new 
                     { 
                         success = false, 
                         error = "並非所有檔案都已上傳完成",
-                        completedFiles = files.Count(f => f.Status == "completed").ToString(),
+                        completedFiles = files.Count(f => f.Status == VideoStatus.Completed).ToString(),
                         totalFiles = files.Count.ToString()
                     });
                 }
 
                 // 更新影片狀態為 completed
-                video.Status = "completed";
-                video.UpdatedAt = DateTime.Now;
+                video.Status = VideoStatus.Completed;
+                video.UpdatedAt = DateTime.UtcNow;
                 _context.Videos.Update(video);
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation($"✅ 影片狀態已更新為 completed");
 
                 // ✅ 改進：創建對應的處理隊列項目
-                if (files.Any(x=>x.Type == "clip"))
+                if (files.Any(x=>x.Type == VideoType.Clip))
                 {
                     var queueItem = new ProcessQueueItem
                     {
                         Id = Guid.NewGuid().ToString(),
                         VideoId = videoId,
-                        Status = "ready",
-                        CreatedAt = DateTime.Now,
+                        Status = QueueStatus.Ready,
+                        CreatedAt = DateTime.UtcNow,
                         Video = video
                     };
                     _context.ProcessQueueItems.Add(queueItem);
@@ -448,7 +412,7 @@ namespace UploadServer.Controllers
                     // 獲取該影片的主要文件類型（優先順序：pose_phase_trajectory_video > clip > original）
                     var videoFiles = await _context.Files
                         .Where(f => f.VideoId == video.Id)
-                        .OrderByDescending(f => f.Type == "clip")
+                        .OrderByDescending(f => f.Type == VideoType.Clip)
                         .FirstOrDefaultAsync();
                     var mainFileType = videoFiles?.Type ?? "unknown";
 
@@ -519,10 +483,10 @@ namespace UploadServer.Controllers
                     summary = new
                     {
                         total = queueItems.Count,
-                        pending = queueItems.Count(q => q.Status == "pending"),
-                        processing = queueItems.Count(q => q.Status == "processing"),
-                        completed = queueItems.Count(q => q.Status == "completed"),
-                        failed = queueItems.Count(q => q.Status == "failed"),
+                        pending = queueItems.Count(q => q.Status == VideoStatus.Pending),
+                        processing = queueItems.Count(q => q.Status == VideoStatus.Processing),
+                        completed = queueItems.Count(q => q.Status == VideoStatus.Completed),
+                        failed = queueItems.Count(q => q.Status == VideoStatus.Failed),
                         successCount = queueItems.Count(q => q.IsSuccess == true),
                     },
                     items = queueItems.Select(q => new
@@ -583,8 +547,8 @@ namespace UploadServer.Controllers
 
                 // 按優先度排序檔案：pose_phase_trajectory_video 優先，然後是 clip，最後是 original
                 var sortedFiles = files
-                    .OrderByDescending(f => f.Type == "pose_phase_trajectory_video")
-                    .ThenByDescending(f => f.Type == "clip")
+                    .OrderByDescending(f => f.Type == FileType.PosePhaseVideo)
+                    .ThenByDescending(f => f.Type == VideoType.Clip)
                     .ToList();
 
                 // 取得主要文件類型（優先順序：pose_phase_trajectory_video > clip > original）
@@ -644,8 +608,8 @@ namespace UploadServer.Controllers
         /// 重新分析影片 (Re-run Analysis)
         /// POST: /api/videos/{videoId}/rerun-analysis
         /// 邏輯：
-        ///   1. 檢查該影片是否已經在隊列中 + status = "ready"
-        ///   2. 如果有 → 重用現有隊列項目（改為 "queued"）
+        ///   1. 檢查該影片是否已經在隊列中 + status = QueueStatus.Ready
+        ///   2. 如果有 → 重用現有隊列項目（改為 QueueStatus.Queued）
         ///   3. 如果沒有 → 創建新的隊列項目
         /// </summary>
         [Authorize]
@@ -686,11 +650,11 @@ namespace UploadServer.Controllers
 
                 if (existingReadyQueue != null)
                 {
-                    // 📌 情況 1：有現成的 "ready" 隊列項目 → 重用它
+                    // 📌 情況 1：有現成的 QueueStatus.Ready 隊列項目 → 重用它
                     _logger.LogInformation($"♻️ 找到現成的 'ready' 隊列項目: {existingReadyQueue.Id}");
                     
-                    // 重設隊列項目狀態為 "queued"
-                    existingReadyQueue.Status = "ready";
+                    // 重設隊列項目狀態為 QueueStatus.Queued
+                    existingReadyQueue.Status = QueueStatus.Ready;
                     existingReadyQueue.RetryCount = 0;
                     existingReadyQueue.StartedAt = null;
                     existingReadyQueue.CompletedAt = null;
@@ -710,8 +674,8 @@ namespace UploadServer.Controllers
                     {
                         Id = Guid.NewGuid().ToString(),
                         VideoId = videoId,
-                        Status = "ready",
-                        CreatedAt = DateTime.Now,
+                        Status = QueueStatus.Ready,
+                        CreatedAt = DateTime.UtcNow,
                         Video = video
                     };
                     
@@ -794,7 +758,7 @@ namespace UploadServer.Controllers
         /// <summary>
         /// 解除雲端綁定
         /// POST: /api/videos/{videoId}/unbind
-        /// 將影片狀態更新為 "unbind"
+        /// 將影片狀態更新為 VideoStatus.Unbind
         /// </summary>
         [Authorize]
         [HttpPost("videos/{videoId}/unbind")]
@@ -826,9 +790,9 @@ namespace UploadServer.Controllers
 
                 _logger.LogInformation($"✅ 影片存在: {video.Name}");
 
-                // 更新影片狀態為 "unbind"
-                video.Status = "unbind";
-                video.UpdatedAt = DateTime.Now;
+                // 更新影片狀態為 VideoStatus.Unbind
+                video.Status = VideoStatus.Unbind;
+                video.UpdatedAt = DateTime.UtcNow;
                 _context.Videos.Update(video);
                 await _context.SaveChangesAsync();
 
@@ -858,7 +822,7 @@ namespace UploadServer.Controllers
         /// <summary>
         /// 標記影片為刪除
         /// POST: /api/videos/{videoId}/delete
-        /// 將影片狀態更新為 "deleted"
+        /// 將影片狀態更新為 VideoStatus.Deleted
         /// </summary>
         [Authorize]
         [HttpPost("videos/{videoId}/delete")]
@@ -890,9 +854,9 @@ namespace UploadServer.Controllers
 
                 _logger.LogInformation($"✅ 影片存在: {video.Name}");
 
-                // 更新影片狀態為 "deleted"
-                video.Status = "deleted";
-                video.UpdatedAt = DateTime.Now;
+                // 更新影片狀態為 VideoStatus.Deleted
+                video.Status = VideoStatus.Deleted;
+                video.UpdatedAt = DateTime.UtcNow;
                 _context.Videos.Update(video);
                 await _context.SaveChangesAsync();
 
@@ -963,7 +927,7 @@ namespace UploadServer.Controllers
 
                 // 更新影片名稱
                 video.Name = request.Name.Trim();
-                video.UpdatedAt = DateTime.Now;
+                video.UpdatedAt = DateTime.UtcNow;
                 _context.Videos.Update(video);
                 await _context.SaveChangesAsync();
 
@@ -1008,7 +972,7 @@ namespace UploadServer.Controllers
                 }
 
                 var query = _context.Videos
-                    .Where(v => v.UserId == userId && v.Status == "completed" && v.GoodShot != null);
+                    .Where(v => v.UserId == userId && v.Status == VideoStatus.Completed && v.GoodShot != null);
 
                 // 根据时间维度筛选
                 DateTime? startDate = null;
@@ -1017,12 +981,12 @@ namespace UploadServer.Controllers
                 switch (period.ToLower())
                 {
                     case "today":
-                        startDate = DateTime.Now.Date;
-                        endDate = DateTime.Now.Date.AddDays(1);
+                        startDate = DateTime.UtcNow.Date;
+                        endDate = DateTime.UtcNow.Date.AddDays(1);
                         break;
                     case "yesterday":
-                        startDate = DateTime.Now.Date.AddDays(-1);
-                        endDate = DateTime.Now.Date;
+                        startDate = DateTime.UtcNow.Date.AddDays(-1);
+                        endDate = DateTime.UtcNow.Date;
                         break;
                     case "date":
                         if (DateTime.TryParse(date, out var parsedDate))
@@ -1091,74 +1055,5 @@ namespace UploadServer.Controllers
             }
         }
 
-        /// <summary>
-        /// 獲取影片文件流（用於播放）
-        /// GET: /api/videos/{videoId}/stream
-        /// 優先返回 clip 類型，其次是 original 類型
-        /// </summary>
-        [HttpGet("videos/{videoId}/stream")]
-        public async Task<IActionResult> GetVideoStream(string videoId, [FromQuery] string? token = null)
-        {
-            try
-            {
-                // 如果查詢參數中有 token，則驗證它
-                if (!string.IsNullOrEmpty(token))
-                {
-                    // 從查詢參數中提取 token 並驗證
-                    var principal = ValidateTokenFromQuery(token);
-                    if (principal == null)
-                    {
-                        return Unauthorized(new { success = false, error = "無效的令牌" });
-                    }
-                    // 設置 User 以便 GetUserIdFromClaims() 可以使用
-                    HttpContext.User = principal;
-                }
-
-                var userId = GetUserIdFromClaims();
-                if (string.IsNullOrEmpty(userId))
-                {
-                    return Unauthorized(new { success = false, error = "無效的用戶身份" });
-                }
-
-                // 驗證影片是否存在且屬於當前用戶
-                var video = await _context.Videos.FirstOrDefaultAsync(v => v.Id == videoId && v.UserId == userId);
-                if (video == null)
-                {
-                    _logger.LogWarning($"❌ 影片未找到或無權限: VideoId={videoId}");
-                    return NotFound(new { success = false, error = "影片不存在或無權限" });
-                }
-
-                // 優先取得 pose_phase_trajectory_video，其次是 clip，最後是 original
-                var videoFile = await _context.Files
-                    .Where(f => f.VideoId == videoId && (f.Type == "pose_phase_trajectory_video" || f.Type == "clip" || f.Type == "original"))
-                    .OrderByDescending(f => f.Type == "pose_phase_trajectory_video")
-                    .ThenByDescending(f => f.Type == "clip")
-                    .FirstOrDefaultAsync();
-
-                if (videoFile == null)
-                {
-                    _logger.LogWarning($"❌ 影片檔案未找到: VideoId={videoId}");
-                    return NotFound(new { success = false, error = "影片檔案不存在" });
-                }
-
-                _logger.LogInformation($"📤 獲取影片流: VideoId={videoId}, FileType={videoFile.Type}, FilePath={videoFile.FilePath}");
-
-                // 檢查檔案是否存在
-                if (!System.IO.File.Exists(videoFile.FilePath))
-                {
-                    _logger.LogWarning($"❌ 檔案不存在: {videoFile.FilePath}");
-                    return NotFound(new { success = false, error = "影片檔案不存在於伺服器" });
-                }
-
-                // 打開檔案流並返回
-                var stream = System.IO.File.OpenRead(videoFile.FilePath);
-                return File(stream, videoFile.MimeType ?? "video/mp4", enableRangeProcessing: true);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ 獲取影片流失敗");
-                return StatusCode(500, new { success = false, error = ex.Message });
-            }
-        }
     }
 }

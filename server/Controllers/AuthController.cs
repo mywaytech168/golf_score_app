@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Google.Apis.Auth;
 using UploadServer.DTOs;
@@ -14,12 +16,14 @@ namespace UploadServer.Controllers
     public class AuthController : ControllerBase
     {
         private readonly AuthService _authService;
+        private readonly ITokenBlacklistService _blacklist;
         private readonly ILogger<AuthController> _logger;
 
-        public AuthController(AuthService authService, ILogger<AuthController> logger)
+        public AuthController(AuthService authService, ITokenBlacklistService blacklist, ILogger<AuthController> logger)
         {
             _authService = authService;
-            _logger = logger;
+            _blacklist   = blacklist;
+            _logger      = logger;
         }
 
         /// <summary>
@@ -329,30 +333,34 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
-        /// 登出
+        /// 登出（將當前 token 加入黑名單，立即失效）
         /// POST: /api/auth/logout
         /// </summary>
         [HttpPost("logout")]
-        public IActionResult Logout([FromBody] LogoutRequest request)
+        [Authorize]
+        public IActionResult Logout()
         {
             try
             {
-                _logger.LogInformation($"✅ 用戶已登出: UserId={request.UserId}");
+                var jti    = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+                var expStr = User.FindFirst(JwtRegisteredClaimNames.Exp)?.Value;
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-                return Ok(new LogoutResponse
+                if (!string.IsNullOrEmpty(jti))
                 {
-                    Success = true,
-                    Message = "已成功登出",
-                });
+                    var exp = expStr is not null
+                        ? DateTimeOffset.FromUnixTimeSeconds(long.Parse(expStr)).UtcDateTime
+                        : DateTime.UtcNow.AddHours(1);
+                    _blacklist.Revoke(jti, exp);
+                }
+
+                _logger.LogInformation("✅ 用戶已登出: UserId={UserId}", userId);
+                return Ok(new LogoutResponse { Success = true, Message = "已成功登出" });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ 登出失敗");
-                return StatusCode(500, new LogoutResponse
-                {
-                    Success = false,
-                    Message = ex.Message,
-                });
+                return StatusCode(500, new LogoutResponse { Success = false, Message = ex.Message });
             }
         }
     }

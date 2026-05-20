@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -65,10 +65,10 @@ namespace UploadServer.Services
                     Email = email,
                     DisplayName = displayName ?? username,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-                    Provider = "local",
-                    Status = "active",
-                    CreatedAt = DateTime.Now,
-                    UpdatedAt = DateTime.Now,
+                    Provider = AuthProvider.Local,
+                    Status = UserStatus.Active,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
                 };
 
                 _context.Users.Add(user);
@@ -108,13 +108,13 @@ namespace UploadServer.Services
                 }
 
                 // 檢查帳戶狀態
-                if (user.Status != "active")
+                if (user.Status != UserStatus.Active)
                 {
                     return (false, null, null, null, $"帳戶已被 {user.Status}");
                 }
 
                 // 更新最後登入時間
-                user.LastLoginAt = DateTime.Now;
+                user.LastLoginAt = DateTime.UtcNow;
                 _context.Users.Update(user);
                 await _context.SaveChangesAsync();
 
@@ -147,8 +147,8 @@ namespace UploadServer.Services
                 if (user != null)
                 {
                     // 已存在，更新登入信息
-                    user.LastLoginAt = DateTime.Now;
-                    user.UpdatedAt = DateTime.Now;
+                    user.LastLoginAt = DateTime.UtcNow;
+                    user.UpdatedAt = DateTime.UtcNow;
                     // 可選：更新頭像 URL
                     if (!string.IsNullOrEmpty(avatarUrl))
                     {
@@ -178,11 +178,11 @@ namespace UploadServer.Services
                         AvatarUrl = avatarUrl,
                         Username = $"google_{googleId}",
                         PasswordHash = "[GOOGLE_AUTH]", // Google 用户不需要密码
-                        Provider = "google",
-                        Status = "active",
-                        LastLoginAt = DateTime.Now,
-                        CreatedAt = DateTime.Now,
-                        UpdatedAt = DateTime.Now,
+                        Provider = AuthProvider.Google,
+                        Status = UserStatus.Active,
+                        LastLoginAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
                     };
 
                     _context.Users.Add(user);
@@ -244,20 +244,22 @@ namespace UploadServer.Services
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             // JWT Claims
+            var jti = Guid.NewGuid().ToString();
             var claims = new[]
             {
+                new Claim(JwtRegisteredClaimNames.Jti, jti),
                 new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
                 new Claim(ClaimTypes.Name, user.Username ?? ""),
                 new Claim(ClaimTypes.Email, user.Email ?? ""),
                 new Claim("DisplayName", user.DisplayName ?? ""),
-                new Claim("Provider", user.Provider ?? "local"),
+                new Claim("Provider", user.Provider ?? AuthProvider.Local),
             };
 
             var token = new JwtSecurityToken(
                 issuer: "GolfScoreApp",
                 audience: "GolfScoreAppUsers",
                 claims: claims,
-                expires: DateTime.Now.AddMinutes(jwtExpiryMinutes),
+                expires: DateTime.UtcNow.AddMinutes(jwtExpiryMinutes),
                 signingCredentials: credentials
             );
 
@@ -326,7 +328,7 @@ namespace UploadServer.Services
 
                 // 更新密碼
                 user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
-                user.UpdatedAt = DateTime.Now;
+                user.UpdatedAt = DateTime.UtcNow;
 
                 _context.Users.Update(user);
                 await _context.SaveChangesAsync();

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace UploadServer.Models
 {
@@ -31,7 +31,7 @@ namespace UploadServer.Models
         /// <summary>
         /// 建立時間
         /// </summary>
-        public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
         /// 開始處理時間

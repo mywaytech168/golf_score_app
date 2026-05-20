@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using UploadServer.Data;
 
 namespace UploadServer.Services
@@ -52,7 +52,7 @@ namespace UploadServer.Services
             var db = scope.ServiceProvider.GetRequiredService<VideoDbContext>();
 
             var expired = await db.ShareLinks
-                .Where(l => l.ExpiresAt <= DateTime.Now)
+                .Where(l => l.ExpiresAt <= DateTime.UtcNow)
                 .ToListAsync(ct);
 
             if (expired.Count == 0)

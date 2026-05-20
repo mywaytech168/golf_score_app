@@ -26,6 +26,7 @@ namespace UploadServer.Data
         public DbSet<FileModel> Files { get; set; }
         public DbSet<ProcessQueueItem> ProcessQueueItems { get; set; }
         public DbSet<ShareLink> ShareLinks { get; set; }
+        public DbSet<UserFeedback> UserFeedbacks { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -94,10 +95,52 @@ namespace UploadServer.Data
                     .HasColumnName("last_login_at")
                     .HasColumnType("datetime");
 
+                entity.Property(e => e.Plan)
+                    .HasColumnName("plan")
+                    .HasMaxLength(50)
+                    .HasDefaultValue("free");
+
+                entity.Property(e => e.BonusBalls)
+                    .HasColumnName("bonus_balls")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.TodayUsed)
+                    .HasColumnName("today_used")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.TodayUsedDate)
+                    .HasColumnName("today_used_date")
+                    .HasColumnType("date");
+
+                entity.Property(e => e.AdClaimedToday)
+                    .HasColumnName("ad_claimed_today")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.AdClaimedDate)
+                    .HasColumnName("ad_claimed_date")
+                    .HasColumnType("date");
+
+                entity.Property(e => e.FeedbackClaimedDate)
+                    .HasColumnName("feedback_claimed_date")
+                    .HasColumnType("date");
+
+                entity.Property(e => e.InviteCode)
+                    .HasColumnName("invite_code")
+                    .HasMaxLength(16);
+
+                entity.Property(e => e.InviteCount)
+                    .HasColumnName("invite_count")
+                    .HasDefaultValue(0);
+
+                entity.Property(e => e.InvitedByCode)
+                    .HasColumnName("invited_by_code")
+                    .HasMaxLength(16);
+
                 // Unique indexes
                 entity.HasIndex(e => e.Username).IsUnique().HasDatabaseName("uk_username");
                 entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("uk_email");
                 entity.HasIndex(e => e.GoogleId).IsUnique().HasDatabaseName("uk_google_id");
+                entity.HasIndex(e => e.InviteCode).IsUnique().HasDatabaseName("uk_invite_code");
 
                 // Regular indexes
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_user_status");
@@ -107,6 +150,12 @@ namespace UploadServer.Data
                 entity.HasMany(u => u.Videos)
                     .WithOne(v => v.User)
                     .HasForeignKey(v => v.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // One-to-Many relationship with UserFeedbacks
+                entity.HasMany(u => u.Feedbacks)
+                    .WithOne(f => f.User)
+                    .HasForeignKey(f => f.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
@@ -397,6 +446,48 @@ namespace UploadServer.Data
 
                 entity.HasIndex(e => e.ExpiresAt)
                     .HasDatabaseName("idx_share_expires_at");
+            });
+
+            // ============================================================
+            // UserFeedbacks Table Configuration
+            // ============================================================
+            modelBuilder.Entity<UserFeedback>(entity =>
+            {
+                entity.ToTable("user_feedbacks");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.Type)
+                    .HasColumnName("type")
+                    .HasMaxLength(20)
+                    .HasDefaultValue("other");
+
+                entity.Property(e => e.Text)
+                    .HasColumnName("text")
+                    .HasColumnType("TEXT")
+                    .IsRequired();
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_feedback_user_id");
+                entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_feedback_created_at");
+
+                entity.HasOne(f => f.User)
+                    .WithMany(u => u.Feedbacks)
+                    .HasForeignKey(f => f.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
         }
     }

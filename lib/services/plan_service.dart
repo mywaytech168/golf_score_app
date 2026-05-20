@@ -159,6 +159,33 @@ class PlanService {
     }
   }
 
+  // ── 付款購買 ──────────────────────────────────────────────────
+
+  /// 付款後向後端驗證並升級方案
+  ///
+  /// [store]         - 'google_pay' | 'google_play' | 'app_store'
+  /// [purchaseToken] - 對應 store 的 token / receipt
+  static Future<bool> purchasePlan(
+    UserPlan plan, {
+    required String store,
+    required String purchaseToken,
+    String? productId,
+  }) async {
+    try {
+      final ok = await VideoServerClient.instance.purchasePlan(
+        plan.key, store, purchaseToken, productId: productId,
+      );
+      if (ok) await _writeCachedPlan(plan);
+      debugPrint('$_tag ${ok ? '✅' : '⚠️'} purchasePlan: ${plan.label} via $store → $ok');
+      return ok;
+    } on UnauthorizedException {
+      rethrow;
+    } catch (e) {
+      debugPrint('$_tag ❌ 購買方案異常: $e');
+      return false;
+    }
+  }
+
   // ── 本地 cache 輔助 ───────────────────────────────────────────
 
   static Future<void> _writeCachedPlan(UserPlan plan) async {

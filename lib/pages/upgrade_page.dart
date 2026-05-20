@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:pay/pay.dart';
 
@@ -665,11 +666,14 @@ class _PaySheetState extends State<_PaySheet> {
   ];
 
   Future<void> _onGooglePayResult(Map<String, dynamic> result) async {
-    // result 包含 Google Pay payment token（TEST 環境無真實金流）
     debugPrint('[GooglePay] result: $result');
     if (!mounted) return;
     Navigator.of(context).pop();
-    await _activatePlan('Google Pay');
+
+    // 從 Google Pay 結果中取出 token（TEST 環境為 JSON 字串）
+    final tokenData = result['paymentMethodData']?['tokenizationData'];
+    final token = tokenData?['token'] as String? ?? jsonEncode(result);
+    await _purchaseWithToken('google_pay', token);
   }
 
   void _onGooglePayError(Object? error) {
@@ -680,6 +684,25 @@ class _PaySheetState extends State<_PaySheet> {
     );
   }
 
+  /// 送後端驗證並升級（真實付款路徑）
+  Future<void> _purchaseWithToken(String store, String token) async {
+    final userPlan = switch (widget.plan) {
+      _Plan.free  => UserPlan.free,
+      _Plan.pro   => UserPlan.pro,
+      _Plan.elite => UserPlan.elite,
+    };
+    final ok = await PlanService.purchasePlan(userPlan, store: store, purchaseToken: token);
+    if (!mounted) return;
+    if (ok) {
+      _showSuccess(store == 'google_pay' ? 'Google Pay' : store);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('付款驗證失敗，請稍後重試')),
+      );
+    }
+  }
+
+  /// Mock 付款路徑（僅 UI 展示用，不呼叫後端）
   Future<void> _activatePlan(String method) async {
     final userPlan = switch (widget.plan) {
       _Plan.free  => UserPlan.free,
