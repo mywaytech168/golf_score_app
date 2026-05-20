@@ -60,6 +60,9 @@ class _RecordScreenState extends State<RecordScreen> {
   Size _analysisImageSize = Size.zero;
   bool _showSkeleton = true;
 
+  // 鏡頭方向
+  bool _isFrontCamera = false;
+
   // 錄製設定
   RecordingConfig _config = RecordingConfig();
 
@@ -166,6 +169,32 @@ class _RecordScreenState extends State<RecordScreen> {
                   top: 16,
                   right: 16,
                   child: _RecordingBadge(elapsed: _elapsed, frameCount: _frameCount),
+                ),
+              // 右上：切換鏡頭（錄影中不可操作）
+              if (!_isRecording)
+                Positioned(
+                  top: 16,
+                  right: 16,
+                  child: GestureDetector(
+                    onTap: () async {
+                      await state.switchCameraSensor();
+                      if (mounted) setState(() => _isFrontCamera = !_isFrontCamera);
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: const Icon(
+                        Icons.flip_camera_ios_rounded,
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                    ),
+                  ),
                 ),
               // 左下：目前設定標籤
               Positioned(
