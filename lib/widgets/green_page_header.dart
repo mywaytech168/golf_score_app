@@ -58,6 +58,8 @@ class GreenPageHeader extends StatelessWidget {
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
@@ -67,6 +69,7 @@ class GreenPageHeader extends StatelessWidget {
                           color: Colors.white70,
                           fontSize: 13,
                         ),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],

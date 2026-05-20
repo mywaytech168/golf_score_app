@@ -185,13 +185,22 @@ class _StatCell extends StatelessWidget {
       child: Column(
         children: [
           RichText(
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             text: TextSpan(children: [
               TextSpan(text: value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
               TextSpan(text: ' $unit', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
             ]),
           ),
           const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+          Text(
+            label,
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );

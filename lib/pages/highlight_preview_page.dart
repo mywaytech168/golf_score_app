@@ -87,16 +87,24 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.download),
-                    label: const Text('匯出 debug 檔到下載'),
+                    icon: const Icon(Icons.download, size: 16),
+                    label: const Text(
+                      '匯出 debug',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     onPressed: () => _exportDebugToDownloads(),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.share),
-                    label: const Text('分享 debug 檔'),
+                    icon: const Icon(Icons.share, size: 16),
+                    label: const Text(
+                      '分享 debug',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     onPressed: () => _shareDebugFile(),
                   ),
                 ),

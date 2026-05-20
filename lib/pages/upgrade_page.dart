@@ -357,7 +357,6 @@ class _FeatureTable extends StatelessWidget {
   const _FeatureTable({required this.highlighted});
 
   static const _rowH = 40.0;
-  static const _leftW = 130.0;
   static const _colW  = 88.0;
   static const _plans = [_Plan.free, _Plan.pro, _Plan.elite];
 
@@ -365,64 +364,71 @@ class _FeatureTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 8, bottom: 10),
-            child: Text(
-              '完整功能比較',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey[800]),
-            ),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 12, offset: const Offset(0, 4))],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // 固定功能名稱欄
-                    SizedBox(
-                      width: _leftW,
-                      child: Column(
-                        children: [
-                          _headerCell('功能', null),
-                          ..._features.asMap().entries.map((e) =>
-                            _featureNameCell(e.value.name, e.key.isOdd),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // 三個方案欄（可橫向捲動）
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: _plans.map((plan) {
-                            final isHighlighted = plan == highlighted;
-                            return _PlanColumn(
-                              plan: plan,
-                              isHighlighted: isHighlighted,
-                              features: _features,
-                              rowH: _rowH,
-                              colW: _colW,
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                  ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 左欄寬度隨螢幕縮放，小螢幕最小 90dp，大螢幕最大 130dp
+          final leftW = (constraints.maxWidth * 0.34).clamp(90.0, 130.0);
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 8, bottom: 10),
+                child: Text(
+                  '完整功能比較',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey[800]),
                 ),
               ),
-            ),
-          ),
-        ],
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 12, offset: const Offset(0, 4))],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // 固定功能名稱欄（響應式寬度）
+                        SizedBox(
+                          width: leftW,
+                          child: Column(
+                            children: [
+                              _headerCell('功能', null),
+                              ..._features.asMap().entries.map((e) =>
+                                _featureNameCell(e.value.name, e.key.isOdd),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // 三個方案欄（可橫向捲動）
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: _plans.map((plan) {
+                                final isHighlighted = plan == highlighted;
+                                return _PlanColumn(
+                                  plan: plan,
+                                  isHighlighted: isHighlighted,
+                                  features: _features,
+                                  rowH: _rowH,
+                                  colW: _colW,
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -1384,11 +1384,14 @@ class _HistoryTileState extends State<_HistoryTile> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      // 狀態徽章區 - 使用 Wrap 以支援標籤換行
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
+                      // 狀態徽章區 - 使用 Wrap 以支援標籤換行，最多顯示 2 行
+                      ClipRect(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 52),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
                           // 長/短影片標記
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -1546,6 +1549,8 @@ class _HistoryTileState extends State<_HistoryTile> {
                               ),
                             ),
                         ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
