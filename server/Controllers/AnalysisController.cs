@@ -37,16 +37,9 @@ namespace UploadServer.Controllers
         [HttpPost("request")]
         public async Task<IActionResult> Request([FromBody] AnalysisRequestDto req)
         {
-            if (string.IsNullOrWhiteSpace(req.VideoId))
-                return BadRequest(new { message = "video_id 不可空白" });
-
-            // 確認 video 屬於此用戶
-            var video = await _db.Videos.FirstOrDefaultAsync(v => v.Id == req.VideoId && v.UserId == UserId);
-            if (video == null)
-                return NotFound(new { message = "影片不存在" });
-
             var analysis = new AiCoachAnalysis
             {
+                UserId        = UserId,
                 VideoId       = req.VideoId,
                 ErrorTypeHint = req.ErrorTypeHint,
                 Status        = "pending",
@@ -74,8 +67,7 @@ namespace UploadServer.Controllers
         public async Task<IActionResult> Ready(string id)
         {
             var analysis = await _db.AiCoachAnalyses
-                .Include(a => a.Video)
-                .FirstOrDefaultAsync(a => a.Id == id && a.Video.UserId == UserId);
+                .FirstOrDefaultAsync(a => a.Id == id && a.UserId == UserId);
 
             if (analysis == null)
                 return NotFound(new { message = "分析記錄不存在" });
@@ -98,8 +90,7 @@ namespace UploadServer.Controllers
         public async Task<IActionResult> GetStatus(string id)
         {
             var analysis = await _db.AiCoachAnalyses
-                .Include(a => a.Video)
-                .FirstOrDefaultAsync(a => a.Id == id && a.Video.UserId == UserId);
+                .FirstOrDefaultAsync(a => a.Id == id && a.UserId == UserId);
 
             if (analysis == null)
                 return NotFound(new { message = "分析記錄不存在" });
@@ -122,18 +113,14 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
-        /// 查詢某影片的所有分析記錄
-        /// GET /api/analysis/video/{videoId}
+        /// 查詢當前用戶的所有分析記錄
+        /// GET /api/analysis
         /// </summary>
-        [HttpGet("video/{videoId}")]
-        public async Task<IActionResult> GetByVideo(string videoId)
+        [HttpGet]
+        public async Task<IActionResult> GetMyAnalyses()
         {
-            var video = await _db.Videos.FirstOrDefaultAsync(v => v.Id == videoId && v.UserId == UserId);
-            if (video == null)
-                return NotFound(new { message = "影片不存在" });
-
             var analyses = await _db.AiCoachAnalyses
-                .Where(a => a.VideoId == videoId)
+                .Where(a => a.UserId == UserId)
                 .OrderByDescending(a => a.CreatedAt)
                 .Select(a => new AnalysisStatusResponse
                 {

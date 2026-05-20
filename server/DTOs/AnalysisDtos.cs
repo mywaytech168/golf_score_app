@@ -2,8 +2,8 @@ namespace UploadServer.DTOs
 {
     public class AnalysisRequestDto
     {
-        /// <summary>要分析的 clip video id（videos 表）</summary>
-        public string VideoId { get; set; }
+        /// <summary>可選：客戶端自定義的影片參考 ID（純字串，不驗證）</summary>
+        public string? VideoId { get; set; }
 
         /// <summary>可選：錯誤類型提示（over_the_top / early_release_casting / ...）</summary>
         public string? ErrorTypeHint { get; set; }
