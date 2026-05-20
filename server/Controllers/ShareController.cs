@@ -63,7 +63,7 @@ namespace UploadServer.Controllers
         [HttpGet("{code}")]
         public async Task<IActionResult> Get(string code)
         {
-            if (code.Length != 16)
+            if (code.Length != 16 || !System.Text.RegularExpressions.Regex.IsMatch(code, @"^[A-Z0-9]{16}$"))
                 return BadRequest(new { message = "分享碼格式錯誤" });
 
             var result = await _shareService.GetAsync(code);

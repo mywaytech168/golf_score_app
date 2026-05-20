@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
@@ -50,8 +51,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     (label: '速度',      color: Color(0xFF1E8E5A)),
   ];
 
-  String get _sessionDir =>
-      widget.videoPath.replaceAll(RegExp(r'[^/\\]*$'), '');
+  String get _sessionDir => '${p.dirname(widget.videoPath)}${p.separator}';
 
   @override
   void initState() {
@@ -82,17 +82,23 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     _controller = ctrl;
     if (mounted) setState(() => _initialized = false);
 
-    await ctrl.initialize();
-    ctrl.addListener(_onUpdate);
-    ctrl.setLooping(true);
+    try {
+      await ctrl.initialize();
+      ctrl.addListener(_onUpdate);
+      ctrl.setLooping(true);
 
-    if (isOriginal && widget.startPosition != null) {
-      await ctrl.seekTo(widget.startPosition!);
+      if (isOriginal && widget.startPosition != null) {
+        await ctrl.seekTo(widget.startPosition!);
+      }
+      ctrl.play();
+
+      if (mounted) setState(() => _initialized = true);
+    } catch (e) {
+      debugPrint('[VideoPlayer] 初始化失敗: $e');
+      if (mounted) _showSnack('影片載入失敗');
+    } finally {
+      await old?.dispose();
     }
-    ctrl.play();
-
-    if (mounted) setState(() => _initialized = true);
-    await old?.dispose();
   }
 
   void _onUpdate() {

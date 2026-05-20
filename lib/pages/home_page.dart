@@ -210,10 +210,12 @@ class _HomePageState extends State<HomePage> {
     String quotaText;
     if (plan.isUnlimited) {
       quotaText = '今日無限制 🏆';
+    } else if (overLimit) {
+      final bonusPart = bonus > 0 ? '（含 +$bonus 獎勵）' : '';
+      quotaText = '今日用量 $used / $total 球$bonusPart  ⚠️ 已達上限';
     } else {
-      quotaText = '今日用量 $used / $total 球';
-      if (bonus > 0) quotaText += '（含 +$bonus 獎勵）';
-      if (overLimit) quotaText += '  ⚠️ 已達上限';
+      final bonusPart = bonus > 0 ? '（含 +$bonus 獎勵）' : '';
+      quotaText = '今日用量 $used / $total 球$bonusPart';
     }
 
     return Consumer<UserProvider>(

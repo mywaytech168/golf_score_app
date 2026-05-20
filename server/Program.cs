@@ -47,19 +47,11 @@ try
 // 1. EF Core DbContext 配置 (Code-First)
 // ============================================================
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrEmpty(connectionString))
+    throw new InvalidOperationException("必須設定 ConnectionStrings:DefaultConnection");
+
 builder.Services.AddDbContext<VideoDbContext>(options =>
-{
-    if (connectionString != null)
-    {
-        options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-    }
-    else
-    {
-        // 默認本地 MySQL 配置（如未配置連接字符串）
-        var defaultConnection = "Server=localhost;Database=VideoSliceUploadDB;Uid=root;Pwd=;";
-        options.UseMySql(defaultConnection, ServerVersion.AutoDetect(defaultConnection));
-    }
-});
+    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
 // ============================================================
 // 2. 服務層依賴注入
@@ -87,10 +79,16 @@ builder.Services.AddHostedService<ShareCleanupService>();
 // ============================================================
 // 3. CORS 跨域配置
 // ============================================================
+// CORS：僅允許已知來源（mobile app 透過 scheme，管理後台透過 HTTPS）
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    options.AddPolicy("MobileApp", policy =>
+        policy.WithOrigins(
+                "https://tekswing.com",
+                "http://localhost:3000"   // 本機開發用
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod());
 });
 
 // ============================================================
@@ -98,9 +96,7 @@ builder.Services.AddCors(options =>
 // ============================================================
 var jwtSecret = builder.Configuration["Jwt:Secret"];
 if (string.IsNullOrEmpty(jwtSecret))
-{
-    jwtSecret = "default-secret-key-please-change-in-production";
-}
+    throw new InvalidOperationException("必須設定 Jwt:Secret（建議 32 字元以上）");
 
 builder.Services
     .AddAuthentication(options =>
@@ -200,7 +196,7 @@ app.Use(async (ctx, next) =>
     await next();
 });
 
-app.UseCors();
+app.UseCors("MobileApp");
 
 // ============================================================
 // 請求日誌 + 速率限制中間件

@@ -53,10 +53,10 @@ namespace UploadServer.Services
                     return (false, null, "該郵箱已被註冊");
                 }
 
-                // 密碼驗證（至少 6 個字符）
-                if (password.Length < 6)
+                // 密碼驗證（至少 8 位，含大小寫與數字，與 Controller 前置驗證一致）
+                if (password.Length < 8)
                 {
-                    return (false, null, "密碼至少需要 6 個字符");
+                    return (false, null, "密碼須至少 8 位且包含大寫字母、小寫字母及數字");
                 }
 
                 // 創建新用戶
@@ -353,10 +353,10 @@ namespace UploadServer.Services
                     return (false, "舊密碼錯誤");
                 }
 
-                // 驗證新密碼
-                if (newPassword.Length < 6)
+                // 驗證新密碼（與 Controller 前置驗證一致）
+                if (newPassword.Length < 8)
                 {
-                    return (false, "新密碼至少需要 6 個字符");
+                    return (false, "新密碼須至少 8 位且包含大寫字母、小寫字母及數字");
                 }
 
                 // 更新密碼

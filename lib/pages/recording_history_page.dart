@@ -741,6 +741,9 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     if (!mounted) return;
 
+    // 在第一個 await 之前捕捉 navigator/messenger，確保 Dialog 一定能關閉
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備骨架分析...'));
 
     showDialog(
@@ -969,12 +972,11 @@ class _HistoryTileState extends State<_HistoryTile> {
         },
       );
 
-      if (!mounted) return;
-      Navigator.pop(context);
-      setState(() => _isDetecting = false);
+      navigator.pop(); // 無論 mounted 與否，一定關閉 Dialog
+      if (mounted) setState(() => _isDetecting = false);
 
       if (results.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           const SnackBar(content: Text('偵測成功，但片段裁切失敗，請重試')),
         );
         return;
@@ -990,7 +992,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         widget.entry,
         results.map((r) => r.entry).toList(),
       );
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text('已生成 ${results.length} 個擊球片段 ✅\n可對每個切片執行「影片分析」加入骨架與球軌跡'),
           duration: const Duration(seconds: 4),
@@ -998,16 +1000,14 @@ class _HistoryTileState extends State<_HistoryTile> {
       );
     } catch (e) {
       debugPrint('[偵測擊球] 錯誤: $e');
-      if (mounted) {
-        Navigator.pop(context);
-        setState(() => _isDetecting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('偵測失敗: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      navigator.pop();
+      if (mounted) setState(() => _isDetecting = false);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('偵測失敗: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       progressNotifier.dispose();
     }
@@ -1020,6 +1020,9 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     if (!mounted) return;
 
+    // 在第一個 await 之前捕捉 navigator/messenger，確保 Dialog 一定能關閉
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
 
     showDialog(
@@ -1212,9 +1215,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         debugPrint('[完整分析] ℹ️  WAV 檔案不存在，无法提取音频（可能是舊錄製或系统无FFmpeg支持）');
       }
 
-      if (!mounted) return;
-      Navigator.pop(context);
-      setState(() => _isAnalyzing = false);
+      navigator.pop(); // 無論 mounted 與否，一定關閉 Dialog
+      if (mounted) setState(() => _isAnalyzing = false);
 
       // Stage 3: 合併結果並更新條目
       if (audioResult != null) {
@@ -1229,32 +1231,26 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       widget.onEntryUpdated?.call(widget.entry, updatedEntry);
 
-      if (!mounted) return;
-
       // 顯示完成訊息
-      final audioMsg = audioResult != null 
+      final audioMsg = audioResult != null
           ? '\n🎵 音頻：${audioResult.feedbackLabel}'
           : '';
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
-          content: Text(
-            '完整分析完成 ✅$audioMsg',
-          ),
+          content: Text('完整分析完成 ✅$audioMsg'),
           duration: const Duration(seconds: 4),
         ),
       );
     } catch (e) {
       debugPrint('[完整分析] 錯誤: $e');
-      if (mounted) {
-        Navigator.pop(context);
-        setState(() => _isAnalyzing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('完整分析失敗: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      navigator.pop();
+      if (mounted) setState(() => _isAnalyzing = false);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('完整分析失敗: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     } finally {
       progressNotifier.dispose();
     }
@@ -1348,20 +1344,18 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: widget.onTap,
+    return Material(
+      color: Colors.white,
       borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      shadowColor: Colors.black12,
+      elevation: 4,
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 第一行：縮圖、標題和操作按鈕
             Row(
@@ -1785,6 +1779,7 @@ class _HistoryTileState extends State<_HistoryTile> {
             // 偵測擊球 / 裁切進度（已改為對話框顯示）
             // 影片分析進度（已改為對話框顯示）
           ],
+          ),
         ),
       ),
     );

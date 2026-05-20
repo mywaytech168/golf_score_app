@@ -12,6 +12,7 @@ class TodayInfoPage extends StatefulWidget {
 
 class _TodayInfoPageState extends State<TodayInfoPage> {
   bool _loading = true;
+  bool _hasError = false;
   StatisticsResponse? _stats;
   DateTime _selectedDate = DateTime.now();
 
@@ -45,9 +46,10 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
         period: isToday ? 'today' : 'day',
         date: isToday ? null : _formatApi(_selectedDate),
       );
-      if (mounted) setState(() { _stats = stats; _loading = false; });
-    } catch (_) {
-      if (mounted) setState(() { _stats = null; _loading = false; });
+      if (mounted) setState(() { _stats = stats; _loading = false; _hasError = false; });
+    } catch (e) {
+      debugPrint('[TodayInfoPage] 載入失敗: $e');
+      if (mounted) setState(() { _stats = null; _loading = false; _hasError = true; });
     }
   }
 
@@ -115,6 +117,18 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
           ),
 
           // ── 可捲動內容 ──────────────────────────────────────
+          if (_hasError)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('載入失敗，請下拉重新整理', style: TextStyle(color: Colors.red, fontSize: 13))),
+                  TextButton(onPressed: _loadStats, child: const Text('重試')),
+                ],
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadStats,
