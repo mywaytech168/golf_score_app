@@ -279,24 +279,23 @@ class _ChartCard extends StatefulWidget {
 class _ChartCardState extends State<_ChartCard> {
   int? _touchedIndex;
 
-  List<FlSpot> get _spots {
-    if (widget.invertY) {
-      final maxY = widget.points.map((e) => e.y).reduce((a, b) => a > b ? a : b);
-      return widget.points.map((p) => FlSpot(p.x, maxY - p.y)).toList();
-    }
-    return widget.points.map((p) => FlSpot(p.x, p.y)).toList();
-  }
+  // invertY 時的原始最大 Y（用來還原顯示值 → 原始值）
+  late final double _rawMaxY = widget.invertY
+      ? widget.points.map((e) => e.y).reduce((a, b) => a > b ? a : b)
+      : 0;
+
+  // 把圖表座標 y（可能已翻轉）還原成原始值，供 label/tooltip 顯示
+  double _toRaw(double displayY) =>
+      widget.invertY ? (_rawMaxY - displayY) : displayY;
+
+  late final List<FlSpot> _spots = widget.invertY
+      ? widget.points.map((p) => FlSpot(p.x, _rawMaxY - p.y)).toList()
+      : widget.points.map((p) => FlSpot(p.x, p.y)).toList();
 
   double get _minX => widget.points.first.x;
   double get _maxX => widget.points.last.x;
-  double get _minY {
-    final ys = _spots.map((s) => s.y);
-    return ys.reduce((a, b) => a < b ? a : b);
-  }
-  double get _maxY {
-    final ys = _spots.map((s) => s.y);
-    return ys.reduce((a, b) => a > b ? a : b);
-  }
+  late final double _minY = _spots.map((s) => s.y).reduce((a, b) => a < b ? a : b);
+  late final double _maxY = _spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
   double get _yPad => (_maxY - _minY) * 0.12 + 1;
 
   @override
@@ -344,7 +343,7 @@ class _ChartCardState extends State<_ChartCard> {
                     touchTooltipData: LineTouchTooltipData(
                       getTooltipColor: (_) => Colors.black87,
                       getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
-                        '${s.x.toStringAsFixed(2)}s\n${widget.yLabel(s.y)}',
+                        '${s.x.toStringAsFixed(2)}s\n${widget.yLabel(_toRaw(s.y))}',
                         const TextStyle(color: Colors.white, fontSize: 11),
                       )).toList(),
                     ),
@@ -381,7 +380,7 @@ class _ChartCardState extends State<_ChartCard> {
                         reservedSize: 44,
                         interval: (_maxY - _minY + 1) / 4,
                         getTitlesWidget: (val, meta) => Text(
-                          widget.yLabel(val),
+                          widget.yLabel(_toRaw(val)),
                           style: const TextStyle(fontSize: 9, color: Colors.black45),
                         ),
                       ),
@@ -453,8 +452,8 @@ class _ChartCardState extends State<_ChartCard> {
                 duration: const Duration(milliseconds: 200),
               ),
             ),
-            // 統計列
-            _StatsRow(points: widget.points, color: widget.color, yLabel: widget.yLabel),
+            // 統計列（invertY 時 Min/Max 對調，使語意與圖表視覺一致）
+            _StatsRow(points: widget.points, color: widget.color, yLabel: widget.yLabel, invertY: widget.invertY),
           ],
         ),
       ),
@@ -466,8 +465,14 @@ class _StatsRow extends StatelessWidget {
   final List<ChartPoint> points;
   final Color color;
   final String Function(double) yLabel;
+  final bool invertY;
 
-  const _StatsRow({required this.points, required this.color, required this.yLabel});
+  const _StatsRow({
+    required this.points,
+    required this.color,
+    required this.yLabel,
+    this.invertY = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -477,13 +482,19 @@ class _StatsRow extends StatelessWidget {
     final maxV = ys.reduce((a, b) => a > b ? a : b);
     final avgV = ys.reduce((a, b) => a + b) / ys.length;
 
+    // invertY 時圖表最高點 = 原始最小像素，對調 Min/Max 標籤讓語意與視覺一致
+    final topLabel  = invertY ? 'Max(↑)' : 'Max';
+    final botLabel  = invertY ? 'Min(↓)' : 'Min';
+    final topVal    = invertY ? minV : maxV;
+    final botVal    = invertY ? maxV : minV;
+
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _StatChip('Min', yLabel(minV), color),
-          _StatChip('Max', yLabel(maxV), color),
+          _StatChip(botLabel, yLabel(botVal), color),
+          _StatChip(topLabel, yLabel(topVal), color),
           _StatChip('Avg', yLabel(avgV), color),
         ],
       ),

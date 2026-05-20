@@ -161,6 +161,13 @@ class PlanService {
     }
   }
 
+  // ── 設定方案（UI 更新用）──────────────────────────────────────
+
+  /// 直接設定方案（本地 cache，不呼叫後端）
+  static Future<void> setPlan(UserPlan plan) async {
+    await _writeCachedPlan(plan);
+  }
+
   // ── 本地 cache 輔助 ───────────────────────────────────────────
 
   static Future<void> _writeCachedPlan(UserPlan plan) async {

@@ -745,7 +745,7 @@ class MainActivity: FlutterActivity() {
             csvWriter = java.io.FileWriter(csvFile)
             val header = buildString {
                 append("frame,time_sec,pose_update_id")
-                for (i in 0..32) append(",lm${i}_xNorm,lm${i}_yNorm,lm${i}_z,lm${i}_visibility,lm${i}_xPx,lm${i}_yPx")
+                for (i in 0..32) append(",lm${i}_x_norm,lm${i}_y_norm,lm${i}_z,lm${i}_visibility,lm${i}_x_px,lm${i}_y_px")
             }
             csvWriter.write(header + "\n")
 
