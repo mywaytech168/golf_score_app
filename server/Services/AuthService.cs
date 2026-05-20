@@ -207,23 +207,40 @@ namespace UploadServer.Services
         // ============================================================
         // 刷新 Token
         // ============================================================
-        public (string NewToken, string NewRefreshToken) RefreshToken(string oldToken)
+
+        /// <summary>
+        /// 以 Refresh Token（JWT）換取新的 Access + Refresh Token 組合。
+        /// Refresh Token 本身是一個長效 JWT（30 天），帶有 token_type=refresh claim，
+        /// 用以區別一般 Access Token，防止以 Access Token 冒充刷新。
+        /// </summary>
+        public async Task<(string NewToken, string NewRefreshToken)> RefreshTokenAsync(string refreshToken)
         {
             try
             {
-                var principal = GetPrincipalFromExpiredToken(oldToken);
-                var userIdClaim = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var principal = GetPrincipalFromExpiredToken(refreshToken);
 
-                if (string.IsNullOrEmpty(userIdClaim))
+                // 確認 token_type 為 refresh，防止用 Access Token 來刷新
+                var tokenType = principal?.FindFirst("token_type")?.Value;
+                if (tokenType != "refresh")
                 {
+                    _logger.LogWarning("❌ 刷新 Token 失敗：token_type 不符（收到: {Type}）", tokenType);
                     return (null, null);
                 }
 
-                // 創建新 Token（使用 UUID string）
-                var user = new User { Id = userIdClaim };
-                var (token, refreshToken) = GenerateTokens(user);
+                var userIdClaim = principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdClaim))
+                    return (null, null);
 
-                return (token, refreshToken);
+                // 從 DB 取完整 User，確保新 JWT 帶有正確的 Username / Email claims
+                var user = await _context.Users.FindAsync(userIdClaim);
+                if (user == null || user.Status != UserStatus.Active)
+                {
+                    _logger.LogWarning("❌ 刷新 Token 失敗：用戶不存在或已停用 (UserId={UserId})", userIdClaim);
+                    return (null, null);
+                }
+
+                var (newToken, newRefresh) = GenerateTokens(user);
+                return (newToken, newRefresh);
             }
             catch (Exception ex)
             {
@@ -237,38 +254,51 @@ namespace UploadServer.Services
         // ============================================================
         public (string Token, string RefreshToken) GenerateTokens(User user)
         {
-            var jwtSecret = _config["Jwt:Secret"] ?? "default_secret_key_please_change_in_production_environment";
+            var jwtSecret        = _config["Jwt:Secret"] ?? "default_secret_key_please_change_in_production_environment";
             var jwtExpiryMinutes = int.Parse(_config["Jwt:ExpiryMinutes"] ?? "60");
 
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+            var handler     = new JwtSecurityTokenHandler();
 
-            // JWT Claims
-            var jti = Guid.NewGuid().ToString();
-            var claims = new[]
+            // ── Access Token ──────────────────────────────────────
+            var accessClaims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Jti, jti),
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Name, user.Username ?? ""),
-                new Claim(ClaimTypes.Email, user.Email ?? ""),
-                new Claim("DisplayName", user.DisplayName ?? ""),
-                new Claim("Provider", user.Provider ?? AuthProvider.Local),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.NameIdentifier, user.Id),
+                new Claim(ClaimTypes.Name,  user.Username    ?? ""),
+                new Claim(ClaimTypes.Email, user.Email       ?? ""),
+                new Claim("DisplayName",    user.DisplayName ?? ""),
+                new Claim("Provider",       user.Provider    ?? AuthProvider.Local),
+                new Claim("token_type",     "access"),
             };
 
-            var token = new JwtSecurityToken(
-                issuer: "GolfScoreApp",
-                audience: "GolfScoreAppUsers",
-                claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(jwtExpiryMinutes),
+            var accessJwt = new JwtSecurityToken(
+                issuer:            "GolfScoreApp",
+                audience:          "GolfScoreAppUsers",
+                claims:            accessClaims,
+                expires:           DateTime.UtcNow.AddMinutes(jwtExpiryMinutes),
                 signingCredentials: credentials
             );
 
-            var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+            // ── Refresh Token（長效 JWT，30 天，僅含 userId）────────
+            // 帶 token_type=refresh，防止與 Access Token 互換使用。
+            var refreshClaims = new[]
+            {
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.NameIdentifier, user.Id),
+                new Claim("token_type", "refresh"),
+            };
 
-            // RefreshToken (簡單實現，實際應存入資料庫)
-            var refreshToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+            var refreshJwt = new JwtSecurityToken(
+                issuer:            "GolfScoreApp",
+                audience:          "GolfScoreAppUsers",
+                claims:            refreshClaims,
+                expires:           DateTime.UtcNow.AddDays(30),
+                signingCredentials: credentials
+            );
 
-            return (accessToken, refreshToken);
+            return (handler.WriteToken(accessJwt), handler.WriteToken(refreshJwt));
         }
 
         // ============================================================

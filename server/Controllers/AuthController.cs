@@ -240,44 +240,31 @@ namespace UploadServer.Controllers
         /// POST: /api/auth/refresh-token
         /// </summary>
         [HttpPost("refresh-token")]
-        public IActionResult RefreshToken([FromBody] RefreshTokenRequest request)
+        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
         {
             try
             {
                 if (request == null || string.IsNullOrEmpty(request.RefreshToken))
-                {
-                    return BadRequest(new RefreshTokenResponse
-                    {
-                        Success = false,
-                    });
-                }
+                    return BadRequest(new RefreshTokenResponse { Success = false });
 
-                var (newToken, newRefreshToken) = _authService.RefreshToken(request.RefreshToken);
+                var (newToken, newRefreshToken) = await _authService.RefreshTokenAsync(request.RefreshToken);
 
                 if (string.IsNullOrEmpty(newToken))
-                {
-                    return Unauthorized(new RefreshTokenResponse
-                    {
-                        Success = false,
-                    });
-                }
+                    return Unauthorized(new RefreshTokenResponse { Success = false });
 
-                _logger.LogInformation($"✅ Token 已刷新");
+                _logger.LogInformation("✅ Token 已刷新");
 
                 return Ok(new RefreshTokenResponse
                 {
-                    Success = true,
-                    Token = newToken,
+                    Success      = true,
+                    Token        = newToken,
                     RefreshToken = newRefreshToken,
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ 刷新 Token 失敗");
-                return StatusCode(500, new RefreshTokenResponse
-                {
-                    Success = false,
-                });
+                return StatusCode(500, new RefreshTokenResponse { Success = false });
             }
         }
 

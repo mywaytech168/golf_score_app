@@ -205,15 +205,29 @@ namespace UploadServer.Services
         /// </summary>
         public async Task ApplyInviteRewardAsync(string newUserId, string inviteCode)
         {
-            var inviter = await _db.Users.FirstOrDefaultAsync(u => u.InviteCode == inviteCode);
-            if (inviter == null) return;
-
             var newUser = await _db.Users.FindAsync(newUserId);
             if (newUser == null) return;
 
+            // 防止重複套用：已使用過邀請碼則直接返回
+            if (!string.IsNullOrEmpty(newUser.InvitedByCode))
+            {
+                _logger.LogWarning("用戶 {UserId} 已套用過邀請碼，忽略重複請求", newUserId);
+                return;
+            }
+
+            // 不能套用自己的邀請碼
+            if (newUser.InviteCode == inviteCode)
+            {
+                _logger.LogWarning("用戶 {UserId} 嘗試套用自己的邀請碼", newUserId);
+                return;
+            }
+
+            var inviter = await _db.Users.FirstOrDefaultAsync(u => u.InviteCode == inviteCode);
+            if (inviter == null) return;
+
             inviter.BonusBalls += InviteBalls;
             inviter.InviteCount++;
-            newUser.BonusBalls += InviteBalls;
+            newUser.BonusBalls   += InviteBalls;
             newUser.InvitedByCode = inviteCode;
 
             await _db.SaveChangesAsync();
@@ -322,8 +336,17 @@ namespace UploadServer.Services
 
         private bool ValidateGooglePayToken(string token)
         {
-            // Google Pay TEST 環境：token 為 JSON payload，驗證基本結構即可。
-            // 生產環境應將此 token 送至 Stripe/Braintree 等金流商進行扣款驗證。
+            var testMode = _config.GetValue<bool>("GooglePay:TestMode", false);
+
+            if (!testMode)
+            {
+                // 生產環境必須串接金流商（Stripe / Braintree）進行真實扣款驗證。
+                // 尚未實作時拒絕所有 google_pay 請求，防止繞過付款。
+                _logger.LogError("Google Pay 生產環境驗證尚未實作，拒絕付款請求");
+                return false;
+            }
+
+            // 測試模式：確認 token 為合法 JSON 物件即可（沙盒環境）
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(token);
@@ -443,8 +466,9 @@ namespace UploadServer.Services
         private static string GenerateInviteCode()
         {
             const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 去掉易混淆字元
-            var rng  = new Random();
-            return new string(Enumerable.Range(0, 8).Select(_ => chars[rng.Next(chars.Length)]).ToArray());
+            return new string(Enumerable.Range(0, 8)
+                .Select(_ => chars[Random.Shared.Next(chars.Length)])
+                .ToArray());
         }
     }
 }
