@@ -6,6 +6,7 @@ using NLog;
 using NLog.Web;
 using Swashbuckle.AspNetCore.SwaggerGen;
 using UploadServer.Data;
+using UploadServer.Middleware;
 using UploadServer.Services;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -63,7 +64,6 @@ builder.Services.AddDbContext<VideoDbContext>(options =>
 // ============================================================
 // 2. 服務層依賴注入
 // ============================================================
-builder.Services.AddScoped<VideoUploadService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton<B2Service>();
 builder.Services.AddScoped<ShareService>();
@@ -180,6 +180,12 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseCors();
+
+// ============================================================
+// 請求日誌 + 速率限制中間件
+// ============================================================
+app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseMiddleware<UserRateLimitMiddleware>();
 
 // ============================================================
 // JWT 身份驗證中間件

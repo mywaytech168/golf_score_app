@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using UploadServer.Data;
 using UploadServer.DTOs;
 using UploadServer.Models;
@@ -12,6 +14,8 @@ namespace UploadServer.Services
     {
         private readonly VideoDbContext _db;
         private readonly ILogger<UserService> _logger;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IConfiguration _config;
 
         // 廣告獎勵每日上限
         private const int AdDailyCap = 5;
@@ -21,10 +25,16 @@ namespace UploadServer.Services
         private const int UploadBalls   = 3;
         private const int InviteBalls   = 5;
 
-        public UserService(VideoDbContext db, ILogger<UserService> logger)
+        public UserService(
+            VideoDbContext db,
+            ILogger<UserService> logger,
+            IHttpClientFactory httpClientFactory,
+            IConfiguration config)
         {
             _db = db;
             _logger = logger;
+            _httpClientFactory = httpClientFactory;
+            _config = config;
         }
 
         // ── 輔助 ──────────────────────────────────────────────────
@@ -322,22 +332,110 @@ namespace UploadServer.Services
             catch { return false; }
         }
 
-        private Task<bool> ValidateGooglePlayTokenAsync(string purchaseToken, string? productId)
+        private async Task<bool> ValidateGooglePlayTokenAsync(string purchaseToken, string? productId)
         {
-            // TODO: 呼叫 Google Play Developer API 驗證訂閱或一次性購買
-            // GET https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{token}
-            // 需要 Google 服務帳戶 OAuth2 憑證
-            _logger.LogWarning("Google Play purchase validation 尚未實作 (需服務帳戶憑證)");
-            return Task.FromResult(false);
+            // 測試模式：接受預設測試 token（Google Play 靜態測試商品）
+            var testMode   = _config.GetValue<bool>("GooglePlay:TestMode", false);
+            var testTokens = _config.GetSection("GooglePlay:TestTokens").Get<string[]>() ?? [];
+
+            if (testMode && testTokens.Contains(purchaseToken))
+            {
+                _logger.LogInformation("Google Play 測試模式：接受測試 token {Token}", purchaseToken);
+                return true;
+            }
+
+            var packageName        = _config["GooglePlay:PackageName"];
+            var serviceAccountJson = _config["GooglePlay:ServiceAccountJson"];
+
+            if (string.IsNullOrEmpty(packageName) || string.IsNullOrEmpty(serviceAccountJson) || string.IsNullOrEmpty(productId))
+            {
+                _logger.LogWarning("Google Play 驗證配置不完整（PackageName / ServiceAccountJson / productId）");
+                return false;
+            }
+
+            try
+            {
+                // 用服務帳戶取得 access token
+                var credential = Google.Apis.Auth.OAuth2.GoogleCredential
+                    .FromJson(serviceAccountJson)
+                    .CreateScoped("https://www.googleapis.com/auth/androidpublisher");
+
+                var accessToken = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
+
+                var client = _httpClientFactory.CreateClient();
+                client.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", accessToken);
+
+                var url = $"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{purchaseToken}";
+                var response = await client.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Google Play API 回應錯誤: {Status}", response.StatusCode);
+                    return false;
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                // purchaseState: 0 = Purchased, 1 = Cancelled, 2 = Pending
+                return doc.RootElement.GetProperty("purchaseState").GetInt32() == 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Google Play 驗證失敗");
+                return false;
+            }
         }
 
-        private Task<bool> ValidateAppStoreReceiptAsync(string receiptData)
+        private async Task<bool> ValidateAppStoreReceiptAsync(string receiptData)
         {
-            // TODO: 呼叫 Apple App Store 收據驗證
-            // POST https://buy.itunes.apple.com/verifyReceipt  { receipt-data, password }
-            // 需要 App Store Connect 共享密鑰
-            _logger.LogWarning("App Store receipt validation 尚未實作 (需共享密鑰)");
-            return Task.FromResult(false);
+            var sharedSecret = _config["AppStore:SharedSecret"];
+            // Sandbox: true = 沙盒測試；false = 正式
+            var isSandbox = _config.GetValue<bool>("AppStore:Sandbox", false);
+
+            if (string.IsNullOrEmpty(sharedSecret))
+            {
+                _logger.LogWarning("App Store 驗證配置不完整（缺少 SharedSecret）");
+                return false;
+            }
+
+            try
+            {
+                var url    = isSandbox
+                    ? "https://sandbox.itunes.apple.com/verifyReceipt"
+                    : "https://buy.itunes.apple.com/verifyReceipt";
+
+                var client = _httpClientFactory.CreateClient();
+                var body   = new { receipt_data = receiptData, password = sharedSecret };
+                var resp   = await client.PostAsJsonAsync(url, body);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("App Store API 回應錯誤: {Status}", resp.StatusCode);
+                    return false;
+                }
+
+                var json = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var status = doc.RootElement.GetProperty("status").GetInt32();
+
+                // 21007 = sandbox receipt 送到正式端點 → 切換 sandbox 重試
+                if (status == 21007 && !isSandbox)
+                {
+                    _logger.LogInformation("App Store：偵測到 sandbox 收據，切換 sandbox 端點重試");
+                    var sr = await client.PostAsJsonAsync("https://sandbox.itunes.apple.com/verifyReceipt", body);
+                    if (!sr.IsSuccessStatusCode) return false;
+                    using var sd = System.Text.Json.JsonDocument.Parse(await sr.Content.ReadAsStringAsync());
+                    status = sd.RootElement.GetProperty("status").GetInt32();
+                }
+
+                return status == 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "App Store 驗證失敗");
+                return false;
+            }
         }
 
         // ── 邀請碼生成 ────────────────────────────────────────────

@@ -18,11 +18,13 @@ namespace UploadServer.Controllers
         private readonly AuthService _authService;
         private readonly ITokenBlacklistService _blacklist;
         private readonly ILogger<AuthController> _logger;
+        private readonly IConfiguration _config;
 
-        public AuthController(AuthService authService, ITokenBlacklistService blacklist, ILogger<AuthController> logger)
+        public AuthController(AuthService authService, ITokenBlacklistService blacklist, IConfiguration config, ILogger<AuthController> logger)
         {
             _authService = authService;
             _blacklist   = blacklist;
+            _config      = config;
             _logger      = logger;
         }
 
@@ -156,13 +158,12 @@ namespace UploadServer.Controllers
                 GoogleJsonWebSignature.Payload payload;
                 try
                 {
+                    var clientId = _config["Google:AndroidClientId"]
+                        ?? throw new InvalidOperationException("Google:AndroidClientId 未設定");
+
                     var validationSettings = new GoogleJsonWebSignature.ValidationSettings()
                     {
-                        Audience = new List<string>
-                        {
-                            "446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com", // Android/Web client
-                            // 添加其他有效的 Google Client IDs（如 iOS、Web 等）
-                        }
+                        Audience = new List<string> { clientId }
                     };
                     
                     payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, validationSettings);
@@ -285,6 +286,7 @@ namespace UploadServer.Controllers
         /// POST: /api/auth/change-password
         /// </summary>
         [HttpPost("change-password")]
+        [Authorize]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
         {
             try
@@ -298,8 +300,13 @@ namespace UploadServer.Controllers
                     });
                 }
 
+                // 從 JWT 取出已驗證的 userId，忽略 body 中的 UserId 防止越權
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized(new ChangePasswordResponse { Success = false, Message = "無效的身份驗證" });
+
                 var (success, error) = await _authService.ChangePasswordAsync(
-                    request.UserId,
+                    userId,
                     request.OldPassword,
                     request.NewPassword
                 );
@@ -313,7 +320,7 @@ namespace UploadServer.Controllers
                     });
                 }
 
-                _logger.LogInformation($"✅ 密碼已變更: UserId={request.UserId}");
+                _logger.LogInformation($"✅ 密碼已變更: UserId={userId}");
 
                 return Ok(new ChangePasswordResponse
                 {
