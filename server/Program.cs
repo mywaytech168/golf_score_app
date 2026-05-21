@@ -184,6 +184,12 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    // 注入測試帳號（僅 Development）
+    using var seedScope = app.Services.CreateScope();
+    var seedDb     = seedScope.ServiceProvider.GetRequiredService<VideoDbContext>();
+    var seedLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    await UploadServer.Data.TestDataSeeder.SeedAsync(seedDb, seedLogger);
 }
 
 app.UseHttpsRedirection();
