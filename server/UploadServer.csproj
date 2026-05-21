@@ -22,5 +22,10 @@
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
 		<PackageReference Include="Google.Apis.Auth" Version="1.54.0" />
 		<PackageReference Include="AWSSDK.S3" Version="3.7.400.2" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- 將 ONNX 模型複製到輸出目錄，路徑: Assets/Models/pose_error_tcn.onnx -->
+		<Content Include="Assets\Models\*.onnx" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 </Project>
