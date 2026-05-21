@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../services/video_server_client.dart';
 import '../services/auth_token_storage.dart';
@@ -99,7 +100,6 @@ class _LoginPageState extends State<LoginPage> {
       if (response['success'] == true) {
         await _persistRememberedCredentials();
 
-        // 儲存顯示資訊（user 在根層級）
         final prefs = await SharedPreferences.getInstance();
         final user = response['user'];
         if (user is Map) {
@@ -107,16 +107,24 @@ class _LoginPageState extends State<LoginPage> {
           if (user['displayName'] != null) await prefs.setString('user_name', user['displayName'].toString());
         }
 
-        _showSnackBar('登入成功，歡迎回來！');
+        _showSnackBar(AppLocalizations.of(context).msgLoginSuccess);
         if (Platform.isIOS) { await _navigateToHome(); return; }
         final ok = await _ensureBlePermissions();
         if (!mounted || !ok) return;
         await _navigateToHome();
       } else {
-        _showSnackBar(response['message'] ?? '登入失敗，請檢查帳號密碼', isError: true);
+        _showSnackBar(
+          response['message'] ?? AppLocalizations.of(context).msgLoginFailed,
+          isError: true,
+        );
       }
     } catch (e) {
-      if (mounted) _showSnackBar('登入失敗：$e', isError: true);
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgLoginFailedWithError(e.toString()),
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -142,16 +150,23 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       if (response['success'] == true) {
-        _showSnackBar('註冊成功，請登入');
-        // 帶入 username 到登入頁
+        _showSnackBar(AppLocalizations.of(context).msgRegisterSuccess);
         _identifierController.text = _usernameController.text.trim();
         _passwordController.clear();
         _switchMode(false);
       } else {
-        _showSnackBar(response['message'] ?? '註冊失敗', isError: true);
+        _showSnackBar(
+          response['message'] ?? AppLocalizations.of(context).msgRegisterFailed,
+          isError: true,
+        );
       }
     } catch (e) {
-      if (mounted) _showSnackBar('註冊失敗：$e', isError: true);
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgRegisterFailedWithError(e.toString()),
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -172,13 +187,16 @@ class _LoginPageState extends State<LoginPage> {
       final googleUser = await googleSignIn.signIn();
 
       if (googleUser == null) {
-        _showSnackBar('已取消 Google 登入流程');
+        _showSnackBar(AppLocalizations.of(context).msgGoogleLoginCancelled);
         return;
       }
 
       final googleAuth = await googleUser.authentication;
       if (googleAuth.idToken == null) {
-        _showSnackBar('無法取得 Google IdToken', isError: true);
+        _showSnackBar(
+          AppLocalizations.of(context).msgGoogleLoginFailed('no IdToken'),
+          isError: true,
+        );
         return;
       }
 
@@ -203,7 +221,7 @@ class _LoginPageState extends State<LoginPage> {
           ?? (data['data'] is Map ? data['data']['token'] ?? data['data']['accessToken'] : null);
 
       if (token == null || (token as String).isEmpty) {
-        _showSnackBar('Google 登入失敗：後端未返回認證令牌', isError: true);
+        _showSnackBar(AppLocalizations.of(context).msgGoogleLoginNoToken, isError: true);
         return;
       }
 
@@ -221,16 +239,31 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (mounted) {
-        _showSnackBar('Google 登入成功，歡迎回來！');
+        _showSnackBar(AppLocalizations.of(context).msgGoogleLoginSuccess);
         await _navigateToHome();
       }
     } on DioException catch (e) {
-      final msg = e.response?.data?['message'] ?? e.message ?? '請稍後再試';
-      _showSnackBar('Google 登入失敗：$msg', isError: true);
+      final msg = e.response?.data?['message'] ?? e.message ?? '';
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgGoogleLoginFailed(msg),
+          isError: true,
+        );
+      }
     } on PlatformException catch (error) {
-      _showSnackBar('Google 登入失敗：${error.message ?? '請稍後再試'}', isError: true);
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgGoogleLoginFailed(error.message ?? ''),
+          isError: true,
+        );
+      }
     } catch (e) {
-      _showSnackBar('Google 登入失敗：$e', isError: true);
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgGoogleLoginFailed(e.toString()),
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isGoogleSigningIn = false);
     }
@@ -304,30 +337,32 @@ class _LoginPageState extends State<LoginPage> {
 
     await _requestBlePermissions(showDeniedDialog: false);
     if (mounted && !_arePermissionsAllGranted) {
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('請允許藍牙權限。'),
+          content: Text(l10n.permBluetooth),
           duration: const Duration(seconds: 4),
-          action: SnackBarAction(label: '查看狀態', onPressed: _showPermissionStatusDialog),
+          action: SnackBarAction(label: l10n.permStatusTitle, onPressed: _showPermissionStatusDialog),
         ),
       );
     }
   }
 
   void _showPermissionStatusDialog() {
+    final l10n = AppLocalizations.of(context);
     final statusText = _permissionStatuses.entries
         .map((e) => '${_blePermissions[e.key]}: ${e.value}')
         .join('\n');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('權限狀態'),
-        content: Text(statusText.isEmpty ? '尚未檢查權限' : statusText),
+        title: Text(l10n.permStatusTitle),
+        content: Text(statusText.isEmpty ? l10n.permNotChecked : statusText),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.commonClose)),
           TextButton(
             onPressed: () async { Navigator.pop(ctx); await openAppSettings(); },
-            child: const Text('開啟設定'),
+            child: Text(l10n.commonOpenSettings),
           ),
         ],
       ),
@@ -350,32 +385,28 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _showPermissionGuideDialog() async {
+    final l10n = AppLocalizations.of(context);
     final instructions = Platform.isIOS
-        ? '需要定位權限才能使用藍牙掃描功能：\n\n'
-            '1. 點擊「開啟設定」\n2. 找到「Golf Score App」\n'
-            '3. 點選「位置」→「使用 App 期間」\n'
-            '4. 返回 App 重新登入'
-        : '請在系統設定中允許以下權限：\n'
-            '1. 進入「應用程式與通知」\n2. 選擇 TekSwing → 權限\n'
-            '3. 啟用「附近裝置、藍牙」與「定位」';
+        ? l10n.permIosInstructions
+        : l10n.permAndroidInstructions;
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Row(children: [
-          Icon(Icons.warning_amber_rounded, color: Colors.orange),
-          SizedBox(width: 8),
-          Text('需要開啟權限'),
+        title: Row(children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+          const SizedBox(width: 8),
+          Text(l10n.permDialogTitle),
         ]),
         content: SingleChildScrollView(
           child: Text(instructions, style: const TextStyle(fontSize: 15)),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.permIKnow)),
           TextButton(
             onPressed: () async { Navigator.pop(ctx); await openAppSettings(); },
-            child: const Text('前往設定'),
+            child: Text(l10n.permGoToSettings),
           ),
         ],
       ),
@@ -392,7 +423,7 @@ class _LoginPageState extends State<LoginPage> {
       s != null && (s.isGranted || s == PermissionStatus.limited || s == PermissionStatus.provisional);
 
   Map<Permission, String> _buildRequiredPermissions() => {
-    Permission.locationWhenInUse: '定位',
+    Permission.locationWhenInUse: AppLocalizations.of(context).permLocation,
   };
 
   // ── Build ────────────────────────────────────────────────────
@@ -400,6 +431,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -417,7 +449,6 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 品牌標誌
                 Row(
                   children: [
                     const Icon(Icons.golf_course_rounded, size: 42, color: Colors.white),
@@ -425,10 +456,10 @@ class _LoginPageState extends State<LoginPage> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('TekSwing',
+                        Text(l10n.appName,
                             style: theme.textTheme.headlineSmall?.copyWith(
                               color: Colors.white, fontWeight: FontWeight.bold)),
-                        Text('智慧揮桿訓練平台',
+                        Text(l10n.appTagline,
                             style: theme.textTheme.titleSmall?.copyWith(color: Colors.white70)),
                       ],
                     ),
@@ -436,15 +467,13 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 const SizedBox(height: 36),
                 Text(
-                  _isRegisterMode ? '建立帳號' : '歡迎回來！',
+                  _isRegisterMode ? l10n.authRegisterTitle : l10n.authWelcomeBack,
                   style: theme.textTheme.headlineMedium?.copyWith(
                     color: Colors.white, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _isRegisterMode
-                      ? '填寫以下資料即可開始使用 TekSwing。'
-                      : '請登入 TekSwing 以同步揮桿資料並探索最新分析報告。',
+                  _isRegisterMode ? l10n.authRegisterSubtitle : l10n.authLoginSubtitle,
                   style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white70),
                 ),
                 const SizedBox(height: 16),
@@ -469,7 +498,7 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     const Icon(Icons.security, color: Colors.white70, size: 18),
                     const SizedBox(width: 8),
-                    Text('所有資料皆採用 256-bit 加密保護',
+                    Text(l10n.authEncryptionNote,
                         style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70)),
                   ],
                 ),
@@ -481,14 +510,13 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // ── 登入表單 ─────────────────────────────────────────────────
-
   Widget _buildLoginForm(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('登入帳號',
+        Text(l10n.authLoginTitle,
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold, color: kPrimaryDark)),
         const SizedBox(height: 24),
@@ -496,13 +524,13 @@ class _LoginPageState extends State<LoginPage> {
           controller: _identifierController,
           keyboardType: TextInputType.emailAddress,
           decoration: InputDecoration(
-            labelText: '用戶名 / 電子郵件',
-            hintText: 'username 或 you@example.com',
+            labelText: l10n.authUsernameOrEmail,
+            hintText: l10n.authUsernameHint,
             prefixIcon: const Icon(Icons.person_outline),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           validator: (v) {
-            if (v == null || v.trim().isEmpty) return '請輸入用戶名或電子郵件';
+            if (v == null || v.trim().isEmpty) return l10n.validationEnterUsernameOrEmail;
             return null;
           },
         ),
@@ -511,7 +539,7 @@ class _LoginPageState extends State<LoginPage> {
           controller: _passwordController,
           obscureText: _isObscure,
           decoration: InputDecoration(
-            labelText: '密碼',
+            labelText: l10n.authPassword,
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
               onPressed: () => setState(() => _isObscure = !_isObscure),
@@ -520,7 +548,7 @@ class _LoginPageState extends State<LoginPage> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           validator: (v) {
-            if (v == null || v.isEmpty) return '請輸入密碼';
+            if (v == null || v.isEmpty) return l10n.validationEnterPassword;
             return null;
           },
         ),
@@ -531,9 +559,9 @@ class _LoginPageState extends State<LoginPage> {
               value: _rememberMe,
               onChanged: (v) => _onRememberMeChanged(v ?? false),
             ),
-            const Text('記住我'),
+            Text(l10n.authRememberMe),
             const Spacer(),
-            TextButton(onPressed: () {}, child: const Text('忘記密碼？')),
+            TextButton(onPressed: () {}, child: Text(l10n.authForgotPassword)),
           ],
         ),
         const SizedBox(height: 12),
@@ -549,11 +577,11 @@ class _LoginPageState extends State<LoginPage> {
             child: _isLoading
                 ? const SizedBox(width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('登入 TekSwing'),
+                : Text(l10n.authLoginButton),
           ),
         ),
         const SizedBox(height: 18),
-        _buildDivider('或使用社群帳號快速登入', theme),
+        _buildDivider(l10n.authSocialDivider, theme),
         const SizedBox(height: 18),
         SizedBox(
           width: double.infinity,
@@ -575,7 +603,7 @@ class _LoginPageState extends State<LoginPage> {
                 else
                   const Icon(Icons.g_mobiledata, size: 28),
                 const SizedBox(width: 8),
-                Text(_isGoogleSigningIn ? 'Google 登入中...' : '使用 Google 登入'),
+                Text(_isGoogleSigningIn ? l10n.authGoogleSigningIn : l10n.authLoginWithGoogle),
               ],
             ),
           ),
@@ -584,36 +612,34 @@ class _LoginPageState extends State<LoginPage> {
         Center(
           child: TextButton(
             onPressed: _isLoading ? null : () => _switchMode(true),
-            child: const Text('還沒有帳戶？立即註冊',
-                style: TextStyle(color: kPrimaryGreen)),
+            child: Text(l10n.authNoAccount, style: const TextStyle(color: kPrimaryGreen)),
           ),
         ),
       ],
     );
   }
 
-  // ── 註冊表單 ─────────────────────────────────────────────────
-
   Widget _buildRegisterForm(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('建立帳號',
+        Text(l10n.authRegisterTitle,
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold, color: kPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _usernameController,
           decoration: InputDecoration(
-            labelText: '用戶名',
-            hintText: '用於登入，不可重複',
+            labelText: l10n.authUsername,
+            hintText: l10n.authUsernameHintReg,
             prefixIcon: const Icon(Icons.person_outline),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           validator: (v) {
-            if (v == null || v.trim().isEmpty) return '請輸入用戶名';
-            if (v.trim().length < 3) return '用戶名至少 3 個字元';
+            if (v == null || v.trim().isEmpty) return l10n.validationEnterUsername;
+            if (v.trim().length < 3) return l10n.validationUsernameTooShort;
             return null;
           },
         ),
@@ -622,13 +648,13 @@ class _LoginPageState extends State<LoginPage> {
           controller: _emailController,
           keyboardType: TextInputType.emailAddress,
           decoration: InputDecoration(
-            labelText: '電子郵件',
+            labelText: l10n.authEmail,
             prefixIcon: const Icon(Icons.email_outlined),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           validator: (v) {
-            if (v == null || v.trim().isEmpty) return '請輸入電子郵件';
-            if (!v.contains('@')) return '電子郵件格式不正確';
+            if (v == null || v.trim().isEmpty) return l10n.validationEnterEmail;
+            if (!v.contains('@')) return l10n.validationInvalidEmail;
             return null;
           },
         ),
@@ -636,8 +662,8 @@ class _LoginPageState extends State<LoginPage> {
         TextFormField(
           controller: _displayNameController,
           decoration: InputDecoration(
-            labelText: '顯示名稱（可選）',
-            hintText: '留空則與用戶名相同',
+            labelText: l10n.authDisplayName,
+            hintText: l10n.authDisplayNameHint,
             prefixIcon: const Icon(Icons.badge_outlined),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -647,7 +673,7 @@ class _LoginPageState extends State<LoginPage> {
           controller: _passwordController,
           obscureText: _isObscure,
           decoration: InputDecoration(
-            labelText: '密碼（至少 6 碼）',
+            labelText: l10n.authPasswordLabel,
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
               onPressed: () => setState(() => _isObscure = !_isObscure),
@@ -656,8 +682,8 @@ class _LoginPageState extends State<LoginPage> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           validator: (v) {
-            if (v == null || v.isEmpty) return '請輸入密碼';
-            if (v.length < 6) return '密碼至少需要 6 碼';
+            if (v == null || v.isEmpty) return l10n.validationEnterPassword;
+            if (v.length < 6) return l10n.validationPasswordTooShort;
             return null;
           },
         ),
@@ -666,7 +692,7 @@ class _LoginPageState extends State<LoginPage> {
           controller: _confirmPasswordController,
           obscureText: _isConfirmObscure,
           decoration: InputDecoration(
-            labelText: '確認密碼',
+            labelText: l10n.authConfirmPassword,
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
               onPressed: () => setState(() => _isConfirmObscure = !_isConfirmObscure),
@@ -675,8 +701,8 @@ class _LoginPageState extends State<LoginPage> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           validator: (v) {
-            if (v == null || v.isEmpty) return '請再次輸入密碼';
-            if (v != _passwordController.text) return '兩次密碼不一致';
+            if (v == null || v.isEmpty) return l10n.validationEnterPasswordAgain;
+            if (v != _passwordController.text) return l10n.validationPasswordMismatch;
             return null;
           },
         ),
@@ -693,15 +719,14 @@ class _LoginPageState extends State<LoginPage> {
             child: _isLoading
                 ? const SizedBox(width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('建立帳號'),
+                : Text(l10n.authRegisterButton),
           ),
         ),
         const SizedBox(height: 16),
         Center(
           child: TextButton(
             onPressed: _isLoading ? null : () => _switchMode(false),
-            child: const Text('已有帳戶？返回登入',
-                style: TextStyle(color: kPrimaryGreen)),
+            child: Text(l10n.authHaveAccount, style: const TextStyle(color: kPrimaryGreen)),
           ),
         ),
       ],
@@ -723,9 +748,8 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // ── 權限提示卡片 ─────────────────────────────────────────────
-
   Widget _buildPermissionReminder(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final chips = _blePermissions.entries.map((entry) {
       final granted = _isGranted(_permissionStatuses[entry.key]);
       return Chip(
@@ -734,24 +758,24 @@ class _LoginPageState extends State<LoginPage> {
           color: granted ? kPrimaryGreen : Colors.redAccent,
           size: 20,
         ),
-        label: Text('${entry.value}${granted ? '：已允許' : '：尚未允許'}'),
-        backgroundColor: granted ? Colors.white : Colors.white.withValues(alpha:0.85),
+        label: Text('${entry.value}：${granted ? l10n.permGranted : l10n.permDenied}'),
+        backgroundColor: granted ? Colors.white : Colors.white.withValues(alpha: 0.85),
       );
     }).toList();
 
     return Card(
-      color: Colors.white.withValues(alpha:0.9),
+      color: Colors.white.withValues(alpha: 0.9),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('請先授權藍牙與定位',
+            Text(l10n.permTitle,
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: kPrimaryDark, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('首次登入時需要取得藍牙權限。',
+            Text(l10n.permSubtitle,
                 style: theme.textTheme.bodyMedium?.copyWith(color: kPrimaryDark)),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: chips),
@@ -761,7 +785,7 @@ class _LoginPageState extends State<LoginPage> {
               child: ElevatedButton.icon(
                 onPressed: () => _requestBlePermissions(showDeniedDialog: true),
                 icon: const Icon(Icons.security),
-                label: const Text('重新檢查權限'),
+                label: Text(l10n.permCheckAgain),
                 style: ElevatedButton.styleFrom(backgroundColor: kPrimaryGreen),
               ),
             ),

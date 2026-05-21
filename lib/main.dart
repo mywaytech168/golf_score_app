@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import 'theme/app_theme.dart';
 import 'services/analysis_progress_service.dart';
@@ -20,47 +22,34 @@ import 'providers/statistics_provider.dart';
 import 'providers/recording_provider.dart';
 import 'providers/video_provider.dart';
 import 'providers/app_state_provider.dart';
+import 'providers/locale_provider.dart';
 
 Future<void> main() async {
-  // 屏蔽系统噪音日志
   _filterSystemLogs();
-  
-  // 先初始化 Flutter 綁定，避免在呼叫可用鏡頭前發生錯誤
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 初始化 media_kit（比較模式雙播放器）
   MediaKit.ensureInitialized();
-
-  // 啟動 Kotlin→Dart 進度回報 EventChannel
   AnalysisProgressService.instance.start();
-  
-  // 初始化 Google Mobile Ads
   await MobileAds.instance.initialize();
-  
-  // 初始化應用內購買服務
   await InAppPurchaseService.initialize();
-  
-  // 初始化購買服務
   final purchaseService = PurchaseService();
   await purchaseService.initialize();
-  
-  // 初始化每日廣告管理
   final adManager = DailyAdManager();
   await adManager.initialize();
-  
-  // 預加載廣告
   AdService.loadInterstitialAd();
   AdService.loadRewardedAd();
 
-  // 相機初始化已由 camerawesome 在運行時處理
-  // List<CameraDescription> cameras = const <CameraDescription>[];
+  // Load saved locale before running the app
+  final localeProvider = LocaleProvider();
+  await localeProvider.loadSavedLocale();
 
-  runApp(const MyApp());
+  runApp(MyApp(localeProvider: localeProvider));
 }
 
-/// 應用程式入口
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, required this.localeProvider});
+
+  final LocaleProvider localeProvider;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -68,80 +57,30 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   @override
-  void initState() {
-    super.initState();
-    
-    // 🧪 非阻塞地運行 VideoFrameExtractor 測試
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      debugPrint('[INIT] ========== 後幀回調開始 ==========');
-      _runVideoFrameExtractorTest();
-    });
-  }
-
-  /// 測試 VideoFrameExtractor 性能
-  Future<void> _runVideoFrameExtractorTest() async {
-    try {
-      // 使用已有的視頻文件進行測試
-      const videoPath = '/sdcard/Download/REC202512091023.mp4';
-      debugPrint('📲 [DEBUG] 正在嘗試測試 VideoFrameExtractor...');
-      debugPrint('📲 [DEBUG] 視頻路徑: $videoPath');
-      
-      // 簡單的測試：直接調用 MethodChannel
-      const frameExtractorChannel =
-          MethodChannel('com.example.golf_score_app/frame_extractor');
-      
-      debugPrint('📲 [DEBUG] 調用 extractFrameRgb at timeMs=0...');
-      final result = await frameExtractorChannel.invokeMethod(
-        'extractFrameRgb',
-        {
-          'videoPath': videoPath,
-          'timeMs': 0,
-          'maxWidth': 720,
-        },
-      ) as Map<dynamic, dynamic>?;
-      
-      if (result != null) {
-        final width = result['width'] as int;
-        final height = result['height'] as int;
-        final pixels = result['pixels'];
-        debugPrint('✅ [SUCCESS] 幀提取成功: ${width}x$height, ${pixels.toString().length} bytes');
-      } else {
-        debugPrint('❌ [ERROR] 結果為 null');
-      }
-    } catch (e) {
-      debugPrint('❌ [ERROR] 測試失敗: $e');
-    }
-  }
-
-  // ---------- 方法區 ----------
-
-  @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        // 全局狀態
+        ChangeNotifierProvider.value(value: widget.localeProvider),
         ChangeNotifierProvider(create: (_) => AppStateProvider()),
-        
-        // 認證
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        
-        // 使用者資料
         ChangeNotifierProvider(create: (_) => UserProvider()),
-        
-        // 統計數據
         ChangeNotifierProvider(create: (_) => StatisticsProvider()),
-        
-        // 錄制
         ChangeNotifierProvider(create: (_) => RecordingProvider()),
-        
-        // 視頻播放
         ChangeNotifierProvider(create: (_) => VideoProvider()),
       ],
-      child: Consumer<AppStateProvider>(
-        builder: (context, appState, _) {
+      child: Consumer<LocaleProvider>(
+        builder: (context, localeProvider, _) {
           return MaterialApp(
-            title: 'Golf Score App',
+            title: 'TekSwing',
             theme: buildAppTheme(),
+            locale: localeProvider.locale,
+            supportedLocales: LocaleProvider.supportedLocales,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
             home: _buildHome(),
             routes: {
               '/home': (context) => const MainShellPage(),

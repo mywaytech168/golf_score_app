@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../theme/app_theme.dart';
 import 'home_page.dart';
@@ -196,8 +197,8 @@ class _MainShellPageState extends State<MainShellPage> {
     );
   }
 
-  /// 構建自定義底部導覽列
   Widget _buildBottomBar() {
+    final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: const BoxDecoration(
@@ -209,29 +210,30 @@ class _MainShellPageState extends State<MainShellPage> {
         children: [
           _BottomNavItem(
             icon: Icons.home_rounded,
-            label: '首頁',
+            label: l10n.navHome,
             isActive: _currentIndex == 0,
             onTap: () => _onBottomNavTap(0),
           ),
           _BottomNavItem(
             icon: Icons.calendar_today_rounded,
-            label: '數據',
+            label: l10n.navData,
             isActive: _currentIndex == 1,
             onTap: () => _onBottomNavTap(1),
           ),
           _QuickStartNavItem(
+            label: l10n.navRecord,
             isActive: _currentIndex == 2,
             onTap: () => _onBottomNavTap(2),
           ),
           _BottomNavItem(
             icon: Icons.bar_chart_rounded,
-            label: '歷史',
+            label: l10n.navHistory,
             isActive: _currentIndex == 3,
             onTap: () => _onBottomNavTap(3),
           ),
           _BottomNavItem(
             icon: Icons.workspace_premium_rounded,
-            label: '付費',
+            label: l10n.navPremium,
             isActive: _currentIndex == 4,
             onTap: () => _onBottomNavTap(4),
           ),
@@ -286,9 +288,11 @@ class _BottomNavItem extends StatelessWidget {
 class _QuickStartNavItem extends StatelessWidget {
   final VoidCallback onTap;
   final bool isActive;
+  final String label;
 
   const _QuickStartNavItem({
     required this.onTap,
+    required this.label,
     this.isActive = false,
   });
 
@@ -333,7 +337,7 @@ class _QuickStartNavItem extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '錄製',
+            label,
             style: TextStyle(
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
