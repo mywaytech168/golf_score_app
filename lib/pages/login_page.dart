@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
@@ -46,6 +47,10 @@ class _LoginPageState extends State<LoginPage> {
   bool _isGoogleSigningIn = false;
   bool _hasRequestedInitialPermissions = false;
 
+  // ── Dev 小幫手（debug only）──────────────────────────────────
+  int _devTapCount = 0;
+  Timer? _devTapTimer;
+
   late final Map<Permission, String> _blePermissions;
   Map<Permission, PermissionStatus> _permissionStatuses = {};
 
@@ -64,6 +69,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    _devTapTimer?.cancel();
     _identifierController.dispose();
     _passwordController.dispose();
     _usernameController.dispose();
@@ -351,7 +357,7 @@ class _LoginPageState extends State<LoginPage> {
   void _showPermissionStatusDialog() {
     final l10n = AppLocalizations.of(context);
     final statusText = _permissionStatuses.entries
-        .map((e) => '${_blePermissions[e.key]}: ${e.value}')
+        .map((e) => '${_permLabel(e.key, l10n)}: ${e.value}')
         .join('\n');
     showDialog(
       context: context,
@@ -422,9 +428,15 @@ class _LoginPageState extends State<LoginPage> {
   bool _isGranted(PermissionStatus? s) =>
       s != null && (s.isGranted || s == PermissionStatus.limited || s == PermissionStatus.provisional);
 
+  // Permission keys only — labels are resolved at render time via _permLabel()
   Map<Permission, String> _buildRequiredPermissions() => {
-    Permission.locationWhenInUse: AppLocalizations.of(context).permLocation,
+    Permission.locationWhenInUse: 'location',
   };
+
+  String _permLabel(Permission perm, AppLocalizations l10n) {
+    if (perm == Permission.locationWhenInUse) return l10n.permLocation;
+    return perm.toString();
+  }
 
   // ── Build ────────────────────────────────────────────────────
 
@@ -451,7 +463,10 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.golf_course_rounded, size: 42, color: Colors.white),
+                    GestureDetector(
+                      onTap: _onDevLogoTap,
+                      child: const Icon(Icons.golf_course_rounded, size: 42, color: Colors.white),
+                    ),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -748,6 +763,132 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  // ── Dev 小幫手 ────────────────────────────────────────────────
+
+  void _onDevLogoTap() {
+    if (!kDebugMode) return;
+    _devTapTimer?.cancel();
+    _devTapCount++;
+    if (_devTapCount >= 5) {
+      _devTapCount = 0;
+      HapticFeedback.mediumImpact();
+      _showDevAccountPicker();
+      return;
+    }
+    _devTapTimer = Timer(const Duration(seconds: 2), () => _devTapCount = 0);
+  }
+
+  static const _devAccounts = [
+    (label: 'Free 全新',       username: 'test_free',        plan: 'free',  note: '0/10'),
+    (label: 'Free 配額滿',     username: 'test_free_full',   plan: 'free',  note: '10/10'),
+    (label: 'Free 有 Ball',    username: 'test_free_balls',  plan: 'free',  note: '10/10 +15球'),
+    (label: '廣告全用完',      username: 'test_ad_full',     plan: 'free',  note: '25球·廣告5/5'),
+    (label: 'Pro 接近上限',    username: 'test_pro',         plan: 'pro',   note: '88/90'),
+    (label: 'Elite',           username: 'test_elite',       plan: 'elite', note: '無限制'),
+    (label: '停權帳號',        username: 'test_suspended',   plan: 'free',  note: 'suspended'),
+    (label: 'AI Coach',        username: 'test_aicoach',     plan: 'pro',   note: 'AI分析測試'),
+    (label: 'IAP 購買',        username: 'test_iap',         plan: 'free',  note: '購買流程測試'),
+    (label: '邀請者',          username: 'test_inviter',     plan: 'free',  note: 'code=TESTINVITE0001'),
+    (label: '被邀請者',        username: 'test_invitee',     plan: 'free',  note: '+5球'),
+    (label: 'Token 測試',      username: 'test_token',       plan: 'free',  note: '一般帳號'),
+  ];
+
+  void _showDevAccountPicker() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.85,
+        minChildSize: 0.35,
+        builder: (_, scrollController) => Column(
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.developer_mode, color: Colors.deepOrange, size: 20),
+                  const SizedBox(width: 8),
+                  Text('測試帳號',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  Text('密碼：Test1234!',
+                      style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
+                        color: Colors.grey[600])),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                itemCount: _devAccounts.length,
+                itemBuilder: (_, i) {
+                  final acc = _devAccounts[i];
+                  final planColor = switch (acc.plan) {
+                    'elite' => const Color(0xFFFFD700),
+                    'pro'   => Colors.blueAccent,
+                    _       => Colors.grey,
+                  };
+                  return ListTile(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      setState(() {
+                        _identifierController.text = acc.username;
+                        _passwordController.text   = 'Test1234!';
+                        _isRegisterMode            = false;
+                      });
+                      HapticFeedback.selectionClick();
+                    },
+                    leading: Container(
+                      width: 42, height: 42,
+                      decoration: BoxDecoration(
+                        color: planColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Center(
+                        child: Text(
+                          acc.plan.substring(0, 1).toUpperCase(),
+                          style: TextStyle(
+                            color: planColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                    title: Text(acc.label,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(acc.username,
+                        style: const TextStyle(fontSize: 12)),
+                    trailing: Text(acc.note,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[500],
+                        )),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPermissionReminder(ThemeData theme) {
     final l10n = AppLocalizations.of(context);
     final chips = _blePermissions.entries.map((entry) {
@@ -758,7 +899,7 @@ class _LoginPageState extends State<LoginPage> {
           color: granted ? kPrimaryGreen : Colors.redAccent,
           size: 20,
         ),
-        label: Text('${entry.value}：${granted ? l10n.permGranted : l10n.permDenied}'),
+        label: Text('${_permLabel(entry.key, l10n)}：${granted ? l10n.permGranted : l10n.permDenied}'),
         backgroundColor: granted ? Colors.white : Colors.white.withValues(alpha: 0.85),
       );
     }).toList();
