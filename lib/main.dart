@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
@@ -27,6 +28,7 @@ import 'providers/locale_provider.dart';
 Future<void> main() async {
   _filterSystemLogs();
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   MediaKit.ensureInitialized();
   AnalysisProgressService.instance.start();
