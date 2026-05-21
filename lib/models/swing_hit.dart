@@ -3,12 +3,15 @@ import 'dart:io';
 
 class SwingHit {
   final int hitIndex;
-  final int hitFrame;
+  final int hitFrame;   // Y-LOW 幀（手腕最低點 = 撞球瞬間）
   final double hitSec;
   final double startSec;
   final double endSec;
   final double speedValue;
   final double audioValue;
+  // ── speed_y_low 算法附加欄位 ──────────────────────────────────────
+  final int fastFrame;  // 速度峰值幀 (FAST)
+  final int topFrame;   // 後擺頂點幀 (TOP)
 
   const SwingHit({
     required this.hitIndex,
@@ -18,6 +21,8 @@ class SwingHit {
     required this.endSec,
     required this.speedValue,
     required this.audioValue,
+    this.fastFrame = 0,
+    this.topFrame = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -28,6 +33,8 @@ class SwingHit {
         'endSec': endSec,
         'speedValue': speedValue,
         'audioValue': audioValue,
+        'fastFrame': fastFrame,
+        'topFrame': topFrame,
       };
 
   factory SwingHit.fromJson(Map<String, dynamic> j) => SwingHit(
@@ -38,6 +45,8 @@ class SwingHit {
         endSec: (j['endSec'] as num).toDouble(),
         speedValue: (j['speedValue'] as num).toDouble(),
         audioValue: (j['audioValue'] as num).toDouble(),
+        fastFrame: (j['fastFrame'] as num?)?.toInt() ?? (j['hitFrame'] as num).toInt(),
+        topFrame: (j['topFrame'] as num?)?.toInt() ?? 0,
       );
 
   Duration get startDuration => Duration(milliseconds: (startSec * 1000).round());

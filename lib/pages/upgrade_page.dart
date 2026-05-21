@@ -144,6 +144,7 @@ class _UpgradePageState extends State<UpgradePage> {
       automaticallyImplyLeading: false,
       flexibleSpace: FlexibleSpaceBar(
         collapseMode: CollapseMode.pin,
+        // 不設 title，避免與 background 重疊
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -152,41 +153,31 @@ class _UpgradePageState extends State<UpgradePage> {
               colors: [kPrimaryGreen, Color(0xFF0A5C3A)],
             ),
           ),
-          // 不用 SafeArea，讓 SliverAppBar 自己處理 status bar
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 72, 24, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Spacer(),
+              // ── 底部大標題 ──────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.workspace_premium_rounded, color: Colors.amber, size: 28),
-                    SizedBox(width: 10),
-                    Text(
+                    const Text(
                       '升級您的方案',
                       style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
                     ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '解鎖更多揮桿分析功能，精進您的球技',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  '解鎖更多揮桿分析功能，精進您的球技',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.workspace_premium_rounded, color: Colors.amber, size: 18),
-            SizedBox(width: 6),
-            Text('升級方案', style: TextStyle(color: Colors.white, fontSize: 16)),
-          ],
-        ),
-        titlePadding: const EdgeInsets.only(left: 16, bottom: 14),
       ),
     );
   }

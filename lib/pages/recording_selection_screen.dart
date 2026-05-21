@@ -384,17 +384,6 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.videocam_rounded, color: Colors.white70, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    '錄製',
-                    style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
               const Text(
                 '選擇錄製方式',
                 style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
