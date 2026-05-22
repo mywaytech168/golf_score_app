@@ -560,6 +560,67 @@ namespace UploadServer.Services
         }
 
         // ════════════════════════════════════════════════════════════════
+        // 使用紀錄
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 分頁查詢 AI 分析紀錄（含每日配額與球數消耗）
+        /// </summary>
+        public async Task<AnalysisHistoryResponse?> GetAnalysisHistoryAsync(
+            string userId, int page, int pageSize)
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            pageSize = Math.Clamp(pageSize, 1, 100);
+            page     = Math.Max(1, page);
+
+            var today = Today;
+
+            var query = _db.AnalysisRecords
+                .Where(r => r.UserId == userId)
+                .OrderByDescending(r => r.UsedAt);
+
+            var total    = await query.CountAsync();
+            var todayUsed = user.TodayUsedDate == today ? user.TodayUsed : 0;
+
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(r => new AnalysisRecordDto(r.Id, r.Source, r.BallsSpent, r.UsedAt))
+                .ToListAsync();
+
+            return new AnalysisHistoryResponse(total, todayUsed, page, pageSize, items);
+        }
+
+        /// <summary>
+        /// 分頁查詢球數流水帳（獲得 + 消耗）
+        /// </summary>
+        public async Task<BallsHistoryResponse?> GetBallsHistoryAsync(
+            string userId, int page, int pageSize)
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            pageSize = Math.Clamp(pageSize, 1, 100);
+            page     = Math.Max(1, page);
+
+            var query = _db.BallRecords
+                .Where(r => r.UserId == userId)
+                .OrderByDescending(r => r.CreatedAt);
+
+            var total = await query.CountAsync();
+
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(r => new BallRecordDto(r.Id, r.Reason, r.Delta, r.BalanceAfter, r.CreatedAt))
+                .ToListAsync();
+
+            return new BallsHistoryResponse(total, user.BonusBalls, page, pageSize, items);
+        }
+
+        // ════════════════════════════════════════════════════════════════
         // 已邀請好友列表
         // ════════════════════════════════════════════════════════════════
 

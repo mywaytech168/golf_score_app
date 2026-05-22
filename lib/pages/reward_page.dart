@@ -11,6 +11,7 @@ import '../services/reward_service.dart';
 import '../services/video_server_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
+import 'usage_history_page.dart';
 
 // ════════════════════════════════════════════════════════════════
 // RewardPage
@@ -80,7 +81,17 @@ class _RewardPageState extends State<RewardPage> {
               icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            actions: const [],
+            actions: [
+              IconButton(
+                tooltip: '使用紀錄',
+                icon: const Icon(Icons.receipt_long_rounded,
+                    color: Colors.white, size: 22),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const UsageHistoryPage()),
+                ),
+              ),
+            ],
           ),
 
           // ── 球數統計卡 ─────────────────────────────────────────

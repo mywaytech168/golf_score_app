@@ -343,6 +343,64 @@ class VideoServerClient {
     }
   }
 
+  // ============================================================
+  // 使用紀錄
+  // ============================================================
+
+  /// 分頁查詢 AI 分析紀錄
+  Future<Map<String, dynamic>?> getAnalysisHistory({
+    int page = 1,
+    int pageSize = 20,
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/analysis/history?page=$page&pageSize=$pageSize');
+      final response = await http.get(url, headers: headers);
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getAnalysisHistory(page: page, pageSize: pageSize, isRetry: true);
+        throw UnauthorizedException('分析紀錄失敗: 401');
+      }
+      return null;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 分析紀錄異常: $e');
+      return null;
+    }
+  }
+
+  /// 分頁查詢球數流水帳
+  Future<Map<String, dynamic>?> getBallsHistory({
+    int page = 1,
+    int pageSize = 20,
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/balls/history?page=$page&pageSize=$pageSize');
+      final response = await http.get(url, headers: headers);
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getBallsHistory(page: page, pageSize: pageSize, isRetry: true);
+        throw UnauthorizedException('球數紀錄失敗: 401');
+      }
+      return null;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 球數紀錄異常: $e');
+      return null;
+    }
+  }
+
   /// 取得已邀請好友列表
   ///
   /// 回傳格式：

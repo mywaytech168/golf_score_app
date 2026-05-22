@@ -80,6 +80,47 @@ namespace UploadServer.DTOs
     public record PurchasePlanResponse(bool Success, string Message, string? Plan);
 
     // ════════════════════════════════════════════════════════════════
+    // 使用紀錄
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>GET /api/user/analysis/history — 單筆分析紀錄</summary>
+    public record AnalysisRecordDto(
+        string Id,
+        /// <summary>"daily_quota" | "bonus_ball"</summary>
+        string Source,
+        int BallsSpent,
+        DateTime UsedAt
+    );
+
+    /// <summary>GET /api/user/analysis/history 回應</summary>
+    public record AnalysisHistoryResponse(
+        int Total,
+        int TodayUsed,
+        int Page,
+        int PageSize,
+        List<AnalysisRecordDto> Items
+    );
+
+    /// <summary>GET /api/user/balls/history — 單筆球數流水</summary>
+    public record BallRecordDto(
+        string Id,
+        /// <summary>"ad" | "feedback" | "invite" | "upload" | "analysis" | "manual"</summary>
+        string Reason,
+        int Delta,
+        int BalanceAfter,
+        DateTime CreatedAt
+    );
+
+    /// <summary>GET /api/user/balls/history 回應</summary>
+    public record BallsHistoryResponse(
+        int Total,
+        int CurrentBalls,
+        int Page,
+        int PageSize,
+        List<BallRecordDto> Items
+    );
+
+    // ════════════════════════════════════════════════════════════════
     // 邀請好友列表
     // ════════════════════════════════════════════════════════════════
 

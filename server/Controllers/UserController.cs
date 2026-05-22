@@ -196,6 +196,48 @@ namespace UploadServer.Controllers
             return Ok(new { data = result });
         }
 
+        // ════════════════════════════════════════════════════════════════
+        // 使用紀錄
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/user/analysis/history?page=1&amp;pageSize=20 — 分頁查詢 AI 分析紀錄
+        /// </summary>
+        [HttpGet("analysis/history")]
+        public async Task<IActionResult> GetAnalysisHistory(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.GetAnalysisHistoryAsync(userId, page, pageSize);
+            if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { data = result });
+        }
+
+        /// <summary>
+        /// GET /api/user/balls/history?page=1&amp;pageSize=20 — 分頁查詢球數流水帳
+        /// </summary>
+        [HttpGet("balls/history")]
+        public async Task<IActionResult> GetBallsHistory(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.GetBallsHistoryAsync(userId, page, pageSize);
+            if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { data = result });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 邀請好友
+        // ════════════════════════════════════════════════════════════════
+
         /// <summary>
         /// GET /api/user/invite/friends — 取得已邀請好友清單
         /// </summary>
