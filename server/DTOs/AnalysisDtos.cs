@@ -19,6 +19,8 @@ namespace UploadServer.DTOs
     public class AnalysisStatusResponse
     {
         public string AnalysisId { get; set; }
+        /// <summary>客戶端傳入的 session 識別符（如 "1779413178538_hit_1"）</summary>
+        public string? VideoId { get; set; }
         public string Status { get; set; }
         public string? Summary { get; set; }
         public string? Severity { get; set; }

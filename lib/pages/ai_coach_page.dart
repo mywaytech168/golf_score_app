@@ -9,27 +9,58 @@ import '../theme/app_theme.dart';
 /// 接收 analysisId（已完成步驟 1~3），輪詢結果並顯示教練評語
 class AiCoachPage extends StatefulWidget {
   final String analysisId;
-  final String? clipPath; // 可選，用於頁面頂部影片回放（如有 video_player）
+  final String? clipPath;
+  /// 供「重新分析」按鈕使用
+  final String? videoId;
+  final String? csvPath;
 
   const AiCoachPage({
     super.key,
     required this.analysisId,
     this.clipPath,
+    this.videoId,
+    this.csvPath,
   });
 
   /// 從 clip 路徑一次完成提交並導向本頁。
   ///
-  /// 若提供 [csvPath]（pose_landmarks.csv），會先呼叫
-  /// ONNX `/api/golf/analyze-swing` 取得揮桿錯誤類型，
-  /// 再將結果作為 [errorTypeHint] 送給 Gemini，以取得更精準的教練評語。
+  /// - [forceReanalyze]=false（預設）：若已有 completed/進行中分析則直接導向，不重複提交
+  /// - [forceReanalyze]=true：強制提交新分析（由「重新分析」按鈕觸發）
+  /// - 若提供 [csvPath]，先跑 ONNX 取得 errorTypeHint 再送 Gemini
   static Future<void> submitAndPush({
     required BuildContext context,
     required String videoId,
     required String clipPath,
     String? csvPath,
     String? errorTypeHint,
+    bool forceReanalyze = false,
   }) async {
-    // 若有 CSV 且尚未指定 hint，先跑 ONNX 骨架分析
+    // ── 快取判斷：若已有分析且不強制重新，直接導向 ──────────
+    if (!forceReanalyze) {
+      try {
+        final existing =
+            await AnalysisService.instance.getLatestAnalysisForVideo(videoId);
+        if (existing != null && !existing.isFailed) {
+          debugPrint('[AiCoach] 已有分析 ${existing.analysisId} '
+              '(${existing.status})，直接開啟');
+          if (context.mounted) {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => AiCoachPage(
+                analysisId: existing.analysisId,
+                clipPath:   clipPath,
+                videoId:    videoId,
+                csvPath:    csvPath,
+              ),
+            ));
+          }
+          return;
+        }
+      } catch (e) {
+        debugPrint('[AiCoach] 快取查詢失敗（略過）: $e');
+      }
+    }
+
+    // ── 若有 CSV，先跑 ONNX 取得 errorTypeHint ──────────────
     String? resolvedHint = errorTypeHint;
     if (resolvedHint == null && csvPath != null) {
       try {
@@ -54,7 +85,12 @@ class AiCoachPage extends StatefulWidget {
     );
     if (context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => AiCoachPage(analysisId: analysisId, clipPath: clipPath),
+        builder: (_) => AiCoachPage(
+          analysisId: analysisId,
+          clipPath:   clipPath,
+          videoId:    videoId,
+          csvPath:    csvPath,
+        ),
       ));
     }
   }
@@ -87,6 +123,25 @@ class _AiCoachPageState extends State<AiCoachPage> {
     _timer = Timer.periodic(_pollInterval, (_) => _poll());
   }
 
+  Future<void> _reanalyze() async {
+    _timer?.cancel();
+    final vid  = widget.videoId;
+    final clip = widget.clipPath;
+    if (vid == null || clip == null) return;
+    if (!mounted) return;
+
+    // 以 forceReanalyze=true 取代目前頁面
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => _ReanalyzeLoader(
+          videoId:  vid,
+          clipPath: clip,
+          csvPath:  widget.csvPath,
+        ),
+      ),
+    );
+  }
+
   Future<void> _poll() async {
     try {
       final status = await AnalysisService.instance.getStatus(widget.analysisId);
@@ -111,6 +166,14 @@ class _AiCoachPageState extends State<AiCoachPage> {
         backgroundColor: kPrimaryDark,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          if (widget.videoId != null && widget.clipPath != null)
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: '重新分析',
+              onPressed: _reanalyze,
+            ),
+        ],
       ),
       body: _buildBody(),
     );
@@ -446,6 +509,76 @@ class _Card extends StatelessWidget {
           ],
           child,
         ],
+      ),
+    );
+  }
+}
+
+// ── 重新分析過渡頁 ────────────────────────────────────────────
+
+/// 顯示「提交中...」，完成後自動替換為 AiCoachPage
+class _ReanalyzeLoader extends StatefulWidget {
+  final String videoId;
+  final String clipPath;
+  final String? csvPath;
+  const _ReanalyzeLoader({
+    required this.videoId,
+    required this.clipPath,
+    this.csvPath,
+  });
+  @override
+  State<_ReanalyzeLoader> createState() => _ReanalyzeLoaderState();
+}
+
+class _ReanalyzeLoaderState extends State<_ReanalyzeLoader> {
+  @override
+  void initState() {
+    super.initState();
+    _submit();
+  }
+
+  Future<void> _submit() async {
+    try {
+      await AiCoachPage.submitAndPush(
+        context:        context,
+        videoId:        widget.videoId,
+        clipPath:       widget.clipPath,
+        csvPath:        widget.csvPath,
+        forceReanalyze: true,
+      );
+      // submitAndPush 已 push 新頁面，移除本過渡頁
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      debugPrint('[ReanalyzeLoader] 重新分析失敗: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('重新分析失敗: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kBgPage,
+      body: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: CircularProgressIndicator(color: kPrimaryGreen, strokeWidth: 3),
+            ),
+            SizedBox(height: 16),
+            Text('提交重新分析中...', style: TextStyle(color: kTextSecondary, fontSize: 15)),
+          ],
+        ),
       ),
     );
   }

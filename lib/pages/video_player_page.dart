@@ -6,7 +6,10 @@ import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
+import '../services/analysis_service.dart';
 import '../services/chart_data_service.dart';
+import '../theme/app_theme.dart';
+import 'ai_coach_page.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
@@ -38,6 +41,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   int _chartTabIndex = 0;
   ChartDataSet? _chartData;
   bool _chartsLoading = false;
+
+  // AI analysis panel state
+  bool _aiExpanded = false;
+  AnalysisStatus? _aiStatus;
+  bool _aiLoading = false;
+  bool _aiSubmitting = false;
 
   static const _tabs = [
     (icon: Icons.videocam,  label: '原始',  type: 'original'),
@@ -114,6 +123,59 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     }
   }
 
+  void _toggleAi() {
+    setState(() => _aiExpanded = !_aiExpanded);
+    if (_aiExpanded && _aiStatus == null && !_aiLoading) {
+      _loadAiStatus();
+    }
+  }
+
+  Future<void> _loadAiStatus() async {
+    if (widget.entry == null) return;
+    setState(() => _aiLoading = true);
+    try {
+      final videoId = p.basename(p.dirname(widget.videoPath));
+      final status = await AnalysisService.instance
+          .getLatestAnalysisForVideo(videoId);
+      if (mounted) setState(() => _aiStatus = status);
+    } catch (_) {
+      // 未登入或網路失敗 → 靜默，顯示「尚未分析」
+    } finally {
+      if (mounted) setState(() => _aiLoading = false);
+    }
+  }
+
+  Future<void> _openOrSubmitAi({bool forceReanalyze = false}) async {
+    if (widget.entry == null) return;
+    setState(() => _aiSubmitting = true);
+    try {
+      final sessionDir = p.dirname(widget.videoPath);
+      final videoId    = p.basename(sessionDir);
+      final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
+      final hasCsv     = File(csvPath).existsSync();
+      await AiCoachPage.submitAndPush(
+        context:        context,
+        videoId:        videoId,
+        clipPath:       widget.videoPath,
+        csvPath:        hasCsv ? csvPath : null,
+        forceReanalyze: forceReanalyze,
+      );
+      // 回到此頁後刷新狀態
+      if (mounted) {
+        setState(() { _aiStatus = null; });
+        _loadAiStatus();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('AI 分析失敗: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _aiSubmitting = false);
+    }
+  }
+
   Future<void> _loadCharts() async {
     final entry = widget.entry;
     if (entry == null) return;
@@ -179,6 +241,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             Expanded(child: _buildVideo()),
             if (_initialized) _buildControls(),
             _buildChartsPanel(),
+            _buildAiPanel(),
           ],
         ),
       ),
@@ -319,6 +382,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _toggleAi,
+                  child: Icon(
+                    Icons.psychology_rounded,
+                    color: _aiExpanded
+                        ? const Color(0xFF7C3AED)
+                        : Colors.white54,
+                    size: 24,
+                  ),
+                ),
               ],
             ],
           ),
@@ -431,6 +505,207 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   Widget _btn(IconData icon, VoidCallback onTap) =>
       GestureDetector(onTap: onTap, child: Icon(icon, color: Colors.white70, size: 26));
+
+  // ── AI 分析面板 ──────────────────────────────────────────────
+
+  Widget _buildAiPanel() {
+    if (widget.entry == null) return const SizedBox.shrink();
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeInOut,
+      height: _aiExpanded ? _aiPanelHeight() : 0,
+      color: const Color(0xFF0D0D1A),
+      child: ClipRect(child: _buildAiContent()),
+    );
+  }
+
+  double _aiPanelHeight() {
+    if (_aiLoading) return 80;
+    if (_aiStatus == null) return 100;
+    if (_aiStatus!.isCompleted) return 160;
+    return 100;
+  }
+
+  Widget _buildAiContent() {
+    if (_aiLoading) {
+      return const Center(
+        child: SizedBox(
+          width: 28, height: 28,
+          child: CircularProgressIndicator(
+              color: Color(0xFF7C3AED), strokeWidth: 2.5),
+        ),
+      );
+    }
+    final status = _aiStatus;
+
+    // 尚無分析
+    if (status == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            const Icon(Icons.psychology_rounded,
+                color: Color(0xFF7C3AED), size: 22),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('尚未進行 AI 教練分析',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
+            ),
+            _aiSubmitting
+                ? const SizedBox(
+                    width: 20, height: 20,
+                    child: CircularProgressIndicator(
+                        color: Color(0xFF7C3AED), strokeWidth: 2))
+                : TextButton(
+                    onPressed: () => _openOrSubmitAi(),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF7C3AED),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                    ),
+                    child: const Text('開始分析',
+                        style: TextStyle(fontSize: 13)),
+                  ),
+          ],
+        ),
+      );
+    }
+
+    // 進行中
+    if (status.isActive) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 20, height: 20,
+              child: CircularProgressIndicator(
+                  color: Color(0xFF7C3AED), strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(_aiStatusLabel(status.status),
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 13)),
+            ),
+            TextButton(
+              onPressed: () => _openOrSubmitAi(),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF7C3AED),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+              ),
+              child: const Text('查看進度',
+                  style: TextStyle(fontSize: 13)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 已完成
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.psychology_rounded,
+                  color: Color(0xFF7C3AED), size: 18),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('AI 教練分析',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ),
+              if (status.severity != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _severityColor(status.severity!)
+                        .withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: _severityColor(status.severity!)
+                            .withValues(alpha: 0.6)),
+                  ),
+                  child: Text(
+                    _severityLabel(status.severity!),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: _severityColor(status.severity!),
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+            ],
+          ),
+          if (status.summary != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              status.summary!,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Colors.white60, fontSize: 12, height: 1.5),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => _openOrSubmitAi(forceReanalyze: true),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white38,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+                child: const Text('重新分析'),
+              ),
+              const SizedBox(width: 4),
+              ElevatedButton(
+                onPressed: () => _openOrSubmitAi(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 6),
+                  textStyle: const TextStyle(fontSize: 13),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('查看詳細'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _aiStatusLabel(String s) => switch (s) {
+    'pending'    => '準備中...',
+    'queued'     => '等待分析佇列...',
+    'processing' => 'AI 教練分析中...',
+    _            => '分析中...',
+  };
+
+  Color _severityColor(String s) => switch (s) {
+    'high'   => kBadColor,
+    'medium' => kCrispColor,
+    _        => kGoodColor,
+  };
+
+  String _severityLabel(String s) => switch (s) {
+    'high'   => '嚴重',
+    'medium' => '中等',
+    _        => '輕微',
+  };
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -586,6 +861,7 @@ class _PlayerChartState extends State<_PlayerChart> {
       duration: Duration.zero,
     );
   }
+
 }
 
 // ════════════════════════════════════════════════════════════════

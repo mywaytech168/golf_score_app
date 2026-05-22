@@ -80,6 +80,7 @@ class CoachResult {
 
 class AnalysisStatus {
   final String analysisId;
+  final String? videoId;
   final String status; // pending | queued | processing | completed | failed
   final String? summary;
   final String? severity;
@@ -87,6 +88,7 @@ class AnalysisStatus {
 
   AnalysisStatus({
     required this.analysisId,
+    this.videoId,
     required this.status,
     this.summary,
     this.severity,
@@ -96,6 +98,7 @@ class AnalysisStatus {
   bool get isCompleted => status == 'completed';
   bool get isFailed    => status == 'failed';
   bool get isDone      => isCompleted || isFailed;
+  bool get isActive    => !isDone; // pending / queued / processing
 
   factory AnalysisStatus.fromJson(Map<String, dynamic> j) {
     CoachResult? result;
@@ -112,6 +115,7 @@ class AnalysisStatus {
     }
     return AnalysisStatus(
       analysisId: j['analysisId'] as String? ?? '',
+      videoId:    j['videoId']    as String?,
       status:     j['status']     as String? ?? 'unknown',
       summary:    j['summary']    as String?,
       severity:   j['severity']   as String?,
@@ -222,13 +226,29 @@ class AnalysisService {
   /// 查詢某影片的所有分析記錄
   Future<List<AnalysisStatus>> getVideoAnalyses(String videoId) async {
     final resp = await _dio.get(
-      '/api/analysis/video/$videoId',
+      '/api/analysis/by-video/$videoId',
       options: Options(headers: await _authHeaders()),
     );
     final list = resp.data as List<dynamic>;
     return list
         .map((e) => AnalysisStatus.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// 取得最新一筆可用分析（completed 或進行中），不存在回傳 null
+  Future<AnalysisStatus?> getLatestAnalysisForVideo(String videoId) async {
+    try {
+      final list = await getVideoAnalyses(videoId);
+      if (list.isEmpty) return null;
+      // 優先：completed → 進行中 → failed（最後選擇）
+      final completed = list.where((a) => a.isCompleted).toList();
+      if (completed.isNotEmpty) return completed.first;
+      final active = list.where((a) => a.isActive).toList();
+      if (active.isNotEmpty) return active.first;
+      return list.first; // failed
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── ONNX 揮桿錯誤分析 ────────────────────────────────────────

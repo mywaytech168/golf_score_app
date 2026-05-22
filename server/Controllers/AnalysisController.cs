@@ -125,6 +125,31 @@ namespace UploadServer.Controllers
                 .Select(a => new AnalysisStatusResponse
                 {
                     AnalysisId = a.Id,
+                    VideoId    = a.VideoId,
+                    Status     = a.Status,
+                    Summary    = a.Summary,
+                    Severity   = a.Severity,
+                })
+                .ToListAsync();
+
+            return Ok(analyses);
+        }
+
+        /// <summary>
+        /// 查詢特定 videoId 的分析記錄（最多回傳 10 筆，最新在前）
+        /// GET /api/analysis/by-video/{videoId}
+        /// </summary>
+        [HttpGet("by-video/{videoId}")]
+        public async Task<IActionResult> GetByVideo(string videoId)
+        {
+            var analyses = await _db.AiCoachAnalyses
+                .Where(a => a.UserId == UserId && a.VideoId == videoId)
+                .OrderByDescending(a => a.CreatedAt)
+                .Take(10)
+                .Select(a => new AnalysisStatusResponse
+                {
+                    AnalysisId = a.Id,
+                    VideoId    = a.VideoId,
                     Status     = a.Status,
                     Summary    = a.Summary,
                     Severity   = a.Severity,
