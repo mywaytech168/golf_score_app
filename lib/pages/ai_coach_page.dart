@@ -17,17 +17,40 @@ class AiCoachPage extends StatefulWidget {
     this.clipPath,
   });
 
-  /// 從 clip 路徑一次完成提交並導向本頁
+  /// 從 clip 路徑一次完成提交並導向本頁。
+  ///
+  /// 若提供 [csvPath]（pose_landmarks.csv），會先呼叫
+  /// ONNX `/api/golf/analyze-swing` 取得揮桿錯誤類型，
+  /// 再將結果作為 [errorTypeHint] 送給 Gemini，以取得更精準的教練評語。
   static Future<void> submitAndPush({
     required BuildContext context,
     required String videoId,
     required String clipPath,
+    String? csvPath,
     String? errorTypeHint,
   }) async {
+    // 若有 CSV 且尚未指定 hint，先跑 ONNX 骨架分析
+    String? resolvedHint = errorTypeHint;
+    if (resolvedHint == null && csvPath != null) {
+      try {
+        final swingResult =
+            await AnalysisService.instance.analyzeSwingFromCsv(csvPath);
+        resolvedHint = swingResult?.topError;
+        if (resolvedHint != null) {
+          debugPrint('[AiCoach] ONNX 揮桿分析結果: $resolvedHint '
+              '(scores: ${swingResult?.scores})');
+        } else {
+          debugPrint('[AiCoach] ONNX 無明確錯誤，以無 hint 繼續');
+        }
+      } catch (e) {
+        debugPrint('[AiCoach] ONNX 分析例外（略過）: $e');
+      }
+    }
+
     final analysisId = await AnalysisService.instance.submitForAnalysis(
       videoId:       videoId,
       clipPath:      clipPath,
-      errorTypeHint: errorTypeHint,
+      errorTypeHint: resolvedHint,
     );
     if (context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(

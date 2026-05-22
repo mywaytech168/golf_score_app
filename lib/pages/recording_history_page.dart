@@ -1241,10 +1241,15 @@ class _HistoryTileState extends State<_HistoryTile> {
     if (_isSubmittingAi) return;
     setState(() => _isSubmittingAi = true);
     try {
+      final sessionDir = p.dirname(widget.entry.filePath);
+      final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
+      final hasCsv     = File(csvPath).existsSync();
+
       await AiCoachPage.submitAndPush(
-        context: context,
-        videoId: widget.entry.filePath,
+        context:  context,
+        videoId:  widget.entry.filePath,
         clipPath: widget.entry.filePath,
+        csvPath:  hasCsv ? csvPath : null,
       );
     } catch (e) {
       debugPrint('[AI分析] 提交失敗: $e');

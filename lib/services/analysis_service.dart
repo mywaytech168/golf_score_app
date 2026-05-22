@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:csv/csv.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -225,4 +226,137 @@ class AnalysisService {
         .map((e) => AnalysisStatus.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  // ── ONNX 揮桿錯誤分析 ────────────────────────────────────────
+
+  /// 從 pose_landmarks.csv 解析骨架幀（最多 600 幀，等距採樣）
+  ///
+  /// CSV 欄位佈局（從 col 3 起，每個 landmark 佔 6 欄）：
+  ///   frame(0), time_sec(1), pose_update_id(2),
+  ///   [lm_x_norm, lm_y_norm, lm_z, lm_vis, lm_x_px, lm_y_px] × 33
+  static List<Map<String, dynamic>> parseCsvToFrames(
+    String csvPath, {
+    int maxFrames = 600,
+  }) {
+    final content = File(csvPath).readAsStringSync();
+    final rows = const CsvToListConverter(eol: '\n').convert(content);
+    if (rows.length < 3) return []; // header + 至少 2 data rows
+
+    final dataRows = rows.sublist(1); // 去掉 header
+
+    // 等距採樣
+    final List<List<dynamic>> sampled;
+    if (dataRows.length <= maxFrames) {
+      sampled = dataRows;
+    } else {
+      sampled = [];
+      final step = (dataRows.length - 1) / (maxFrames - 1);
+      for (int i = 0; i < maxFrames; i++) {
+        sampled.add(dataRows[(i * step).round()]);
+      }
+    }
+
+    final frames = <Map<String, dynamic>>[];
+    for (int fi = 0; fi < sampled.length; fi++) {
+      final row = sampled[fi];
+      final landmarks = <Map<String, dynamic>>[];
+      for (int lm = 0; lm < 33; lm++) {
+        final base = 3 + lm * 6;
+        if (row.length <= base + 3) continue;
+        final x   = _csvDouble(row[base]);
+        final y   = _csvDouble(row[base + 1]);
+        final z   = _csvDouble(row[base + 2]);
+        final vis = _csvDouble(row[base + 3]);
+        // 忽略完全缺失的關鍵點（x 和 y 皆 NaN）
+        if (x.isNaN && y.isNaN) continue;
+        landmarks.add({
+          'id':         lm,
+          'x':          x.isNaN   ? 0.0 : x,
+          'y':          y.isNaN   ? 0.0 : y,
+          'z':          z.isNaN   ? 0.0 : z,
+          'visibility': vis.isNaN ? 0.0 : vis,
+        });
+      }
+      if (landmarks.isNotEmpty) {
+        frames.add({'frameIndex': fi, 'landmarks': landmarks});
+      }
+    }
+    return frames;
+  }
+
+  static double _csvDouble(dynamic v) {
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    return double.tryParse(v.toString()) ?? double.nan;
+  }
+
+  /// 呼叫後端 ONNX 端點 POST /api/golf/analyze-swing
+  Future<GolfSwingResult?> analyzeSwing(
+    List<Map<String, dynamic>> frames,
+  ) async {
+    if (frames.length < 2) return null;
+    try {
+      final resp = await _dio.post(
+        '/api/golf/analyze-swing',
+        data: {'frames': frames},
+        options: Options(
+          headers: await _authHeaders(),
+          sendTimeout:    const Duration(seconds: 20),
+          receiveTimeout: const Duration(seconds: 20),
+        ),
+      );
+      return GolfSwingResult.fromJson(resp.data as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('⚠️ AnalyzeSwing 失敗（略過，繼續 Gemini）: $e');
+      return null;
+    }
+  }
+
+  /// 從 CSV 一次完成骨架解析 + ONNX 推論
+  Future<GolfSwingResult?> analyzeSwingFromCsv(String csvPath) async {
+    final frames = parseCsvToFrames(csvPath);
+    if (frames.length < 2) {
+      debugPrint('[AnalyzeSwing] CSV 幀數不足（${frames.length}），跳過');
+      return null;
+    }
+    debugPrint('[AnalyzeSwing] 送出 ${frames.length} 幀 → /api/golf/analyze-swing');
+    return analyzeSwing(frames);
+  }
+}
+
+// ── ONNX 揮桿分析結果 DTO ────────────────────────────────────
+
+class GolfSwingResult {
+  /// 正式錯誤 (score >= 0.75)
+  final List<String> officialErrors;
+  /// 需複核 (0.75–0.85)
+  final List<String> reviewErrors;
+  /// 疑似錯誤 (0.60–0.75)
+  final List<String> suspectErrors;
+  /// 各標籤原始機率
+  final Map<String, double> scores;
+  /// 各標籤信心帶
+  final Map<String, String> bands;
+
+  GolfSwingResult({
+    required this.officialErrors,
+    required this.reviewErrors,
+    required this.suspectErrors,
+    required this.scores,
+    required this.bands,
+  });
+
+  /// 最高優先錯誤類型：official 優先，次取 suspect，皆無則 null
+  String? get topError =>
+      officialErrors.isNotEmpty ? officialErrors.first :
+      suspectErrors.isNotEmpty  ? suspectErrors.first  : null;
+
+  factory GolfSwingResult.fromJson(Map<String, dynamic> j) => GolfSwingResult(
+    officialErrors: (j['officialErrors'] as List<dynamic>? ?? []).cast<String>(),
+    reviewErrors:   (j['reviewErrors']   as List<dynamic>? ?? []).cast<String>(),
+    suspectErrors:  (j['suspectErrors']  as List<dynamic>? ?? []).cast<String>(),
+    scores: (j['scores'] as Map<String, dynamic>? ?? {})
+        .map((k, v) => MapEntry(k, (v as num).toDouble())),
+    bands:  (j['bands']  as Map<String, dynamic>? ?? {}).cast<String, String>(),
+  );
 }
