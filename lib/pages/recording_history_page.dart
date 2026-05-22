@@ -21,6 +21,7 @@ import '../services/ad_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../widgets/hits_summary_widget.dart';
 import '../widgets/green_page_header.dart';
+import 'ai_coach_page.dart';
 import 'video_comparison_page.dart';
 import 'video_player_page.dart';
 import 'recording_detail_page.dart';
@@ -683,6 +684,7 @@ class _HistoryTileState extends State<_HistoryTile> {
   late Future<List<HitsSummary>> _hitsSummaryFuture;
   bool _isDetecting = false;
   bool _isAnalyzing = false;
+  bool _isSubmittingAi = false;
   bool get _isLongVideo => widget.entry.durationSeconds > 5 && widget.entry.durationSeconds <= 120;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
   bool get _isClip => widget.entry.videoType == VideoType.localClip;
@@ -1234,6 +1236,31 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
+  /// 提交影片到 AI 教練後端，並跳轉至結果頁面
+  Future<void> _runAiAnalysis() async {
+    if (_isSubmittingAi) return;
+    setState(() => _isSubmittingAi = true);
+    try {
+      await AiCoachPage.submitAndPush(
+        context: context,
+        videoId: widget.entry.filePath,
+        clipPath: widget.entry.filePath,
+      );
+    } catch (e) {
+      debugPrint('[AI分析] 提交失敗: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('AI 分析提交失敗: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmittingAi = false);
+    }
+  }
+
   /// 測試用：重置分析狀態為 false
   void _shareSession() {
     ShareUploadDialog.show(
@@ -1681,6 +1708,51 @@ class _HistoryTileState extends State<_HistoryTile> {
                     ],
                   ),
                 ),
+                // ── AI 分析按鈕 ──────────────────────────────────
+                GestureDetector(
+                  onTap: _runAiAnalysis,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: _isSubmittingAi
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF7C3AED),
+                            ),
+                          )
+                        : Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF7C3AED).withAlpha(20),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: const Color(0xFF7C3AED).withAlpha(100),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.psychology_rounded,
+                                    size: 13, color: Color(0xFF7C3AED)),
+                                SizedBox(width: 3),
+                                Text(
+                                  'AI',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF7C3AED),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ),
+                // ── 圖表 ─────────────────────────────────────────
                 GestureDetector(
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
@@ -1692,6 +1764,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                     child: Icon(Icons.bar_chart_rounded, color: Color(0xFF1565C0), size: 22),
                   ),
                 ),
+                // ── 播放 ─────────────────────────────────────────
                 GestureDetector(
                   onTap: widget.onTap,
                   child: const Padding(
