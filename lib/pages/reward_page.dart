@@ -283,10 +283,16 @@ class _RewardCard extends StatelessWidget {
                     children: [
                       Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 2),
-                      Text(description, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      Text(
+                        description,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 // 球數徽章
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -348,6 +354,7 @@ class _RewardCard extends StatelessWidget {
                   child: buttonBusy
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                       : Row(
+                          mainAxisSize: MainAxisSize.min,
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             if (claimed)
@@ -355,9 +362,13 @@ class _RewardCard extends StatelessWidget {
                             else
                               Icon(icon, size: 16),
                             const SizedBox(width: 6),
-                            Text(
-                              claimed ? '今日已完成' : (buttonLabel ?? ''),
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                            Flexible(
+                              child: Text(
+                                claimed ? '今日已完成' : (buttonLabel ?? ''),
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
                             ),
                           ],
                         ),
@@ -972,12 +983,12 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                 const Divider(height: 1),
                 const SizedBox(height: 12),
                 // 類型選擇
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
                   children: [
                     _TypeChip(label: '🐛 問題回報', value: 'bug',     selected: _type, onTap: (v) => setState(() => _type = v)),
-                    const SizedBox(width: 8),
                     _TypeChip(label: '💡 功能建議', value: 'feature', selected: _type, onTap: (v) => setState(() => _type = v)),
-                    const SizedBox(width: 8),
                     _TypeChip(label: '💬 其他',    value: 'other',   selected: _type, onTap: (v) => setState(() => _type = v)),
                   ],
                 ),
