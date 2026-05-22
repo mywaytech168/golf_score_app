@@ -1455,527 +1455,374 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
+  // ── Badge 輔助 ────────────────────────────────────────────────
+
+  Widget _badge(String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(5),
+      border: Border.all(color: color.withValues(alpha: 0.45)),
+    ),
+    child: Text(label,
+        style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+  );
+
+  Widget _badgeWithIcon(String label, Color color, IconData icon) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(5),
+      border: Border.all(color: color.withValues(alpha: 0.45)),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 10, color: color),
+      const SizedBox(width: 3),
+      Text(label,
+          style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+    ]),
+  );
+
+  Widget _actionBtn({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool loading = false,
+  }) =>
+      Expanded(
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                loading
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: color))
+                    : Icon(icon, size: 18, color: color),
+                const SizedBox(height: 3),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: color,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  // ── Build ─────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      shadowColor: Colors.black12,
-      elevation: 4,
+      borderRadius: BorderRadius.circular(16),
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      elevation: 2,
       child: InkWell(
         onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 第一行：縮圖、標題和操作按鈕
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 縮圖
-                _HistoryPreview(
-                  thumbnailPath: widget.entry.thumbnailPath,
-                  roundIndex: widget.entry.roundIndex,
-                ),
-                const SizedBox(width: 12),
-                // 標題和同步狀態
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.entry.displayTitle,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF123B70),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      // 狀態徽章區 - 使用 Wrap 以支援標籤換行，最多顯示 2 行
-                      ClipRect(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 52),
-                          child: Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: [
-                          // 長/短影片標記
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _isLongVideo
-                                  ? const Color(0xFF1565C0).withAlpha(25)
-                                  : const Color(0xFF757575).withAlpha(25),
-                              border: Border.all(
-                                color: _isLongVideo
-                                    ? const Color(0xFF1565C0)
-                                    : const Color(0xFF757575),
-                                width: 1,
-                              ),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              _isLongVideo ? '🎬 長影片' : '⚡ 短影片',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: _isLongVideo
-                                    ? const Color(0xFF1565C0)
-                                    : const Color(0xFF757575),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          // 已切片標記（只對原始影片顯示）
-                          if (widget.entry.videoType == VideoType.original &&
-                              widget.entry.isClipped)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF9800).withAlpha(30),
-                                border: Border.all(
-                                  color: const Color(0xFFFF9800),
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                '✂️ 已切片',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFFFF9800),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          // 好球/壞球指示器
-                          if (widget.entry.goodShot != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: widget.entry.goodShot == true
-                                    ? const Color(0xFF4CAF50).withAlpha(30)
-                                    : const Color(0xFFF44336).withAlpha(30),
-                                border: Border.all(
-                                  color: widget.entry.goodShot == true
-                                      ? const Color(0xFF4CAF50)
-                                      : const Color(0xFFF44336),
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
+            // ── 主體區域 ──────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 4, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 縮圖
+                  _HistoryPreview(
+                    thumbnailPath: widget.entry.thumbnailPath,
+                    roundIndex: widget.entry.roundIndex,
+                    durationSeconds: widget.entry.durationSeconds,
+                  ),
+                  const SizedBox(width: 12),
+                  // 標題 + 時間 + 標籤
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 標題列 + 更多選單
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
                               child: Text(
-                                widget.entry.goodShot == true ? '✓ 好球' : '✗ 壞球',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: widget.entry.goodShot == true
-                                      ? const Color(0xFF4CAF50)
-                                      : const Color(0xFFF44336),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          // 音頻分析標籤
-                          if (widget.entry.audioLabel != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF6F00).withAlpha(25),
-                                border: Border.all(
-                                  color: const Color(0xFFFF6F00),
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '🎵 ${widget.entry.audioLabel}',
+                                widget.entry.displayTitle,
                                 style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFFFF6F00),
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF123B70),
+                                  height: 1.3,
                                 ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          // 無聲音標籤
-                          if (widget.entry.audioTags?.contains('no_audio') == true)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF9E9E9E).withAlpha(40),
-                                border: Border.all(
-                                  color: const Color(0xFF757575),
-                                  width: 1,
+                            PopupMenuButton<_HistoryMenuAction>(
+                              tooltip: '更多操作',
+                              icon: const Icon(
+                                  Icons.more_vert,
+                                  color: Color(0xFF9AA6B2),
+                                  size: 20),
+                              padding: EdgeInsets.zero,
+                              onSelected: (action) {
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  switch (action) {
+                                    case _HistoryMenuAction.rename:
+                                      widget.onRename();
+                                      break;
+                                    case _HistoryMenuAction.detectHits:
+                                      _runDetection();
+                                      break;
+                                    case _HistoryMenuAction.analyze:
+                                      _runCombinedAnalysis();
+                                      break;
+                                    case _HistoryMenuAction.compare:
+                                      _runCompare();
+                                      break;
+                                    case _HistoryMenuAction.share:
+                                      _shareSession();
+                                      break;
+                                    case _HistoryMenuAction.resetAnalysisState:
+                                      _resetAnalysisState();
+                                      break;
+                                    case _HistoryMenuAction.resetClippingState:
+                                      _resetClippingState();
+                                      break;
+                                    case _HistoryMenuAction.delete:
+                                      widget.onDelete();
+                                      break;
+                                  }
+                                });
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem<_HistoryMenuAction>(
+                                  value: _HistoryMenuAction.rename,
+                                  child: Text('重新命名'),
                                 ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                '🔇 無聲音',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF757575),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          // 已分析標籤
-                          if (widget.entry.isAnalyzed)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF4CAF50).withAlpha(30),
-                                border: Border.all(
-                                  color: const Color(0xFF4CAF50),
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                '✓ 已分析',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF4CAF50),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          // AI Coach 分析標籤
-                          if (widget.entry.hasAiCoachAnalysis)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF7C3AED).withAlpha(25),
-                                border: Border.all(
-                                  color: const Color(0xFF7C3AED).withAlpha(180),
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.psychology_rounded,
-                                      size: 10, color: Color(0xFF7C3AED)),
-                                  SizedBox(width: 3),
-                                  Text(
-                                    'AI 分析',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Color(0xFF7C3AED),
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                if (_isLongVideo &&
+                                    _isOriginalVideo &&
+                                    !widget.entry.isClipped)
+                                  PopupMenuItem<_HistoryMenuAction>(
+                                    value: _HistoryMenuAction.detectHits,
+                                    child: Row(children: [
+                                      Text(
+                                          _isDetecting ? '偵測中...' : '偵測擊球',
+                                          style: TextStyle(
+                                              color: _isDetecting
+                                                  ? Colors.grey
+                                                  : null)),
+                                      if (_isDetecting) ...[
+                                        const SizedBox(width: 8),
+                                        const SizedBox(
+                                            width: 12,
+                                            height: 12,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2)),
+                                      ],
+                                    ]),
                                   ),
-                                ],
-                              ),
-                            ),
-                        ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // 右側操作按鈕（固定位置）
-                PopupMenuButton<_HistoryMenuAction>(
-                  tooltip: '更多操作',
-                  icon: const Icon(
-                    Icons.more_vert,
-                    color: Color(0xFF123B70),
-                    size: 20,
-                  ),
-                  onSelected: (action) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      switch (action) {
-                        case _HistoryMenuAction.rename:
-                          widget.onRename();
-                          break;
-                        case _HistoryMenuAction.detectHits:
-                          _runDetection();
-                          break;
-                        case _HistoryMenuAction.analyze:
-                          _runCombinedAnalysis();
-                          break;
-                        case _HistoryMenuAction.compare:
-                          _runCompare();
-                          break;
-                        case _HistoryMenuAction.share:
-                          _shareSession();
-                          break;
-                        case _HistoryMenuAction.resetAnalysisState:
-                          _resetAnalysisState();
-                          break;
-                        case _HistoryMenuAction.resetClippingState:
-                          _resetClippingState();
-                          break;
-                        case _HistoryMenuAction.delete:
-                          widget.onDelete();
-                          break;
-                      }
-                    });
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.rename,
-                      child: Text('重新命名'),
-                    ),
-                    if (_isLongVideo && _isOriginalVideo && !widget.entry.isClipped)
-                      PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.detectHits,
-                        child: Row(
-                          children: [
-                            Text(
-                              _isDetecting ? '偵測中...' : '偵測擊球',
-                              style: TextStyle(
-                                color: _isDetecting ? Colors.grey : null,
-                              ),
-                            ),
-                            if (_isDetecting) ...[
-                              const SizedBox(width: 8),
-                              const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    if ((_isClip || (!_isLongVideo && _isOriginalVideo)) && !_isAnalyzed)
-                      PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.analyze,
-                        child: Row(
-                          children: [
-                            Text(
-                              _isAnalyzing ? '分析中...' : '🎬 完整分析',
-                              style: TextStyle(
-                                color: _isAnalyzing ? Colors.grey : null,
-                              ),
-                            ),
-                            if (_isAnalyzing) ...[
-                              const SizedBox(width: 8),
-                              const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    // 比較模式：限短影片（≤ 30 秒），且列表中還有其他短影片可選
-                    if (!_isLongVideo && widget.allEntries.where((e) =>
-                        e.filePath != widget.entry.filePath &&
-                        e.durationSeconds <= 5 &&
-                        File(e.filePath).existsSync()).isNotEmpty)
-                      const PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.compare,
-                        child: Text('⚖️ 與另一部影片比較'),
-                      ),
-                    if (!_isLongVideo && _isAnalyzed)
-                      const PopupMenuItem<_HistoryMenuAction>(
-                        value: _HistoryMenuAction.share,
-                        child: Row(
-                          children: [
-                            Icon(Icons.share_outlined, size: 16, color: Color(0xFF1E8E5A)),
-                            SizedBox(width: 8),
-                            Text('分享連結'),
-                          ],
-                        ),
-                      ),
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.resetAnalysisState,
-                      child: Text('🧪 測試: 重置分析狀態'),
-                    ),
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.resetClippingState,
-                      child: Text('🧪 測試: 重置切片狀態'),
-                    ),
-                    const PopupMenuItem<_HistoryMenuAction>(
-                      value: _HistoryMenuAction.delete,
-                      child: Text('刪除影片'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // 第二行：時間、時長、模式（帶播放按鈕）
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '🎬 ${widget.formattedTime} · ${widget.entry.durationSeconds} 秒',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (widget.formattedImportTime != null)
-                        Text(
-                          '📥 ${widget.formattedImportTime}${widget.entry.sharerName != null ? '  來自 ${widget.entry.sharerName}' : ''}',
-                          style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-                // ── AI 分析按鈕 ──────────────────────────────────
-                GestureDetector(
-                  onTap: _runAiAnalysis,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _isSubmittingAi
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Color(0xFF7C3AED),
-                            ),
-                          )
-                        : Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF7C3AED).withAlpha(20),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: const Color(0xFF7C3AED).withAlpha(100),
-                                width: 1,
-                              ),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.psychology_rounded,
-                                    size: 13, color: Color(0xFF7C3AED)),
-                                SizedBox(width: 3),
-                                Text(
-                                  'AI',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF7C3AED),
+                                if ((_isClip ||
+                                        (!_isLongVideo && _isOriginalVideo)) &&
+                                    !_isAnalyzed)
+                                  PopupMenuItem<_HistoryMenuAction>(
+                                    value: _HistoryMenuAction.analyze,
+                                    child: Row(children: [
+                                      Text(
+                                          _isAnalyzing ? '分析中...' : '完整分析',
+                                          style: TextStyle(
+                                              color: _isAnalyzing
+                                                  ? Colors.grey
+                                                  : null)),
+                                      if (_isAnalyzing) ...[
+                                        const SizedBox(width: 8),
+                                        const SizedBox(
+                                            width: 12,
+                                            height: 12,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2)),
+                                      ],
+                                    ]),
                                   ),
+                                if (!_isLongVideo &&
+                                    widget.allEntries
+                                        .where((e) =>
+                                            e.filePath !=
+                                                widget.entry.filePath &&
+                                            e.durationSeconds <= 5 &&
+                                            File(e.filePath).existsSync())
+                                        .isNotEmpty)
+                                  const PopupMenuItem<_HistoryMenuAction>(
+                                    value: _HistoryMenuAction.compare,
+                                    child: Text('與另一部影片比較'),
+                                  ),
+                                if (!_isLongVideo && _isAnalyzed)
+                                  const PopupMenuItem<_HistoryMenuAction>(
+                                    value: _HistoryMenuAction.share,
+                                    child: Row(children: [
+                                      Icon(Icons.share_outlined,
+                                          size: 16, color: Color(0xFF1E8E5A)),
+                                      SizedBox(width: 8),
+                                      Text('分享連結'),
+                                    ]),
+                                  ),
+                                const PopupMenuItem<_HistoryMenuAction>(
+                                  value: _HistoryMenuAction.resetAnalysisState,
+                                  child: Text('🧪 測試: 重置分析狀態'),
+                                ),
+                                const PopupMenuItem<_HistoryMenuAction>(
+                                  value: _HistoryMenuAction.resetClippingState,
+                                  child: Text('🧪 測試: 重置切片狀態'),
+                                ),
+                                const PopupMenuItem<_HistoryMenuAction>(
+                                  value: _HistoryMenuAction.delete,
+                                  child: Text('刪除影片'),
                                 ),
                               ],
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        // 時間資訊
+                        Row(children: [
+                          const Icon(Icons.access_time_rounded,
+                              size: 12, color: Color(0xFF9AA6B2)),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              '${widget.formattedTime} · ${widget.entry.durationSeconds}秒',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Color(0xFF9AA6B2)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                  ),
-                ),
-                // ── 圖表 ─────────────────────────────────────────
-                GestureDetector(
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => RecordingDetailPage(entry: widget.entry),
+                        ]),
+                        if (widget.formattedImportTime != null) ...[
+                          const SizedBox(height: 2),
+                          Row(children: [
+                            const Icon(Icons.download_rounded,
+                                size: 12, color: Color(0xFF9AA6B2)),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                '${widget.formattedImportTime!}${widget.entry.sharerName != null ? '  · 來自 ${widget.entry.sharerName}' : ''}',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Color(0xFF9AA6B2)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ]),
+                        ],
+                        const SizedBox(height: 7),
+                        // 標籤列
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            _badge(
+                              _isLongVideo ? '長影片' : '短影片',
+                              _isLongVideo
+                                  ? const Color(0xFF1565C0)
+                                  : const Color(0xFF757575),
+                            ),
+                            if (widget.entry.videoType == VideoType.original &&
+                                widget.entry.isClipped)
+                              _badge('已切片', const Color(0xFFFF9800)),
+                            if (widget.entry.goodShot != null)
+                              _badge(
+                                widget.entry.goodShot == true ? '好球' : '壞球',
+                                widget.entry.goodShot == true
+                                    ? const Color(0xFF4CAF50)
+                                    : const Color(0xFFF44336),
+                              ),
+                            if (widget.entry.audioLabel != null)
+                              _badge(widget.entry.audioLabel!,
+                                  const Color(0xFFFF6F00)),
+                            if (widget.entry.audioTags
+                                    ?.contains('no_audio') ==
+                                true)
+                              _badge('無聲音', const Color(0xFF9E9E9E)),
+                            if (widget.entry.isAnalyzed)
+                              _badge('已分析', const Color(0xFF1E8E5A)),
+                            if (widget.entry.hasAiCoachAnalysis)
+                              _badgeWithIcon('AI', const Color(0xFF7C3AED),
+                                  Icons.psychology_rounded),
+                            if (widget.entry.audioCrispness != null)
+                              _badge(
+                                '清脆 ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
+                                const Color(0xFFFF6F00),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ),
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: Icon(Icons.bar_chart_rounded, color: Color(0xFF1565C0), size: 22),
-                  ),
-                ),
-                // ── 播放 ─────────────────────────────────────────
-                GestureDetector(
-                  onTap: widget.onTap,
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: Icon(
-                      Icons.play_arrow_rounded,
-                      color: Color(0xFF1E8E5A),
-                      size: 24,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            // 第三行：聲音清脆度
-            if (widget.entry.audioCrispness != null)
-              Row(
-                children: [
-                  const Icon(Icons.music_note, size: 14, color: Color(0xFFFF6F00)),
-                  const SizedBox(width: 4),
-                  Text(
-                    '清脆度: ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFFFF6F00), fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
-            const SizedBox(height: 6),
-            // 第四行：影片類型和檔名
-            Text(
-              '${widget.entry.videoType.icon} ${widget.entry.videoType.label}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF9AA6B2)),
             ),
-            const SizedBox(height: 2),
-            Text(
-              widget.entry.fileName,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            // 摆球摘要展开面板
-            const SizedBox(height: 12),
+            // ── 擊球摘要 ──────────────────────────────────────────
             FutureBuilder<List<HitsSummary>>(
               future: _hitsSummaryFuture,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8.0),
-                    child: SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  );
-                }
-
                 if (!snapshot.hasData || snapshot.data!.isEmpty) {
                   return const SizedBox.shrink();
                 }
-
-                final hitsSummary = snapshot.data!;
-                return HitsSummaryExpansionTile(
-                  hitsSummary: hitsSummary,
-                  title: '摆球摘要',
-                  initiallyExpanded: false,
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: HitsSummaryExpansionTile(
+                    hitsSummary: snapshot.data!,
+                    title: '擊球摘要',
+                    initiallyExpanded: false,
+                  ),
                 );
               },
             ),
-            // 偵測擊球 / 裁切進度（已改為對話框顯示）
-            // 影片分析進度（已改為對話框顯示）
+            // ── 底部操作列 ────────────────────────────────────────
+            const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+            IntrinsicHeight(
+              child: Row(
+                children: [
+                  _actionBtn(
+                    icon: Icons.psychology_rounded,
+                    label: 'AI 分析',
+                    color: const Color(0xFF7C3AED),
+                    loading: _isSubmittingAi,
+                    onTap: _runAiAnalysis,
+                  ),
+                  const VerticalDivider(
+                      width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  _actionBtn(
+                    icon: Icons.bar_chart_rounded,
+                    label: '圖表',
+                    color: const Color(0xFF1565C0),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) =>
+                            RecordingDetailPage(entry: widget.entry))),
+                  ),
+                  const VerticalDivider(
+                      width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  _actionBtn(
+                    icon: Icons.play_arrow_rounded,
+                    label: '播放',
+                    color: const Color(0xFF1E8E5A),
+                    onTap: widget.onTap,
+                  ),
+                ],
+              ),
+            ),
           ],
-          ),
         ),
       ),
     );
@@ -1983,59 +1830,81 @@ class _HistoryTileState extends State<_HistoryTile> {
 }
 
 
-/// 縮圖元件：顯示影片預覽或替代圖示，並標示錄影輪次
+/// 縮圖元件：顯示影片預覽或替代圖示，並標示錄影輪次與時長
 class _HistoryPreview extends StatelessWidget {
-  final String? thumbnailPath; // 影片縮圖路徑
-  final int roundIndex; // 對應的錄影輪次
+  final String? thumbnailPath;
+  final int roundIndex;
+  final int durationSeconds;
 
   const _HistoryPreview({
     required this.thumbnailPath,
     required this.roundIndex,
+    required this.durationSeconds,
   });
+
+  String _fmtDur(int s) {
+    if (s >= 60) {
+      final m = s ~/ 60;
+      final sec = s % 60;
+      return '${m}m${sec}s';
+    }
+    return '${s}s';
+  }
 
   @override
   Widget build(BuildContext context) {
     final filePath = thumbnailPath?.trim() ?? '';
     final hasThumbnail = filePath.isNotEmpty && File(filePath).existsSync();
 
-    // 若有縮圖則顯示圖片，否則提供預設背景與圖示
     final Widget content = hasThumbnail
         ? ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             child: Image.file(
               File(filePath),
-              width: 112,
-              height: 72,
+              width: 130,
+              height: 82,
               fit: BoxFit.cover,
             ),
           )
         : Container(
-            width: 112,
-            height: 72,
+            width: 130,
+            height: 82,
             decoration: BoxDecoration(
               color: const Color(0xFFE5EBF5),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(Icons.videocam_outlined, color: Color(0xFF123B70), size: 32),
-          );
-
-    return Stack(
-      alignment: Alignment.bottomLeft,
-      children: [
-        content,
-        Positioned(
-          left: 8,
-          bottom: 8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.6),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(
-              '第 $roundIndex 輪',
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
-            ),
+            child: const Icon(Icons.videocam_outlined,
+                color: Color(0xFF123B70), size: 32),
+          );
+
+    final overlayDeco = BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.55),
+      borderRadius: BorderRadius.circular(6),
+    );
+    const overlayStyle = TextStyle(
+        color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600);
+
+    return Stack(
+      children: [
+        content,
+        // 第N輪 — 左上角
+        Positioned(
+          left: 6,
+          top: 6,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: overlayDeco,
+            child: Text('第$roundIndex輪', style: overlayStyle),
+          ),
+        ),
+        // 時長 — 右下角
+        Positioned(
+          right: 6,
+          bottom: 6,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: overlayDeco,
+            child: Text(_fmtDur(durationSeconds), style: overlayStyle),
           ),
         ),
       ],
