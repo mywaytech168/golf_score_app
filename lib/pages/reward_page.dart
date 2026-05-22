@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1076,7 +1077,7 @@ class _TypeChip extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 4. 上傳資料
+// 5. 上傳分析資料（手動選擇）
 // ════════════════════════════════════════════════════════════════
 
 class _UploadCard extends StatefulWidget {
@@ -1091,36 +1092,77 @@ class _UploadCard extends StatefulWidget {
 }
 
 class _UploadCardState extends State<_UploadCard> {
-  bool _busy = false;
-  int _sessionCount = 0;
-  bool _counted = false;
+  bool _busy         = false;
+  bool _loaded       = false;
+  List<RecordingHistoryEntry> _uploadable = [];   // 可選取
+  int  _alreadyCount = 0;                          // 已上傳數
 
   @override
   void initState() {
     super.initState();
-    _countSessions();
+    _loadCandidates();
   }
 
-  Future<void> _countSessions() async {
+  Future<void> _loadCandidates() async {
     try {
       final all = await RecordingHistoryStorage.instance.loadHistory();
-      // 只上傳已分析的短片（有實際分析資料的才有價值）
-      final uploadable = all.where((e) => e.isAnalyzed).length;
-      if (mounted) setState(() { _sessionCount = uploadable; _counted = true; });
+      final uploadable  = all.where((e) => e.isAnalyzed && !e.isEffectivelyUploaded).toList();
+      final alreadyDone = all.where((e) => e.isEffectivelyUploaded).length;
+      if (mounted) {
+        setState(() {
+          _uploadable   = uploadable;
+          _alreadyCount = alreadyDone;
+          _loaded       = true;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _counted = true);
+      if (mounted) {
+        setState(() => _loaded = true);
+      }
     }
   }
 
-  Future<List<Map<String, dynamic>>> _buildPayload() async {
-    final all = await RecordingHistoryStorage.instance.loadHistory();
-    return all
-        .where((e) => e.isAnalyzed)
-        .map((e) => _entryToJson(e))
-        .toList();
+  Future<void> _openPicker() async {
+    if (_uploadable.isEmpty) {
+      widget.onError('目前沒有可上傳的分析資料');
+      return;
+    }
+    if (!mounted) return;
+
+    final selected = await showModalBottomSheet<List<RecordingHistoryEntry>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _UploadPickerSheet(candidates: _uploadable),
+    );
+
+    if (selected == null || selected.isEmpty || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final payload = selected.map(_entryToJson).toList();
+      final balls   = await RewardService.claimUploadReward(sessions: payload);
+
+      // 標記為已上傳，寫回本地儲存
+      final all     = await RecordingHistoryStorage.instance.loadHistory();
+      final pathSet = selected.map((e) => e.filePath).toSet();
+      final updated = all.map((e) =>
+        pathSet.contains(e.filePath) ? e.copyWith(isUploaded: true) : e
+      ).toList();
+      await RecordingHistoryStorage.instance.saveHistory(updated);
+
+      // 重新計算可上傳數
+      await _loadCandidates();
+
+      if (mounted) widget.onEarned(balls);
+    } catch (e) {
+      if (mounted) widget.onError('上傳失敗：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  Map<String, dynamic> _entryToJson(RecordingHistoryEntry e) => {
+  static Map<String, dynamic> _entryToJson(RecordingHistoryEntry e) => {
     'filePath':        e.filePath,
     'recordedAt':      e.recordedAt.toIso8601String(),
     'durationSeconds': e.durationSeconds,
@@ -1130,54 +1172,357 @@ class _UploadCardState extends State<_UploadCard> {
     'videoType':       e.videoType.name,
   };
 
-  Future<void> _upload() async {
-    if (_sessionCount == 0) {
-      widget.onError('目前沒有可上傳的分析資料');
-      return;
-    }
-    setState(() => _busy = true);
-    try {
-      final payload = await _buildPayload();
-      final balls = await RewardService.claimUploadReward(sessions: payload);
-      widget.onEarned(balls);
-    } catch (e) {
-      widget.onError('上傳失敗：$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    final canUpload = _uploadable.isNotEmpty;
+
     return _RewardCard(
       iconBg: const Color(0xFF00897B),
       icon: Icons.cloud_upload_rounded,
       title: '上傳分析資料',
       description: RewardType.uploadData.description,
       balls: RewardType.uploadData.ballsPerAction,
-      bottomWidget: _counted
-          ? Container(
+      bottomWidget: !_loaded
+          ? const SizedBox(
+              height: 32,
+              child: Center(child: SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          : Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: const Color(0xFFE0F2F1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(children: [
-                const Icon(Icons.analytics_rounded, color: Color(0xFF00897B), size: 18),
+                const Icon(Icons.analytics_rounded,
+                    color: Color(0xFF00897B), size: 18),
                 const SizedBox(width: 8),
-                Text(
-                  '可上傳 $_sessionCount 筆已分析錄影記錄',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF00695C)),
+                Expanded(
+                  child: Text(
+                    canUpload
+                        ? '可上傳 ${_uploadable.length} 筆，已上傳 $_alreadyCount 筆'
+                        : '所有分析資料已上傳（共 $_alreadyCount 筆）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: canUpload
+                            ? const Color(0xFF00695C)
+                            : Colors.grey[600]),
+                  ),
                 ),
               ]),
-            )
-          : const SizedBox(
-              height: 32,
-              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
             ),
-      buttonLabel: '上傳資料 +${RewardType.uploadData.ballsPerAction} 球',
+      buttonLabel: canUpload ? '選擇要上傳的錄影' : null,
       buttonBusy: _busy,
-      onTap: _sessionCount > 0 ? _upload : null,
+      onTap: canUpload ? _openPicker : null,
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 上傳選擇器 Bottom Sheet（多選）
+// ════════════════════════════════════════════════════════════════
+
+class _UploadPickerSheet extends StatefulWidget {
+  final List<RecordingHistoryEntry> candidates;
+  const _UploadPickerSheet({required this.candidates});
+
+  @override
+  State<_UploadPickerSheet> createState() => _UploadPickerSheetState();
+}
+
+class _UploadPickerSheetState extends State<_UploadPickerSheet> {
+  late final Set<String> _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    // 預設全選
+    _selected = widget.candidates.map((e) => e.filePath).toSet();
+  }
+
+  bool get _allSelected => _selected.length == widget.candidates.length;
+
+  void _toggleAll() => setState(() {
+        if (_allSelected) {
+          _selected.clear();
+        } else {
+          _selected.addAll(widget.candidates.map((e) => e.filePath));
+        }
+      });
+
+  void _toggle(String path) => setState(() {
+        if (_selected.contains(path)) {
+          _selected.remove(path);
+        } else {
+          _selected.add(path);
+        }
+      });
+
+  void _confirm() {
+    final result = widget.candidates
+        .where((e) => _selected.contains(e.filePath))
+        .toList();
+    Navigator.pop(context, result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.65,
+      minChildSize:     0.40,
+      maxChildSize:     0.90,
+      builder: (_, scrollCtrl) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            // 把手
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+
+            // 標題列
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 16, 0),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_upload_rounded,
+                      color: Color(0xFF00897B), size: 22),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('選擇要上傳的錄影',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1A2E20))),
+                        Text('勾選後按「確認上傳」獲得獎勵',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                  ),
+                  // 全選按鈕
+                  TextButton.icon(
+                    onPressed: _toggleAll,
+                    icon: Icon(
+                      _allSelected
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      size: 16,
+                      color: const Color(0xFF00897B),
+                    ),
+                    label: Text(
+                      _allSelected ? '取消全選' : '全選',
+                      style: const TextStyle(
+                          color: Color(0xFF00897B), fontSize: 13),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 16),
+
+            // 列表
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 4),
+                itemCount: widget.candidates.length,
+                itemBuilder: (_, i) {
+                  final e    = widget.candidates[i];
+                  final sel  = _selected.contains(e.filePath);
+                  return _UploadCandidateTile(
+                    entry:    e,
+                    selected: sel,
+                    onTap:    () => _toggle(e.filePath),
+                  );
+                },
+              ),
+            ),
+
+            // 底部確認列
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Row(
+                  children: [
+                    Text(
+                      '已選 ${_selected.length} / ${widget.candidates.length} 筆',
+                      style: TextStyle(
+                          fontSize: 13, color: Colors.grey[600]),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, null),
+                      child: const Text('取消'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: _selected.isEmpty ? null : _confirm,
+                      icon: const Icon(Icons.upload_rounded, size: 16),
+                      label: Text(
+                          '確認上傳 +${RewardType.uploadData.ballsPerAction} 球'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00897B),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 單筆候選卡片 ──────────────────────────────────────────────────
+
+class _UploadCandidateTile extends StatelessWidget {
+  final RecordingHistoryEntry entry;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _UploadCandidateTile({
+    required this.entry,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = const Color(0xFF00897B);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.06)
+              : Colors.white,
+          border: Border.all(
+            color: selected ? color : Colors.grey.shade200,
+            width: selected ? 1.5 : 1,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            // Checkbox
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              width: 22, height: 22,
+              decoration: BoxDecoration(
+                color: selected ? color : Colors.transparent,
+                border: Border.all(
+                  color: selected ? color : Colors.grey.shade400,
+                  width: 1.5,
+                ),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: selected
+                  ? const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 14)
+                  : null,
+            ),
+            const SizedBox(width: 10),
+
+            // 縮圖
+            ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: _buildThumb(),
+            ),
+            const SizedBox(width: 10),
+
+            // 文字資訊
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.displayTitle,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.access_time_rounded,
+                        size: 11, color: Colors.grey[400]),
+                    const SizedBox(width: 3),
+                    Text('${entry.durationSeconds} 秒',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey[500])),
+                    if (entry.isAnalyzed) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00897B)
+                              .withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text('已分析',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFF00695C),
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                    if (entry.goodShot == true) ...[
+                      const SizedBox(width: 6),
+                      const Text('⛳', style: TextStyle(fontSize: 11)),
+                    ],
+                  ]),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThumb() {
+    final tp = entry.thumbnailPath;
+    if (tp != null && File(tp).existsSync()) {
+      return Image.file(File(tp),
+          width: 56, height: 42, fit: BoxFit.cover);
+    }
+    return Container(
+      width: 56, height: 42,
+      color: Colors.grey[200],
+      child: const Icon(Icons.videocam_rounded,
+          color: Colors.grey, size: 22),
     );
   }
 }

@@ -99,6 +99,10 @@ class RecordingHistoryEntry {
   /// 是否已送出 AI Coach 分析（至少提交過一次，不論結果）
   final bool hasAiCoachAnalysis;
 
+  /// 是否已透過「上傳分析資料」功能上傳至伺服器
+  /// hasAiCoachAnalysis == true 亦視為已上傳
+  final bool isUploaded;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -122,7 +126,11 @@ class RecordingHistoryEntry {
     this.shareExpiresAt,
     this.sharerName,
     this.hasAiCoachAnalysis = false,
+    this.isUploaded = false,
   });
+
+  /// 是否已上傳（明確標記 或 AI Coach 分析過）
+  bool get isEffectivelyUploaded => isUploaded || hasAiCoachAnalysis;
 
   /// 排序用時間：優先用 createdAt，若無則 fallback 到 recordedAt
   DateTime get sortTime => createdAt ?? recordedAt;
@@ -157,6 +165,7 @@ class RecordingHistoryEntry {
     DateTime? createdAt,
     String? sharerName,
     bool? hasAiCoachAnalysis,
+    bool? isUploaded,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -181,6 +190,7 @@ class RecordingHistoryEntry {
       shareExpiresAt: shareExpiresAt ?? this.shareExpiresAt,
       sharerName: sharerName ?? this.sharerName,
       hasAiCoachAnalysis: hasAiCoachAnalysis ?? this.hasAiCoachAnalysis,
+      isUploaded: isUploaded ?? this.isUploaded,
     );
   }
 
@@ -224,6 +234,7 @@ class RecordingHistoryEntry {
       'createdAt': createdAt?.toIso8601String(),
       'sharerName': sharerName,
       'hasAiCoachAnalysis': hasAiCoachAnalysis,
+      'isUploaded': isUploaded,
     };
   }
 
@@ -278,6 +289,7 @@ class RecordingHistoryEntry {
           : null,
       sharerName: json['sharerName'] as String?,
       hasAiCoachAnalysis: (json['hasAiCoachAnalysis'] as bool?) ?? false,
+      isUploaded:         (json['isUploaded']         as bool?) ?? false,
     );
   }
 }
