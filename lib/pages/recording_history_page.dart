@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -785,7 +786,6 @@ class _HistoryTileState extends State<_HistoryTile> {
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
-      final audioPath = p.join(sessionDir, 'audio.wav');
 
       // 1. 確保骨架與音訊已分析（若無則先進行基礎分析）
       if (!await File(csvPath).exists()) {
@@ -804,77 +804,65 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
       }
 
-      // 2. 讀取 WAV 並轉換為 PCM
+      // 2. 讀取 audio.pcm（float32 LE，與 record_screen 寫入格式一致）
       progressNotifier.value = (0.35, '載入音訊中...');
       List<double> audioPcm = [];
       const int sampleRate = 44100;
-      final wavFile = File(audioPath);
       bool audioHasSilence = false;
-      
-      debugPrint('[偵測擊球] 📂 WAV 路徑: $audioPath');
+
+      // 錄製存 audio.pcm（raw float32 LE），不是 WAV
+      final pcmAudioPath = p.join(sessionDir, 'audio.pcm');
+      final pcmFile = File(pcmAudioPath);
+
+      debugPrint('[偵測擊球] 📂 PCM 路徑: $pcmAudioPath');
       debugPrint('[偵測擊球] 📂 CSV 路徑: $csvPath');
       debugPrint('[偵測擊球] 📂 CSV 存在: ${await File(csvPath).exists()}');
-      debugPrint('[偵測擊球] 📂 WAV 存在: ${await wavFile.exists()}');
-      
-      if (await wavFile.exists()) {
-        final wavBytes = await wavFile.readAsBytes();
-        debugPrint('[偵測擊球] 🔊 WAV 大小: ${wavBytes.length} bytes');
-        
-        if (wavBytes.length >= 44) {
-          // 🔧 解析 WAV 头
-          int dataStart = 44;
-          for (int i = 36; i < wavBytes.length - 8; i++) {
-            if (wavBytes[i] == 100 && wavBytes[i + 1] == 97 &&
-                wavBytes[i + 2] == 116 && wavBytes[i + 3] == 97) {
-              dataStart = i + 8;
-              break;
+      debugPrint('[偵測擊球] 📂 PCM 存在: ${await pcmFile.exists()}');
+
+      if (await pcmFile.exists()) {
+        final bytes = await pcmFile.readAsBytes();
+        debugPrint('[偵測擊球] 🔊 PCM 大小: ${bytes.length} bytes');
+
+        if (bytes.length >= 4) {
+          // float32 LE：每個樣本 4 bytes（與 record_screen.dart setFloat32 一致）
+          final byteData = bytes.buffer.asByteData();
+          final sampleCount = bytes.length ~/ 4;
+          double rmsSum = 0.0;
+          double peakVal = 0.0;
+
+          for (int i = 0; i < sampleCount; i++) {
+            final sample = byteData.getFloat32(i * 4, Endian.little);
+            if (sample.isFinite) {
+              audioPcm.add(sample);
+              rmsSum += sample * sample;
+              final abs = sample.abs();
+              if (abs > peakVal) peakVal = abs;
             }
           }
-          
-          debugPrint('[偵測擊球] 🔧 WAV data 開始位置: $dataStart');
-          
-          // 🔧 转换 int16 → float32
-          final audioDataBytes = wavBytes.sublist(dataStart);
-          debugPrint('[偵測擊球] 🔧 PCM 數據大小: ${audioDataBytes.length} bytes');
-          
-          if (audioDataBytes.isEmpty) {
-            debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV data 為空');
-            audioHasSilence = true;
+
+          debugPrint('[偵測擊球] ✅ PCM 讀取完成: ${audioPcm.length} 樣本');
+
+          if (audioPcm.isNotEmpty) {
+            final rms = math.sqrt(rmsSum / audioPcm.length);
+            final minVal = audioPcm.reduce((a, b) => a < b ? a : b);
+            final maxVal = audioPcm.reduce((a, b) => a > b ? a : b);
+            debugPrint('[偵測擊球] 📊 PCM 範圍: [$minVal, $maxVal], '
+                'RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+
+            if (rms < 0.001 && peakVal < 0.01) {
+              debugPrint('[偵測擊球] ⚠️ 【無聲音】RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+              audioHasSilence = true;
+            }
           } else {
-            double rmsSum = 0.0;
-            double peakVal = 0.0;
-            
-            for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
-              final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
-              final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
-              final normalized = signedInt16 / 32768.0;
-              audioPcm.add(normalized);
-              rmsSum += normalized * normalized;
-              if (normalized.abs() > peakVal) peakVal = normalized.abs();
-            }
-            
-            debugPrint('[偵測擊球] ✅ PCM 轉換完成: ${audioPcm.length} 樣本');
-            
-            // 📊 PCM 統計與無聲音檢測
-            if (audioPcm.isNotEmpty) {
-              final rms = math.sqrt(rmsSum / audioPcm.length);
-              final minVal = audioPcm.reduce((a, b) => a < b ? a : b);
-              final maxVal = audioPcm.reduce((a, b) => a > b ? a : b);
-              debugPrint('[偵測擊球] 📊 PCM 範圍: [$minVal, $maxVal], RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
-              
-              // 檢測無聲音：RMS < 0.01 且峰值 < 0.05
-              if (rms < 0.01 && peakVal < 0.05) {
-                debugPrint('[偵測擊球] ⚠️ 【無聲音】RMS=${rms.toStringAsFixed(4)} < 0.01, Peak=${peakVal.toStringAsFixed(4)} < 0.05');
-                audioHasSilence = true;
-              }
-            }
+            debugPrint('[偵測擊球] ⚠️ 【無聲音】無有效浮點樣本');
+            audioHasSilence = true;
           }
         } else {
-          debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 檔案過小 (${wavBytes.length} < 44 bytes)');
+          debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 檔案過小 (${bytes.length} bytes)');
           audioHasSilence = true;
         }
       } else {
-        debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 文件不存在: $audioPath');
+        debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 文件不存在: $pcmAudioPath');
         audioHasSilence = true;
       }
 
