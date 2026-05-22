@@ -804,27 +804,31 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
       }
 
-      // 2. 讀取 audio.pcm（float32 LE，與 record_screen 寫入格式一致）
+      // 2. 讀取音訊：優先 audio.pcm（raw float32 LE），其次 audio.wav（WAV int16）
       progressNotifier.value = (0.35, '載入音訊中...');
       List<double> audioPcm = [];
       const int sampleRate = 44100;
       bool audioHasSilence = false;
 
-      // 錄製存 audio.pcm（raw float32 LE），不是 WAV
       final pcmAudioPath = p.join(sessionDir, 'audio.pcm');
+      final wavAudioPath = p.join(sessionDir, 'audio.wav');
       final pcmFile = File(pcmAudioPath);
+      final wavFile = File(wavAudioPath);
 
-      debugPrint('[偵測擊球] 📂 PCM 路徑: $pcmAudioPath');
+      final pcmExists = await pcmFile.exists();
+      final wavExists = await wavFile.exists();
+
       debugPrint('[偵測擊球] 📂 CSV 路徑: $csvPath');
       debugPrint('[偵測擊球] 📂 CSV 存在: ${await File(csvPath).exists()}');
-      debugPrint('[偵測擊球] 📂 PCM 存在: ${await pcmFile.exists()}');
+      debugPrint('[偵測擊球] 📂 PCM 路徑: $pcmAudioPath, 存在: $pcmExists');
+      debugPrint('[偵測擊球] 📂 WAV 路徑: $wavAudioPath, 存在: $wavExists');
 
-      if (await pcmFile.exists()) {
+      if (pcmExists) {
+        // ── 原始錄製：audio.pcm（raw float32 LE）────────────────────────
         final bytes = await pcmFile.readAsBytes();
         debugPrint('[偵測擊球] 🔊 PCM 大小: ${bytes.length} bytes');
 
         if (bytes.length >= 4) {
-          // float32 LE：每個樣本 4 bytes（與 record_screen.dart setFloat32 一致）
           final byteData = bytes.buffer.asByteData();
           final sampleCount = bytes.length ~/ 4;
           double rmsSum = 0.0;
@@ -844,13 +848,9 @@ class _HistoryTileState extends State<_HistoryTile> {
 
           if (audioPcm.isNotEmpty) {
             final rms = math.sqrt(rmsSum / audioPcm.length);
-            final minVal = audioPcm.reduce((a, b) => a < b ? a : b);
-            final maxVal = audioPcm.reduce((a, b) => a > b ? a : b);
-            debugPrint('[偵測擊球] 📊 PCM 範圍: [$minVal, $maxVal], '
-                'RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
-
+            debugPrint('[偵測擊球] 📊 PCM RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
             if (rms < 0.001 && peakVal < 0.01) {
-              debugPrint('[偵測擊球] ⚠️ 【無聲音】RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+              debugPrint('[偵測擊球] ⚠️ 【無聲音】RMS 及 Peak 均偏低');
               audioHasSilence = true;
             }
           } else {
@@ -861,8 +861,62 @@ class _HistoryTileState extends State<_HistoryTile> {
           debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 檔案過小 (${bytes.length} bytes)');
           audioHasSilence = true;
         }
+      } else if (wavExists) {
+        // ── 切片 session：audio.wav（WAV header + int16 PCM）───────────
+        debugPrint('[偵測擊球] 🔊 讀取 WAV 檔案...');
+        try {
+          final bytes = await wavFile.readAsBytes();
+          debugPrint('[偵測擊球] 🔊 WAV 大小: ${bytes.length} bytes');
+
+          if (bytes.length < 44) {
+            debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 檔案過小');
+            audioHasSilence = true;
+          } else {
+            // 搜尋 "data" chunk（ASCII: 100 97 116 97）
+            int dataStart = 44;
+            for (int i = 36; i < bytes.length - 8; i++) {
+              if (bytes[i] == 100 && bytes[i + 1] == 97 &&
+                  bytes[i + 2] == 116 && bytes[i + 3] == 97) {
+                dataStart = i + 8; // 跳過 "data" + 4-byte size
+                break;
+              }
+            }
+
+            // 轉換 int16 LE → float32
+            final audioData = bytes.sublist(dataStart);
+            double rmsSum = 0.0;
+            double peakVal = 0.0;
+
+            for (int i = 0; i < audioData.length - 1; i += 2) {
+              final raw = audioData[i] | (audioData[i + 1] << 8);
+              final signed = (raw > 32767) ? raw - 65536 : raw;
+              final sample = signed / 32768.0;
+              audioPcm.add(sample);
+              rmsSum += sample * sample;
+              final abs = sample.abs();
+              if (abs > peakVal) peakVal = abs;
+            }
+
+            debugPrint('[偵測擊球] ✅ WAV 讀取完成: ${audioPcm.length} 樣本 (dataStart=$dataStart)');
+
+            if (audioPcm.isNotEmpty) {
+              final rms = math.sqrt(rmsSum / audioPcm.length);
+              debugPrint('[偵測擊球] 📊 WAV RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+              if (rms < 0.001 && peakVal < 0.01) {
+                debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV RMS 及 Peak 均偏低');
+                audioHasSilence = true;
+              }
+            } else {
+              debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 無有效樣本');
+              audioHasSilence = true;
+            }
+          }
+        } catch (e) {
+          debugPrint('[偵測擊球] ❌ WAV 讀取失敗: $e');
+          audioHasSilence = true;
+        }
       } else {
-        debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 文件不存在: $pcmAudioPath');
+        debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 及 WAV 均不存在');
         audioHasSilence = true;
       }
 
