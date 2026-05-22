@@ -78,21 +78,7 @@ class _RewardPageState extends State<RewardPage> {
               icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            actions: [
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.only(right: 12),
-                  child: SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                  ),
-                )
-              else
-                IconButton(
-                  icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                  onPressed: _load,
-                ),
-            ],
+            actions: const [],
           ),
 
           // ── 球數統計卡 ─────────────────────────────────────────

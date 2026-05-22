@@ -103,8 +103,6 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
           _StaticHeader(
             displayText: _formatDisplay(_selectedDate),
             isToday: isToday,
-            loading: _loading,
-            onRefresh: _loadStats,
           ),
 
           // ── 日期選擇列 ──────────────────────────────────────
@@ -173,14 +171,10 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
 class _StaticHeader extends StatelessWidget {
   final String displayText;
   final bool isToday;
-  final bool loading;
-  final VoidCallback onRefresh;
 
   const _StaticHeader({
     required this.displayText,
     required this.isToday,
-    required this.loading,
-    required this.onRefresh,
   });
 
   @override
@@ -191,40 +185,21 @@ class _StaticHeader extends StatelessWidget {
         bottom: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(kSpaceLG, kSpaceMD, kSpaceSM, kSpaceMD),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isToday ? '今日概況' : '歷史概況',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    displayText,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ],
+              Text(
+                isToday ? '今日概況' : '歷史概況',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              const Spacer(),
-              IconButton(
-                onPressed: loading ? null : onRefresh,
-                icon: loading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.refresh_rounded, color: Colors.white),
-                tooltip: '重新整理',
+              const SizedBox(height: 2),
+              Text(
+                displayText,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
             ],
           ),
