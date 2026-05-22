@@ -399,5 +399,77 @@ public sealed class GolfSwingAnalyzerService : IDisposable
         _                 => "low_ignore"
     };
 
-    public void Dispose() => _session.Dispose();
+    // ── CSV 解析（供 Worker 在 Server 端使用）────────────────────
+
+    /// <summary>
+    /// 將 pose_landmarks.csv 文字內容解析為骨架幀列表（最多 maxFrames 幀，等距採樣）。
+    /// CSV 格式（每欄）：frame, time_sec, pose_update_id,
+    ///   [x_norm, y_norm, z, visibility, x_px, y_px] × 33
+    /// </summary>
+    public static List<PoseFrameDto> ParseCsvToFrames(string csvContent, int maxFrames = 600)
+    {
+        var lines = csvContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length < 3) return [];   // header + at least 2 data rows
+
+        var dataLines = lines.Skip(1).ToList();   // remove header row
+
+        // 等距採樣
+        List<string> sampled;
+        if (dataLines.Count <= maxFrames)
+        {
+            sampled = dataLines;
+        }
+        else
+        {
+            sampled = new List<string>(maxFrames);
+            double step = (dataLines.Count - 1.0) / (maxFrames - 1);
+            for (int i = 0; i < maxFrames; i++)
+                sampled.Add(dataLines[(int)Math.Round(i * step)]);
+        }
+
+        var frames = new List<PoseFrameDto>(sampled.Count);
+        for (int fi = 0; fi < sampled.Count; fi++)
+        {
+            var cols = sampled[fi].Split(',');
+            var landmarks = new List<PoseLandmarkDto>(LandmarkCount);
+
+            for (int lm = 0; lm < LandmarkCount; lm++)
+            {
+                int b = 3 + lm * 6;
+                if (cols.Length <= b + 3) continue;
+
+                float x   = ParseCsvFloat(cols[b]);
+                float y   = ParseCsvFloat(cols[b + 1]);
+                float z   = ParseCsvFloat(cols[b + 2]);
+                float vis = ParseCsvFloat(cols[b + 3]);
+
+                // 忽略完全缺失的關鍵點
+                if (float.IsNaN(x) && float.IsNaN(y)) continue;
+
+                landmarks.Add(new PoseLandmarkDto(
+                    lm,
+                    float.IsNaN(x)   ? 0f : x,
+                    float.IsNaN(y)   ? 0f : y,
+                    float.IsNaN(z)   ? 0f : z,
+                    float.IsNaN(vis) ? 0f : vis
+                ));
+            }
+
+            if (landmarks.Count > 0)
+                frames.Add(new PoseFrameDto(fi, landmarks));
+        }
+        return frames;
+    }
+
+    private static float ParseCsvFloat(string s)
+    {
+        if (float.TryParse(s.Trim(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var v))
+            return v;
+        return float.NaN;
+    }
+
+    public void Dispose() => _session?.Dispose();
 }

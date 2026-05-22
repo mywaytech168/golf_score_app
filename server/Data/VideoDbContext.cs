@@ -532,6 +532,10 @@ namespace UploadServer.Data
                     .HasColumnName("clip_b2_path")
                     .HasMaxLength(512);
 
+                entity.Property(e => e.CsvB2Path)
+                    .HasColumnName("csv_b2_path")
+                    .HasMaxLength(512);
+
                 entity.Property(e => e.ResultJson)
                     .HasColumnName("result_json")
                     .HasColumnType("LONGTEXT");

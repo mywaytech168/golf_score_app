@@ -40,7 +40,6 @@
   "authGoogleSigningIn": "Google 登入中...",
   "authNoAccount": "還沒有帳戶？立即註冊",
   "authHaveAccount": "已有帳戶？返回登入",
-  "authEncryptionNote": "所有資料皆採用 256-bit 加密保護",
 
   "validationEnterUsernameOrEmail": "請輸入用戶名或電子郵件",
   "validationEnterPassword": "請輸入密碼",

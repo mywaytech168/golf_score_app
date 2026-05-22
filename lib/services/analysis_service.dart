@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:csv/csv.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -10,14 +9,24 @@ const _baseUrl = 'https://tekswing.api.atk.tw';
 
 // ── 資料模型 ──────────────────────────────────────────────────
 
+/// 步驟 1 回傳：分析 ID + 上傳 URL
 class AnalysisRequestResult {
   final String analysisId;
   final String clipUploadUrl;
-  AnalysisRequestResult({required this.analysisId, required this.clipUploadUrl});
+  /// HasCsv=true 時才有值；Worker 用此 CSV 執行 ONNX 推論
+  final String? csvUploadUrl;
+
+  AnalysisRequestResult({
+    required this.analysisId,
+    required this.clipUploadUrl,
+    this.csvUploadUrl,
+  });
+
   factory AnalysisRequestResult.fromJson(Map<String, dynamic> j) =>
       AnalysisRequestResult(
         analysisId:    j['analysisId']    as String,
         clipUploadUrl: j['clipUploadUrl'] as String,
+        csvUploadUrl:  j['csvUploadUrl']  as String?,
       );
 }
 
@@ -26,30 +35,40 @@ class CoachPrimaryError {
   final String zhName;
   final String severity;
   final List<String> evidence;
+
   CoachPrimaryError({
     required this.errorType,
     required this.zhName,
     required this.severity,
     required this.evidence,
   });
-  factory CoachPrimaryError.fromJson(Map<String, dynamic> j) => CoachPrimaryError(
-    errorType: j['error_type'] as String? ?? '',
-    zhName:    j['zh_name']    as String? ?? '',
-    severity:  j['severity']   as String? ?? 'medium',
-    evidence:  (j['evidence']  as List<dynamic>? ?? []).cast<String>(),
-  );
+
+  factory CoachPrimaryError.fromJson(Map<String, dynamic> j) =>
+      CoachPrimaryError(
+        errorType: j['error_type'] as String? ?? '',
+        zhName:    j['zh_name']    as String? ?? '',
+        severity:  j['severity']   as String? ?? 'medium',
+        evidence:  (j['evidence']  as List<dynamic>? ?? []).cast<String>(),
+      );
 }
 
 class PracticeSuggestion {
   final String drill;
   final String instruction;
   final String reps;
-  PracticeSuggestion({required this.drill, required this.instruction, required this.reps});
-  factory PracticeSuggestion.fromJson(Map<String, dynamic> j) => PracticeSuggestion(
-    drill:       j['drill']       as String? ?? '',
-    instruction: j['instruction'] as String? ?? '',
-    reps:        j['reps']        as String? ?? '',
-  );
+
+  PracticeSuggestion({
+    required this.drill,
+    required this.instruction,
+    required this.reps,
+  });
+
+  factory PracticeSuggestion.fromJson(Map<String, dynamic> j) =>
+      PracticeSuggestion(
+        drill:       j['drill']       as String? ?? '',
+        instruction: j['instruction'] as String? ?? '',
+        reps:        j['reps']        as String? ?? '',
+      );
 }
 
 class CoachResult {
@@ -68,16 +87,18 @@ class CoachResult {
   });
 
   factory CoachResult.fromJson(Map<String, dynamic> j) => CoachResult(
-    summary:           j['summary']            as String? ?? '',
-    primaryError:      CoachPrimaryError.fromJson((j['primary_error'] as Map<String, dynamic>?) ?? {}),
-    coachFeedback:     (j['coach_feedback']    as List<dynamic>? ?? []).cast<String>(),
+    summary:      j['summary']         as String? ?? '',
+    primaryError: CoachPrimaryError.fromJson(
+        (j['primary_error'] as Map<String, dynamic>?) ?? {}),
+    coachFeedback: (j['coach_feedback'] as List<dynamic>? ?? []).cast<String>(),
     practiceSuggestions: (j['practice_suggestions'] as List<dynamic>? ?? [])
         .map((e) => PracticeSuggestion.fromJson(e as Map<String, dynamic>))
         .toList(),
-    nextTrainingGoal:  j['next_training_goal'] as String? ?? '',
+    nextTrainingGoal: j['next_training_goal'] as String? ?? '',
   );
 }
 
+/// 分析任務狀態（輪詢用）
 class AnalysisStatus {
   final String analysisId;
   final String? videoId;
@@ -125,6 +146,20 @@ class AnalysisStatus {
 }
 
 // ── Service ───────────────────────────────────────────────────
+//
+// 完整 AI Coach 提交流程（使用者只需提供骨架 CSV，ONNX 推論在後端完成）：
+//
+//   1. requestAnalysis()   → 建立任務，取得 B2 presigned URL
+//   2. uploadClip()        → 直傳 clip.mp4 到 B2
+//   2b. uploadCsv()        → 直傳 pose_landmarks.csv 到 B2（若有）
+//   3. notifyReady()       → 觸發 Worker
+//
+//   Worker 流程（後端自動執行，無需使用者中繼）：
+//     下載 clip + CSV → ONNX 推論 → OnnxResultJson 存 DB
+//                     → effectiveHint → Gemini → ResultJson 存 DB
+//
+//   4. getStatus()         → 輪詢結果
+// ─────────────────────────────────────────────────────────────
 
 class AnalysisService {
   static final AnalysisService _instance = AnalysisService._internal();
@@ -150,34 +185,40 @@ class AnalysisService {
     };
   }
 
-  /// 步驟 1：向 Server 請求分析，取得 clip 上傳 URL
+  // ── 步驟 1 ────────────────────────────────────────────────────
+
+  /// 向 Server 建立分析任務，回傳 B2 presigned 上傳 URL。
+  /// [hasCsv]=true 時同時回傳 [csvUploadUrl]，供後端 Worker 執行 ONNX 推論。
   Future<AnalysisRequestResult> requestAnalysis({
     required String videoId,
-    String? errorTypeHint,
+    bool hasCsv = false,
   }) async {
     final resp = await _dio.post(
       '/api/analysis/request',
-      data: {'videoId': videoId, if (errorTypeHint != null) 'errorTypeHint': errorTypeHint},
+      data: {
+        'videoId': videoId,
+        'hasCsv':  hasCsv,
+      },
       options: Options(headers: await _authHeaders()),
     );
     return AnalysisRequestResult.fromJson(resp.data as Map<String, dynamic>);
   }
 
-  /// 步驟 2：直傳 clip.mp4 到 B2（Presigned PUT）
+  // ── 步驟 2a ───────────────────────────────────────────────────
+
+  /// 直傳 clip.mp4 到 B2（Presigned PUT）
   Future<void> uploadClip({
     required String clipUploadUrl,
     required String clipPath,
     void Function(int sent, int total)? onProgress,
   }) async {
-    final file = File(clipPath);
-    final bytes = await file.readAsBytes();
-
+    final bytes = await File(clipPath).readAsBytes();
     await _dio.put(
       clipUploadUrl,
       data: bytes,
       options: Options(
         headers: {
-          'Content-Type': 'video/mp4',
+          'Content-Type':   'video/mp4',
           'Content-Length': bytes.length.toString(),
         },
         sendTimeout:    const Duration(minutes: 3),
@@ -188,7 +229,35 @@ class AnalysisService {
     debugPrint('✅ Clip 上傳完成: ${bytes.length ~/ 1024}KB');
   }
 
-  /// 步驟 3：通知 Server clip 已上傳，觸發 Worker
+  // ── 步驟 2b ───────────────────────────────────────────────────
+
+  /// 直傳 pose_landmarks.csv 到 B2（Presigned PUT）。
+  /// Worker 收到後自行執行 ONNX 推論，不需使用者中繼。
+  Future<void> uploadCsv({
+    required String csvUploadUrl,
+    required String csvPath,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    final bytes = await File(csvPath).readAsBytes();
+    await _dio.put(
+      csvUploadUrl,
+      data: bytes,
+      options: Options(
+        headers: {
+          'Content-Type':   'text/csv',
+          'Content-Length': bytes.length.toString(),
+        },
+        sendTimeout:    const Duration(minutes: 3),
+        receiveTimeout: const Duration(minutes: 3),
+      ),
+      onSendProgress: onProgress,
+    );
+    debugPrint('✅ CSV 上傳完成: ${bytes.length ~/ 1024}KB');
+  }
+
+  // ── 步驟 3 ────────────────────────────────────────────────────
+
+  /// 通知 Server clip（與 CSV）已上傳完畢，觸發 Worker 開始分析。
   Future<void> notifyReady(String analysisId) async {
     await _dio.post(
       '/api/analysis/$analysisId/ready',
@@ -197,7 +266,9 @@ class AnalysisService {
     debugPrint('✅ 已通知 Server 開始分析: $analysisId');
   }
 
-  /// 步驟 4：輪詢分析狀態（呼叫端用 Timer 或 Stream 控制間隔）
+  // ── 步驟 4 ────────────────────────────────────────────────────
+
+  /// 輪詢分析狀態（呼叫端用 Timer 或 Stream 控制間隔）
   Future<AnalysisStatus> getStatus(String analysisId) async {
     final resp = await _dio.get(
       '/api/analysis/$analysisId',
@@ -206,24 +277,43 @@ class AnalysisService {
     return AnalysisStatus.fromJson(resp.data as Map<String, dynamic>);
   }
 
-  /// 一次完成步驟 1～3，回傳 analysisId 供輪詢
+  // ── 便利方法 ──────────────────────────────────────────────────
+
+  /// 一次完成步驟 1～3，回傳 analysisId 供輪詢。
+  ///
+  /// - [csvPath]：若提供且檔案存在，一併上傳骨架 CSV。
+  ///   Worker 收到後在後端自動執行 ONNX，結果存入 DB，
+  ///   不需使用者在客戶端中繼。
   Future<String> submitForAnalysis({
     required String videoId,
     required String clipPath,
-    String? errorTypeHint,
+    String? csvPath,
     void Function(int sent, int total)? onUploadProgress,
   }) async {
-    final req = await requestAnalysis(videoId: videoId, errorTypeHint: errorTypeHint);
+    final hasCsv = csvPath != null && File(csvPath).existsSync();
+
+    final req = await requestAnalysis(videoId: videoId, hasCsv: hasCsv);
+
     await uploadClip(
       clipUploadUrl: req.clipUploadUrl,
       clipPath:      clipPath,
       onProgress:    onUploadProgress,
     );
+
+    if (hasCsv && req.csvUploadUrl != null) {
+      await uploadCsv(
+        csvUploadUrl: req.csvUploadUrl!,
+        csvPath:      csvPath,
+      );
+    }
+
     await notifyReady(req.analysisId);
     return req.analysisId;
   }
 
-  /// 查詢某影片的所有分析記錄
+  // ── 查詢 ──────────────────────────────────────────────────────
+
+  /// 查詢某影片的所有分析記錄（最多 10 筆，最新在前）
   Future<List<AnalysisStatus>> getVideoAnalyses(String videoId) async {
     final resp = await _dio.get(
       '/api/analysis/by-video/$videoId',
@@ -235,12 +325,11 @@ class AnalysisService {
         .toList();
   }
 
-  /// 取得最新一筆可用分析（completed 或進行中），不存在回傳 null
+  /// 取得最新一筆可用分析（completed 優先，其次進行中，最後 failed）
   Future<AnalysisStatus?> getLatestAnalysisForVideo(String videoId) async {
     try {
       final list = await getVideoAnalyses(videoId);
       if (list.isEmpty) return null;
-      // 優先：completed → 進行中 → failed（最後選擇）
       final completed = list.where((a) => a.isCompleted).toList();
       if (completed.isNotEmpty) return completed.first;
       final active = list.where((a) => a.isActive).toList();
@@ -250,148 +339,6 @@ class AnalysisService {
       return null;
     }
   }
-
-  // ── ONNX 揮桿錯誤分析 ────────────────────────────────────────
-
-  /// 從 pose_landmarks.csv 解析骨架幀（最多 600 幀，等距採樣）
-  ///
-  /// CSV 欄位佈局（從 col 3 起，每個 landmark 佔 6 欄）：
-  ///   frame(0), time_sec(1), pose_update_id(2),
-  ///   [lm_x_norm, lm_y_norm, lm_z, lm_vis, lm_x_px, lm_y_px] × 33
-  static List<Map<String, dynamic>> parseCsvToFrames(
-    String csvPath, {
-    int maxFrames = 600,
-  }) {
-    final content = File(csvPath).readAsStringSync();
-    final rows = const CsvToListConverter(eol: '\n').convert(content);
-    if (rows.length < 3) return []; // header + 至少 2 data rows
-
-    final dataRows = rows.sublist(1); // 去掉 header
-
-    // 等距採樣
-    final List<List<dynamic>> sampled;
-    if (dataRows.length <= maxFrames) {
-      sampled = dataRows;
-    } else {
-      sampled = [];
-      final step = (dataRows.length - 1) / (maxFrames - 1);
-      for (int i = 0; i < maxFrames; i++) {
-        sampled.add(dataRows[(i * step).round()]);
-      }
-    }
-
-    final frames = <Map<String, dynamic>>[];
-    for (int fi = 0; fi < sampled.length; fi++) {
-      final row = sampled[fi];
-      final landmarks = <Map<String, dynamic>>[];
-      for (int lm = 0; lm < 33; lm++) {
-        final base = 3 + lm * 6;
-        if (row.length <= base + 3) continue;
-        final x   = _csvDouble(row[base]);
-        final y   = _csvDouble(row[base + 1]);
-        final z   = _csvDouble(row[base + 2]);
-        final vis = _csvDouble(row[base + 3]);
-        // 忽略完全缺失的關鍵點（x 和 y 皆 NaN）
-        if (x.isNaN && y.isNaN) continue;
-        landmarks.add({
-          'id':         lm,
-          'x':          x.isNaN   ? 0.0 : x,
-          'y':          y.isNaN   ? 0.0 : y,
-          'z':          z.isNaN   ? 0.0 : z,
-          'visibility': vis.isNaN ? 0.0 : vis,
-        });
-      }
-      if (landmarks.isNotEmpty) {
-        frames.add({'frameIndex': fi, 'landmarks': landmarks});
-      }
-    }
-    return frames;
-  }
-
-  static double _csvDouble(dynamic v) {
-    if (v is double) return v;
-    if (v is int) return v.toDouble();
-    return double.tryParse(v.toString()) ?? double.nan;
-  }
-
-  /// 呼叫後端 ONNX 端點 POST /api/golf/analyze-swing
-  Future<GolfSwingResult?> analyzeSwing(
-    List<Map<String, dynamic>> frames,
-  ) async {
-    if (frames.length < 2) return null;
-    try {
-      final resp = await _dio.post(
-        '/api/golf/analyze-swing',
-        data: {'frames': frames},
-        options: Options(
-          headers: await _authHeaders(),
-          sendTimeout:    const Duration(seconds: 20),
-          receiveTimeout: const Duration(seconds: 20),
-        ),
-      );
-      return GolfSwingResult.fromJson(resp.data as Map<String, dynamic>);
-    } on DioException catch (e) {
-      final status = e.response?.statusCode;
-      if (status == 503) {
-        // 模型尚未部署，正常降級（不記為錯誤）
-        debugPrint('[AnalyzeSwing] 503 — ONNX 模型未就緒，略過');
-      } else {
-        debugPrint('⚠️ AnalyzeSwing 失敗（略過，繼續 Gemini）: $e');
-      }
-      return null;
-    } catch (e) {
-      debugPrint('⚠️ AnalyzeSwing 失敗（略過，繼續 Gemini）: $e');
-      return null;
-    }
-  }
-
-  /// 從 CSV 一次完成骨架解析 + ONNX 推論
-  Future<GolfSwingResult?> analyzeSwingFromCsv(String csvPath) async {
-    final frames = parseCsvToFrames(csvPath);
-    if (frames.length < 2) {
-      debugPrint('[AnalyzeSwing] CSV 幀數不足（${frames.length}），跳過');
-      return null;
-    }
-    debugPrint('[AnalyzeSwing] 送出 ${frames.length} 幀 → /api/golf/analyze-swing');
-    return analyzeSwing(frames);
-  }
-}
-
-// ── ONNX 揮桿分析結果 DTO ────────────────────────────────────
-
-class GolfSwingResult {
-  /// 正式錯誤 (score >= 0.75)
-  final List<String> officialErrors;
-  /// 需複核 (0.75–0.85)
-  final List<String> reviewErrors;
-  /// 疑似錯誤 (0.60–0.75)
-  final List<String> suspectErrors;
-  /// 各標籤原始機率
-  final Map<String, double> scores;
-  /// 各標籤信心帶
-  final Map<String, String> bands;
-
-  GolfSwingResult({
-    required this.officialErrors,
-    required this.reviewErrors,
-    required this.suspectErrors,
-    required this.scores,
-    required this.bands,
-  });
-
-  /// 最高優先錯誤類型：official 優先，次取 suspect，皆無則 null
-  String? get topError =>
-      officialErrors.isNotEmpty ? officialErrors.first :
-      suspectErrors.isNotEmpty  ? suspectErrors.first  : null;
-
-  factory GolfSwingResult.fromJson(Map<String, dynamic> j) => GolfSwingResult(
-    officialErrors: (j['officialErrors'] as List<dynamic>? ?? []).cast<String>(),
-    reviewErrors:   (j['reviewErrors']   as List<dynamic>? ?? []).cast<String>(),
-    suspectErrors:  (j['suspectErrors']  as List<dynamic>? ?? []).cast<String>(),
-    scores: (j['scores'] as Map<String, dynamic>? ?? {})
-        .map((k, v) => MapEntry(k, (v as num).toDouble())),
-    bands:  (j['bands']  as Map<String, dynamic>? ?? {}).cast<String, String>(),
-  );
 }
 
 // ── Dio 401 自動刷新攔截器 ────────────────────────────────────
@@ -407,25 +354,21 @@ class _TokenRefreshInterceptor extends Interceptor {
   ) async {
     final response = err.response;
     if (response == null || response.statusCode != 401) {
-      return handler.next(err); // 非 401，直接往上拋
+      return handler.next(err);
     }
 
     debugPrint('[TokenRefreshInterceptor] 收到 401，嘗試刷新 Token...');
-    final refreshed =
-        await AuthTokenStorage.instance.tryRefreshToken();
+    final refreshed = await AuthTokenStorage.instance.tryRefreshToken();
 
     if (!refreshed) {
       debugPrint('[TokenRefreshInterceptor] 刷新失敗，放棄重試');
       return handler.next(err);
     }
 
-    // 刷新成功 → 用新 token 重試原始請求
     try {
-      final opts = err.requestOptions;
-      final newToken =
-          await AuthTokenStorage.instance.getAccessToken();
+      final opts     = err.requestOptions;
+      final newToken = await AuthTokenStorage.instance.getAccessToken();
       opts.headers['Authorization'] = 'Bearer $newToken';
-
       final retryResp = await _dio.fetch(opts);
       return handler.resolve(retryResp);
     } catch (retryErr) {

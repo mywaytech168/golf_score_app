@@ -40,7 +40,7 @@
   "authGoogleSigningIn": "Google 登录中...",
   "authNoAccount": "还没有账号？立即注册",
   "authHaveAccount": "已有账号？返回登录",
-  "authEncryptionNote": "所有数据均采用 256 位加密保护",
+
 
   "validationEnterUsernameOrEmail": "请输入用户名或电子邮件",
   "validationEnterPassword": "请输入密码",

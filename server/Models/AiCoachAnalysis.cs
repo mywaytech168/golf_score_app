@@ -23,6 +23,12 @@ namespace UploadServer.Models
 
         public string? ClipB2Path { get; set; }
 
+        /// <summary>pose_landmarks.csv 在 B2 的路徑；null 表示未上傳 CSV</summary>
+        public string? CsvB2Path { get; set; }
+
+        /// <summary>Worker 執行 ONNX 推論後序列化的 GolfSwingAnalysisResponse JSON</summary>
+        public string? OnnxResultJson { get; set; }
+
         public string? ResultJson { get; set; }
 
         public string? Summary { get; set; }

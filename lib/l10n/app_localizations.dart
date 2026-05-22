@@ -322,12 +322,6 @@ abstract class AppLocalizations {
   /// **'Already have an account? Back to Login'**
   String get authHaveAccount;
 
-  /// No description provided for @authEncryptionNote.
-  ///
-  /// In en, this message translates to:
-  /// **'All data protected with 256-bit encryption'**
-  String get authEncryptionNote;
-
   /// No description provided for @validationEnterUsernameOrEmail.
   ///
   /// In en, this message translates to:

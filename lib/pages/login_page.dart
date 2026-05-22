@@ -507,16 +507,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.security, color: Colors.white70, size: 18),
-                    const SizedBox(width: 8),
-                    Text(l10n.authEncryptionNote,
-                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70)),
-                  ],
-                ),
+
               ],
             ),
           ),

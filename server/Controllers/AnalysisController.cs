@@ -45,17 +45,21 @@ namespace UploadServer.Controllers
                 Status        = "pending",
             };
             analysis.ClipB2Path = B2Service.AiCoachClipKey(analysis.Id);
+            if (req.HasCsv)
+                analysis.CsvB2Path = B2Service.AiCoachCsvKey(analysis.Id);
 
             _db.AiCoachAnalyses.Add(analysis);
             await _db.SaveChangesAsync();
 
-            var uploadUrl = _b2.GenerateClipUploadUrl(analysis.Id);
+            var clipUploadUrl = _b2.GenerateClipUploadUrl(analysis.Id);
+            var csvUploadUrl  = req.HasCsv ? _b2.GenerateCsvUploadUrl(analysis.Id) : null;
 
-            _logger.LogInformation("建立 AI Coach 分析請求: {Id}", analysis.Id);
+            _logger.LogInformation("建立 AI Coach 分析請求: {Id} HasCsv={HasCsv}", analysis.Id, req.HasCsv);
             return Ok(new AnalysisRequestResponse
             {
                 AnalysisId    = analysis.Id,
-                ClipUploadUrl = uploadUrl,
+                ClipUploadUrl = clipUploadUrl,
+                CsvUploadUrl  = csvUploadUrl,
             });
         }
 

@@ -123,9 +123,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get authHaveAccount => 'Already have an account? Back to Login';
 
   @override
-  String get authEncryptionNote => 'All data protected with 256-bit encryption';
-
-  @override
   String get validationEnterUsernameOrEmail =>
       'Please enter your username or email';
 

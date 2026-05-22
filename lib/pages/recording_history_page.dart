@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
@@ -73,13 +74,18 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   List<RecordingHistoryEntry> _entries = [];
   bool _isLoading = true;
   bool _rebuildScheduled = false; // 避免重複排程 setState 造成框架錯誤
+  // ── 篩選 & 排序狀態（從 SharedPreferences 持久化，跨重啟保留）──
   bool? _selectedGoodShot; // 好球/壞球篩選 - null: 全部, true: 好球, false: 壞球
+  bool? _videoTypeIsLong;  // 影片長度篩選 - null: 全部, true: 長影片, false: 短影片
+  bool? _aiAnalyzedFilter; // 分析狀態篩選 - null: 全部, true: 已分析, false: 未分析
+  bool? _clippedFilter;    // 切片狀態篩選 - null: 全部, true: 已切片, false: 未切片
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
 
   @override
   void initState() {
     super.initState();
     _loadFromStorage();
+    _loadFilters();
   }
 
   Future<void> _loadFromStorage() async {
@@ -346,6 +352,96 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     }
   }
 
+  // ---------- 篩選持久化 ----------
+
+  static const _kGoodShot  = 'hf_good_shot';
+  static const _kVideoType = 'hf_video_type';
+  static const _kAnalyzed  = 'hf_analyzed';
+  static const _kClipped   = 'hf_clipped';
+  static const _kSortBy    = 'hf_sort_by';
+
+  /// 從 SharedPreferences 還原篩選狀態（initState 呼叫）
+  Future<void> _loadFilters() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _selectedGoodShot = _prefBool(prefs, _kGoodShot);
+      _videoTypeIsLong  = _prefBool(prefs, _kVideoType);
+      _aiAnalyzedFilter = _prefBool(prefs, _kAnalyzed);
+      _clippedFilter    = _prefBool(prefs, _kClipped);
+      final name = prefs.getString(_kSortBy);
+      if (name != null) {
+        _sortBy = _SortBy.values.firstWhere(
+          (e) => e.name == name, orElse: () => _SortBy.date);
+      }
+    });
+  }
+
+  /// 將篩選狀態寫入 SharedPreferences（每次改值後呼叫）
+  void _saveFilters() async {
+    final prefs = await SharedPreferences.getInstance();
+    _setPrefBool(prefs, _kGoodShot,  _selectedGoodShot);
+    _setPrefBool(prefs, _kVideoType, _videoTypeIsLong);
+    _setPrefBool(prefs, _kAnalyzed,  _aiAnalyzedFilter);
+    _setPrefBool(prefs, _kClipped,   _clippedFilter);
+    await prefs.setString(_kSortBy, _sortBy.name);
+  }
+
+  static bool? _prefBool(SharedPreferences p, String key) {
+    final v = p.getString(key);
+    if (v == 'true')  return true;
+    if (v == 'false') return false;
+    return null;
+  }
+
+  static void _setPrefBool(SharedPreferences p, String key, bool? value) {
+    if (value == null) {
+      p.remove(key);
+    } else {
+      p.setString(key, value.toString());
+    }
+  }
+
+  // ---------- 篩選面板 Helper ----------
+
+  /// 單列篩選行：左側固定寬度標籤 + 右側橫向捲動 chips
+  Widget _filterRow(String label, List<Widget> chips) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 32,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6F7B86),
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (int i = 0; i < chips.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  chips[i],
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  /// 快速建立 _HistoryFilterChip
+  Widget _chip(String label, bool selected, Color color, VoidCallback onTap) =>
+      _HistoryFilterChip(label: label, selected: selected, selectedColor: color, onTap: onTap);
+
   // ---------- 方法區 ----------
   /// 將時間轉換為易讀字串，方便列表展示
   String _formatTimestamp(DateTime time) {
@@ -478,10 +574,32 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   // ---------- 畫面建構 ----------
   @override
   Widget build(BuildContext context) {
-    // 根据选中的过滤条件过滤条目
+    // 好球/壞球
     var filteredEntries = _selectedGoodShot == null
         ? _entries
         : _entries.where((entry) => entry.goodShot == _selectedGoodShot).toList();
+
+    // 影片類型（長/短）
+    if (_videoTypeIsLong != null) {
+      filteredEntries = filteredEntries.where((e) {
+        final isLong = e.durationSeconds > 5 && e.durationSeconds <= 120;
+        return _videoTypeIsLong! ? isLong : !isLong;
+      }).toList();
+    }
+
+    // 分析狀態（已分析/未分析）
+    if (_aiAnalyzedFilter != null) {
+      filteredEntries = filteredEntries
+          .where((e) => e.isAnalyzed == _aiAnalyzedFilter)
+          .toList();
+    }
+
+    // 切片狀態（已切片/未切片）
+    if (_clippedFilter != null) {
+      filteredEntries = filteredEntries
+          .where((e) => e.isClipped == _clippedFilter)
+          .toList();
+    }
 
     // 應用排序
     filteredEntries = _sortEntries(filteredEntries);
@@ -523,68 +641,37 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                   ),
               ],
             ),
-            // 好球/壞球 TAB 選擇器
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  children: [
-                    _HistoryFilterChip(
-                      label: '全部',
-                      selected: _selectedGoodShot == null,
-                      selectedColor: const Color(0xFF1E8E5A),
-                      onTap: () => setState(() => _selectedGoodShot = null),
-                    ),
-                    const SizedBox(width: 8),
-                    _HistoryFilterChip(
-                      label: '好球 ✓',
-                      selected: _selectedGoodShot == true,
-                      selectedColor: const Color(0xFF4CAF50),
-                      onTap: () => setState(() => _selectedGoodShot = true),
-                    ),
-                    const SizedBox(width: 8),
-                    _HistoryFilterChip(
-                      label: '壞球 ✗',
-                      selected: _selectedGoodShot == false,
-                      selectedColor: const Color(0xFFF44336),
-                      onTap: () => setState(() => _selectedGoodShot = false),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // 排序選擇器
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  children: [
-                    const Text(
-                      '排序: ',
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF6F7B86)),
-                    ),
-                    const SizedBox(width: 8),
-                    _HistoryFilterChip(
-                      label: '時間',
-                      selected: _sortBy == _SortBy.date,
-                      selectedColor: const Color(0xFF1E8E5A),
-                      onTap: () => setState(() => _sortBy = _SortBy.date),
-                    ),
-                    const SizedBox(width: 8),
-                    _HistoryFilterChip(
-                      label: '最佳速度 🎯',
-                      selected: _sortBy == _SortBy.peakValue,
-                      selectedColor: const Color(0xFF1565C0),
-                      onTap: () => setState(() => _sortBy = _SortBy.peakValue),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ),
+            // ── 篩選 & 排序面板 ──────────────────────────────────
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+              child: Column(
+                children: [
+                  _filterRow('好/壞', [
+                    _chip('全部',   _selectedGoodShot == null,  const Color(0xFF1E8E5A), () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
+                    _chip('好球 ✓', _selectedGoodShot == true,  const Color(0xFF4CAF50), () { setState(() => _selectedGoodShot = true);  _saveFilters(); }),
+                    _chip('壞球 ✗', _selectedGoodShot == false, const Color(0xFFF44336), () { setState(() => _selectedGoodShot = false); _saveFilters(); }),
+                  ]),
+                  _filterRow('影片', [
+                    _chip('全部',   _videoTypeIsLong == null,  const Color(0xFF1E8E5A), () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
+                    _chip('長影片', _videoTypeIsLong == true,  const Color(0xFF1565C0), () { setState(() => _videoTypeIsLong = true);  _saveFilters(); }),
+                    _chip('短影片', _videoTypeIsLong == false, const Color(0xFF757575), () { setState(() => _videoTypeIsLong = false); _saveFilters(); }),
+                  ]),
+                  _filterRow('分析', [
+                    _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
+                    _chip('已分析', _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
+                    _chip('未分析', _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
+                  ]),
+                  _filterRow('切片', [
+                    _chip('全部',   _clippedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
+                    _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
+                    _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
+                  ]),
+                  _filterRow('排序', [
+                    _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1E8E5A), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
+                    _chip('最佳速度', _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
+                  ]),
+                ],
               ),
             ),
             // 影片列表
@@ -1254,6 +1341,14 @@ class _HistoryTileState extends State<_HistoryTile> {
         clipPath: widget.entry.filePath,
         csvPath:  hasCsv ? csvPath : null,
       );
+
+      // 成功進入 AI Coach 頁面後，標記此影片已送出過 AI 分析
+      if (mounted && !widget.entry.hasAiCoachAnalysis) {
+        widget.onEntryUpdated?.call(
+          widget.entry,
+          widget.entry.copyWith(hasAiCoachAnalysis: true),
+        );
+      }
     } catch (e) {
       debugPrint('[AI分析] 提交失敗: $e');
       if (mounted) {
@@ -1559,6 +1654,38 @@ class _HistoryTileState extends State<_HistoryTile> {
                                   color: Color(0xFF4CAF50),
                                   fontWeight: FontWeight.w600,
                                 ),
+                              ),
+                            ),
+                          // AI Coach 分析標籤
+                          if (widget.entry.hasAiCoachAnalysis)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF7C3AED).withAlpha(25),
+                                border: Border.all(
+                                  color: const Color(0xFF7C3AED).withAlpha(180),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.psychology_rounded,
+                                      size: 10, color: Color(0xFF7C3AED)),
+                                  SizedBox(width: 3),
+                                  Text(
+                                    'AI 分析',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Color(0xFF7C3AED),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                         ],

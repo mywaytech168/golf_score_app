@@ -26,13 +26,12 @@ class AiCoachPage extends StatefulWidget {
   ///
   /// - [forceReanalyze]=false（預設）：若已有 completed/進行中分析則直接導向，不重複提交
   /// - [forceReanalyze]=true：強制提交新分析（由「重新分析」按鈕觸發）
-  /// - 若提供 [csvPath]，先跑 ONNX 取得 errorTypeHint 再送 Gemini
+  /// - 若提供 [csvPath]，一併上傳骨架 CSV；ONNX 推論由後端 Worker 執行
   static Future<void> submitAndPush({
     required BuildContext context,
     required String videoId,
     required String clipPath,
     String? csvPath,
-    String? errorTypeHint,
     bool forceReanalyze = false,
   }) async {
     // ── 快取判斷：若已有分析且不強制重新，直接導向 ──────────
@@ -60,28 +59,11 @@ class AiCoachPage extends StatefulWidget {
       }
     }
 
-    // ── 若有 CSV，先跑 ONNX 取得 errorTypeHint ──────────────
-    String? resolvedHint = errorTypeHint;
-    if (resolvedHint == null && csvPath != null) {
-      try {
-        final swingResult =
-            await AnalysisService.instance.analyzeSwingFromCsv(csvPath);
-        resolvedHint = swingResult?.topError;
-        if (resolvedHint != null) {
-          debugPrint('[AiCoach] ONNX 揮桿分析結果: $resolvedHint '
-              '(scores: ${swingResult?.scores})');
-        } else {
-          debugPrint('[AiCoach] ONNX 無明確錯誤，以無 hint 繼續');
-        }
-      } catch (e) {
-        debugPrint('[AiCoach] ONNX 分析例外（略過）: $e');
-      }
-    }
-
+    // 使用者只需上傳 clip + CSV；ONNX 推論在後端 Worker 自動執行
     final analysisId = await AnalysisService.instance.submitForAnalysis(
-      videoId:       videoId,
-      clipPath:      clipPath,
-      errorTypeHint: resolvedHint,
+      videoId:  videoId,
+      clipPath: clipPath,
+      csvPath:  csvPath,  // 有值時一併上傳，Worker 自行推論並存入 DB
     );
     if (context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(

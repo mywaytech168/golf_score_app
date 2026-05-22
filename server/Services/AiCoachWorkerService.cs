@@ -1,10 +1,13 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using UploadServer.Data;
+using UploadServer.DTOs;
 
 namespace UploadServer.Services
 {
     /// <summary>
-    /// 背景 Worker：輪詢 ai_coach_analyses 佇列，下載 clip 並呼叫 Gemini
+    /// 背景 Worker：輪詢 ai_coach_analyses 佇列，下載 clip（＋可選 CSV），
+    /// 執行 ONNX 推論取得錯誤類型，再呼叫 Gemini 產出教練回饋。
     /// </summary>
     public class AiCoachWorkerService : BackgroundService
     {
@@ -14,6 +17,7 @@ namespace UploadServer.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly B2Service _b2;
         private readonly GeminiService _gemini;
+        private readonly GolfSwingAnalyzerService _onnx;
         private readonly IHttpClientFactory _httpFactory;
         private readonly ILogger<AiCoachWorkerService> _logger;
 
@@ -21,12 +25,14 @@ namespace UploadServer.Services
             IServiceScopeFactory scopeFactory,
             B2Service b2,
             GeminiService gemini,
+            GolfSwingAnalyzerService onnx,
             IHttpClientFactory httpFactory,
             ILogger<AiCoachWorkerService> logger)
         {
             _scopeFactory = scopeFactory;
             _b2           = b2;
             _gemini       = gemini;
+            _onnx         = onnx;
             _httpFactory  = httpFactory;
             _logger       = logger;
         }
@@ -70,16 +76,64 @@ namespace UploadServer.Services
 
             try
             {
-                // 1. 從 B2 下載 clip（透過 Presigned GET）
-                var downloadUrl = _b2.GenerateClipDownloadUrl(analysis.ClipB2Path!);
-                var clipBytes   = await DownloadBytesAsync(downloadUrl, ct);
-
+                // 1. 從 B2 下載 clip
+                var clipUrl   = _b2.GenerateClipDownloadUrl(analysis.ClipB2Path!);
+                var clipBytes = await DownloadBytesAsync(clipUrl, ct);
                 _logger.LogInformation("Clip 下載完成: {KB}KB", clipBytes.Length / 1024);
 
-                // 2. 呼叫 Gemini 分析
-                var result = await _gemini.AnalyzeAsync(clipBytes, analysis.ErrorTypeHint, ct);
+                // 2. 若有 CSV，執行 ONNX 推論取得錯誤類型
+                string? effectiveHint = analysis.ErrorTypeHint;
+                if (analysis.CsvB2Path != null)
+                {
+                    if (_onnx.IsAvailable)
+                    {
+                        try
+                        {
+                            var csvUrl     = _b2.GenerateDownloadUrlForKey(analysis.CsvB2Path);
+                            var csvBytes   = await DownloadBytesAsync(csvUrl, ct);
+                            var csvContent = System.Text.Encoding.UTF8.GetString(csvBytes);
+                            var frames     = GolfSwingAnalyzerService.ParseCsvToFrames(csvContent);
 
-                // 3. 寫回結果
+                            if (frames.Count >= 2)
+                            {
+                                var onnxResult = _onnx.Analyze(new GolfSwingAnalysisRequest(frames));
+                                analysis.OnnxResultJson = JsonSerializer.Serialize(onnxResult);
+
+                                var onnxTop = onnxResult.OfficialErrors.FirstOrDefault()
+                                           ?? onnxResult.SuspectErrors.FirstOrDefault();
+                                if (onnxTop != null)
+                                {
+                                    effectiveHint = onnxTop;
+                                    _logger.LogInformation(
+                                        "ONNX 推論完成: topError={Error} frames={N}",
+                                        effectiveHint, frames.Count);
+                                }
+                                else
+                                {
+                                    _logger.LogInformation(
+                                        "ONNX 推論完成但無明確錯誤，沿用 hint={Hint}", effectiveHint ?? "(none)");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("CSV 幀數不足 ({N})，跳過 ONNX", frames.Count);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "ONNX 推論失敗（略過，繼續 Gemini）");
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogInformation("ONNX 模型未就緒，跳過 CSV 分析");
+                    }
+                }
+
+                // 3. 呼叫 Gemini 分析
+                var result = await _gemini.AnalyzeAsync(clipBytes, effectiveHint, ct);
+
+                // 4. 寫回結果
                 analysis.Status      = "completed";
                 analysis.ResultJson  = result.RawJson;
                 analysis.Summary     = result.Summary;

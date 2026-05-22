@@ -120,9 +120,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get authHaveAccount => '已有帳戶？返回登入';
 
   @override
-  String get authEncryptionNote => '所有資料皆採用 256-bit 加密保護';
-
-  @override
   String get validationEnterUsernameOrEmail => '請輸入用戶名或電子郵件';
 
   @override
@@ -596,9 +593,6 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get authHaveAccount => '已有账号？返回登录';
 
   @override
-  String get authEncryptionNote => '所有数据均采用 256 位加密保护';
-
-  @override
   String get validationEnterUsernameOrEmail => '请输入用户名或电子邮件';
 
   @override
@@ -1070,9 +1064,6 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get authHaveAccount => '已有帳戶？返回登入';
-
-  @override
-  String get authEncryptionNote => '所有資料皆採用 256-bit 加密保護';
 
   @override
   String get validationEnterUsernameOrEmail => '請輸入用戶名或電子郵件';

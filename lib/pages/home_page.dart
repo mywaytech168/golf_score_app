@@ -86,20 +86,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('確認登出'),
-        content: const Text('您確定要登出嗎？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('確定登出', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
+      builder: (_) => _buildLogoutDialog(),
     );
     if (confirmed != true) return;
 
@@ -108,6 +95,141 @@ class _HomePageState extends State<HomePage> {
     await prefs.remove('user_email');
     if (!mounted) return;
     Navigator.of(context).pushReplacementNamed('/login');
+  }
+
+  Widget _buildLogoutDialog() {
+    return Dialog(
+      elevation: 0,
+      backgroundColor: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x20000000),
+              blurRadius: 24,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── 頂部標題區 ──
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              child: Column(
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(
+                      Icons.logout_rounded,
+                      color: Colors.red,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '確認登出',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0B2A2E),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // ── 內容 ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                '您確定要登出嗎？您可以稍後再次登入。',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: const Color(0xFF0B2A2E).withOpacity(0.7),
+                  height: 1.5,
+                ),
+              ),
+            ),
+            // ── 按鈕區 ──
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                children: [
+                  // 取消按鈕
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: const Color(0xFF0B2A2E).withOpacity(0.1),
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                      child: const Text(
+                        '取消',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6F7B86),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 登出按鈕
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.red.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          '確定登出',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _loadInitialHistory() async {
@@ -275,34 +397,88 @@ class _HomePageState extends State<HomePage> {
               ).then((_) => _loadPlanStatus()),
             ),
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+              offset: const Offset(0, 50),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              elevation: 12,
+              surfaceTintColor: Colors.white,
+              color: Colors.white,
               onSelected: (v) {
                 if (v == 'logout') _logout();
                 if (v == 'language') LanguageSelectorSheet.show(context);
               },
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
                 PopupMenuItem(
                   value: 'language',
-                  child: Row(
-                    children: [
-                      Icon(Icons.language_rounded, size: 18),
-                      SizedBox(width: 8),
-                      Text('語言 / Language'),
-                    ],
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.language_rounded,
+                          size: 20,
+                          color: Color(0xFF1E8E5A),
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          '語言 / Language',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF0B2A2E),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                PopupMenuDivider(),
+                PopupMenuDivider(
+                  height: 8,
+                  indent: 12,
+                  endIndent: 12,
+                ),
                 PopupMenuItem(
                   value: 'logout',
-                  child: Row(
-                    children: [
-                      Icon(Icons.logout_rounded, size: 18, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('登出', style: TextStyle(color: Colors.red)),
-                    ],
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.logout_rounded,
+                          size: 20,
+                          color: Colors.red,
+                        ),
+                        SizedBox(width: 12),
+                        Text(
+                          '登出',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.more_vert_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
             ),
           ],
         );

@@ -96,6 +96,9 @@ class RecordingHistoryEntry {
   /// 從分享連結匯入時，記錄分享者的顯示名稱
   final String? sharerName;
 
+  /// 是否已送出 AI Coach 分析（至少提交過一次，不論結果）
+  final bool hasAiCoachAnalysis;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -118,6 +121,7 @@ class RecordingHistoryEntry {
     this.shareCode,
     this.shareExpiresAt,
     this.sharerName,
+    this.hasAiCoachAnalysis = false,
   });
 
   /// 排序用時間：優先用 createdAt，若無則 fallback 到 recordedAt
@@ -152,6 +156,7 @@ class RecordingHistoryEntry {
     DateTime? shareExpiresAt,
     DateTime? createdAt,
     String? sharerName,
+    bool? hasAiCoachAnalysis,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -175,6 +180,7 @@ class RecordingHistoryEntry {
       shareCode: shareCode ?? this.shareCode,
       shareExpiresAt: shareExpiresAt ?? this.shareExpiresAt,
       sharerName: sharerName ?? this.sharerName,
+      hasAiCoachAnalysis: hasAiCoachAnalysis ?? this.hasAiCoachAnalysis,
     );
   }
 
@@ -217,6 +223,7 @@ class RecordingHistoryEntry {
       'shareExpiresAt': shareExpiresAt?.toUtc().toIso8601String(),
       'createdAt': createdAt?.toIso8601String(),
       'sharerName': sharerName,
+      'hasAiCoachAnalysis': hasAiCoachAnalysis,
     };
   }
 
@@ -270,6 +277,7 @@ class RecordingHistoryEntry {
           ? DateTime.tryParse(json['createdAt'] as String)
           : null,
       sharerName: json['sharerName'] as String?,
+      hasAiCoachAnalysis: (json['hasAiCoachAnalysis'] as bool?) ?? false,
     );
   }
 }
