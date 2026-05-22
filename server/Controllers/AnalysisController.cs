@@ -146,21 +146,32 @@ namespace UploadServer.Controllers
         [HttpGet("by-video/{videoId}")]
         public async Task<IActionResult> GetByVideo(string videoId)
         {
-            var analyses = await _db.AiCoachAnalyses
+            var rows = await _db.AiCoachAnalyses
                 .Where(a => a.UserId == UserId && a.VideoId == videoId)
                 .OrderByDescending(a => a.CreatedAt)
                 .Take(10)
-                .Select(a => new AnalysisStatusResponse
+                .ToListAsync();
+
+            var responses = rows.Select(a =>
+            {
+                object? result = null;
+                if (a.Status == "completed" && !string.IsNullOrEmpty(a.ResultJson))
+                {
+                    try { result = JsonSerializer.Deserialize<JsonElement>(a.ResultJson); }
+                    catch { result = a.ResultJson; }
+                }
+                return new AnalysisStatusResponse
                 {
                     AnalysisId = a.Id,
                     VideoId    = a.VideoId,
                     Status     = a.Status,
                     Summary    = a.Summary,
                     Severity   = a.Severity,
-                })
-                .ToListAsync();
+                    Result     = result,
+                };
+            }).ToList();
 
-            return Ok(analyses);
+            return Ok(responses);
         }
     }
 }
