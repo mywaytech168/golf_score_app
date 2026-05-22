@@ -2,8 +2,11 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Google.Apis.Auth;
+using UploadServer.Data;
 using UploadServer.DTOs;
+using UploadServer.Models;
 using UploadServer.Services;
 
 namespace UploadServer.Controllers
@@ -18,13 +21,23 @@ namespace UploadServer.Controllers
     {
         private readonly AuthService _authService;
         private readonly ITokenBlacklistService _blacklist;
+        private readonly IEmailService _email;
+        private readonly VideoDbContext _db;
         private readonly ILogger<AuthController> _logger;
         private readonly IConfiguration _config;
 
-        public AuthController(AuthService authService, ITokenBlacklistService blacklist, IConfiguration config, ILogger<AuthController> logger)
+        public AuthController(
+            AuthService authService,
+            ITokenBlacklistService blacklist,
+            IEmailService email,
+            VideoDbContext db,
+            IConfiguration config,
+            ILogger<AuthController> logger)
         {
             _authService = authService;
             _blacklist   = blacklist;
+            _email       = email;
+            _db          = db;
             _config      = config;
             _logger      = logger;
         }
@@ -354,6 +367,150 @@ namespace UploadServer.Controllers
                 {
                     Success = false,
                     Message = ex.Message,
+                });
+            }
+        }
+
+        /// <summary>
+        /// 忘記密碼：寄送 6 位驗證碼至信箱
+        /// POST: /api/auth/forgot-password
+        /// </summary>
+        [HttpPost("forgot-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest req)
+        {
+            // 固定回傳成功（防 email 枚舉攻擊）
+            const string okMsg = "如果此 Email 已在系統中，驗證碼將在數分鐘內送達";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(req?.Email))
+                    return Ok(new ForgotPasswordResponse { Success = true, Message = okMsg });
+
+                var email = req.Email.Trim().ToLowerInvariant();
+                var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email);
+                if (user == null)
+                {
+                    _logger.LogInformation("ForgotPassword: 查無此 Email={Email}（已靜默回傳）", email);
+                    return Ok(new ForgotPasswordResponse { Success = true, Message = okMsg });
+                }
+
+                // 生成 6 位數驗證碼
+                var code = new Random().Next(100000, 999999).ToString();
+                var codeHash = BCrypt.Net.BCrypt.HashPassword(code);
+
+                // 將舊有未使用的 token 標記已使用
+                var oldTokens = await _db.PasswordResetTokens
+                    .Where(t => t.UserId == user.Id && !t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+                    .ToListAsync();
+                foreach (var t in oldTokens) t.IsUsed = true;
+
+                // 建立新 token 記錄
+                var resetToken = new PasswordResetToken
+                {
+                    UserId    = user.Id,
+                    CodeHash  = codeHash,
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                };
+                _db.PasswordResetTokens.Add(resetToken);
+                await _db.SaveChangesAsync();
+
+                // 寄信
+                await _email.SendPasswordResetCodeAsync(
+                    user.Email,
+                    user.DisplayName ?? user.Username,
+                    code);
+
+                _logger.LogInformation("ForgotPassword: 驗證碼已寄至 UserId={UserId}", user.Id);
+                return Ok(new ForgotPasswordResponse { Success = true, Message = okMsg });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ForgotPassword 失敗");
+                return StatusCode(500, new ForgotPasswordResponse
+                {
+                    Success = false,
+                    Message = "寄送失敗，請稍後再試",
+                });
+            }
+        }
+
+        /// <summary>
+        /// 重設密碼：驗證碼 + 新密碼
+        /// POST: /api/auth/reset-password
+        /// </summary>
+        [HttpPost("reset-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest req)
+        {
+            try
+            {
+                if (req == null ||
+                    string.IsNullOrWhiteSpace(req.Email) ||
+                    string.IsNullOrWhiteSpace(req.Code) ||
+                    string.IsNullOrWhiteSpace(req.NewPassword))
+                {
+                    return BadRequest(new ResetPasswordResponse
+                    {
+                        Success = false, Message = "請填寫 Email、驗證碼與新密碼",
+                    });
+                }
+
+                // 新密碼強度
+                if (req.NewPassword.Length < 8 ||
+                    !Regex.IsMatch(req.NewPassword, @"[A-Z]") ||
+                    !Regex.IsMatch(req.NewPassword, @"[a-z]") ||
+                    !Regex.IsMatch(req.NewPassword, @"[0-9]"))
+                {
+                    return BadRequest(new ResetPasswordResponse
+                    {
+                        Success = false,
+                        Message = "新密碼須至少 8 位且包含大寫、小寫及數字",
+                    });
+                }
+
+                var email = req.Email.Trim().ToLowerInvariant();
+                var user  = await _db.Users.FirstOrDefaultAsync(u => u.Email == email);
+                if (user == null)
+                    return BadRequest(new ResetPasswordResponse
+                        { Success = false, Message = "驗證碼無效或已過期" });
+
+                // 找最新一筆有效 token
+                var token = await _db.PasswordResetTokens
+                    .Where(t => t.UserId == user.Id && !t.IsUsed && t.ExpiresAt > DateTime.UtcNow)
+                    .OrderByDescending(t => t.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (token == null || !BCrypt.Net.BCrypt.Verify(req.Code.Trim(), token.CodeHash))
+                    return BadRequest(new ResetPasswordResponse
+                        { Success = false, Message = "驗證碼無效或已過期" });
+
+                // 標記已使用
+                token.IsUsed = true;
+
+                // 更新密碼雜湊（local auth）
+                var auth = await _db.UserAuths
+                    .FirstOrDefaultAsync(a => a.UserId == user.Id && a.Provider == "local");
+
+                if (auth == null)
+                    return BadRequest(new ResetPasswordResponse
+                        { Success = false, Message = "此帳號非本地帳號，無法重設密碼" });
+
+                auth.CredentialHash = BCrypt.Net.BCrypt.HashPassword(req.NewPassword);
+                await _db.SaveChangesAsync();
+
+                _logger.LogInformation("ResetPassword: 密碼已重設 UserId={UserId}", user.Id);
+                return Ok(new ResetPasswordResponse
+                {
+                    Success = true,
+                    Message = "密碼已重設，請使用新密碼登入",
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ResetPassword 失敗");
+                return StatusCode(500, new ResetPasswordResponse
+                {
+                    Success = false, Message = "重設失敗，請稍後再試",
                 });
             }
         }

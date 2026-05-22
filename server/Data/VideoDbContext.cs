@@ -18,6 +18,7 @@ namespace UploadServer.Data
         public DbSet<ShareLink> ShareLinks { get; set; }
         public DbSet<UserFeedback> UserFeedbacks { get; set; }
         public DbSet<AiCoachAnalysis> AiCoachAnalyses { get; set; }
+        public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -562,6 +563,51 @@ namespace UploadServer.Data
 
                 entity.HasIndex(e => e.UserId).HasDatabaseName("idx_ai_coach_user_id");
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_ai_coach_status");
+
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // PasswordResetTokens
+            // ============================================================
+            modelBuilder.Entity<PasswordResetToken>(entity =>
+            {
+                entity.ToTable("password_reset_tokens");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.CodeHash)
+                    .HasColumnName("code_hash")
+                    .HasMaxLength(255)
+                    .IsRequired();
+
+                entity.Property(e => e.ExpiresAt)
+                    .HasColumnName("expires_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.IsUsed)
+                    .HasColumnName("is_used")
+                    .HasDefaultValue(false);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.UserId).HasDatabaseName("idx_prt_user_id");
+                entity.HasIndex(e => e.ExpiresAt).HasDatabaseName("idx_prt_expires_at");
 
                 entity.HasOne(e => e.User)
                     .WithMany()

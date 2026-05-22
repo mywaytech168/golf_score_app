@@ -144,4 +144,36 @@ namespace UploadServer.DTOs
         public bool Success { get; set; }
         public string Message { get; set; }
     }
+
+    // ============================================================
+    // 忘記密碼 / 重設密碼
+    // ============================================================
+
+    public class ForgotPasswordRequest
+    {
+        /// <summary>使用者 Email</summary>
+        public string Email { get; set; } = "";
+    }
+
+    public class ForgotPasswordResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    public class ResetPasswordRequest
+    {
+        /// <summary>申請時的 Email</summary>
+        public string Email { get; set; } = "";
+        /// <summary>信件中的 6 位數驗證碼</summary>
+        public string Code { get; set; } = "";
+        /// <summary>新密碼（須符合強度規則）</summary>
+        public string NewPassword { get; set; } = "";
+    }
+
+    public class ResetPasswordResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = "";
+    }
 }
