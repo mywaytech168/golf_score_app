@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -58,6 +60,28 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<void>? _sessionExpiredSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // 當 refresh token 也失效時，自動跳轉登入頁
+    _sessionExpiredSub = sessionExpiredStream.stream.listen((_) {
+      debugPrint('⚠️ [App] Session 過期，跳轉登入頁');
+      _navigatorKey.currentState?.pushNamedAndRemoveUntil(
+        '/login',
+        (route) => false,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _sessionExpiredSub?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -73,6 +97,7 @@ class _MyAppState extends State<MyApp> {
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, _) {
           return MaterialApp(
+            navigatorKey: _navigatorKey,
             title: 'TekSwing',
             theme: buildAppTheme(),
             locale: localeProvider.locale,

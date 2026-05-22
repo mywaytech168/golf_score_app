@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
+/// 當 access + refresh token 雙雙失效，廣播此事件通知 UI 導向登入頁
+final sessionExpiredStream = StreamController<void>.broadcast();
+
 /// 認證令牌存儲服務
 /// 使用 flutter_secure_storage 加密存儲 JWT，防止明文讀取
 class AuthTokenStorage {
@@ -42,6 +45,13 @@ class AuthTokenStorage {
   Future<String?> getUserEmail()    async => _storage.read(key: _userEmailKey);
 
   Future<void> clearTokens() async => _storage.deleteAll();
+
+  /// 刷新失敗（session 完全失效）：清除 tokens 並廣播 sessionExpired
+  Future<void> _expireSession() async {
+    await clearTokens();
+    debugPrint('⚠️ [AuthTokenStorage] Session 已過期，清除 tokens，廣播登出事件');
+    sessionExpiredStream.add(null);
+  }
 
   Future<bool> isLoggedIn() async {
     final token = await getAccessToken();
@@ -99,6 +109,8 @@ class AuthTokenStorage {
 
       debugPrint('❌ [AuthTokenStorage] Token 刷新失敗: ${response.statusCode}');
       for (final w in _refreshWaiters) { w.complete(false); }
+      // Refresh token 本身也無效 → 徹底登出並通知 UI
+      await _expireSession();
       return false;
     } catch (e) {
       debugPrint('❌ [AuthTokenStorage] Token 刷新異常: $e');
