@@ -310,6 +310,15 @@ class AnalysisService {
         ),
       );
       return GolfSwingResult.fromJson(resp.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 503) {
+        // 模型尚未部署，正常降級（不記為錯誤）
+        debugPrint('[AnalyzeSwing] 503 — ONNX 模型未就緒，略過');
+      } else {
+        debugPrint('⚠️ AnalyzeSwing 失敗（略過，繼續 Gemini）: $e');
+      }
+      return null;
     } catch (e) {
       debugPrint('⚠️ AnalyzeSwing 失敗（略過，繼續 Gemini）: $e');
       return null;

@@ -35,10 +35,15 @@ public class GolfAnalysisController : ControllerBase
     [HttpPost("analyze-swing")]
     [ProducesResponseType(typeof(GolfSwingAnalysisResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public ActionResult<GolfSwingAnalysisResponse> AnalyzeSwing(
         [FromBody] GolfSwingAnalysisRequest request)
     {
+        if (!_analyzer.IsAvailable)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                new { message = "ONNX 模型尚未部署，揮桿分析暫不可用" });
+
         if (request.Frames.Count < 2)
             return BadRequest("至少需要 2 幀骨架資料");
 

@@ -32,10 +32,16 @@ public sealed class GolfSwingAnalyzerService : IDisposable
     ];
 
     // ── 執行期欄位 ────────────────────────────────────────────────
-    private readonly InferenceSession _session;
+    private readonly InferenceSession? _session;
     private readonly int _targetFrames;
     private readonly int _inputDim;
     private readonly ILogger<GolfSwingAnalyzerService> _logger;
+
+    /// <summary>
+    /// 模型是否可用。若 ONNX 檔案不存在或載入失敗，此為 false，
+    /// Analyze() 將回傳空結果而非拋出例外。
+    /// </summary>
+    public bool IsAvailable { get; private set; }
 
     public GolfSwingAnalyzerService(
         IConfiguration config,
@@ -47,39 +53,61 @@ public sealed class GolfSwingAnalyzerService : IDisposable
             ?? Path.Combine(AppContext.BaseDirectory, "Assets", "Models", "pose_error_tcn.onnx");
 
         if (!File.Exists(modelPath))
-            throw new FileNotFoundException($"ONNX 模型不存在: {modelPath}");
+        {
+            _logger.LogWarning(
+                "⚠️ GolfSwingAnalyzer: ONNX 模型不存在，端點將回傳空結果。路徑={Path}", modelPath);
+            IsAvailable = false;
+            return;
+        }
 
-        _session = new InferenceSession(modelPath);
+        try
+        {
+            _session = new InferenceSession(modelPath);
 
-        // 從 ONNX metadata 讀取實際輸入維度
-        var inputMeta = _session.InputMetadata["pose_sequence"];
-        var dims = inputMeta.Dimensions;
+            var inputMeta = _session.InputMetadata["pose_sequence"];
+            var dims = inputMeta.Dimensions;
 
-        // Bug fix: dims 可能為 -1（dynamic axis），必須驗證為正整數
-        if (dims.Length < 3 || dims[1] <= 0 || dims[2] <= 0)
-            throw new InvalidOperationException(
-                $"ONNX 模型輸入維度無效（expected [batch, frames, features]，got [{dims[0]}, {dims[1]}, {dims[2]}]）。" +
-                $"請確認 export_onnx.py 的 dynamic_axes 只設定 batch 維度。");
+            if (dims.Length < 3 || dims[1] <= 0 || dims[2] <= 0)
+            {
+                _logger.LogWarning(
+                    "⚠️ GolfSwingAnalyzer: ONNX 模型輸入維度無效 [{D0},{D1},{D2}]，停用服務",
+                    dims[0], dims[1], dims[2]);
+                IsAvailable = false;
+                return;
+            }
 
-        _targetFrames = dims[1];
-        _inputDim = dims[2];
+            _targetFrames = dims[1];
+            _inputDim     = dims[2];
 
-        // Bug fix: 驗證模型 inputDim 與預處理產生的 featuresPerFrame 一致
-        int expectedDim = LandmarkCount * FeatPerLandmark;
-        if (_inputDim != expectedDim)
-            throw new InvalidOperationException(
-                $"ONNX 模型 input_dim={_inputDim}，但預處理產生 {expectedDim}（{LandmarkCount} landmarks × {FeatPerLandmark} features）。" +
-                $"請確認訓練時使用的特徵數量，並更新 FeatPerLandmark 常數。");
+            int expectedDim = LandmarkCount * FeatPerLandmark;
+            if (_inputDim != expectedDim)
+            {
+                _logger.LogWarning(
+                    "⚠️ GolfSwingAnalyzer: input_dim={Actual} != 期望 {Expected}，停用服務",
+                    _inputDim, expectedDim);
+                IsAvailable = false;
+                return;
+            }
 
-        _logger.LogInformation(
-            "GolfSwingAnalyzer 初始化完成 | 模型: {Path} | 輸入: [1, {Frames}, {Dim}]",
-            modelPath, _targetFrames, _inputDim);
+            IsAvailable = true;
+            _logger.LogInformation(
+                "✅ GolfSwingAnalyzer 初始化完成 | 模型: {Path} | 輸入: [1, {Frames}, {Dim}]",
+                modelPath, _targetFrames, _inputDim);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "⚠️ GolfSwingAnalyzer: 載入 ONNX 模型失敗，停用服務");
+            IsAvailable = false;
+        }
     }
 
     // ── 公開介面 ──────────────────────────────────────────────────
 
     public GolfSwingAnalysisResponse Analyze(GolfSwingAnalysisRequest request)
     {
+        if (!IsAvailable)
+            return new GolfSwingAnalysisResponse([], [], [], [], []);
+
         if (request.Frames.Count < 2)
             throw new ArgumentException("至少需要 2 幀骨架資料");
 
