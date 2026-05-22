@@ -169,7 +169,8 @@ namespace UploadServer.Services
                 user.AdClaimedToday,
                 user.FeedbackClaimedDate == today,
                 user.InviteCode,
-                user.InviteCount
+                user.InviteCount,
+                !string.IsNullOrEmpty(user.InvitedByCode)
             );
         }
 
@@ -236,37 +237,42 @@ namespace UploadServer.Services
 
         /// <summary>
         /// 完成邀請獎勵：雙方各得球數，寫入 invite_records 和 ball_records。
+        /// 回傳 ApplyInviteResponse（含成功/失敗訊息與被邀請者得到的球數）。
         /// </summary>
-        public async Task ApplyInviteRewardAsync(string newUserId, string inviteCode)
+        public async Task<ApplyInviteResponse> ApplyInviteRewardAsync(string newUserId, string inviteCode)
         {
             var newUser = await _db.Users.FindAsync(newUserId);
-            if (newUser == null) return;
+            if (newUser == null)
+                return new ApplyInviteResponse(false, "用戶不存在", 0);
 
             if (!string.IsNullOrEmpty(newUser.InvitedByCode))
             {
                 _logger.LogWarning("用戶 {UserId} 已套用過邀請碼，忽略重複請求", newUserId);
-                return;
+                return new ApplyInviteResponse(false, "你已套用過邀請碼，每個帳號只能使用一次", 0);
             }
 
-            if (newUser.InviteCode == inviteCode)
+            if (!string.IsNullOrEmpty(newUser.InviteCode) &&
+                newUser.InviteCode.Equals(inviteCode, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning("用戶 {UserId} 嘗試套用自己的邀請碼", newUserId);
-                return;
+                return new ApplyInviteResponse(false, "不能使用自己的邀請碼", 0);
             }
 
-            var inviter = await _db.Users.FirstOrDefaultAsync(u => u.InviteCode == inviteCode);
-            if (inviter == null) return;
+            var inviter = await _db.Users.FirstOrDefaultAsync(
+                u => u.InviteCode != null && u.InviteCode.ToLower() == inviteCode.ToLower());
+            if (inviter == null)
+                return new ApplyInviteResponse(false, "邀請碼無效，請確認後再試", 0);
 
-            inviter.BonusBalls  += InviteBalls;
+            inviter.BonusBalls   += InviteBalls;
             inviter.InviteCount++;
             newUser.BonusBalls   += InviteBalls;
-            newUser.InvitedByCode = inviteCode;
+            newUser.InvitedByCode = inviteCode.ToUpperInvariant();
 
             var inviteRecord = new InviteRecord
             {
                 InviterUserId = inviter.Id,
                 InviteeUserId = newUserId,
-                InviteCode    = inviteCode,
+                InviteCode    = inviteCode.ToUpperInvariant(),
                 InviterBalls  = InviteBalls,
                 InviteeBalls  = InviteBalls,
                 CreatedAt     = DateTime.UtcNow,
@@ -295,6 +301,8 @@ namespace UploadServer.Services
             await _db.SaveChangesAsync();
             _logger.LogInformation("邀請獎勵：邀請者 {InviterId} 與被邀請者 {NewUserId} 各 +{Balls} 球",
                 inviter.Id, newUserId, InviteBalls);
+
+            return new ApplyInviteResponse(true, $"邀請碼套用成功！雙方各獲得 +{InviteBalls} 球", InviteBalls);
         }
 
         // ════════════════════════════════════════════════════════════════

@@ -16,6 +16,8 @@ namespace UploadServer.DTOs
         public string Email { get; set; }
         public string Password { get; set; }
         public string DisplayName { get; set; }
+        /// <summary>可選邀請碼（好友提供，雙方各得獎勵球數）</summary>
+        public string? InviteCode { get; set; }
     }
 
     public class RegisterResponse

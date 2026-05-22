@@ -20,6 +20,7 @@ namespace UploadServer.Controllers
     public class AuthController : ControllerBase
     {
         private readonly AuthService _authService;
+        private readonly UserService _userService;
         private readonly ITokenBlacklistService _blacklist;
         private readonly IEmailService _email;
         private readonly VideoDbContext _db;
@@ -28,6 +29,7 @@ namespace UploadServer.Controllers
 
         public AuthController(
             AuthService authService,
+            UserService userService,
             ITokenBlacklistService blacklist,
             IEmailService email,
             VideoDbContext db,
@@ -35,6 +37,7 @@ namespace UploadServer.Controllers
             ILogger<AuthController> logger)
         {
             _authService = authService;
+            _userService = userService;
             _blacklist   = blacklist;
             _email       = email;
             _db          = db;
@@ -94,10 +97,36 @@ namespace UploadServer.Controllers
 
                 _logger.LogInformation($"✅ 用戶註冊成功: {request.Username}");
 
+                // 若填寫了邀請碼，自動套用（非同步，失敗不影響註冊結果）
+                string? inviteMessage = null;
+                if (!string.IsNullOrWhiteSpace(request.InviteCode) && user != null)
+                {
+                    try
+                    {
+                        var inviteResult = await _userService.ApplyInviteRewardAsync(
+                            user.Id, request.InviteCode.Trim().ToUpperInvariant());
+                        if (inviteResult.Success)
+                        {
+                            inviteMessage = inviteResult.Message;
+                            _logger.LogInformation("✅ 新用戶 {Username} 邀請碼套用成功", request.Username);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ 邀請碼套用失敗: {Msg}", inviteResult.Message);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "⚠️ 邀請碼套用時發生例外，不影響註冊");
+                    }
+                }
+
                 return Ok(new RegisterResponse
                 {
                     Success = true,
-                    Message = "註冊成功，請登入",
+                    Message = inviteMessage != null
+                        ? $"註冊成功，{inviteMessage}，請登入"
+                        : "註冊成功，請登入",
                     User = user,
                 });
             }

@@ -37,6 +37,7 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();      // 註冊：Email
   final _displayNameController = TextEditingController(); // 註冊：顯示名稱
   final _confirmPasswordController = TextEditingController();
+  final _inviteCodeController = TextEditingController(); // 註冊：邀請碼（可選）
 
   final _formKey = GlobalKey<FormState>();
 
@@ -76,6 +77,7 @@ class _LoginPageState extends State<LoginPage> {
     _emailController.dispose();
     _displayNameController.dispose();
     _confirmPasswordController.dispose();
+    _inviteCodeController.dispose();
     super.dispose();
   }
 
@@ -152,6 +154,9 @@ class _LoginPageState extends State<LoginPage> {
         displayName: _displayNameController.text.trim().isEmpty
             ? _usernameController.text.trim()
             : _displayNameController.text.trim(),
+        inviteCode: _inviteCodeController.text.trim().isEmpty
+            ? null
+            : _inviteCodeController.text.trim(),
       );
 
       if (!mounted) return;
@@ -734,6 +739,36 @@ class _LoginPageState extends State<LoginPage> {
             if (v != _passwordController.text) return l10n.validationPasswordMismatch;
             return null;
           },
+        ),
+        const SizedBox(height: 16),
+
+        // ── 邀請碼（可選）────────────────────────────────────────
+        Row(children: [
+          const Expanded(child: Divider(color: Color(0xFFE0E0E0))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('選填', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+          ),
+          const Expanded(child: Divider(color: Color(0xFFE0E0E0))),
+        ]),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _inviteCodeController,
+          textCapitalization: TextCapitalization.characters,
+          maxLength: 12,
+          decoration: InputDecoration(
+            labelText: '邀請碼',
+            hintText: '如有好友邀請碼，請在此填寫',
+            prefixIcon: const Icon(Icons.card_giftcard_rounded, color: Color(0xFFFF6B35)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: Color(0xFFFF6B35), width: 1.5),
+            ),
+            helperText: '填寫邀請碼，雙方各獲得 +5 球獎勵',
+            helperStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            counterText: '',
+          ),
         ),
         const SizedBox(height: 24),
         SizedBox(

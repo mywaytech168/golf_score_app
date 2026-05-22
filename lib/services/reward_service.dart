@@ -73,6 +73,9 @@ class RewardStatus {
   /// 已成功邀請的好友數
   final int inviteCount;
 
+  /// 是否已使用過別人的邀請碼（每帳號限一次）
+  final bool hasAppliedInviteCode;
+
   /// true = 後端不可用，資料來自本地快取
   final bool fromCache;
 
@@ -82,11 +85,13 @@ class RewardStatus {
     this.feedbackClaimedToday = false,
     this.inviteCode,
     this.inviteCount = 0,
+    this.hasAppliedInviteCode = false,
     this.fromCache = false,
   });
 
   bool get canWatchAd => adClaimedToday < RewardType.watchAd.dailyCap;
   bool get canSubmitFeedback => !feedbackClaimedToday;
+  bool get canApplyInviteCode => !hasAppliedInviteCode;
 
   RewardStatus copyWith({
     int? bonusBalls,
@@ -94,15 +99,17 @@ class RewardStatus {
     bool? feedbackClaimedToday,
     String? inviteCode,
     int? inviteCount,
+    bool? hasAppliedInviteCode,
     bool? fromCache,
   }) {
     return RewardStatus(
-      bonusBalls: bonusBalls ?? this.bonusBalls,
-      adClaimedToday: adClaimedToday ?? this.adClaimedToday,
+      bonusBalls:           bonusBalls           ?? this.bonusBalls,
+      adClaimedToday:       adClaimedToday       ?? this.adClaimedToday,
       feedbackClaimedToday: feedbackClaimedToday ?? this.feedbackClaimedToday,
-      inviteCode: inviteCode ?? this.inviteCode,
-      inviteCount: inviteCount ?? this.inviteCount,
-      fromCache: fromCache ?? this.fromCache,
+      inviteCode:           inviteCode           ?? this.inviteCode,
+      inviteCount:          inviteCount          ?? this.inviteCount,
+      hasAppliedInviteCode: hasAppliedInviteCode ?? this.hasAppliedInviteCode,
+      fromCache:            fromCache            ?? this.fromCache,
     );
   }
 }
@@ -134,6 +141,7 @@ class RewardService {
           feedbackClaimedToday: (data['feedbackClaimedToday'] as bool?) ?? false,
           inviteCode:            data['inviteCode']            as String?,
           inviteCount:          (data['inviteCount']           as int?)  ?? 0,
+          hasAppliedInviteCode: (data['hasAppliedInviteCode'] as bool?) ?? false,
         );
         await _cacheStatus(status);
         debugPrint('$_tag ✅ 後端: bonus=${status.bonusBalls} ad=${status.adClaimedToday}');
@@ -183,6 +191,26 @@ class RewardService {
     }
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyInviteCode);
+  }
+
+  // ── 套用邀請碼 ───────────────────────────────────────────────
+
+  /// 套用好友邀請碼，回傳 `(success, message, ballsEarned)`
+  static Future<({bool success, String message, int balls})> applyInviteCode(
+      String code) async {
+    try {
+      final result = await VideoServerClient.instance.applyInviteCode(code);
+      if (result == null) return (success: false, message: '伺服器無回應', balls: 0);
+      final success = result['success'] as bool? ?? false;
+      final msg     = result['message'] as String? ?? '';
+      final balls   = (result['ballsEarned'] as num?)?.toInt() ?? 0;
+      return (success: success, message: msg, balls: balls);
+    } on UnauthorizedException {
+      rethrow;
+    } catch (e) {
+      debugPrint('$_tag ❌ 套用邀請碼失敗: $e');
+      return (success: false, message: '網路錯誤：$e', balls: 0);
+    }
   }
 
   // ── 問題回饋 ─────────────────────────────────────────────────

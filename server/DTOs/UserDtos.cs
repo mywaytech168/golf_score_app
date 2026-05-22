@@ -28,8 +28,13 @@ namespace UploadServer.DTOs
         int AdClaimedToday,
         bool FeedbackClaimedToday,
         string? InviteCode,
-        int InviteCount
+        int InviteCount,
+        /// <summary>是否已使用過別人的邀請碼（true = 已使用，不可再套用）</summary>
+        bool HasAppliedInviteCode
     );
+
+    /// <summary>POST /api/user/invite/apply 回應</summary>
+    public record ApplyInviteResponse(bool Success, string Message, int BallsEarned);
 
     /// <summary>POST /api/user/rewards/ad 回應</summary>
     public record ClaimAdRewardResponse(int Balls, int AdClaimedToday);

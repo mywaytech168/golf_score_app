@@ -98,19 +98,23 @@ class VideoServerClient {
     required String email,
     required String password,
     required String displayName,
+    String? inviteCode,
   }) async {
     try {
       final url = Uri.parse('$_baseUrl/api/auth/register');
       debugPrint('📝 本地註冊 → $url');
+      final body = <String, dynamic>{
+        'username': username,
+        'email': email,
+        'password': password,
+        'displayName': displayName,
+        if (inviteCode != null && inviteCode.isNotEmpty)
+          'inviteCode': inviteCode.toUpperCase(),
+      };
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'email': email,
-          'password': password,
-          'displayName': displayName,
-        }),
+        body: jsonEncode(body),
       );
 
       debugPrint('📥 Response: ${response.statusCode}');
@@ -398,6 +402,45 @@ class VideoServerClient {
     } catch (e) {
       if (e is UnauthorizedException) rethrow;
       debugPrint('❌ 取得邀請碼異常: $e');
+      return null;
+    }
+  }
+
+  /// 套用邀請碼（每帳號限一次）
+  ///
+  /// 回傳格式：`{ "success": true, "message": "...", "ballsEarned": 5 }`
+  Future<Map<String, dynamic>?> applyInviteCode(
+    String inviteCode, {
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/invite/apply');
+      debugPrint('🎟️ 套用邀請碼 → $url code=$inviteCode');
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode({'inviteCode': inviteCode.toUpperCase()}),
+      );
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 400) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return {'success': false, 'message': json['message'] ?? '邀請碼無效'};
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return applyInviteCode(inviteCode, isRetry: true);
+        throw UnauthorizedException('套用邀請碼失敗: 401');
+      } else {
+        debugPrint('❌ 套用邀請碼失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 套用邀請碼異常: $e');
       return null;
     }
   }

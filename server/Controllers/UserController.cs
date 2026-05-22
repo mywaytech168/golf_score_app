@@ -224,8 +224,12 @@ namespace UploadServer.Controllers
             if (string.IsNullOrWhiteSpace(req.InviteCode))
                 return BadRequest(new { message = "邀請碼不得為空" });
 
-            await _userService.ApplyInviteRewardAsync(userId, req.InviteCode.ToUpperInvariant());
-            return Ok(new { message = "邀請碼套用成功，雙方各獲得獎勵" });
+            var result = await _userService.ApplyInviteRewardAsync(
+                userId, req.InviteCode.Trim().ToUpperInvariant());
+
+            return result.Success
+                ? Ok(new { data = result })
+                : BadRequest(new { message = result.Message });
         }
     }
 

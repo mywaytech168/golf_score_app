@@ -106,6 +106,17 @@ class _RewardPageState extends State<RewardPage> {
                     onRefresh: _load,
                   ),
                   const SizedBox(height: 12),
+
+                  // 輸入邀請碼（未套用過才顯示）
+                  if (!_status.hasAppliedInviteCode) ...[
+                    _EnterInviteCodeCard(
+                      onEarned: (b) => _showEarned(b, '輸入邀請碼'),
+                      onError: _showError,
+                      onApplied: _load,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   _FeedbackCard(
                     status: _status,
                     onEarned: (b) => _showEarned(b, '問題回饋'),
@@ -749,7 +760,145 @@ class _FriendTile extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 3. 問題回饋
+// 3. 輸入邀請碼（被邀請方）
+// ════════════════════════════════════════════════════════════════
+
+class _EnterInviteCodeCard extends StatefulWidget {
+  final void Function(int balls) onEarned;
+  final void Function(String) onError;
+  final VoidCallback onApplied;
+
+  const _EnterInviteCodeCard({
+    required this.onEarned,
+    required this.onError,
+    required this.onApplied,
+  });
+
+  @override
+  State<_EnterInviteCodeCard> createState() => _EnterInviteCodeCardState();
+}
+
+class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
+  bool _expanded = false;
+  bool _busy     = false;
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final code = _ctrl.text.trim().toUpperCase();
+    if (code.isEmpty) { widget.onError('請輸入邀請碼'); return; }
+
+    setState(() => _busy = true);
+    try {
+      final r = await RewardService.applyInviteCode(code);
+      if (!mounted) return;
+      if (r.success) {
+        _ctrl.clear();
+        setState(() { _expanded = false; });
+        widget.onEarned(r.balls);
+        widget.onApplied(); // 刷新狀態，卡片消失
+      } else {
+        widget.onError(r.message.isNotEmpty ? r.message : '邀請碼無效');
+      }
+    } catch (e) {
+      if (mounted) widget.onError('套用失敗：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _RewardCard(
+      iconBg: const Color(0xFF7B61FF),
+      icon: Icons.card_giftcard_rounded,
+      title: '輸入邀請碼',
+      description: '輸入好友的邀請碼，你獲得 +${RewardType.inviteFriend.ballsPerAction} 球，好友也獲得 +${RewardType.inviteFriend.ballsPerAction} 球',
+      balls: RewardType.inviteFriend.ballsPerAction,
+      bottomWidget: _expanded
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _ctrl,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 12,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 3,
+                    color: Color(0xFF5B42D6),
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'ABCD1234',
+                    hintStyle: TextStyle(
+                      color: Colors.grey[300],
+                      fontSize: 18,
+                      letterSpacing: 3,
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFFF3F0FF),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFB39DDB)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF7B61FF), width: 1.5),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFD1C4E9)),
+                    ),
+                    prefixIcon: const Icon(Icons.vpn_key_rounded, color: Color(0xFF7B61FF), size: 20),
+                    counterText: '',
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: _busy ? null : () => setState(() { _expanded = false; _ctrl.clear(); }),
+                      child: const Text('取消'),
+                    ),
+                    const Spacer(),
+                    SizedBox(
+                      height: 38,
+                      child: ElevatedButton.icon(
+                        onPressed: _busy ? null : _submit,
+                        icon: _busy
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.check_circle_rounded, size: 16),
+                        label: Text(_busy ? '套用中...' : '套用 +${RewardType.inviteFriend.ballsPerAction} 球'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF7B61FF),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : null,
+      buttonLabel: _expanded ? null : '輸入好友邀請碼',
+      onTap: () => setState(() => _expanded = true),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 4. 問題回饋
 // ════════════════════════════════════════════════════════════════
 
 class _FeedbackCard extends StatefulWidget {
