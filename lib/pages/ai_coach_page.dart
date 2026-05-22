@@ -521,15 +521,24 @@ class _ReanalyzeLoaderState extends State<_ReanalyzeLoader> {
 
   Future<void> _submit() async {
     try {
-      await AiCoachPage.submitAndPush(
-        context:        context,
-        videoId:        widget.videoId,
-        clipPath:       widget.clipPath,
-        csvPath:        widget.csvPath,
-        forceReanalyze: true,
+      // 直接提交並取得 analysisId，再用 pushReplacement 取代自己
+      // 不呼叫 submitAndPush（它用 push，會讓自己誤 pop 掉新頁面）
+      final analysisId = await AnalysisService.instance.submitForAnalysis(
+        videoId:  widget.videoId,
+        clipPath: widget.clipPath,
+        csvPath:  widget.csvPath,
       );
-      // submitAndPush 已 push 新頁面，移除本過渡頁
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => AiCoachPage(
+            analysisId: analysisId,
+            clipPath:   widget.clipPath,
+            videoId:    widget.videoId,
+            csvPath:    widget.csvPath,
+          ),
+        ),
+      );
     } catch (e) {
       debugPrint('[ReanalyzeLoader] 重新分析失敗: $e');
       if (mounted) {
