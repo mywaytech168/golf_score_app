@@ -49,8 +49,15 @@ public sealed class GolfSwingAnalyzerService : IDisposable
     {
         _logger = logger;
 
-        var modelPath = config["GolfSwing:ModelPath"]
-            ?? Path.Combine(AppContext.BaseDirectory, "Assets", "Models", "pose_error_tcn.onnx");
+        var rawPath = config["GolfSwing:ModelPath"]
+            ?? Path.Combine("Assets", "Models", "pose_error_tcn.onnx");
+
+        // 相對路徑統一相對 AppContext.BaseDirectory 解析，避免 IIS CWD 不一致
+        var modelPath = Path.IsPathRooted(rawPath)
+            ? rawPath
+            : Path.Combine(AppContext.BaseDirectory, rawPath);
+
+        _logger.LogInformation("GolfSwingAnalyzer 模型路徑: {Path}", modelPath);
 
         if (!File.Exists(modelPath))
         {
