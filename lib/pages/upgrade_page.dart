@@ -4,6 +4,7 @@ import 'package:pay/pay.dart';
 
 import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/green_page_header.dart';
 
 // ════════════════════════════════════════════════════════════════
 // 資料模型
@@ -112,72 +113,30 @@ class _UpgradePageState extends State<UpgradePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
-      body: CustomScrollView(
-        slivers: [
-          _buildAppBar(),
-          SliverToBoxAdapter(
-            child: Column(
-              children: [
-                const SizedBox(height: 24),
-                _PlanToggle(selected: _selected, onChanged: (p) => setState(() => _selected = p)),
-                const SizedBox(height: 20),
-                _SelectedPlanCard(plan: _selected),
-                const SizedBox(height: 28),
-                _FeatureTable(highlighted: _selected),
-                const SizedBox(height: 28),
-                _CtaButton(plan: _selected, onTap: () => _onUpgrade(context)),
-                const SizedBox(height: 40),
-              ],
+      body: Column(
+        children: [
+          GreenPageHeader(
+            title: '升級您的方案',
+            subtitle: '解鎖更多揮桿分析功能，精進您的球技',
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  const SizedBox(height: 24),
+                  _PlanToggle(selected: _selected, onChanged: (p) => setState(() => _selected = p)),
+                  const SizedBox(height: 20),
+                  _SelectedPlanCard(plan: _selected),
+                  const SizedBox(height: 28),
+                  _FeatureTable(highlighted: _selected),
+                  const SizedBox(height: 28),
+                  _CtaButton(plan: _selected, onTap: () => _onUpgrade(context)),
+                  const SizedBox(height: 40),
+                ],
+              ),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildAppBar() {
-    return SliverAppBar(
-      expandedHeight: 160,
-      pinned: true,
-      backgroundColor: kPrimaryGreen,
-      foregroundColor: Colors.white,
-      automaticallyImplyLeading: false,
-      flexibleSpace: FlexibleSpaceBar(
-        collapseMode: CollapseMode.pin,
-        // 不設 title，避免與 background 重疊
-        background: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [kPrimaryGreen, Color(0xFF0A5C3A)],
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Spacer(),
-              // ── 底部大標題 ──────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '升級您的方案',
-                      style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '解鎖更多揮桿分析功能，精進您的球技',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
