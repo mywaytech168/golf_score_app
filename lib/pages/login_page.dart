@@ -113,6 +113,7 @@ class _LoginPageState extends State<LoginPage> {
           if (user['displayName'] != null) await prefs.setString('user_name', user['displayName'].toString());
         }
 
+        if (!mounted) return;
         _showSnackBar(AppLocalizations.of(context).msgLoginSuccess);
         if (Platform.isIOS) { await _navigateToHome(); return; }
         final ok = await _ensureBlePermissions();
@@ -193,12 +194,14 @@ class _LoginPageState extends State<LoginPage> {
       final googleUser = await googleSignIn.signIn();
 
       if (googleUser == null) {
+        if (!mounted) return;
         _showSnackBar(AppLocalizations.of(context).msgGoogleLoginCancelled);
         return;
       }
 
       final googleAuth = await googleUser.authentication;
       if (googleAuth.idToken == null) {
+        if (!mounted) return;
         _showSnackBar(
           AppLocalizations.of(context).msgGoogleLoginFailed('no IdToken'),
           isError: true,
@@ -227,6 +230,7 @@ class _LoginPageState extends State<LoginPage> {
           ?? (data['data'] is Map ? data['data']['token'] ?? data['data']['accessToken'] : null);
 
       if (token == null || (token as String).isEmpty) {
+        if (!mounted) return;
         _showSnackBar(AppLocalizations.of(context).msgGoogleLoginNoToken, isError: true);
         return;
       }
@@ -516,6 +520,22 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  // ── 忘記密碼 ─────────────────────────────────────────────────
+
+  void _showForgotPasswordSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ForgotPasswordSheet(
+        onDone: (email) {
+          // 重設成功後預填 email
+          _identifierController.text = email;
+        },
+      ),
+    );
+  }
+
   Widget _buildLoginForm(ThemeData theme) {
     final l10n = AppLocalizations.of(context);
     return Column(
@@ -567,7 +587,10 @@ class _LoginPageState extends State<LoginPage> {
             ),
             Text(l10n.authRememberMe),
             const Spacer(),
-            TextButton(onPressed: () {}, child: Text(l10n.authForgotPassword)),
+            TextButton(
+          onPressed: () => _showForgotPasswordSheet(context),
+          child: Text(l10n.authForgotPassword),
+        ),
           ],
         ),
         const SizedBox(height: 12),
@@ -921,6 +944,276 @@ class _LoginPageState extends State<LoginPage> {
                 style: ElevatedButton.styleFrom(backgroundColor: kPrimaryGreen),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 忘記密碼底部彈出表單（2步驟：輸入Email → 輸入驗證碼+新密碼）
+// ════════════════════════════════════════════════════════════════
+
+class _ForgotPasswordSheet extends StatefulWidget {
+  final void Function(String email)? onDone;
+
+  const _ForgotPasswordSheet({this.onDone});
+
+  @override
+  State<_ForgotPasswordSheet> createState() => _ForgotPasswordSheetState();
+}
+
+class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
+  // step 0: 輸入 Email；step 1: 輸入驗證碼 + 新密碼
+  int _step = 0;
+  bool _loading = false;
+
+  final _emailCtrl   = TextEditingController();
+  final _codeCtrl    = TextEditingController();
+  final _newPwCtrl   = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+
+  bool _obscureNew     = true;
+  bool _obscureConfirm = true;
+
+  String? _errorMsg;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _codeCtrl.dispose();
+    _newPwCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _requestCode() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _errorMsg = '請輸入有效的 Email');
+      return;
+    }
+    setState(() { _loading = true; _errorMsg = null; });
+    try {
+      final res = await VideoServerClient.instance.forgotPassword(email);
+      if (!mounted) return;
+      if (res['success'] == true) {
+        setState(() => _step = 1);
+      } else {
+        setState(() => _errorMsg = res['message'] ?? '寄送失敗');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _errorMsg = '網路錯誤，請稍後再試');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final code  = _codeCtrl.text.trim();
+    final newPw = _newPwCtrl.text;
+    final conf  = _confirmCtrl.text;
+
+    if (code.length != 6) {
+      setState(() => _errorMsg = '請輸入 6 位數驗證碼');
+      return;
+    }
+    if (newPw.length < 8 ||
+        !newPw.contains(RegExp(r'[A-Z]')) ||
+        !newPw.contains(RegExp(r'[a-z]')) ||
+        !newPw.contains(RegExp(r'[0-9]'))) {
+      setState(() => _errorMsg = '密碼須至少 8 位且包含大寫、小寫及數字');
+      return;
+    }
+    if (newPw != conf) {
+      setState(() => _errorMsg = '兩次密碼不一致');
+      return;
+    }
+    setState(() { _loading = true; _errorMsg = null; });
+    try {
+      final res = await VideoServerClient.instance.resetPassword(
+        email:       _emailCtrl.text.trim(),
+        code:        code,
+        newPassword: newPw,
+      );
+      if (!mounted) return;
+      if (res['success'] == true) {
+        Navigator.pop(context);
+        widget.onDone?.call(_emailCtrl.text.trim());
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('密碼已重設，請用新密碼登入'),
+            backgroundColor: kPrimaryGreen,
+          ),
+        );
+      } else {
+        setState(() => _errorMsg = res['message'] ?? '重設失敗');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _errorMsg = '網路錯誤，請稍後再試');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 拖把 handle
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            // 標題
+            Row(children: [
+              const Icon(Icons.lock_reset_rounded, color: kPrimaryGreen, size: 24),
+              const SizedBox(width: 10),
+              Text(
+                _step == 0 ? '忘記密碼' : '輸入驗證碼',
+                style: const TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF123B70)),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Text(
+              _step == 0
+                  ? '輸入您的 Email，我們將寄送 6 位數驗證碼'
+                  : '驗證碼已寄至 ${_emailCtrl.text.trim()}',
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Step 0: Email ──
+            if (_step == 0) ...[
+              TextField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: const Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ],
+
+            // ── Step 1: 驗證碼 + 新密碼 ──
+            if (_step == 1) ...[
+              TextField(
+                controller: _codeCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                autofocus: true,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700,
+                    letterSpacing: 10),
+                decoration: InputDecoration(
+                  labelText: '6 位驗證碼',
+                  counterText: '',
+                  prefixIcon: const Icon(Icons.pin_outlined),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _newPwCtrl,
+                obscureText: _obscureNew,
+                decoration: InputDecoration(
+                  labelText: '新密碼',
+                  hintText: '至少 8 位，含大寫、小寫、數字',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscureNew ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _obscureNew = !_obscureNew),
+                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _confirmCtrl,
+                obscureText: _obscureConfirm,
+                decoration: InputDecoration(
+                  labelText: '確認新密碼',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscureConfirm ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ],
+
+            // 錯誤訊息
+            if (_errorMsg != null) ...[
+              const SizedBox(height: 10),
+              Row(children: [
+                const Icon(Icons.error_outline, color: Colors.redAccent, size: 16),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(_errorMsg!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                ),
+              ]),
+            ],
+
+            const SizedBox(height: 20),
+            // 按鈕
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _loading ? null : (_step == 0 ? _requestCode : _resetPassword),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimaryGreen,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: _loading
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Text(_step == 0 ? '寄送驗證碼' : '確認重設密碼',
+                        style: const TextStyle(fontSize: 15)),
+              ),
+            ),
+            if (_step == 1) ...[
+              const SizedBox(height: 8),
+              Center(
+                child: TextButton(
+                  onPressed: _loading ? null : () => setState(() {
+                    _step = 0;
+                    _codeCtrl.clear();
+                    _newPwCtrl.clear();
+                    _confirmCtrl.clear();
+                    _errorMsg = null;
+                  }),
+                  child: const Text('重新輸入 Email',
+                      style: TextStyle(color: Color(0xFF9AA6B2))),
+                ),
+              ),
+            ],
           ],
         ),
       ),

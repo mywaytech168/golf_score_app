@@ -130,6 +130,46 @@ class VideoServerClient {
     }
   }
 
+  /// 忘記密碼：請求寄送 6 位驗證碼
+  Future<Map<String, dynamic>> forgotPassword(String email) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/auth/forgot-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email}),
+      );
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      final err = jsonDecode(response.body);
+      return {'success': false, 'message': err['message'] ?? '寄送失敗'};
+    } catch (e) {
+      return {'success': false, 'message': '網路錯誤: $e'};
+    }
+  }
+
+  /// 重設密碼：驗證碼 + 新密碼
+  Future<Map<String, dynamic>> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/auth/reset-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'code': code,
+          'newPassword': newPassword,
+        }),
+      );
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      final err = jsonDecode(response.body);
+      return {'success': false, 'message': err['message'] ?? '重設失敗'};
+    } catch (e) {
+      return {'success': false, 'message': '網路錯誤: $e'};
+    }
+  }
+
   /// 刷新 Token
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     try {
