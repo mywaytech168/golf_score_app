@@ -67,17 +67,22 @@ public sealed class GolfSwingAnalyzerService : IDisposable
             var inputMeta = _session.InputMetadata["pose_sequence"];
             var dims = inputMeta.Dimensions;
 
-            if (dims.Length < 3 || dims[1] <= 0 || dims[2] <= 0)
+            if (dims.Length < 3)
             {
                 _logger.LogWarning(
-                    "⚠️ GolfSwingAnalyzer: ONNX 模型輸入維度無效 [{D0},{D1},{D2}]，停用服務",
-                    dims[0], dims[1], dims[2]);
+                    "⚠️ GolfSwingAnalyzer: ONNX 模型輸入維度數量不足 ({N})，停用服務", dims.Length);
                 IsAvailable = false;
                 return;
             }
 
-            _targetFrames = dims[1];
-            _inputDim     = dims[2];
+            // dims[1] = -1 表示動態序列長度（Dynamic Shape），使用預設 60 幀
+            _targetFrames = dims[1] > 0 ? dims[1] : 60;
+            // dims[2] = -1 表示動態特徵維度，則由 expectedDim 驗證
+            _inputDim     = dims[2] > 0 ? dims[2] : LandmarkCount * FeatPerLandmark;
+
+            _logger.LogInformation(
+                "ONNX 模型維度讀取: [{D0}, {D1}, {D2}] → targetFrames={F} inputDim={D}",
+                dims[0], dims[1], dims[2], _targetFrames, _inputDim);
 
             int expectedDim = LandmarkCount * FeatPerLandmark;
             if (_inputDim != expectedDim)
