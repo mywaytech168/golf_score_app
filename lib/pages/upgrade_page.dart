@@ -347,8 +347,7 @@ class _FeatureTable extends StatelessWidget {
   final _Plan highlighted;
   const _FeatureTable({required this.highlighted});
 
-  static const _rowH = 40.0;
-  static const _colW  = 88.0;
+  static const _rowH  = 44.0;
   static const _plans = [_Plan.free, _Plan.pro, _Plan.elite];
 
   @override
@@ -357,8 +356,10 @@ class _FeatureTable extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // 左欄寬度隨螢幕縮放，小螢幕最小 90dp，大螢幕最大 130dp
-          final leftW = (constraints.maxWidth * 0.34).clamp(90.0, 130.0);
+          // 左欄寬度：30%，最小 80、最大 110
+          final leftW = (constraints.maxWidth * 0.30).clamp(80.0, 110.0);
+          // 三個方案欄平分剩餘寬度
+          final colW  = (constraints.maxWidth - leftW) / 3;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -382,7 +383,7 @@ class _FeatureTable extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // 固定功能名稱欄（響應式寬度）
+                        // 功能名稱欄
                         SizedBox(
                           width: leftW,
                           child: Column(
@@ -394,24 +395,17 @@ class _FeatureTable extends StatelessWidget {
                             ],
                           ),
                         ),
-                        // 三個方案欄（可橫向捲動）
-                        Expanded(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: _plans.map((plan) {
-                                final isHighlighted = plan == highlighted;
-                                return _PlanColumn(
-                                  plan: plan,
-                                  isHighlighted: isHighlighted,
-                                  features: _features,
-                                  rowH: _rowH,
-                                  colW: _colW,
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                        ),
+                        // 三個方案欄（撐滿剩餘寬度，不橫向捲動）
+                        ..._plans.map((plan) {
+                          final isHighlighted = plan == highlighted;
+                          return _PlanColumn(
+                            plan: plan,
+                            isHighlighted: isHighlighted,
+                            features: _features,
+                            rowH: _rowH,
+                            colW: colW,
+                          );
+                        }),
                       ],
                     ),
                   ),
