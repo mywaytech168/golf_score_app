@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace UploadServer.Models
 {
@@ -8,7 +9,11 @@ namespace UploadServer.Models
 
         public string UserId { get; set; }
 
-        /// <summary>optional reference to a clip; no FK constraint</summary>
+        /// <summary>
+        /// Optional local session identifier (e.g. "1779413178538_hit_1").
+        /// No FK constraint; pure informational reference.
+        /// </summary>
+        [MaxLength(255)]
         public string? VideoId { get; set; }
 
         /// <summary>pending → queued → processing → completed | failed</summary>

@@ -1244,10 +1244,13 @@ class _HistoryTileState extends State<_HistoryTile> {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
       final hasCsv     = File(csvPath).existsSync();
+      // videoId 使用 session 目錄名稱（如 "1779413178538_hit_1"），
+      // 符合後端 video_id varchar(255) 長度限制，避免送完整路徑超長
+      final videoId    = p.basename(sessionDir);
 
       await AiCoachPage.submitAndPush(
         context:  context,
-        videoId:  widget.entry.filePath,
+        videoId:  videoId,
         clipPath: widget.entry.filePath,
         csvPath:  hasCsv ? csvPath : null,
       );

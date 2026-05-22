@@ -81,8 +81,8 @@ namespace UploadServer.Migrations
                         .HasColumnName("user_id");
 
                     b.Property<string>("VideoId")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
                         .HasColumnName("video_id");
 
                     b.HasKey("Id");
