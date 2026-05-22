@@ -78,6 +78,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   bool? _selectedGoodShot; // 好球/壞球篩選 - null: 全部, true: 好球, false: 壞球
   bool? _videoTypeIsLong;  // 影片長度篩選 - null: 全部, true: 長影片, false: 短影片
   bool? _aiAnalyzedFilter; // 分析狀態篩選 - null: 全部, true: 已分析, false: 未分析
+  bool? _aiCoachFilter;    // AI教練篩選   - null: 全部, true: 已AI分析, false: 未AI分析
   bool? _clippedFilter;    // 切片狀態篩選 - null: 全部, true: 已切片, false: 未切片
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
 
@@ -352,6 +353,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   static const _kGoodShot  = 'hf_good_shot';
   static const _kVideoType = 'hf_video_type';
   static const _kAnalyzed  = 'hf_analyzed';
+  static const _kAiCoach   = 'hf_ai_coach';
   static const _kClipped   = 'hf_clipped';
   static const _kSortBy    = 'hf_sort_by';
 
@@ -363,6 +365,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       _selectedGoodShot = _prefBool(prefs, _kGoodShot);
       _videoTypeIsLong  = _prefBool(prefs, _kVideoType);
       _aiAnalyzedFilter = _prefBool(prefs, _kAnalyzed);
+      _aiCoachFilter    = _prefBool(prefs, _kAiCoach);
       _clippedFilter    = _prefBool(prefs, _kClipped);
       final name = prefs.getString(_kSortBy);
       if (name != null) {
@@ -378,6 +381,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     _setPrefBool(prefs, _kGoodShot,  _selectedGoodShot);
     _setPrefBool(prefs, _kVideoType, _videoTypeIsLong);
     _setPrefBool(prefs, _kAnalyzed,  _aiAnalyzedFilter);
+    _setPrefBool(prefs, _kAiCoach,   _aiCoachFilter);
     _setPrefBool(prefs, _kClipped,   _clippedFilter);
     await prefs.setString(_kSortBy, _sortBy.name);
   }
@@ -589,6 +593,13 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           .toList();
     }
 
+    // AI教練分析（已AI分析/未AI分析）
+    if (_aiCoachFilter != null) {
+      filteredEntries = filteredEntries
+          .where((e) => e.hasAiCoachAnalysis == _aiCoachFilter)
+          .toList();
+    }
+
     // 切片狀態（已切片/未切片）
     if (_clippedFilter != null) {
       filteredEntries = filteredEntries
@@ -651,6 +662,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
                     _chip('已分析', _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
                     _chip('未分析', _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
+                  ]),
+                  _filterRow('AI', [
+                    _chip('全部',   _aiCoachFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
+                    _chip('已分析', _aiCoachFilter == true,  const Color(0xFF7C3AED), () { setState(() => _aiCoachFilter = true);  _saveFilters(); }),
+                    _chip('未分析', _aiCoachFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiCoachFilter = false); _saveFilters(); }),
                   ]),
                   _filterRow('切片', [
                     _chip('全部',   _clippedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
