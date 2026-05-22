@@ -529,34 +529,25 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   children: [
-                    FilterChip(
+                    _HistoryFilterChip(
+                      label: '全部',
                       selected: _selectedGoodShot == null,
-                      label: const Text('全部'),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() => _selectedGoodShot = null);
-                        }
-                      },
+                      selectedColor: const Color(0xFF1E8E5A),
+                      onTap: () => setState(() => _selectedGoodShot = null),
                     ),
                     const SizedBox(width: 8),
-                    FilterChip(
+                    _HistoryFilterChip(
+                      label: '好球 ✓',
                       selected: _selectedGoodShot == true,
-                      label: const Text('好球 ✓'),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() => _selectedGoodShot = true);
-                        }
-                      },
+                      selectedColor: const Color(0xFF4CAF50),
+                      onTap: () => setState(() => _selectedGoodShot = true),
                     ),
                     const SizedBox(width: 8),
-                    FilterChip(
+                    _HistoryFilterChip(
+                      label: '壞球 ✗',
                       selected: _selectedGoodShot == false,
-                      label: const Text('壞球 ✗'),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() => _selectedGoodShot = false);
-                        }
-                      },
+                      selectedColor: const Color(0xFFF44336),
+                      onTap: () => setState(() => _selectedGoodShot = false),
                     ),
                   ],
                 ),
@@ -571,29 +562,26 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                   children: [
                     const Text(
                       '排序: ',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF6F7B86)),
                     ),
                     const SizedBox(width: 8),
-                    FilterChip(
+                    _HistoryFilterChip(
+                      label: '時間',
                       selected: _sortBy == _SortBy.date,
-                      label: const Text('時間'),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() => _sortBy = _SortBy.date);
-                        }
-                      },
+                      selectedColor: const Color(0xFF1E8E5A),
+                      onTap: () => setState(() => _sortBy = _SortBy.date),
                     ),
                     const SizedBox(width: 8),
-                    FilterChip(
+                    _HistoryFilterChip(
+                      label: '最佳速度 🎯',
                       selected: _sortBy == _SortBy.peakValue,
-                      label: const Text('最佳速度 🎯'),
-                      onSelected: (selected) {
-                        if (selected) {
-                          setState(() => _sortBy = _SortBy.peakValue);
-                        }
-                      },
+                      selectedColor: const Color(0xFF1565C0),
+                      onTap: () => setState(() => _sortBy = _SortBy.peakValue),
                     ),
-                    const SizedBox(width: 8)
+                    const SizedBox(width: 8),
                   ],
                 ),
               ),
@@ -1921,6 +1909,51 @@ class _ComparePickerSheet extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 篩選／排序用的 Chip（明確指定顏色，避免 M3 seed 色推導導致文字不可見）
+// ────────────────────────────────────────────────────────────────────────────
+
+class _HistoryFilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final Color selectedColor;
+  final VoidCallback onTap;
+
+  const _HistoryFilterChip({
+    required this.label,
+    required this.selected,
+    required this.selectedColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? selectedColor : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? selectedColor : const Color(0xFFBBC4CE),
+            width: 1.2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : const Color(0xFF4A5568),
+          ),
+        ),
+      ),
     );
   }
 }
