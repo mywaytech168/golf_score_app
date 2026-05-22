@@ -65,7 +65,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabs.length, vsync: this, initialIndex: 2)
+
+    // 有分析結果 → 預設分析 Tab(2)；否則 → 原始 Tab(0)
+    final hasAnalysis = widget.entry?.isAnalyzed ?? false;
+    final initialTab  = hasAnalysis ? 2 : 0;
+
+    _tabController = TabController(length: _tabs.length, vsync: this, initialIndex: initialTab)
       ..addListener(() {
         if (!_tabController.indexIsChanging) return;
         switch (_tabController.index) {
@@ -74,7 +79,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           case 2: _viewAnalyzed();
         }
       });
-    _initController(widget.videoPath, isOriginal: true);
+
+    // 依初始 tab 載入對應影片
+    if (hasAnalysis) {
+      _initController(widget.videoPath, isOriginal: true);
+    } else {
+      // 載入原始影片（swing.mp4 優先，否則 clip.mp4）
+      final originalPath = File('${p.dirname(widget.videoPath)}${p.separator}swing.mp4').existsSync()
+          ? '${p.dirname(widget.videoPath)}${p.separator}swing.mp4'
+          : widget.videoPath;
+      _initController(originalPath, isOriginal: true);
+    }
   }
 
   Future<void> _initController(String path, {bool isOriginal = false}) async {
