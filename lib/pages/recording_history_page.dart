@@ -1045,8 +1045,8 @@ class _HistoryTileState extends State<_HistoryTile> {
       final durationSeconds = widget.entry.durationSeconds;
 
       // 檢查時長有效性
-      if (durationSeconds < 5 || durationSeconds > 120) {
-        throw '影片時長 ($durationSeconds 秒) 不符合要求 (5-120 秒)';
+      if (durationSeconds < 1 || durationSeconds > 120) {
+        throw '影片時長 ($durationSeconds 秒) 不符合要求 (1-120 秒)';
       }
 
       // Stage 1: 視頻分析（0-70%）
