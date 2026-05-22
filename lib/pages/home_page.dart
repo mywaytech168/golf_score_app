@@ -16,6 +16,7 @@ import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 import '../services/plan_service.dart';
 import '../widgets/green_page_header.dart';
+import '../widgets/language_selector.dart';
 import 'reward_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -275,8 +276,22 @@ class _HomePageState extends State<HomePage> {
             ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
-              onSelected: (v) { if (v == 'logout') _logout(); },
+              onSelected: (v) {
+                if (v == 'logout') _logout();
+                if (v == 'language') LanguageSelectorSheet.show(context);
+              },
               itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'language',
+                  child: Row(
+                    children: [
+                      Icon(Icons.language_rounded, size: 18),
+                      SizedBox(width: 8),
+                      Text('語言 / Language'),
+                    ],
+                  ),
+                ),
+                PopupMenuDivider(),
                 PopupMenuItem(
                   value: 'logout',
                   child: Row(
