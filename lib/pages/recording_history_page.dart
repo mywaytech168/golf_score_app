@@ -81,6 +81,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   bool? _aiCoachFilter;    // AI教練篩選   - null: 全部, true: 已AI分析, false: 未AI分析
   bool? _clippedFilter;    // 切片狀態篩選 - null: 全部, true: 已切片, false: 未切片
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
+  bool _filtersExpanded = false;  // 篩選面板折疊狀態（預設收起）
 
   @override
   void initState() {
@@ -441,6 +442,56 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   Widget _chip(String label, bool selected, Color color, VoidCallback onTap) =>
       _HistoryFilterChip(label: label, selected: selected, selectedColor: color, onTap: onTap);
 
+  /// 目前非預設值的篩選條件數量
+  int get _activeFilterCount {
+    int n = 0;
+    if (_selectedGoodShot != null) n++;
+    if (_videoTypeIsLong  != null) n++;
+    if (_aiAnalyzedFilter != null) n++;
+    if (_aiCoachFilter    != null) n++;
+    if (_clippedFilter    != null) n++;
+    if (_sortBy != _SortBy.date)   n++;
+    return n;
+  }
+
+  /// 折疊時顯示目前啟用的篩選摘要小 chip
+  Widget _activeFilterSummary() {
+    final items = <(String, Color)>[];
+    if (_selectedGoodShot == true)  items.add(('好球',   const Color(0xFF4CAF50)));
+    if (_selectedGoodShot == false) items.add(('壞球',   const Color(0xFFF44336)));
+    if (_videoTypeIsLong  == true)  items.add(('長影片', const Color(0xFF1565C0)));
+    if (_videoTypeIsLong  == false) items.add(('短影片', const Color(0xFF757575)));
+    if (_aiAnalyzedFilter == true)  items.add(('已分析', const Color(0xFF1E8E5A)));
+    if (_aiAnalyzedFilter == false) items.add(('未分析', const Color(0xFF9AA6B2)));
+    if (_aiCoachFilter    == true)  items.add(('AI已分析', const Color(0xFF7C3AED)));
+    if (_aiCoachFilter    == false) items.add(('AI未分析', const Color(0xFF9AA6B2)));
+    if (_clippedFilter    == true)  items.add(('已切片', const Color(0xFFFF9800)));
+    if (_clippedFilter    == false) items.add(('未切片', const Color(0xFF9AA6B2)));
+    if (_sortBy != _SortBy.date)    items.add((_sortBy.label, const Color(0xFF1565C0)));
+
+    if (items.isEmpty) {
+      return const Text('全部',
+          style: TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)));
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: items.map((t) => Container(
+          margin: const EdgeInsets.only(right: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: t.$2.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: t.$2.withValues(alpha: 0.4)),
+          ),
+          child: Text(t.$1,
+              style: TextStyle(
+                  fontSize: 10, color: t.$2, fontWeight: FontWeight.w600)),
+        )).toList(),
+      ),
+    );
+  }
+
   // ---------- 方法區 ----------
   /// 將時間轉換為易讀字串，方便列表展示
   String _formatTimestamp(DateTime time) {
@@ -642,41 +693,110 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                   ),
               ],
             ),
-            // ── 篩選 & 排序面板 ──────────────────────────────────
+            // ── 篩選 & 排序面板（可折疊）────────────────────────
             Container(
               color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _filterRow('好/壞', [
-                    _chip('全部',   _selectedGoodShot == null,  const Color(0xFF1E8E5A), () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
-                    _chip('好球 ✓', _selectedGoodShot == true,  const Color(0xFF4CAF50), () { setState(() => _selectedGoodShot = true);  _saveFilters(); }),
-                    _chip('壞球 ✗', _selectedGoodShot == false, const Color(0xFFF44336), () { setState(() => _selectedGoodShot = false); _saveFilters(); }),
-                  ]),
-                  _filterRow('影片', [
-                    _chip('全部',   _videoTypeIsLong == null,  const Color(0xFF1E8E5A), () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
-                    _chip('長影片', _videoTypeIsLong == true,  const Color(0xFF1565C0), () { setState(() => _videoTypeIsLong = true);  _saveFilters(); }),
-                    _chip('短影片', _videoTypeIsLong == false, const Color(0xFF757575), () { setState(() => _videoTypeIsLong = false); _saveFilters(); }),
-                  ]),
-                  _filterRow('分析', [
-                    _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
-                    _chip('已分析', _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
-                    _chip('未分析', _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
-                  ]),
-                  _filterRow('AI', [
-                    _chip('全部',   _aiCoachFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
-                    _chip('已分析', _aiCoachFilter == true,  const Color(0xFF7C3AED), () { setState(() => _aiCoachFilter = true);  _saveFilters(); }),
-                    _chip('未分析', _aiCoachFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiCoachFilter = false); _saveFilters(); }),
-                  ]),
-                  _filterRow('切片', [
-                    _chip('全部',   _clippedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
-                    _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
-                    _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
-                  ]),
-                  _filterRow('排序', [
-                    _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1E8E5A), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
-                    _chip('最佳速度', _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
-                  ]),
+                  // 折疊標頭列（常駐）
+                  InkWell(
+                    onTap: () => setState(
+                        () => _filtersExpanded = !_filtersExpanded),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.tune_rounded,
+                              size: 15, color: Color(0xFF1E8E5A)),
+                          const SizedBox(width: 6),
+                          const Text('篩選與排序',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF123B70))),
+                          if (_activeFilterCount > 0) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E8E5A),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text('$_activeFilterCount',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                          const SizedBox(width: 8),
+                          // 折疊時顯示啟用篩選摘要
+                          if (!_filtersExpanded)
+                            Expanded(child: _activeFilterSummary())
+                          else
+                            const Spacer(),
+                          AnimatedRotation(
+                            turns: _filtersExpanded ? 0.5 : 0,
+                            duration: const Duration(milliseconds: 200),
+                            child: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                size: 20,
+                                color: Color(0xFF9AA6B2)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 展開的篩選列（AnimatedSize 平滑動畫）
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeInOut,
+                    alignment: Alignment.topCenter,
+                    child: _filtersExpanded
+                        ? Padding(
+                            padding:
+                                const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _filterRow('好/壞', [
+                                  _chip('全部',   _selectedGoodShot == null,  const Color(0xFF1E8E5A), () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
+                                  _chip('好球',   _selectedGoodShot == true,  const Color(0xFF4CAF50), () { setState(() => _selectedGoodShot = true);  _saveFilters(); }),
+                                  _chip('壞球',   _selectedGoodShot == false, const Color(0xFFF44336), () { setState(() => _selectedGoodShot = false); _saveFilters(); }),
+                                ]),
+                                _filterRow('影片', [
+                                  _chip('全部',   _videoTypeIsLong == null,  const Color(0xFF1E8E5A), () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
+                                  _chip('長影片', _videoTypeIsLong == true,  const Color(0xFF1565C0), () { setState(() => _videoTypeIsLong = true);  _saveFilters(); }),
+                                  _chip('短影片', _videoTypeIsLong == false, const Color(0xFF757575), () { setState(() => _videoTypeIsLong = false); _saveFilters(); }),
+                                ]),
+                                _filterRow('分析', [
+                                  _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
+                                  _chip('已分析', _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
+                                  _chip('未分析', _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
+                                ]),
+                                _filterRow('AI', [
+                                  _chip('全部',   _aiCoachFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
+                                  _chip('已分析', _aiCoachFilter == true,  const Color(0xFF7C3AED), () { setState(() => _aiCoachFilter = true);  _saveFilters(); }),
+                                  _chip('未分析', _aiCoachFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiCoachFilter = false); _saveFilters(); }),
+                                ]),
+                                _filterRow('切片', [
+                                  _chip('全部',   _clippedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
+                                  _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
+                                  _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
+                                ]),
+                                _filterRow('排序', [
+                                  _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1E8E5A), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
+                                  _chip('最佳速度', _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
+                                ]),
+                              ],
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
                 ],
               ),
             ),
