@@ -525,20 +525,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   Widget _buildAiPanel() {
     if (widget.entry == null) return const SizedBox.shrink();
-    return AnimatedContainer(
+    return AnimatedSize(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,
-      height: _aiExpanded ? _aiPanelHeight() : 0,
-      color: const Color(0xFF0D0D1A),
-      child: ClipRect(child: _buildAiContent()),
+      alignment: Alignment.topCenter,
+      child: _aiExpanded
+          ? Container(
+              color: const Color(0xFF0D0D1A),
+              constraints: const BoxConstraints(maxHeight: 240),
+              child: SingleChildScrollView(child: _buildAiContent()),
+            )
+          : const SizedBox.shrink(),
     );
-  }
-
-  double _aiPanelHeight() {
-    if (_aiLoading) return 80;
-    if (_aiStatus == null) return 100;
-    if (_aiStatus!.isCompleted) return 160;
-    return 100;
   }
 
   Widget _buildAiContent() {
@@ -662,8 +660,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             const SizedBox(height: 8),
             Text(
               status.summary!,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   color: Colors.white60, fontSize: 12, height: 1.5),
             ),
