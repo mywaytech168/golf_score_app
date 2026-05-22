@@ -65,7 +65,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabs.length, vsync: this)
+    _tabController = TabController(length: _tabs.length, vsync: this, initialIndex: 2)
       ..addListener(() {
         if (!_tabController.indexIsChanging) return;
         switch (_tabController.index) {
