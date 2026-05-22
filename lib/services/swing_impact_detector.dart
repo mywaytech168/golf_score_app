@@ -380,14 +380,15 @@ class _CsvResult {
 }
 
 // 右手腕 = landmark 16
-// CSV 欄位：frame, time_sec, [lm0_x_norm, lm0_y_norm, lm0_z, lm0_vis, lm0_x_px, lm0_y_px] × 33
-// lm16_vis   = 2 + 16*6 + 3 = 101
-// lm16_x_px  = 2 + 16*6 + 4 = 102
-// lm16_y_px  = 2 + 16*6 + 5 = 103
+// CSV 欄位：frame(0), time_sec(1), pose_update_id(2),
+//           [lm0_x_norm, lm0_y_norm, lm0_z, lm0_vis, lm0_x_px, lm0_y_px] × 33  (從 col 3 開始)
+// lm16_vis   = 3 + 16*6 + 3 = 102
+// lm16_x_px  = 3 + 16*6 + 4 = 103
+// lm16_y_px  = 3 + 16*6 + 5 = 104
 const int _colTimeSec = 1;
-const int _colRwVis   = 101;
-const int _colRwXpx   = 102;
-const int _colRwYpx   = 103;
+const int _colRwVis   = 102;
+const int _colRwXpx   = 103;
+const int _colRwYpx   = 104;
 const double _minVisibility = 0.1;
 const int    _smoothWrist   = 5;
 
