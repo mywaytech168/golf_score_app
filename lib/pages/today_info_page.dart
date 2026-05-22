@@ -180,11 +180,12 @@ class _StaticHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
       decoration: const BoxDecoration(gradient: kPrimaryGradient),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(kSpaceLG, kSpaceMD, kSpaceSM, kSpaceMD),
+          padding: const EdgeInsets.fromLTRB(kSpaceLG, kSpaceMD, kSpaceLG, kSpaceMD),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
