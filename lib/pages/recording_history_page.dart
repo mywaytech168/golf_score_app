@@ -2,8 +2,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -18,7 +18,7 @@ import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
 import '../services/ad_service.dart';
-import '../services/plan_service.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../widgets/hits_summary_widget.dart';
 import '../widgets/green_page_header.dart';
 import 'video_comparison_page.dart';
@@ -750,38 +750,12 @@ class _HistoryTileState extends State<_HistoryTile> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          backgroundColor: Colors.grey[900],
-          title: const Text('擊球偵測中', style: TextStyle(color: Colors.white)),
-          content: ValueListenableBuilder<(double, String)>(
-            valueListenable: progressNotifier,
-            builder: (_, val, __) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: val.$1,
-                  backgroundColor: Colors.grey[700],
-                  color: Colors.blue,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  val.$2,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
+      builder: (_) => _ProgressWithAdDialog(
+        title: '擊球偵測中',
+        progressNotifier: progressNotifier,
+        progressColor: Colors.blue,
       ),
     );
-
-    // Free 方案：在分析期間插播廣告（fire-and-forget，不阻塞進度）
-    final detectionPlan = await PlanService.getPlanStatus();
-    if (detectionPlan.plan == UserPlan.free) {
-      unawaited(AdService.showInterstitialAd());
-    }
 
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
@@ -1070,38 +1044,12 @@ class _HistoryTileState extends State<_HistoryTile> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          backgroundColor: Colors.grey[900],
-          title: const Text('🎬 完整分析中', style: TextStyle(color: Colors.white)),
-          content: ValueListenableBuilder<(double, String)>(
-            valueListenable: progressNotifier,
-            builder: (_, val, __) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: val.$1,
-                  backgroundColor: Colors.grey[700],
-                  color: Colors.cyan,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  val.$2,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
+      builder: (_) => _ProgressWithAdDialog(
+        title: '🎬 完整分析中',
+        progressNotifier: progressNotifier,
+        progressColor: Colors.cyan,
       ),
     );
-
-    // Free 方案：在分析期間插播廣告（fire-and-forget，不阻塞進度）
-    final analysisPlan = await PlanService.getPlanStatus();
-    if (analysisPlan.plan == UserPlan.free) {
-      unawaited(AdService.showInterstitialAd());
-    }
 
     try {
       final clipPath = widget.entry.filePath;
@@ -1976,6 +1924,113 @@ class _ComparePickerSheet extends StatelessWidget {
     );
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 分析進度彈窗（含橫幅廣告）
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 鎖定式進度對話框，底部嵌入橫幅廣告。
+/// 廣告在背景非同步載入，載入成功後自動顯示；失敗時不佔位，UI 不受影響。
+class _ProgressWithAdDialog extends StatefulWidget {
+  final String title;
+  final ValueListenable<(double, String)> progressNotifier;
+  final Color progressColor;
+
+  const _ProgressWithAdDialog({
+    required this.title,
+    required this.progressNotifier,
+    required this.progressColor,
+  });
+
+  @override
+  State<_ProgressWithAdDialog> createState() => _ProgressWithAdDialogState();
+}
+
+class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
+  BannerAd? _bannerAd;
+  bool _bannerLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanner();
+  }
+
+  void _loadBanner() {
+    final ad = BannerAd(
+      adUnitId: AdService.bannerAdUnitId,
+      size: AdSize.banner, // 320×50 dp
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          if (mounted) setState(() => _bannerLoaded = true);
+        },
+        onAdFailedToLoad: (ad, error) {
+          debugPrint('[ProgressDialog] 橫幅廣告載入失敗: $error');
+          ad.dispose();
+        },
+      ),
+    )..load();
+    _bannerAd = ad;
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: Text(widget.title,
+            style: const TextStyle(color: Colors.white)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── 進度區 ─────────────────────────────────────────────
+            ValueListenableBuilder<(double, String)>(
+              valueListenable: widget.progressNotifier,
+              builder: (_, val, __) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LinearProgressIndicator(
+                    value: val.$1,
+                    backgroundColor: Colors.grey[700],
+                    color: widget.progressColor,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    val.$2,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            // ── 橫幅廣告（載入後才顯示，不佔位） ──────────────────
+            if (_bannerLoaded && _bannerAd != null) ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: _bannerAd!.size.width.toDouble(),
+                height: _bannerAd!.size.height.toDouble(),
+                child: AdWidget(ad: _bannerAd!),
+              ),
+            ],
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 class _CandidateCard extends StatelessWidget {
   final RecordingHistoryEntry entry;
