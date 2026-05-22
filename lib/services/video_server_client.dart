@@ -25,12 +25,6 @@ class VideoServerClient {
 
   VideoServerClient._internal();
 
-  /// 是否正在刷新 token（防止重複刷新）
-  bool _isRefreshing = false;
-
-  /// 等待刷新完成的 Completer 列表
-  final List<Completer<bool>> _refreshWaiters = [];
-
   /// 獲取認證請求頭
   Future<Map<String, String>> _getAuthHeaders() async {
     final token = await AuthTokenStorage.instance.getAccessToken();
@@ -40,69 +34,9 @@ class VideoServerClient {
     };
   }
 
-  /// 嘗試自動刷新 Token
-  Future<bool> _tryRefreshToken() async {
-    if (_isRefreshing) {
-      final completer = Completer<bool>();
-      _refreshWaiters.add(completer);
-      return completer.future;
-    }
-
-    _isRefreshing = true;
-    debugPrint('🔄 嘗試自動刷新 Token...');
-
-    try {
-      final refreshTokenValue = await AuthTokenStorage.instance.getRefreshToken();
-
-      if (refreshTokenValue == null || refreshTokenValue.isEmpty) {
-        debugPrint('❌ 沒有可用的 Refresh Token');
-        return false;
-      }
-
-      final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/refresh-token'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refreshTokenValue}),
-      );
-
-      if (response.statusCode == 200) {
-        final result = jsonDecode(response.body);
-        // 後端回傳 { token, refreshToken }（camelCase，無 data wrapper）
-        final newToken = result['token'] as String?;
-        final newRefresh = result['refreshToken'] as String?;
-        if (newToken != null && newToken.isNotEmpty) {
-          await AuthTokenStorage.instance.saveTokens(
-            accessToken: newToken,
-            refreshToken: newRefresh,
-            userId: await AuthTokenStorage.instance.getUserId() ?? '',
-            userEmail: await AuthTokenStorage.instance.getUserEmail(),
-          );
-          debugPrint('✅ Token 刷新成功');
-          for (final w in _refreshWaiters) {
-            w.complete(true);
-          }
-          _refreshWaiters.clear();
-          return true;
-        }
-      }
-
-      debugPrint('❌ Token 刷新失敗: ${response.statusCode}');
-      for (final w in _refreshWaiters) {
-        w.complete(false);
-      }
-      _refreshWaiters.clear();
-      return false;
-    } catch (e) {
-      debugPrint('❌ Token 刷新異常: $e');
-      for (final w in _refreshWaiters) {
-        w.complete(false);
-      }
-      _refreshWaiters.clear();
-      return false;
-    } finally {
-      _isRefreshing = false;
-    }
-  }
+  /// 嘗試自動刷新 Token（委派給共用的 AuthTokenStorage.tryRefreshToken）
+  Future<bool> _tryRefreshToken() =>
+      AuthTokenStorage.instance.tryRefreshToken();
 
   // ============================================================
   // 身份驗證方法

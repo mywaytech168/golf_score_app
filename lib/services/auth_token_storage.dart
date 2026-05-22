@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 
 /// 認證令牌存儲服務
 /// 使用 flutter_secure_storage 加密存儲 JWT，防止明文讀取
@@ -42,5 +46,67 @@ class AuthTokenStorage {
   Future<bool> isLoggedIn() async {
     final token = await getAccessToken();
     return token != null && token.isNotEmpty;
+  }
+
+  // ── 共用 Token 刷新邏輯 ─────────────────────────────────────
+  // 可被多個 HTTP client（VideoServerClient、AnalysisService…）共用
+
+  static const _serverBaseUrl = 'https://tekswing.api.atk.tw';
+
+  bool _isRefreshing = false;
+  final List<Completer<bool>> _refreshWaiters = [];
+
+  /// 嘗試使用 refresh token 取得新 access token。
+  /// 成功 → 更新儲存並回傳 true；失敗 → 回傳 false。
+  /// 多個並發呼叫者只會觸發一次刷新（其餘等待）。
+  Future<bool> tryRefreshToken() async {
+    if (_isRefreshing) {
+      final c = Completer<bool>();
+      _refreshWaiters.add(c);
+      return c.future;
+    }
+    _isRefreshing = true;
+    debugPrint('🔄 [AuthTokenStorage] 嘗試刷新 Token...');
+    try {
+      final refreshTokenValue = await getRefreshToken();
+      if (refreshTokenValue == null || refreshTokenValue.isEmpty) {
+        debugPrint('❌ 沒有可用的 Refresh Token');
+        return false;
+      }
+
+      final response = await http.post(
+        Uri.parse('$_serverBaseUrl/api/auth/refresh-token'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': refreshTokenValue}),
+      );
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body) as Map<String, dynamic>;
+        final newToken   = result['token']        as String?;
+        final newRefresh = result['refreshToken'] as String?;
+        if (newToken != null && newToken.isNotEmpty) {
+          await saveTokens(
+            accessToken:  newToken,
+            refreshToken: newRefresh,
+            userId:       await getUserId()    ?? '',
+            userEmail:    await getUserEmail(),
+          );
+          debugPrint('✅ [AuthTokenStorage] Token 刷新成功');
+          for (final w in _refreshWaiters) { w.complete(true); }
+          return true;
+        }
+      }
+
+      debugPrint('❌ [AuthTokenStorage] Token 刷新失敗: ${response.statusCode}');
+      for (final w in _refreshWaiters) { w.complete(false); }
+      return false;
+    } catch (e) {
+      debugPrint('❌ [AuthTokenStorage] Token 刷新異常: $e');
+      for (final w in _refreshWaiters) { w.complete(false); }
+      return false;
+    } finally {
+      _refreshWaiters.clear();
+      _isRefreshing = false;
+    }
   }
 }

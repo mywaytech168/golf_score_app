@@ -126,13 +126,17 @@ class AnalysisService {
   static final AnalysisService _instance = AnalysisService._internal();
   factory AnalysisService() => _instance;
   static AnalysisService get instance => _instance;
-  AnalysisService._internal();
 
-  final _dio = Dio(BaseOptions(
-    baseUrl:        _baseUrl,
-    connectTimeout: const Duration(seconds: 15),
-    receiveTimeout: const Duration(seconds: 30),
-  ));
+  late final Dio _dio;
+
+  AnalysisService._internal() {
+    _dio = Dio(BaseOptions(
+      baseUrl:        _baseUrl,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+    ));
+    _dio.interceptors.add(_TokenRefreshInterceptor(_dio));
+  }
 
   Future<Map<String, String>> _authHeaders() async {
     final token = await AuthTokenStorage.instance.getAccessToken();
@@ -359,4 +363,45 @@ class GolfSwingResult {
         .map((k, v) => MapEntry(k, (v as num).toDouble())),
     bands:  (j['bands']  as Map<String, dynamic>? ?? {}).cast<String, String>(),
   );
+}
+
+// ── Dio 401 自動刷新攔截器 ────────────────────────────────────
+
+class _TokenRefreshInterceptor extends Interceptor {
+  final Dio _dio;
+  _TokenRefreshInterceptor(this._dio);
+
+  @override
+  Future<void> onError(
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
+    final response = err.response;
+    if (response == null || response.statusCode != 401) {
+      return handler.next(err); // 非 401，直接往上拋
+    }
+
+    debugPrint('[TokenRefreshInterceptor] 收到 401，嘗試刷新 Token...');
+    final refreshed =
+        await AuthTokenStorage.instance.tryRefreshToken();
+
+    if (!refreshed) {
+      debugPrint('[TokenRefreshInterceptor] 刷新失敗，放棄重試');
+      return handler.next(err);
+    }
+
+    // 刷新成功 → 用新 token 重試原始請求
+    try {
+      final opts = err.requestOptions;
+      final newToken =
+          await AuthTokenStorage.instance.getAccessToken();
+      opts.headers['Authorization'] = 'Bearer $newToken';
+
+      final retryResp = await _dio.fetch(opts);
+      return handler.resolve(retryResp);
+    } catch (retryErr) {
+      debugPrint('[TokenRefreshInterceptor] 重試失敗: $retryErr');
+      return handler.next(err);
+    }
+  }
 }
