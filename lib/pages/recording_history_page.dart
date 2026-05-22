@@ -102,11 +102,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     super.dispose();
   }
 
-  /// 返回上一頁並帶出更新後的清單
-  void _finishWithResult() {
-    Navigator.of(context).pop(List<RecordingHistoryEntry>.from(_entries));
-  }
-
   /// 移除指定紀錄並同步刪除實體檔案
   Future<void> _deleteEntry(RecordingHistoryEntry entry) async {
     final confirm = await showDialog<bool>(
@@ -611,12 +606,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         ? '載入中…'
         : '共 ${_entries.length} 筆 · 好球 $goodCount · 壞球 $badCount';
 
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _finishWithResult();
-      },
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: const Color(0xFFF4F6F9),
         body: Column(
           children: [
@@ -703,7 +693,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             ),
           ],
         ),
-      ),
     );
   }
 }
