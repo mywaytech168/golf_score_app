@@ -1992,6 +1992,15 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ── 橫幅廣告（title 下方，載入後才顯示，不佔位） ────────
+            if (_bannerLoaded && _bannerAd != null) ...[
+              SizedBox(
+                width: _bannerAd!.size.width.toDouble(),
+                height: _bannerAd!.size.height.toDouble(),
+                child: AdWidget(ad: _bannerAd!),
+              ),
+              const SizedBox(height: 16),
+            ],
             // ── 進度區 ─────────────────────────────────────────────
             ValueListenableBuilder<(double, String)>(
               valueListenable: widget.progressNotifier,
@@ -2013,16 +2022,7 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
                 ],
               ),
             ),
-            // ── 橫幅廣告（載入後才顯示，不佔位） ──────────────────
-            if (_bannerLoaded && _bannerAd != null) ...[
-              const SizedBox(height: 16),
-              SizedBox(
-                width: _bannerAd!.size.width.toDouble(),
-                height: _bannerAd!.size.height.toDouble(),
-                child: AdWidget(ad: _bannerAd!),
-              ),
-            ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
           ],
         ),
       ),
