@@ -295,16 +295,18 @@ class _SummaryCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: sevColor.withAlpha(25),
-                  borderRadius: BorderRadius.circular(kRadiusSM),
-                  border: Border.all(color: sevColor.withAlpha(80)),
-                ),
-                child: Text(
-                  err.zhName,
-                  style: TextStyle(color: sevColor, fontWeight: FontWeight.bold, fontSize: 13),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: sevColor.withAlpha(25),
+                    borderRadius: BorderRadius.circular(kRadiusSM),
+                    border: Border.all(color: sevColor.withAlpha(80)),
+                  ),
+                  child: Text(
+                    err.zhName,
+                    style: TextStyle(color: sevColor, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
                 ),
               ),
               const SizedBox(width: kSpaceSM),
@@ -395,23 +397,28 @@ class _PracticeCard extends StatelessWidget {
             children: [
               if (i > 0) const Divider(height: kSpaceLG),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(
-                    radius: 12,
-                    backgroundColor: kPrimaryGreen,
-                    child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: CircleAvatar(
+                      radius: 12,
+                      backgroundColor: kPrimaryGreen,
+                      child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                    ),
                   ),
                   const SizedBox(width: kSpaceSM),
                   Expanded(
-                    child: Text(s.drill, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: kBgPage,
-                      borderRadius: BorderRadius.circular(kRadiusSM),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(s.drill, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        if (s.reps.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(s.reps, style: const TextStyle(fontSize: 12, color: kTextSecondary)),
+                        ],
+                      ],
                     ),
-                    child: Text(s.reps, style: const TextStyle(fontSize: 12, color: kTextSecondary)),
                   ),
                 ],
               ),
