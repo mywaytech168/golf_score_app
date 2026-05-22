@@ -339,6 +339,41 @@ class VideoServerClient {
     }
   }
 
+  /// 取得已邀請好友列表
+  ///
+  /// 回傳格式：
+  /// ```json
+  /// { "total": 2, "friends": [
+  ///   { "displayName": "John", "avatarUrl": null,
+  ///     "joinedAt": "2024-01-15T10:00:00Z", "ballsEarned": 5 }, ...
+  /// ]}
+  /// ```
+  Future<Map<String, dynamic>?> getInvitedFriends({bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/invite/friends');
+      debugPrint('👥 取得邀請好友列表 → $url');
+      final response = await http.get(url, headers: headers);
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getInvitedFriends(isRetry: true);
+        throw UnauthorizedException('取得邀請好友失敗: 401');
+      } else {
+        debugPrint('❌ 取得邀請好友失敗: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 取得邀請好友異常: $e');
+      return null;
+    }
+  }
+
   /// 取得使用者邀請碼
   Future<String?> getInviteCode({bool isRetry = false}) async {
     try {

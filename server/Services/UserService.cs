@@ -551,6 +551,41 @@ namespace UploadServer.Services
             }
         }
 
+        // ════════════════════════════════════════════════════════════════
+        // 已邀請好友列表
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 查詢某用戶曾成功邀請的好友清單。
+        /// 回傳：顯示名稱、大頭貼、加入時間、獎勵球數。
+        /// </summary>
+        public async Task<InvitedFriendsResponse?> GetInvitedFriendsAsync(string userId)
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            var records = await _db.InviteRecords
+                .Where(r => r.InviterUserId == userId)
+                .OrderByDescending(r => r.CreatedAt)
+                .Select(r => new
+                {
+                    r.CreatedAt,
+                    r.InviterBalls,
+                    InviteeDisplayName = r.Invitee != null ? r.Invitee.DisplayName : "好友",
+                    InviteeAvatarUrl   = r.Invitee != null ? r.Invitee.AvatarUrl   : null,
+                })
+                .ToListAsync();
+
+            var friends = records.Select(r => new InvitedFriendDto(
+                r.InviteeDisplayName,
+                r.InviteeAvatarUrl,
+                r.CreatedAt,
+                r.InviterBalls
+            )).ToList();
+
+            return new InvitedFriendsResponse(friends.Count, friends);
+        }
+
         private static string GenerateInviteCode()
         {
             const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

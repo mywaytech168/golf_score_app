@@ -73,4 +73,22 @@ namespace UploadServer.DTOs
 
     /// <summary>POST /api/user/plan/purchase 回應</summary>
     public record PurchasePlanResponse(bool Success, string Message, string? Plan);
+
+    // ════════════════════════════════════════════════════════════════
+    // 邀請好友列表
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>GET /api/user/invite/friends — 單筆已邀請好友</summary>
+    public record InvitedFriendDto(
+        string DisplayName,
+        string? AvatarUrl,
+        DateTime JoinedAt,
+        int BallsEarned
+    );
+
+    /// <summary>GET /api/user/invite/friends 回應</summary>
+    public record InvitedFriendsResponse(
+        int Total,
+        List<InvitedFriendDto> Friends
+    );
 }

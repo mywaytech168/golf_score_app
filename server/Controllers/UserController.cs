@@ -197,6 +197,21 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// GET /api/user/invite/friends — 取得已邀請好友清單
+        /// </summary>
+        [HttpGet("invite/friends")]
+        public async Task<IActionResult> GetInvitedFriends()
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.GetInvitedFriendsAsync(userId);
+            if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { data = result });
+        }
+
+        /// <summary>
         /// POST /api/user/invite/apply — 好友使用邀請碼（Auth callback 或客戶端呼叫）
         /// Body: { "inviteCode": "ABC12345" }
         /// </summary>

@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../models/recording_history_entry.dart';
 import '../services/ad_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/reward_service.dart';
+import '../services/video_server_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
 
@@ -419,6 +421,12 @@ class _InviteCardState extends State<_InviteCard> {
   String? _code;
   bool _loadingCode = false;
 
+  // 已邀請好友列表
+  bool _friendsExpanded = false;
+  bool _loadingFriends  = false;
+  List<_InvitedFriend> _friends = [];
+  bool _friendsLoaded   = false;
+
   @override
   void initState() {
     super.initState();
@@ -433,6 +441,33 @@ class _InviteCardState extends State<_InviteCard> {
       if (mounted) setState(() { _code = code; _loadingCode = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingCode = false);
+    }
+  }
+
+  Future<void> _toggleFriends() async {
+    if (_friendsExpanded) {
+      setState(() => _friendsExpanded = false);
+      return;
+    }
+    setState(() { _friendsExpanded = true; });
+    if (_friendsLoaded) return; // 已載入過，直接展開
+    setState(() => _loadingFriends = true);
+    try {
+      final data = await VideoServerClient.instance.getInvitedFriends();
+      if (!mounted) return;
+      final rawList = (data?['friends'] as List<dynamic>?) ?? [];
+      _friends = rawList.map((e) {
+        final m = e as Map<String, dynamic>;
+        return _InvitedFriend(
+          displayName: m['displayName'] as String? ?? '好友',
+          avatarUrl:   m['avatarUrl']   as String?,
+          joinedAt:    DateTime.tryParse(m['joinedAt'] as String? ?? '') ?? DateTime.now(),
+          ballsEarned: (m['ballsEarned'] as num?)?.toInt() ?? 0,
+        );
+      }).toList();
+      setState(() { _loadingFriends = false; _friendsLoaded = true; });
+    } catch (_) {
+      if (mounted) setState(() => _loadingFriends = false);
     }
   }
 
@@ -467,6 +502,7 @@ class _InviteCardState extends State<_InviteCard> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── 邀請碼顯示 ────────────────────────────────
                     Text('你的邀請碼', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                     const SizedBox(height: 6),
                     Container(
@@ -494,10 +530,220 @@ class _InviteCardState extends State<_InviteCard> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Text('已邀請 ${s.inviteCount} 位好友加入', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    const SizedBox(height: 10),
+
+                    // ── 已邀請好友列表折疊列 ─────────────────────
+                    InkWell(
+                      onTap: _toggleFriends,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.people_alt_rounded, size: 16, color: Color(0xFFFF6B35)),
+                            const SizedBox(width: 6),
+                            Text(
+                              '已邀請好友',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFE55A1C)),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF6B35).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '${s.inviteCount} 位',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFE55A1C)),
+                              ),
+                            ),
+                            const Spacer(),
+                            AnimatedRotation(
+                              turns: _friendsExpanded ? 0.5 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Color(0xFFFF6B35)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // ── 展開的好友列表 ───────────────────────────
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeInOut,
+                      child: _friendsExpanded
+                          ? Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: _loadingFriends
+                                  ? const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.symmetric(vertical: 12),
+                                        child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFF6B35))),
+                                      ),
+                                    )
+                                  : _friends.isEmpty
+                                      ? _EmptyFriendsList()
+                                      : _FriendsList(friends: _friends),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
                   ],
                 ),
+    );
+  }
+}
+
+// ── 資料模型 ─────────────────────────────────────────────────────
+
+class _InvitedFriend {
+  final String displayName;
+  final String? avatarUrl;
+  final DateTime joinedAt;
+  final int ballsEarned;
+  const _InvitedFriend({
+    required this.displayName,
+    this.avatarUrl,
+    required this.joinedAt,
+    required this.ballsEarned,
+  });
+}
+
+// ── 空狀態 ───────────────────────────────────────────────────────
+
+class _EmptyFriendsList extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      alignment: Alignment.center,
+      child: Column(
+        children: [
+          Icon(Icons.person_search_rounded, size: 36, color: Colors.grey[300]),
+          const SizedBox(height: 8),
+          Text('尚無邀請紀錄', style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+          const SizedBox(height: 4),
+          Text('分享你的邀請碼，邀請好友一起練習！',
+              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+        ],
+      ),
+    );
+  }
+}
+
+// ── 好友列表 ─────────────────────────────────────────────────────
+
+class _FriendsList extends StatelessWidget {
+  final List<_InvitedFriend> friends;
+  const _FriendsList({required this.friends});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: friends.asMap().entries.map((entry) {
+        final i = entry.key;
+        final f = entry.value;
+        return Column(
+          children: [
+            if (i > 0) Divider(height: 1, color: Colors.grey[100]),
+            _FriendTile(friend: f, index: i + 1),
+          ],
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _FriendTile extends StatelessWidget {
+  final _InvitedFriend friend;
+  final int index;
+  const _FriendTile({required this.friend, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = friend.displayName.isNotEmpty
+        ? friend.displayName.characters.first.toUpperCase()
+        : '?';
+    final dateStr = DateFormat('yyyy/MM/dd').format(friend.joinedAt.toLocal());
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+      child: Row(
+        children: [
+          // 序號 + 大頭貼
+          Stack(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: const Color(0xFFFFE0D0),
+                backgroundImage: friend.avatarUrl != null ? NetworkImage(friend.avatarUrl!) : null,
+                child: friend.avatarUrl == null
+                    ? Text(initials, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFE55A1C)))
+                    : null,
+              ),
+              Positioned(
+                bottom: 0, right: 0,
+                child: Container(
+                  width: 16, height: 16,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFF6B35),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text('$index', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 12),
+
+          // 名稱 + 日期
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  friend.displayName,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(Icons.calendar_today_rounded, size: 11, color: Colors.grey[400]),
+                    const SizedBox(width: 3),
+                    Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // 獎勵球數徽章
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF3EE),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('⛳', style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 3),
+                Text(
+                  '+${friend.ballsEarned}',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFE55A1C)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
