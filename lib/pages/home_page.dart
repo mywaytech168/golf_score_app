@@ -323,10 +323,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGreenHeader(BuildContext context) {
-    final plan   = _planStatus.plan;
-    final used   = _planStatus.todayUsed;
-    final total  = _planStatus.totalLimit;   // dailyLimit + bonusBalls
-    final bonus  = _planStatus.bonusBalls;
+    final plan      = _planStatus.plan;
+    final used      = _planStatus.todayUsed;
+    final baseLimit = _planStatus.dailyLimit;   // 方案原始上限（不含獎勵）
+    final total     = _planStatus.totalLimit;   // dailyLimit + bonusBalls（實際可用）
     final planColor = Color(plan.colorValue);
 
     final overLimit = !plan.isUnlimited && used >= total;
@@ -334,11 +334,9 @@ class _HomePageState extends State<HomePage> {
     if (plan.isUnlimited) {
       quotaText = '今日無限制 🏆';
     } else if (overLimit) {
-      final bonusPart = bonus > 0 ? '（含 +$bonus 獎勵）' : '';
-      quotaText = '今日用量 $used / $total 球$bonusPart  ⚠️ 已達上限';
+      quotaText = '今日用量 $used / $baseLimit 球  ⚠️ 已達上限';
     } else {
-      final bonusPart = bonus > 0 ? '（含 +$bonus 獎勵）' : '';
-      quotaText = '今日用量 $used / $total 球$bonusPart';
+      quotaText = '今日用量 $used / $baseLimit 球';
     }
 
     return Consumer<UserProvider>(
