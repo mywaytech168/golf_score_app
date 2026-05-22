@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -70,7 +71,11 @@ class ClipPipelineService {
     final sessionName   = p.basename(srcSessionDir);
     final golfRecDir    = p.dirname(srcSessionDir);
     final srcCsvPath    = p.join(srcSessionDir, 'pose_landmarks.csv');
-    final srcAudioPath  = p.join(srcSessionDir, 'audio.wav');
+    // 優先使用 audio.wav（VideoAnalysisService 從影片提取），
+    // 若不存在則退回 audio.pcm（原始錄製的即時 float32 PCM）
+    final srcWavPath = p.join(srcSessionDir, 'audio.wav');
+    final srcPcmPath = p.join(srcSessionDir, 'audio.pcm');
+    final srcAudioPath = await File(srcWavPath).exists() ? srcWavPath : srcPcmPath;
 
     final results = <ClipResult>[];
     for (int i = 0; i < hits.length; i++) {
@@ -409,9 +414,11 @@ class ClipPipelineService {
     );
   }
 
-  /// 從原始音頻（PCM）中切分出指定時間範圍的片段
-  /// 
-  /// PCM 格式：Float32，44.1kHz，每個樣本占 4 字節
+  /// 從原始音頻切分出指定時間範圍的片段，輸出為 WAV（int16 LE）。
+  ///
+  /// 支援兩種輸入格式：
+  ///   • audio.wav  — WAV 容器 + int16 PCM（VideoAnalysisService 從影片提取）
+  ///   • audio.pcm  — raw float32 LE，無標頭（RealtimeAudioService 即時錄製）
   static Future<void> _sliceAudio({
     required String srcAudioPath,
     required String dstAudioPath,
@@ -426,109 +433,121 @@ class ClipPipelineService {
 
     try {
       const int sampleRate = 44100;
-      const int bytesPerSample = 2; // 16-bit PCM
-      
       final bytes = await src.readAsBytes();
-      
-      // WAV 头最小 44 字节
-      if (bytes.length < 44) {
-        debugPrint('[Pipeline._sliceAudio] WAV 檔案太小: ${bytes.length} 字節');
-        return;
-      }
+      final isWav = srcAudioPath.endsWith('.wav');
 
-      // 查找 "data" chunk 的起始位置
-      int dataStart = 44;
-      for (int i = 36; i < bytes.length - 8; i++) {
-        if (bytes[i] == 100 && bytes[i + 1] == 97 &&
-            bytes[i + 2] == 116 && bytes[i + 3] == 97) {
-          dataStart = i + 8;
-          break;
+      // ── 取得 int16 LE 的切片 bytes ─────────────────────────────────
+      Uint8List slicedInt16Bytes;
+
+      if (isWav) {
+        // WAV 容器：搜尋 "data" chunk，讀出 int16 原始字節
+        if (bytes.length < 44) {
+          debugPrint('[Pipeline._sliceAudio] WAV 檔案過小: ${bytes.length} bytes');
+          return;
         }
+        int dataStart = 44;
+        for (int i = 36; i < bytes.length - 8; i++) {
+          if (bytes[i] == 100 && bytes[i + 1] == 97 &&
+              bytes[i + 2] == 116 && bytes[i + 3] == 97) {
+            dataStart = i + 8;
+            break;
+          }
+        }
+        final dataBytes = bytes.sublist(dataStart);
+        final totalSamples = dataBytes.length ~/ 2; // int16 = 2 bytes/sample
+        final startSample = (startSec * sampleRate).toInt().clamp(0, totalSamples);
+        final endSample   = (endSec   * sampleRate).toInt().clamp(0, totalSamples);
+        if (startSample >= endSample) {
+          debugPrint('[Pipeline._sliceAudio] WAV 無效範圍：$startSample-$endSample');
+          return;
+        }
+        slicedInt16Bytes = Uint8List.fromList(
+            dataBytes.sublist(startSample * 2, endSample * 2));
+        debugPrint('[Pipeline._sliceAudio] WAV 切分: $startSample-$endSample '
+            '(${slicedInt16Bytes.length ~/ 2} 樣本, dataStart=$dataStart)');
+      } else {
+        // raw float32 LE PCM（無標頭）：轉換為 int16 LE
+        if (bytes.length < 4) {
+          debugPrint('[Pipeline._sliceAudio] PCM 檔案過小: ${bytes.length} bytes');
+          return;
+        }
+        final byteData    = bytes.buffer.asByteData();
+        final totalSamples = bytes.length ~/ 4; // float32 = 4 bytes/sample
+        final startSample = (startSec * sampleRate).toInt().clamp(0, totalSamples);
+        final endSample   = (endSec   * sampleRate).toInt().clamp(0, totalSamples);
+        if (startSample >= endSample) {
+          debugPrint('[Pipeline._sliceAudio] PCM 無效範圍：$startSample-$endSample');
+          return;
+        }
+        // float32 → int16 LE
+        final int16Builder = BytesBuilder();
+        for (int i = startSample; i < endSample; i++) {
+          final f = byteData.getFloat32(i * 4, Endian.little);
+          final clamped = f.isFinite ? f.clamp(-1.0, 1.0) : 0.0;
+          final int16 = (clamped * 32767.0).round().clamp(-32768, 32767);
+          final unsigned = int16 < 0 ? int16 + 65536 : int16;
+          int16Builder.addByte(unsigned & 0xFF);
+          int16Builder.addByte((unsigned >> 8) & 0xFF);
+        }
+        slicedInt16Bytes = int16Builder.toBytes();
+        debugPrint('[Pipeline._sliceAudio] PCM→int16 切分: $startSample-$endSample '
+            '(${slicedInt16Bytes.length ~/ 2} 樣本)');
       }
 
-      final dataBytes = bytes.sublist(dataStart);
-      final totalSamples = dataBytes.length ~/ bytesPerSample;
-      
-      // 計算樣本範圍
-      final startSample = (startSec * sampleRate).toInt().clamp(0, totalSamples);
-      final endSample = (endSec * sampleRate).toInt().clamp(0, totalSamples);
-      
-      if (startSample >= endSample) {
-        debugPrint('[Pipeline._sliceAudio] 無效範圍：$startSample-$endSample');
+      if (slicedInt16Bytes.isEmpty) {
+        debugPrint('[Pipeline._sliceAudio] 切片結果為空，略過寫出');
         return;
       }
-      
-      // 提取音頻數據
-      final startByte = startSample * bytesPerSample;
-      final endByte = endSample * bytesPerSample;
-      final slicedAudioBytes = dataBytes.sublist(startByte, endByte);
-      
-      // 🔧 重新生成 WAV 頭
+
+      // ── 包裝成 WAV 標頭並寫出 ────────────────────────────────────
       final wavHeader = BytesBuilder();
-      
-      // ChunkID "RIFF"
-      wavHeader.addByte(82); wavHeader.addByte(73); 
+
+      // "RIFF"
+      wavHeader.addByte(82); wavHeader.addByte(73);
       wavHeader.addByte(70); wavHeader.addByte(70);
-      
-      // ChunkSize (44 - 8 + dataSize)
-      final fileSize = 36 + slicedAudioBytes.length;
+      // ChunkSize = 36 + dataSize
+      final fileSize = 36 + slicedInt16Bytes.length;
       wavHeader.addByte(fileSize & 0xFF);
-      wavHeader.addByte((fileSize >> 8) & 0xFF);
+      wavHeader.addByte((fileSize >> 8)  & 0xFF);
       wavHeader.addByte((fileSize >> 16) & 0xFF);
       wavHeader.addByte((fileSize >> 24) & 0xFF);
-      
-      // Format "WAVE"
+      // "WAVE"
       wavHeader.addByte(87); wavHeader.addByte(65);
       wavHeader.addByte(86); wavHeader.addByte(69);
-      
-      // Subchunk1ID "fmt "
+      // "fmt " + subchunk1Size=16
       wavHeader.addByte(102); wavHeader.addByte(109);
       wavHeader.addByte(116); wavHeader.addByte(32);
-      
-      // Subchunk1Size (16)
       wavHeader.addByte(16); wavHeader.addByte(0);
-      wavHeader.addByte(0); wavHeader.addByte(0);
-      
-      // AudioFormat (1 = PCM)
+      wavHeader.addByte(0);  wavHeader.addByte(0);
+      // AudioFormat=1 (PCM)
       wavHeader.addByte(1); wavHeader.addByte(0);
-      
-      // NumChannels (1 = mono)
+      // NumChannels=1
       wavHeader.addByte(1); wavHeader.addByte(0);
-      
-      // SampleRate (44100)
+      // SampleRate=44100  (0x00_00_AC_44)
       wavHeader.addByte(0x44); wavHeader.addByte(0xAC);
-      wavHeader.addByte(0); wavHeader.addByte(0);
-      
-      // ByteRate (44100 * 1 * 2 = 88200)
+      wavHeader.addByte(0);    wavHeader.addByte(0);
+      // ByteRate=88200  (0x00_01_58_88)
       wavHeader.addByte(0x88); wavHeader.addByte(0x58);
-      wavHeader.addByte(1); wavHeader.addByte(0);
-      
-      // BlockAlign (1 * 2 = 2)
+      wavHeader.addByte(1);    wavHeader.addByte(0);
+      // BlockAlign=2
       wavHeader.addByte(2); wavHeader.addByte(0);
-      
-      // BitsPerSample (16)
+      // BitsPerSample=16
       wavHeader.addByte(16); wavHeader.addByte(0);
-      
-      // Subchunk2ID "data"
+      // "data"
       wavHeader.addByte(100); wavHeader.addByte(97);
       wavHeader.addByte(116); wavHeader.addByte(97);
-      
-      // Subchunk2Size (dataSize)
-      wavHeader.addByte(slicedAudioBytes.length & 0xFF);
-      wavHeader.addByte((slicedAudioBytes.length >> 8) & 0xFF);
-      wavHeader.addByte((slicedAudioBytes.length >> 16) & 0xFF);
-      wavHeader.addByte((slicedAudioBytes.length >> 24) & 0xFF);
-      
-      // 合併頭部 + 數據
+      // Subchunk2Size
+      wavHeader.addByte(slicedInt16Bytes.length & 0xFF);
+      wavHeader.addByte((slicedInt16Bytes.length >> 8)  & 0xFF);
+      wavHeader.addByte((slicedInt16Bytes.length >> 16) & 0xFF);
+      wavHeader.addByte((slicedInt16Bytes.length >> 24) & 0xFF);
+
       final finalWav = BytesBuilder();
       finalWav.add(wavHeader.toBytes());
-      finalWav.add(slicedAudioBytes);
-      
-      // 寫入目標檔案
+      finalWav.add(slicedInt16Bytes);
+
       await File(dstAudioPath).writeAsBytes(finalWav.toBytes());
-      
-      final slicedSamples = slicedAudioBytes.length ~/ bytesPerSample;
-      debugPrint('[Pipeline._sliceAudio] 切分完成: $startSample-$endSample ($slicedSamples 樣本) → $dstAudioPath');
+      debugPrint('[Pipeline._sliceAudio] ✅ 寫出完成 → $dstAudioPath');
     } catch (e) {
       debugPrint('[Pipeline._sliceAudio] 錯誤: $e');
     }

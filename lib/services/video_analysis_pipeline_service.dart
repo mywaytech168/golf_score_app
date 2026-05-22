@@ -20,16 +20,26 @@ class VideoAnalysisPipelineService {
     void Function(String label)? onProgress,
   }) async {
     try {
-      final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
-      final audioPath = p.join(sessionDir, 'audio.pcm');
+      final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
+      // 兩種音訊格式皆可視為「已就緒」：
+      //   audio.wav — VideoAnalysisService 從影片提取（int16 WAV）
+      //   audio.pcm — RealtimeAudioService 即時錄製（raw float32）
+      // ClipPipelineService._sliceAudio() 已能處理這兩種格式。
+      final audioWavPath = p.join(sessionDir, 'audio.wav');
+      final audioPcmPath = p.join(sessionDir, 'audio.pcm');
+      final csvExists   = await File(csvPath).exists();
+      final wavExists   = await File(audioWavPath).exists();
+      final pcmExists   = await File(audioPcmPath).exists();
 
-      // 若兩者都已存在，直接跳過
-      if (await File(csvPath).exists() && await File(audioPath).exists()) {
-        debugPrint('[VideoAnalysisPipeline] ✅ 骨架與音訊已存在，略過分析');
+      // 若 CSV 存在，且至少有一種音訊檔，直接跳過分析
+      if (csvExists && (wavExists || pcmExists)) {
+        final existingAudioPath = wavExists ? audioWavPath : audioPcmPath;
+        debugPrint('[VideoAnalysisPipeline] ✅ 骨架與音訊已存在 '
+            '(audio=${wavExists ? "wav" : "pcm"})，略過分析');
         onProgress?.call('使用既有分析資料...');
         return BasicAnalysisResult(
           csvPath: csvPath,
-          audioPath: audioPath,
+          audioPath: existingAudioPath,
           isComplete: true,
         );
       }
