@@ -532,7 +532,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       child: _aiExpanded
           ? Container(
               color: const Color(0xFF0D0D1A),
-              constraints: const BoxConstraints(maxHeight: 240),
+              constraints: const BoxConstraints(maxHeight: 360),
               child: SingleChildScrollView(child: _buildAiContent()),
             )
           : const SizedBox.shrink(),
@@ -617,11 +617,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     }
 
     // 已完成
+    final result = status.result;
+    final sevColor = _severityColor(status.severity ?? 'low');
+
     return Padding(
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── 標題列 ──────────────────────────────────────────
           Row(
             children: [
               const Icon(Icons.psychology_rounded,
@@ -636,35 +640,115 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               ),
               if (status.severity != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: _severityColor(status.severity!)
-                        .withValues(alpha: 0.2),
+                    color: sevColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                        color: _severityColor(status.severity!)
-                            .withValues(alpha: 0.6)),
+                    border: Border.all(color: sevColor.withValues(alpha: 0.6)),
                   ),
-                  child: Text(
-                    _severityLabel(status.severity!),
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: _severityColor(status.severity!),
-                        fontWeight: FontWeight.w600),
-                  ),
+                  child: Text(_severityLabel(status.severity!),
+                      style: TextStyle(fontSize: 11, color: sevColor, fontWeight: FontWeight.w600)),
                 ),
             ],
           ),
+          // ── 摘要 ────────────────────────────────────────────
           if (status.summary != null) ...[
             const SizedBox(height: 8),
-            Text(
-              status.summary!,
-              style: const TextStyle(
-                  color: Colors.white60, fontSize: 12, height: 1.5),
-            ),
+            Text(status.summary!,
+                style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.5)),
           ],
-          const SizedBox(height: 10),
+          // ── 以下需要 result 物件 ─────────────────────────────
+          if (result != null) ...[
+            // 主要錯誤
+            if (result.primaryError.zhName.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _aiSectionTitle('主要問題'),
+              const SizedBox(height: 4),
+              _aiTag(result.primaryError.zhName, sevColor),
+              if (result.primaryError.evidence.isNotEmpty)
+                ...result.primaryError.evidence.map((e) => _aiBullet(e)),
+            ],
+            // 教練評語
+            if (result.coachFeedback.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _aiSectionTitle('教練評語'),
+              const SizedBox(height: 4),
+              ...result.coachFeedback.map((f) => _aiBullet(f)),
+            ],
+            // 訓練建議
+            if (result.practiceSuggestions.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _aiSectionTitle('訓練建議'),
+              const SizedBox(height: 4),
+              ...result.practiceSuggestions.asMap().entries.map((entry) {
+                final i = entry.key;
+                final s = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 18, height: 18,
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF7C3AED),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text('${i + 1}',
+                                style: const TextStyle(color: Colors.white, fontSize: 10)),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(s.drill,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                if (s.reps.isNotEmpty)
+                                  Text(s.reps,
+                                      style: const TextStyle(color: Color(0xFF7C3AED), fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (s.instruction.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 24, top: 3),
+                          child: Text(s.instruction,
+                              style: const TextStyle(
+                                  color: Colors.white54, fontSize: 11, height: 1.4)),
+                        ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            // 下次目標
+            if (result.nextTrainingGoal.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _aiSectionTitle('下次目標'),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.flag_rounded, color: Color(0xFF4CAF50), size: 14),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(result.nextTrainingGoal,
+                        style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.4)),
+                  ),
+                ],
+              ),
+            ],
+          ],
+          // ── 按鈕列 ──────────────────────────────────────────
+          const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -672,8 +756,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 onPressed: () => _openOrSubmitAi(forceReanalyze: true),
                 style: TextButton.styleFrom(
                   foregroundColor: Colors.white38,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   textStyle: const TextStyle(fontSize: 12),
                 ),
                 child: const Text('重新分析'),
@@ -684,8 +767,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF7C3AED),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   textStyle: const TextStyle(fontSize: 13),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -698,6 +780,47 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       ),
     );
   }
+
+  Widget _aiSectionTitle(String text) => Text(
+    text,
+    style: const TextStyle(
+      color: Colors.white70,
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.5,
+    ),
+  );
+
+  Widget _aiTag(String text, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    margin: const EdgeInsets.only(bottom: 4),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.15),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color.withValues(alpha: 0.5)),
+    ),
+    child: Text(text,
+        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+  );
+
+  Widget _aiBullet(String text) => Padding(
+    padding: const EdgeInsets.only(left: 4, bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 5),
+          child: Icon(Icons.circle, color: Colors.white38, size: 5),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(text,
+              style: const TextStyle(
+                  color: Colors.white60, fontSize: 12, height: 1.4)),
+        ),
+      ],
+    ),
+  );
 
   String _aiStatusLabel(String s) => switch (s) {
     'pending'    => '準備中...',
