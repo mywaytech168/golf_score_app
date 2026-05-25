@@ -160,7 +160,7 @@ class _RecordScreenState extends State<RecordScreen> {
 
   Widget _buildCameraUI() {
     final cameraWidget = KeyedSubtree(
-      key: ValueKey(_config.cameraKey),
+      key: ValueKey('${_config.cameraKey}_$_isFrontCamera'),
       child: CameraAwesomeBuilder.custom(
         sensorConfig: _buildSensorConfig(),
         saveConfig: SaveConfig.video(
@@ -204,10 +204,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   top: 16,
                   right: 16,
                   child: GestureDetector(
-                    onTap: () async {
-                      await state.switchCameraSensor();
-                      if (mounted) setState(() => _isFrontCamera = !_isFrontCamera);
-                    },
+                    onTap: () => setState(() => _isFrontCamera = !_isFrontCamera),
                     child: Container(
                       width: 48,
                       height: 48,
