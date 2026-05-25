@@ -12,193 +12,126 @@ import WatchConnectivity
     GeneratedPluginRegistrant.register(with: self)
 
     if let controller = window?.rootViewController as? FlutterViewController {
-      setupKeepScreenChannel(messenger: controller.binaryMessenger)
-      setupAudioExtractorChannel(messenger: controller.binaryMessenger)
-      setupWatchChannel(messenger: controller.binaryMessenger)
+      let m = controller.binaryMessenger
+
+      // ── 已實作的 channel ─────────────────────────────────────
+      setupKeepScreenChannel(messenger: m)
+      setupAudioExtractorChannel(messenger: m)
+      setupWatchChannel(messenger: m)
+
+      // ── 分析進度 EventChannel ────────────────────────────────
+      FlutterEventChannel(
+        name: "com.example.golf_score_app/analysis_progress",
+        binaryMessenger: m
+      ).setStreamHandler(AnalysisProgressSink.shared)
+
+      // ── 新增 MethodChannel 實作 ──────────────────────────────
+      setupShareChannel(messenger: m)
+      setupVideoOverlayChannel(messenger: m)
+      registerTrimmerChannel(messenger: m)
+      registerFrameExtractorChannel(messenger: m)
+      registerPoseAnalyzerChannel(messenger: m)
+
+      // ── 骨架疊加 / 球體軌跡 ──────────────────────────────────
+      registerSkeletonOverlayChannel(messenger: m)
+      registerBallTrajectoryChannel(messenger: m)
+
+      // ── Stub channels（iOS 尚未實作）────────────────────────
+      setupStubChannel(name: "volume_button_channel", messenger: m)
     }
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
+}
 
-  private func setupWatchChannel(messenger: FlutterBinaryMessenger) {
-    // EventChannel 接收 Watch IMU 數據
-    let eventChannel = FlutterEventChannel(name: "watch_imu_stream", binaryMessenger: messenger)
-    
-    // MethodChannel 發送指令給 Watch
-    let methodChannel = FlutterMethodChannel(name: "watch_imu_control", binaryMessenger: messenger)
-    
-    if #available(iOS 15.0, *) {
-      let handler = WatchStreamHandler()
-      eventChannel.setStreamHandler(handler)
-      
-      methodChannel.setMethodCallHandler { call, result in
+// MARK: - Keep screen on
+
+private extension AppDelegate {
+  func setupKeepScreenChannel(messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: "keep_screen_on_channel", binaryMessenger: messenger)
+      .setMethodCallHandler { call, result in
         switch call.method {
-        case "startIMU":
-          handler.sendCommandToWatch(command: "start")
-          result(true)
-        case "stopIMU":
-          handler.sendCommandToWatch(command: "stop")
-          result(true)
-        case "isWatchReachable":
-          result(handler.session.isReachable)
-        case "isWatchAppInstalled":
-          result(handler.session.isWatchAppInstalled)
+        case "enable":
+          UIApplication.shared.isIdleTimerDisabled = true
+          result(nil)
+        case "disable":
+          UIApplication.shared.isIdleTimerDisabled = false
+          result(nil)
         default:
           result(FlutterMethodNotImplemented)
         }
       }
-    }
   }
 }
 
-@available(iOS 15.0, *)
-class WatchStreamHandler: NSObject, FlutterStreamHandler, WCSessionDelegate {
-  var sink: FlutterEventSink?
-  let session: WCSession
-
-  override init() {
-    if WCSession.isSupported() {
-      session = WCSession.default
-    } else {
-      fatalError("WCSession not supported")
-    }
-    super.init()
-    session.delegate = self
-    session.activate()
-  }
-  
-  func sendCommandToWatch(command: String) {
-    guard session.isReachable else {
-      print("Watch not reachable")
-      return
-    }
-    session.sendMessage(["command": command], replyHandler: nil) { error in
-      print("Send command error: \(error.localizedDescription)")
-    }
-  }
-
-  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-    sink = events
-    return nil
-  }
-
-  func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    sink = nil
-    return nil
-  }
-
-  func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
-    // no-op
-  }
-
-  func sessionDidBecomeInactive(_ session: WCSession) {
-    // no-op
-  }
-
-  func sessionDidDeactivate(_ session: WCSession) {
-    session.activate()
-  }
-
-  func session(_ session: WCSession, didReceiveMessage message: [String : Any]) {
-    DispatchQueue.main.async { [weak self] in
-      guard let sink = self?.sink else { return }
-      sink(message)
-    }
-  }
-}
-
-// Removed duplicate extension
+// MARK: - Audio extractor
 
 private extension AppDelegate {
-  private func setupKeepScreenChannel(messenger: FlutterBinaryMessenger) {
-    let channel = FlutterMethodChannel(
-      name: "keep_screen_on_channel",
-      binaryMessenger: messenger
-    )
-    channel.setMethodCallHandler { call, result in
-      switch call.method {
-      case "enable":
-        UIApplication.shared.isIdleTimerDisabled = true
-        result(nil)
-      case "disable":
-        UIApplication.shared.isIdleTimerDisabled = false
-        result(nil)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
-  }
+  func setupAudioExtractorChannel(messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: "audio_extractor_channel", binaryMessenger: messenger)
+      .setMethodCallHandler { [weak self] call, result in
+        guard call.method == "extractAudio" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        guard
+          let arguments = call.arguments as? [String: Any],
+          let videoPath = arguments["videoPath"] as? String,
+          !videoPath.isEmpty
+        else {
+          result(FlutterError(code: "invalid_args", message: "缺少影片路徑參數", details: nil))
+          return
+        }
 
-  private func setupAudioExtractorChannel(messenger: FlutterBinaryMessenger) {
-    let channel = FlutterMethodChannel(
-      name: "audio_extractor_channel",
-      binaryMessenger: messenger
-    )
-
-    channel.setMethodCallHandler { [weak self] call, result in
-      guard call.method == "extractAudio" else {
-        result(FlutterMethodNotImplemented)
-        return
-      }
-      guard
-        let arguments = call.arguments as? [String: Any],
-        let videoPath = arguments["videoPath"] as? String,
-        !videoPath.isEmpty
-      else {
-        result(FlutterError(code: "invalid_args", message: "缺少影片路徑參數", details: nil))
-        return
-      }
-
-      DispatchQueue.global(qos: .userInitiated).async {
-        do {
-          let extraction = try self?.extractAudio(toWavFrom: videoPath)
-          DispatchQueue.main.async {
-            if let extraction = extraction {
-              result([
-                "path": extraction.path,
-                "sampleRate": extraction.sampleRate,
-                "channels": extraction.channels,
-              ])
-            } else {
-              result(FlutterError(code: "extract_failed", message: "未知的錯誤", details: nil))
+        DispatchQueue.global(qos: .userInitiated).async {
+          do {
+            let extraction = try self?.extractAudio(toWavFrom: videoPath)
+            DispatchQueue.main.async {
+              if let extraction = extraction {
+                result([
+                  "path":       extraction.path,
+                  "sampleRate": extraction.sampleRate,
+                  "channels":   extraction.channels,
+                ])
+              } else {
+                result(FlutterError(code: "extract_failed", message: "未知的錯誤", details: nil))
+              }
+            }
+          } catch {
+            DispatchQueue.main.async {
+              result(FlutterError(code: "extract_failed", message: error.localizedDescription, details: nil))
             }
           }
-        } catch {
-          DispatchQueue.main.async {
-            result(FlutterError(code: "extract_failed", message: error.localizedDescription, details: nil))
-          }
         }
       }
-    }
   }
 
-  private func extractAudio(toWavFrom videoPath: String) throws -> (path: String, sampleRate: Int, channels: Int) {
-    let url = URL(fileURLWithPath: videoPath)
+  func extractAudio(toWavFrom videoPath: String) throws -> (path: String, sampleRate: Int, channels: Int) {
+    let url   = URL(fileURLWithPath: videoPath)
     let asset = AVURLAsset(url: url)
     guard let track = asset.tracks(withMediaType: .audio).first else {
-      throw NSError(domain: "AudioExtractor", code: -1, userInfo: [NSLocalizedDescriptionKey: "影片中找不到音訊軌道"])
+      throw NSError(domain: "AudioExtractor", code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "影片中找不到音訊軌道"])
     }
 
-      var sampleRate = 44100
-      var channels = 1
+    var sampleRate = 44100
+    var channels   = 1
 
-      if let desc = track.formatDescriptions.first {
-        let formatDesc = desc as! CMFormatDescription
-        if CMFormatDescriptionGetMediaType(formatDesc) == kCMMediaType_Audio {
-          if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee {
-            sampleRate = Int(asbd.mSampleRate)
-            channels = Int(asbd.mChannelsPerFrame)
-          }
-        }
+    if let desc = track.formatDescriptions.first {
+      let formatDesc = desc as! CMFormatDescription
+      if CMFormatDescriptionGetMediaType(formatDesc) == kCMMediaType_Audio,
+         let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee {
+        sampleRate = Int(asbd.mSampleRate)
+        channels   = Int(asbd.mChannelsPerFrame)
       }
-
+    }
 
     let outputSettings: [String: Any] = [
-      AVFormatIDKey: kAudioFormatLinearPCM,
-      AVSampleRateKey: sampleRate,
-      AVNumberOfChannelsKey: channels,
-      AVLinearPCMIsFloatKey: false,
-      AVLinearPCMBitDepthKey: 16,
+      AVFormatIDKey:             kAudioFormatLinearPCM,
+      AVSampleRateKey:           sampleRate,
+      AVNumberOfChannelsKey:     channels,
+      AVLinearPCMIsFloatKey:     false,
+      AVLinearPCMBitDepthKey:    16,
       AVLinearPCMIsBigEndianKey: false,
       AVLinearPCMIsNonInterleaved: false,
     ]
@@ -208,19 +141,19 @@ private extension AppDelegate {
     reader.add(output)
 
     guard reader.startReading() else {
-      throw reader.error ?? NSError(domain: "AudioExtractor", code: -2, userInfo: [NSLocalizedDescriptionKey: "無法啟動音訊讀取"])
+      throw reader.error ?? NSError(domain: "AudioExtractor", code: -2,
+                                    userInfo: [NSLocalizedDescriptionKey: "無法啟動音訊讀取"])
     }
 
-    let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    let tempDir   = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
     let outputURL = tempDir.appendingPathComponent("audio_extract_\(Int(Date().timeIntervalSince1970 * 1000)).wav")
     FileManager.default.createFile(atPath: outputURL.path, contents: Data(count: 44), attributes: nil)
 
     guard let handle = try? FileHandle(forWritingTo: outputURL) else {
-      throw NSError(domain: "AudioExtractor", code: -3, userInfo: [NSLocalizedDescriptionKey: "無法建立暫存檔案"])
+      throw NSError(domain: "AudioExtractor", code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "無法建立暫存檔案"])
     }
-    defer {
-      try? handle.close()
-    }
+    defer { try? handle.close() }
 
     try handle.seek(toOffset: 44)
     var totalBytes = 0
@@ -228,13 +161,11 @@ private extension AppDelegate {
     while reader.status == .reading {
       guard
         let sampleBuffer = output.copyNextSampleBuffer(),
-        let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer)
-      else {
-        break
-      }
+        let blockBuffer  = CMSampleBufferGetDataBuffer(sampleBuffer)
+      else { break }
 
       let length = CMBlockBufferGetDataLength(blockBuffer)
-      var data = Data(count: length)
+      var data   = Data(count: length)
       data.withUnsafeMutableBytes { pointer in
         if let baseAddress = pointer.baseAddress {
           CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
@@ -246,29 +177,19 @@ private extension AppDelegate {
     }
 
     if reader.status == .failed || reader.status == .unknown {
-      throw reader.error ?? NSError(domain: "AudioExtractor", code: -4, userInfo: [NSLocalizedDescriptionKey: "音訊讀取失敗"])
+      throw reader.error ?? NSError(domain: "AudioExtractor", code: -4,
+                                    userInfo: [NSLocalizedDescriptionKey: "音訊讀取失敗"])
     }
 
-    writeWavHeader(
-      fileURL: outputURL,
-      pcmBytes: totalBytes,
-      sampleRate: sampleRate,
-      channels: channels,
-      bitsPerSample: 16
-    )
+    writeWavHeader(fileURL: outputURL, pcmBytes: totalBytes,
+                   sampleRate: sampleRate, channels: channels, bitsPerSample: 16)
     return (path: outputURL.path, sampleRate: sampleRate, channels: channels)
   }
 
-  private func writeWavHeader(
-    fileURL: URL,
-    pcmBytes: Int,
-    sampleRate: Int,
-    channels: Int,
-    bitsPerSample: Int
-  ) {
-    let byteRate = sampleRate * channels * bitsPerSample / 8
+  func writeWavHeader(fileURL: URL, pcmBytes: Int, sampleRate: Int, channels: Int, bitsPerSample: Int) {
+    let byteRate   = sampleRate * channels * bitsPerSample / 8
     let blockAlign = UInt16(channels * bitsPerSample / 8)
-    var header = Data()
+    var header     = Data()
     header.append("RIFF".data(using: .ascii)!)
     header.append(UInt32(36 + pcmBytes).littleEndianData)
     header.append("WAVE".data(using: .ascii)!)
@@ -290,6 +211,172 @@ private extension AppDelegate {
     }
   }
 }
+
+// MARK: - Watch connectivity
+
+@available(iOS 15.0, *)
+class WatchStreamHandler: NSObject, FlutterStreamHandler, WCSessionDelegate {
+  var sink: FlutterEventSink?
+  let session: WCSession
+
+  override init() {
+    if WCSession.isSupported() {
+      session = WCSession.default
+    } else {
+      fatalError("WCSession not supported")
+    }
+    super.init()
+    session.delegate = self
+    session.activate()
+  }
+
+  func sendCommandToWatch(command: String) {
+    guard session.isReachable else { return }
+    session.sendMessage(["command": command], replyHandler: nil) { error in
+      print("Send command error: \(error.localizedDescription)")
+    }
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    sink = events
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    sink = nil
+    return nil
+  }
+
+  func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+  func sessionDidBecomeInactive(_ session: WCSession) {}
+  func sessionDidDeactivate(_ session: WCSession) { session.activate() }
+
+  func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    DispatchQueue.main.async { [weak self] in
+      self?.sink?(message)
+    }
+  }
+}
+
+private extension AppDelegate {
+  func setupWatchChannel(messenger: FlutterBinaryMessenger) {
+    let eventChannel  = FlutterEventChannel(name: "watch_imu_stream",   binaryMessenger: messenger)
+    let methodChannel = FlutterMethodChannel(name: "watch_imu_control", binaryMessenger: messenger)
+
+    if #available(iOS 15.0, *) {
+      let handler = WatchStreamHandler()
+      eventChannel.setStreamHandler(handler)
+
+      methodChannel.setMethodCallHandler { call, result in
+        switch call.method {
+        case "startIMU":
+          handler.sendCommandToWatch(command: "start")
+          result(true)
+        case "stopIMU":
+          handler.sendCommandToWatch(command: "stop")
+          result(true)
+        case "isWatchReachable":
+          result(handler.session.isReachable)
+        case "isWatchAppInstalled":
+          result(handler.session.isWatchAppInstalled)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+  }
+}
+
+// MARK: - Share intent
+
+private extension AppDelegate {
+  func setupShareChannel(messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: "share_intent_channel", binaryMessenger: messenger)
+      .setMethodCallHandler { [weak self] call, result in
+        guard call.method == "shareToPackage",
+              let args     = call.arguments as? [String: Any],
+              let filePath = args["filePath"] as? String
+        else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+
+        let fileURL = URL(fileURLWithPath: filePath)
+        guard FileManager.default.fileExists(atPath: filePath) else {
+          result(FlutterError(code: "file_not_found", message: "找不到指定檔案", details: nil))
+          return
+        }
+
+        DispatchQueue.main.async {
+          let vc = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+          if let text = args["text"] as? String {
+            vc.setValue(text, forKey: "subject")
+          }
+          // iPad support
+          if let popover = vc.popoverPresentationController {
+            popover.sourceView = self?.window?.rootViewController?.view
+            popover.sourceRect = CGRect(x: UIScreen.main.bounds.midX,
+                                        y: UIScreen.main.bounds.midY,
+                                        width: 0, height: 0)
+            popover.permittedArrowDirections = []
+          }
+          self?.window?.rootViewController?.present(vc, animated: true)
+          result(true)
+        }
+      }
+  }
+}
+
+// MARK: - Video overlay (stub that copies file, mirrors Android behaviour)
+
+private extension AppDelegate {
+  func setupVideoOverlayChannel(messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: "video_overlay_channel", binaryMessenger: messenger)
+      .setMethodCallHandler { call, result in
+        guard call.method == "processVideo",
+              let args       = call.arguments as? [String: Any],
+              let inputPath  = args["inputPath"]  as? String,
+              let outputPath = args["outputPath"] as? String
+        else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+          do {
+            let dstURL = URL(fileURLWithPath: outputPath)
+            try FileManager.default.createDirectory(
+              at: dstURL.deletingLastPathComponent(),
+              withIntermediateDirectories: true
+            )
+            try? FileManager.default.removeItem(at: dstURL)
+            try FileManager.default.copyItem(
+              at: URL(fileURLWithPath: inputPath),
+              to: dstURL
+            )
+            DispatchQueue.main.async { result(outputPath) }
+          } catch {
+            DispatchQueue.main.async {
+              result(FlutterError(code: "overlay_failed", message: error.localizedDescription, details: nil))
+            }
+          }
+        }
+      }
+  }
+}
+
+// MARK: - Stub channel (returns notImplemented so Dart can catch gracefully)
+
+private extension AppDelegate {
+  func setupStubChannel(name: String, messenger: FlutterBinaryMessenger) {
+    FlutterMethodChannel(name: name, binaryMessenger: messenger)
+      .setMethodCallHandler { _, result in
+        result(FlutterMethodNotImplemented)
+      }
+  }
+}
+
+// MARK: - Data helpers
 
 private extension UInt16 {
   var littleEndianData: Data {
