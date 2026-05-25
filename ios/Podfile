@@ -1,5 +1,5 @@
 # Uncomment this line to define a global platform for your project
-platform :ios, '14.0'
+platform :ios, '15.5'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -41,9 +41,9 @@ post_install do |installer|
     # Flutter 原本需要的設定（一定要留）
     flutter_additional_ios_build_settings(target)
 
-    # 強制所有 Pods 使用 iOS 14.0（解 Xcode 26 問題）
+    # 強制所有 Pods 使用 iOS 15.5（解 Xcode 26 問題）
     target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
     end
   end
 end
