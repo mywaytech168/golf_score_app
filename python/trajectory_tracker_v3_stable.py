@@ -15,8 +15,8 @@ from datetime import datetime
 # ============================================================
 BATCH_MODE = False
 INPUT_DIR = r"Y:\Software Engineering\Project\Golf\Test_data\hit_catch\V1"
-BATCH_OUTPUT_DIR = r"Y:\Software Engineering\Project\Golf\Test_data\hit_catch\V1\traj_out"
-VIDEO_PATH = r"Y:\Software Engineering\Project\Golf\Test_data\hit_catch\hit_0016_skeleton.mp4"
+BATCH_OUTPUT_DIR = r""
+VIDEO_PATH = r"hit_003.mp4"
 AUTO_DISABLE_UI_IN_BATCH = True
 
 # ============================================================

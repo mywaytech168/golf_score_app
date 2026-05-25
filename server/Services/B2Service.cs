@@ -139,5 +139,39 @@ namespace UploadServer.Services
                 _logger.LogWarning(ex, "B2 物件刪除失敗: {Key}", objectKey);
             }
         }
+
+        // ── 問題回饋圖片路徑規則 ────────────────────────────────────────
+        public static string FeedbackImageKey(string imageId) =>
+            $"feedback_images/{imageId}.jpg";
+
+        /// <summary>產生回饋圖片上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
+        public string GenerateFeedbackImageUploadUrl(string imageId, int expiryMinutes = 10)
+        {
+            var key = FeedbackImageKey(imageId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "image/jpeg",
+            };
+            _logger.LogInformation("產生回饋圖片 PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
+        /// <summary>產生回饋圖片下載的 pre-signed GET URL（管理員查看用）</summary>
+        public string GenerateFeedbackImageDownloadUrl(string imageId, int expiryMinutes = 30)
+        {
+            var key = FeedbackImageKey(imageId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName = _bucketName,
+                Key        = key,
+                Verb       = HttpVerb.GET,
+                Expires    = DateTime.UtcNow.AddMinutes(expiryMinutes),
+            };
+            return _s3.GetPreSignedURL(request);
+        }
     }
 }

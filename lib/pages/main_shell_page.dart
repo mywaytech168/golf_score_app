@@ -133,8 +133,7 @@ class _MainShellPageState extends State<MainShellPage> {
         audioTags: audioTags,
       );
       
-      final updated = <RecordingHistoryEntry>[entry, ...existing];
-      await RecordingHistoryStorage.instance.saveHistory(updated);
+      await RecordingHistoryStorage.instance.upsertEntry(entry);
       
       setState(() {
         _recordingHistory.insert(0, entry);

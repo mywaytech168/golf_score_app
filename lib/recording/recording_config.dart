@@ -21,18 +21,36 @@ enum FrameRate {
   const FrameRate(this.value, this.label);
 }
 
+/// 預覽／錄製裁切比例
+enum AspectRatioMode {
+  square('1:1',   1 / 1),
+  standard('4:3', 4 / 3),
+  wide('16:9',    16 / 9),
+  full('全螢幕',   null);
+
+  /// 顯示標籤
+  final String label;
+
+  /// 寬高比；null 表示全螢幕（不做裁切）
+  final double? ratio;
+
+  const AspectRatioMode(this.label, this.ratio);
+}
+
 /// 錄製設定
 class RecordingConfig {
   VideoQuality quality;
   FrameRate fps;
+  AspectRatioMode aspectRatio;
 
   RecordingConfig({
     this.quality = VideoQuality.hd,
     this.fps = FrameRate.fps30,
+    this.aspectRatio = AspectRatioMode.full,
   });
 
   /// 給 CameraAwesomeBuilder 的 key，設定變更時強制重建相機
-  String get cameraKey => '${quality.name}_${fps.value}';
+  String get cameraKey => '${quality.name}_${fps.value}_${aspectRatio.name}';
 
   /// 轉為 camerawesome VideoOptions
   VideoOptions toVideoOptions() => VideoOptions(

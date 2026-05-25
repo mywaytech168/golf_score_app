@@ -494,9 +494,9 @@ namespace UploadServer.Data
                     .HasMaxLength(255)
                     .IsRequired(false);
 
-                entity.Property(e => e.AttachedImageBase64)
-                    .HasColumnName("attached_image_base64")
-                    .HasColumnType("MEDIUMTEXT")
+                entity.Property(e => e.AttachedImageB2Key)
+                    .HasColumnName("attached_image_b2_key")
+                    .HasMaxLength(500)
                     .IsRequired(false);
 
                 entity.HasIndex(e => e.UserId).HasDatabaseName("idx_feedback_user_id");

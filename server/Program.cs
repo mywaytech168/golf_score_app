@@ -196,6 +196,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// 提供 wwwroot 靜態檔案（包含管理後臺 /admin/）
+app.UseStaticFiles();
+
 // 安全 HTTP headers
 app.Use(async (ctx, next) =>
 {

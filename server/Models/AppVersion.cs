@@ -33,6 +33,12 @@ namespace UploadServer.Models
         /// <summary>發布日期，e.g. "2026-05-25"</summary>
         public string ReleaseDate { get; set; } = string.Empty;
 
+        /// <summary>
+        /// 伺服器自託管 APK 檔名（僅 android）；
+        /// e.g. "android-1.2.0.apk"；null 表示未上傳，改用商店連結。
+        /// </summary>
+        public string? ApkFileName { get; set; }
+
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 }

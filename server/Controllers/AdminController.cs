@@ -1,5 +1,10 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using UploadServer.Data;
 using UploadServer.DTOs;
 using UploadServer.Services;
@@ -17,22 +22,98 @@ namespace UploadServer.Controllers
         private readonly IConfiguration _config;
         private readonly ILogger<AdminController> _logger;
         private readonly AppVersionService _versionService;
+        private readonly B2Service _b2;
+        private readonly IWebHostEnvironment _env;
 
         public AdminController(
             VideoDbContext db,
             IConfiguration config,
             ILogger<AdminController> logger,
-            AppVersionService versionService)
+            AppVersionService versionService,
+            B2Service b2,
+            IWebHostEnvironment env)
         {
             _db             = db;
             _config         = config;
             _logger         = logger;
             _versionService = versionService;
+            _b2             = b2;
+            _env            = env;
         }
 
-        private bool IsAdmin() =>
-            Request.Headers.TryGetValue("X-Admin-Key", out var key) &&
-            key == _config["Admin:SecretKey"];
+        // ── 認證輔助 ──────────────────────────────────────────────
+
+        private bool IsAdmin()
+        {
+            // 支援兩種方式：Bearer JWT（登入後）或 X-Admin-Key（舊相容）
+            if (Request.Headers.TryGetValue("Authorization", out var authHeader))
+            {
+                var token = authHeader.ToString().Replace("Bearer ", "").Trim();
+                if (ValidateAdminJwt(token)) return true;
+            }
+            if (Request.Headers.TryGetValue("X-Admin-Key", out var key))
+                return key == _config["Admin:SecretKey"];
+            return false;
+        }
+
+        private bool ValidateAdminJwt(string token)
+        {
+            try
+            {
+                var secret  = _config["Admin:JwtSecret"] ?? _config["Jwt:Secret"] ?? "fallback-secret";
+                var handler = new JwtSecurityTokenHandler();
+                handler.ValidateToken(token, new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
+                    ValidateIssuer           = true,
+                    ValidIssuer              = "GolfAdmin",
+                    ValidateAudience         = true,
+                    ValidAudience            = "GolfAdminUI",
+                    ClockSkew                = TimeSpan.Zero,
+                }, out _);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 登入
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// POST /api/admin/login — 管理員帳密登入，回傳 JWT
+        /// Body: { "username": "admin", "password": "admin" }
+        /// </summary>
+        [HttpPost("login")]
+        public IActionResult Login([FromBody] AdminLoginRequest req)
+        {
+            var expectedUser = _config["Admin:Username"] ?? "admin";
+            var expectedPass = _config["Admin:Password"] ?? "admin";
+
+            if (req.Username != expectedUser || req.Password != expectedPass)
+            {
+                _logger.LogWarning("管理員登入失敗: username={Username}", req.Username);
+                return StatusCode(401, new { message = "帳號或密碼錯誤" });
+            }
+
+            var secret  = _config["Admin:JwtSecret"] ?? _config["Jwt:Secret"] ?? "fallback-secret";
+            var key     = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+            var creds   = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var expires = DateTime.UtcNow.AddHours(8);
+
+            var jwt = new JwtSecurityToken(
+                issuer:             "GolfAdmin",
+                audience:           "GolfAdminUI",
+                claims:             [new Claim("role", "admin")],
+                expires:            expires,
+                signingCredentials: creds
+            );
+            var tokenStr = new JwtSecurityTokenHandler().WriteToken(jwt);
+
+            _logger.LogInformation("管理員登入成功: {Username}", req.Username);
+            return Ok(new { token = tokenStr, expiresAt = expires.ToString("yyyy-MM-ddTHH:mm:ssZ") });
+        }
 
         /// <summary>
         /// GET /api/admin/feedbacks — 查看用戶回饋列表
@@ -66,7 +147,11 @@ namespace UploadServer.Controllers
                     f.Type,
                     f.Text,
                     f.AttachedVideoId,
-                    HasImage  = f.AttachedImageBase64 != null,
+                    HasImage      = f.AttachedImageB2Key != null,
+                    f.AdminReply,
+                    AdminRepliedAt = f.AdminRepliedAt.HasValue
+                                     ? f.AdminRepliedAt.Value.ToString("yyyy-MM-dd HH:mm:ss")
+                                     : (string?)null,
                     CreatedAt = f.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                 })
                 .ToListAsync();
@@ -76,11 +161,34 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// GET /api/admin/feedbacks/{id}/image — 取得回饋圖片的臨時下載 URL
+        /// </summary>
+        [HttpGet("feedbacks/{id}/image")]
+        public async Task<IActionResult> GetFeedbackImageUrl(string id)
+        {
+            if (!IsAdmin())
+                return StatusCode(403, new { message = "需要管理員權限" });
+
+            var feedback = await _db.UserFeedbacks.FindAsync(id);
+            if (feedback == null)
+                return NotFound(new { message = "回饋不存在" });
+
+            if (string.IsNullOrEmpty(feedback.AttachedImageB2Key))
+                return NotFound(new { message = "此回饋無附加圖片" });
+
+            var url = _b2.GenerateFeedbackImageDownloadUrl(feedback.AttachedImageB2Key);
+            return Ok(new { data = new { url } });
+        }
+
+        /// <summary>
         /// GET /api/admin/users — 查看用戶列表（含方案與球數統計）
         /// Query: page, size
         /// </summary>
         [HttpGet("users")]
-        public async Task<IActionResult> GetUsers([FromQuery] int page = 1, [FromQuery] int size = 50)
+        public async Task<IActionResult> GetUsers(
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 50,
+            [FromQuery] string? search = null)
         {
             if (!IsAdmin())
                 return StatusCode(403, new { message = "需要管理員權限" });
@@ -88,8 +196,12 @@ namespace UploadServer.Controllers
             page = Math.Max(1, page);
             size = Math.Clamp(size, 1, 200);
 
-            var total = await _db.Users.CountAsync();
-            var items = await _db.Users
+            var query = _db.Users.AsQueryable();
+            if (!string.IsNullOrEmpty(search))
+                query = query.Where(u => u.Email.Contains(search) || u.Username.Contains(search));
+
+            var total = await query.CountAsync();
+            var items = await query
                 .OrderByDescending(u => u.CreatedAt)
                 .Skip((page - 1) * size)
                 .Take(size)
@@ -197,6 +309,292 @@ namespace UploadServer.Controllers
                 _logger.LogError(ex, "更新版本設定失敗 platform={Platform}", platform);
                 return StatusCode(500, new { message = "伺服器錯誤" });
             }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // AI 分析記錄
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/admin/analyses — 查看所有 AI 分析記錄
+        /// Query: page, size, status (pending|queued|processing|completed|failed)
+        /// </summary>
+        [HttpGet("analyses")]
+        public async Task<IActionResult> GetAnalyses(
+            [FromQuery] int page     = 1,
+            [FromQuery] int size     = 50,
+            [FromQuery] string? status = null,
+            [FromQuery] string? userId = null)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            page = Math.Max(1, page);
+            size = Math.Clamp(size, 1, 200);
+
+            var query = _db.AiCoachAnalyses.AsQueryable();
+            if (!string.IsNullOrEmpty(status)) query = query.Where(a => a.Status == status);
+            if (!string.IsNullOrEmpty(userId)) query = query.Where(a => a.UserId == userId);
+
+            var total = await query.CountAsync();
+            var items = await query
+                .OrderByDescending(a => a.CreatedAt)
+                .Skip((page - 1) * size)
+                .Take(size)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.UserId,
+                    a.VideoId,
+                    a.Status,
+                    a.ErrorTypeHint,
+                    a.Severity,
+                    a.Summary,
+                    a.RetryCount,
+                    HasResult      = a.ResultJson != null,
+                    HasOnnxResult  = a.OnnxResultJson != null,
+                    CreatedAt      = a.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                    CompletedAt    = a.CompletedAt.HasValue
+                                     ? a.CompletedAt.Value.ToString("yyyy-MM-dd HH:mm:ss")
+                                     : (string?)null,
+                })
+                .ToListAsync();
+
+            return Ok(new { total, page, size, data = items });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 球數流水帳
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/admin/ball-records — 查看球數流水帳
+        /// Query: page, size, userId, reason
+        /// </summary>
+        [HttpGet("ball-records")]
+        public async Task<IActionResult> GetBallRecords(
+            [FromQuery] int page      = 1,
+            [FromQuery] int size      = 50,
+            [FromQuery] string? userId = null,
+            [FromQuery] string? reason = null)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            page = Math.Max(1, page);
+            size = Math.Clamp(size, 1, 200);
+
+            var query = _db.BallRecords.AsQueryable();
+            if (!string.IsNullOrEmpty(userId)) query = query.Where(b => b.UserId == userId);
+            if (!string.IsNullOrEmpty(reason)) query = query.Where(b => b.Reason == reason);
+
+            var total = await query.CountAsync();
+            var items = await query
+                .OrderByDescending(b => b.CreatedAt)
+                .Skip((page - 1) * size)
+                .Take(size)
+                .Select(b => new
+                {
+                    b.Id,
+                    b.UserId,
+                    b.Reason,
+                    b.Delta,
+                    b.BalanceAfter,
+                    b.RefId,
+                    CreatedAt = b.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                })
+                .ToListAsync();
+
+            return Ok(new { total, page, size, data = items });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 用戶球數調整
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// POST /api/admin/users/{id}/balls — 手動調整某用戶球數
+        /// Body: { "delta": 10, "reason": "manual" }
+        /// </summary>
+        [HttpPost("users/{id}/balls")]
+        public async Task<IActionResult> AdjustUserBalls(string id, [FromBody] AdminAdjustBallsRequest req)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+            if (req.Delta == 0) return BadRequest(new { message = "delta 不可為 0" });
+
+            var user = await _db.Users.FindAsync(id);
+            if (user == null) return NotFound(new { message = "用戶不存在" });
+
+            user.BonusBalls = Math.Max(0, user.BonusBalls + req.Delta);
+            user.UpdatedAt  = DateTime.UtcNow;
+
+            _db.BallRecords.Add(new Models.BallRecord
+            {
+                UserId       = id,
+                Reason       = "manual",
+                Delta        = req.Delta,
+                BalanceAfter = user.BonusBalls,
+                RefId        = null,
+            });
+
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("管理員調整球數 userId={UserId} delta={Delta} balance={Balance}",
+                id, req.Delta, user.BonusBalls);
+
+            return Ok(new { message = "球數已調整", userId = id, delta = req.Delta, bonusBalls = user.BonusBalls });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 管理員回覆 Feedback
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// POST /api/admin/feedbacks/{id}/reply — 管理員回覆用戶回饋
+        /// Body: { "reply": "感謝您的回饋..." }
+        /// </summary>
+        [HttpPost("feedbacks/{id}/reply")]
+        public async Task<IActionResult> ReplyFeedback(string id, [FromBody] AdminFeedbackReplyRequest req)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+            if (string.IsNullOrWhiteSpace(req.Reply)) return BadRequest(new { message = "回覆內容不可為空" });
+
+            var feedback = await _db.UserFeedbacks.FindAsync(id);
+            if (feedback == null) return NotFound(new { message = "回饋不存在" });
+
+            feedback.AdminReply     = req.Reply.Trim();
+            feedback.AdminRepliedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("管理員回覆 Feedback id={Id}", id);
+            return Ok(new { message = "回覆已儲存", feedbackId = id });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // APK 自託管上傳 / 刪除
+        // ════════════════════════════════════════════════════════════════
+
+        private string ApksDir => Path.Combine(_env.WebRootPath, "apks");
+        private string BaseUrl  => (_config["App:BaseUrl"] ?? "https://tekswing.api.atk.tw").TrimEnd('/');
+
+        /// <summary>
+        /// POST /api/admin/app/version/android/apk
+        /// Content-Type: multipart/form-data  (field name: "file")
+        /// 
+        /// 上傳 APK 至 wwwroot/apks/，並自動更新 android 版本的 UpdateUrl。
+        /// 回應: { message, fileName, downloadUrl, sizeKb }
+        /// </summary>
+        [HttpPost("app/version/android/apk")]
+        [RequestSizeLimit(300 * 1024 * 1024)]   // 300 MB hard cap
+        public async Task<IActionResult> UploadApk(IFormFile file)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            if (file == null || file.Length == 0)
+                return BadRequest(new { message = "未收到檔案" });
+
+            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (ext != ".apk")
+                return BadRequest(new { message = "只接受 .apk 檔案" });
+
+            var maxMb = _config.GetValue<int>("App:ApkMaxMb", 200);
+            if (file.Length > maxMb * 1024L * 1024L)
+                return BadRequest(new { message = $"檔案超過 {maxMb} MB 上限" });
+
+            // 取得 android 版本號，用於命名
+            var record = await _db.AppVersions.FirstOrDefaultAsync(v => v.Platform == "android");
+            var version = record?.LatestVersion ?? "unknown";
+
+            // 安全化版本號（只保留字母、數字、點）
+            var safeVersion = System.Text.RegularExpressions.Regex.Replace(version, @"[^\w\.]", "");
+            var fileName    = $"android-{safeVersion}.apk";
+
+            Directory.CreateDirectory(ApksDir);
+
+            // 寫入版本檔 + 覆蓋 latest
+            var versionedPath = Path.Combine(ApksDir, fileName);
+            var latestPath    = Path.Combine(ApksDir, "android-latest.apk");
+
+            await using (var stream = System.IO.File.Create(versionedPath))
+                await file.CopyToAsync(stream);
+
+            System.IO.File.Copy(versionedPath, latestPath, overwrite: true);
+
+            // 更新 AppVersion.UpdateUrl & ApkFileName
+            var downloadUrl = $"{BaseUrl}/apks/{fileName}";
+            if (record != null)
+            {
+                record.UpdateUrl   = downloadUrl;
+                record.ApkFileName = fileName;
+                record.UpdatedAt   = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("管理員上傳 APK: {File} size={Size}KB", fileName, file.Length / 1024);
+
+            return Ok(new
+            {
+                message     = "APK 上傳成功",
+                fileName,
+                downloadUrl,
+                latestUrl   = $"{BaseUrl}/apks/android-latest.apk",
+                sizeKb      = file.Length / 1024,
+            });
+        }
+
+        /// <summary>
+        /// GET /api/admin/app/version/android/apk — 查詢目前伺服器上的 APK 狀態
+        /// </summary>
+        [HttpGet("app/version/android/apk")]
+        public async Task<IActionResult> GetApkInfo()
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            var record = await _db.AppVersions.AsNoTracking()
+                            .FirstOrDefaultAsync(v => v.Platform == "android");
+
+            if (record?.ApkFileName == null)
+                return Ok(new { exists = false });
+
+            var filePath = Path.Combine(ApksDir, record.ApkFileName);
+            var exists   = System.IO.File.Exists(filePath);
+            var sizeKb   = exists ? (long?)new FileInfo(filePath).Length / 1024 : null;
+
+            return Ok(new
+            {
+                exists,
+                fileName    = record.ApkFileName,
+                downloadUrl = $"{BaseUrl}/apks/{record.ApkFileName}",
+                latestUrl   = $"{BaseUrl}/apks/android-latest.apk",
+                sizeKb,
+                updatedAt   = record.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+            });
+        }
+
+        /// <summary>
+        /// DELETE /api/admin/app/version/android/apk — 刪除伺服器上的 APK 檔案
+        /// </summary>
+        [HttpDelete("app/version/android/apk")]
+        public async Task<IActionResult> DeleteApk()
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            var record = await _db.AppVersions.FirstOrDefaultAsync(v => v.Platform == "android");
+
+            if (record?.ApkFileName != null)
+            {
+                var path = Path.Combine(ApksDir, record.ApkFileName);
+                if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
+
+                var latest = Path.Combine(ApksDir, "android-latest.apk");
+                if (System.IO.File.Exists(latest)) System.IO.File.Delete(latest);
+
+                record.ApkFileName = null;
+                record.UpdateUrl   = string.Empty;
+                record.UpdatedAt   = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("管理員刪除 APK");
+            return Ok(new { message = "APK 已刪除" });
         }
     }
 }

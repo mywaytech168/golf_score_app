@@ -149,7 +149,7 @@ class _RecordScreenState extends State<RecordScreen> {
   // ─── 相機 UI ─────────────────────────────────────────────────────────────
 
   Widget _buildCameraUI() {
-    return KeyedSubtree(
+    final cameraWidget = KeyedSubtree(
       key: ValueKey(_config.cameraKey),
       child: CameraAwesomeBuilder.custom(
         saveConfig: SaveConfig.video(
@@ -234,6 +234,21 @@ class _RecordScreenState extends State<RecordScreen> {
             ],
           );
         },
+      ),
+    );
+
+    // 全螢幕：直接回傳相機 widget；其他比例：加黑框裁切
+    final ratio = _config.aspectRatio.ratio;
+    if (ratio == null) {
+      return cameraWidget;
+    }
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: ratio,
+          child: ClipRect(child: cameraWidget),
+        ),
       ),
     );
   }
@@ -371,9 +386,18 @@ class _RecordScreenState extends State<RecordScreen> {
           ? DateTime.now().difference(_recordingStartTime!).inMilliseconds / 1000.0
           : 0.0;
 
+      // Android NV21: raw buffer dimensions are in sensor (landscape) space.
+      // ML Kit applies the rotation metadata and returns landmarks in visual space.
+      // If rotation is 90° or 270°, swap width/height to get the visual dimensions.
+      final isRotated = image.rotation == InputAnalysisImageRotation.rotation90deg ||
+          image.rotation == InputAnalysisImageRotation.rotation270deg;
+      final visualSize = isRotated
+          ? Size(image.height.toDouble(), image.width.toDouble())
+          : Size(image.width.toDouble(), image.height.toDouble());
+
       setState(() {
         _poses = poses;
-        _analysisImageSize = Size(image.width.toDouble(), image.height.toDouble());
+        _analysisImageSize = visualSize;
       });
 
       if (_isRecording) {
@@ -383,8 +407,8 @@ class _RecordScreenState extends State<RecordScreen> {
                 timeSec: timeSec,
                 poseUpdateId: _frameCount,
                 pose: poses.first,
-                imgWidth: image.width.toDouble(),
-                imgHeight: image.height.toDouble(),
+                imgWidth: visualSize.width,
+                imgHeight: visualSize.height,
               )
             : PoseFrameModel.empty(
                 frame: _frameCount,
@@ -407,6 +431,7 @@ class _RecordScreenState extends State<RecordScreen> {
     // 暫存設定，確認後才套用
     VideoQuality pendingQuality = _config.quality;
     FrameRate pendingFps = _config.fps;
+    AspectRatioMode pendingRatio = _config.aspectRatio;
 
     showModalBottomSheet<void>(
       context: context,
@@ -453,6 +478,26 @@ class _RecordScreenState extends State<RecordScreen> {
                               label: q.label,
                               selected: selected,
                               onTap: () => setSheet(() => pendingQuality = q),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // ── 影片尺寸 ──────────────────────────────────────
+                    const Text('影片尺寸', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: AspectRatioMode.values.map((r) {
+                        final selected = pendingRatio == r;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: _SettingChip(
+                              label: r.label,
+                              selected: selected,
+                              onTap: () => setSheet(() => pendingRatio = r),
                             ),
                           ),
                         );
@@ -509,12 +554,14 @@ class _RecordScreenState extends State<RecordScreen> {
                         onPressed: () {
                           Navigator.pop(ctx);
                           final changed = pendingQuality != _config.quality ||
-                              pendingFps != _config.fps;
+                              pendingFps != _config.fps ||
+                              pendingRatio != _config.aspectRatio;
                           if (changed) {
                             setState(() {
                               _config = RecordingConfig(
                                 quality: pendingQuality,
                                 fps: pendingFps,
+                                aspectRatio: pendingRatio,
                               );
                             });
                           }
@@ -585,7 +632,7 @@ class _ConfigBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        '${config.quality.label}  ${config.fps.label}',
+        '${config.quality.label}  ${config.fps.label}  ${config.aspectRatio.label}',
         style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
       ),
     );

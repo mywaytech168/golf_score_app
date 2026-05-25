@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using UploadServer.Data;
 
@@ -11,9 +12,11 @@ using UploadServer.Data;
 namespace UploadServer.Migrations
 {
     [DbContext(typeof(VideoDbContext))]
-    partial class VideoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260525043417_FeedbackImageB2")]
+    partial class FeedbackImageB2
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -160,9 +163,6 @@ namespace UploadServer.Migrations
                         .HasColumnName("id");
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ApkFileName")
-                        .HasColumnType("longtext");
 
                     b.Property<bool>("ForceUpdate")
                         .ValueGeneratedOnAdd()
@@ -682,12 +682,6 @@ namespace UploadServer.Migrations
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
                         .HasColumnName("id");
-
-                    b.Property<DateTime?>("AdminRepliedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("AdminReply")
-                        .HasColumnType("longtext");
 
                     b.Property<string>("AttachedImageB2Key")
                         .HasMaxLength(500)

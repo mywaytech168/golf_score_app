@@ -31,4 +31,14 @@ namespace UploadServer.DTOs
         List<string> ReleaseNotes,
         string ReleaseDate
     );
+
+    // ════════════════════════════════════════════════════════════════
+    // 管理員 API 請求 DTOs
+    // ════════════════════════════════════════════════════════════════
+
+    public record AdminLoginRequest(string Username, string Password);
+
+    public record AdminAdjustBallsRequest(int Delta);
+
+    public record AdminFeedbackReplyRequest(string Reply);
 }

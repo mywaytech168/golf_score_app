@@ -128,12 +128,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
 
   /// 將 entry 更新寫入持久化儲存
   Future<void> _persistEntry(RecordingHistoryEntry updated) async {
-    final all = await RecordingHistoryStorage.instance.loadHistory();
-    final idx = all.indexWhere((e) => e.filePath == updated.filePath);
-    if (idx >= 0) {
-      all[idx] = updated;
-      await RecordingHistoryStorage.instance.saveHistory(all);
-    }
+    await RecordingHistoryStorage.instance.upsertEntry(updated);
   }
 
   @override

@@ -662,6 +662,25 @@ class VideoServerClient {
     }
   }
 
+  /// 取得回饋圖片上傳的 pre-signed PUT URL
+  ///
+  /// 回傳格式：`{ "uploadUrl": "...", "imageId": "..." }`
+  Future<Map<String, dynamic>?> getFeedbackImageUploadUrl() async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/rewards/feedback/image-upload-url');
+      final response = await http.get(url, headers: headers);
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return json['data'] as Map<String, dynamic>?;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ 取得回饋圖片上傳 URL 異常: $e');
+      return null;
+    }
+  }
+
   /// 提交問題回饋並認領獎勵（每日限 1 次）
   ///
   /// [type] = 'bug' | 'feature' | 'other'
@@ -670,7 +689,7 @@ class VideoServerClient {
     required String type,
     required String text,
     String? videoId,
-    String? imageBase64,
+    String? imageB2Key,
     bool isRetry = false,
   }) async {
     try {
@@ -681,7 +700,7 @@ class VideoServerClient {
         'type': type,
         'text': text,
         if (videoId != null) 'videoId': videoId,
-        if (imageBase64 != null) 'imageBase64': imageBase64,
+        if (imageB2Key != null) 'imageB2Key': imageB2Key,
       };
       final response = await http.post(
         url,
@@ -698,7 +717,7 @@ class VideoServerClient {
         if (ok) {
           return submitFeedback(
               type: type, text: text,
-              videoId: videoId, imageBase64: imageBase64, isRetry: true);
+              videoId: videoId, imageB2Key: imageB2Key, isRetry: true);
         }
         throw UnauthorizedException('提交回饋失敗: 401');
       } else {

@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
@@ -1015,17 +1015,34 @@ class _FeedbackCardState extends State<_FeedbackCard> {
       if (_selectedVideo != null) {
         videoId = p.basename(p.dirname(_selectedVideo!.filePath));
       }
-      // 附加圖片（base64）
-      String? imageBase64;
+      // 附加圖片：上傳至 B2，取得 imageId
+      String? imageB2Key;
       if (_previewImageBytes != null) {
-        imageBase64 = base64Encode(_previewImageBytes!);
+        final urlData = await VideoServerClient.instance.getFeedbackImageUploadUrl();
+        if (urlData != null) {
+          final uploadUrl = urlData['uploadUrl'] as String?;
+          final imageId   = urlData['imageId'] as String?;
+          if (uploadUrl != null && imageId != null) {
+            final uploadResp = await http.put(
+              Uri.parse(uploadUrl),
+              headers: {'Content-Type': 'image/jpeg'},
+              body: _previewImageBytes,
+            );
+            if (uploadResp.statusCode == 200) {
+              imageB2Key = imageId;
+              debugPrint('[回饋圖片] ✅ 上傳至 B2: $imageId');
+            } else {
+              debugPrint('[回饋圖片] ❌ B2 上傳失敗: ${uploadResp.statusCode}');
+            }
+          }
+        }
       }
 
       final balls = await RewardService.submitFeedback(
         type: _type,
         text: text,
         videoId: videoId,
-        imageBase64: imageBase64,
+        imageB2Key: imageB2Key,
       );
       _ctrl.clear();
       setState(() {
@@ -1414,7 +1431,7 @@ class _VideoPickerSheet extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  '$durStr · ${e.durationSeconds > 5 && e.durationSeconds <= 120 ? '長影片' : '短影片'}',
+                                  '$durStr · ${e.durationSeconds > 5 && e.durationSeconds <= 600 ? '長影片' : '短影片'}',
                                   style: const TextStyle(
                                       fontSize: 11, color: Color(0xFF9AA6B2)),
                                 ),
@@ -1532,13 +1549,12 @@ class _UploadCardState extends State<_UploadCard> {
       final payload = selected.map(_entryToJson).toList();
       final balls   = await RewardService.claimUploadReward(sessions: payload);
 
-      // 標記為已上傳，寫回本地儲存
-      final all     = await RecordingHistoryStorage.instance.loadHistory();
-      final pathSet = selected.map((e) => e.filePath).toSet();
-      final updated = all.map((e) =>
-        pathSet.contains(e.filePath) ? e.copyWith(isUploaded: true) : e
-      ).toList();
-      await RecordingHistoryStorage.instance.saveHistory(updated);
+      // 標記為已上傳，精確更新各筆記錄
+      for (final e in selected) {
+        await RecordingHistoryStorage.instance.upsertEntry(
+          e.copyWith(isUploaded: true),
+        );
+      }
 
       // 重新計算可上傳數
       await _loadCandidates();
@@ -1622,36 +1638,13 @@ class _UploadPickerSheet extends StatefulWidget {
 }
 
 class _UploadPickerSheetState extends State<_UploadPickerSheet> {
-  late final Set<String> _selected;
+  String? _selectedPath;
 
-  @override
-  void initState() {
-    super.initState();
-    // 預設全選
-    _selected = widget.candidates.map((e) => e.filePath).toSet();
-  }
-
-  bool get _allSelected => _selected.length == widget.candidates.length;
-
-  void _toggleAll() => setState(() {
-        if (_allSelected) {
-          _selected.clear();
-        } else {
-          _selected.addAll(widget.candidates.map((e) => e.filePath));
-        }
-      });
-
-  void _toggle(String path) => setState(() {
-        if (_selected.contains(path)) {
-          _selected.remove(path);
-        } else {
-          _selected.add(path);
-        }
-      });
+  void _select(String path) => setState(() => _selectedPath = path);
 
   void _confirm() {
     final result = widget.candidates
-        .where((e) => _selected.contains(e.filePath))
+        .where((e) => e.filePath == _selectedPath)
         .toList();
     Navigator.pop(context, result);
   }
@@ -1698,30 +1691,10 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFF1A2E20))),
-                        Text('勾選後按「確認上傳」獲得獎勵',
+                        Text('選擇一筆後按「確認上傳」獲得獎勵',
                             style: TextStyle(
                                 fontSize: 12, color: Colors.grey)),
                       ],
-                    ),
-                  ),
-                  // 全選按鈕
-                  TextButton.icon(
-                    onPressed: _toggleAll,
-                    icon: Icon(
-                      _allSelected
-                          ? Icons.check_box_rounded
-                          : Icons.check_box_outline_blank_rounded,
-                      size: 16,
-                      color: const Color(0xFF00897B),
-                    ),
-                    label: Text(
-                      _allSelected ? '取消全選' : '全選',
-                      style: const TextStyle(
-                          color: Color(0xFF00897B), fontSize: 13),
-                    ),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
                     ),
                   ),
                 ],
@@ -1737,12 +1710,12 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                     horizontal: 16, vertical: 4),
                 itemCount: widget.candidates.length,
                 itemBuilder: (_, i) {
-                  final e    = widget.candidates[i];
-                  final sel  = _selected.contains(e.filePath);
+                  final e   = widget.candidates[i];
+                  final sel = e.filePath == _selectedPath;
                   return _UploadCandidateTile(
                     entry:    e,
                     selected: sel,
-                    onTap:    () => _toggle(e.filePath),
+                    onTap:    () => _select(e.filePath),
                   );
                 },
               ),
@@ -1756,7 +1729,7 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                 child: Row(
                   children: [
                     Text(
-                      '已選 ${_selected.length} / ${widget.candidates.length} 筆',
+                      _selectedPath == null ? '尚未選擇' : '已選 1 筆',
                       style: TextStyle(
                           fontSize: 13, color: Colors.grey[600]),
                     ),
@@ -1767,7 +1740,7 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
-                      onPressed: _selected.isEmpty ? null : _confirm,
+                      onPressed: _selectedPath == null ? null : _confirm,
                       icon: const Icon(Icons.upload_rounded, size: 16),
                       label: Text(
                           '確認上傳 +${RewardType.uploadData.ballsPerAction} 球'),
@@ -1824,7 +1797,7 @@ class _UploadCandidateTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Checkbox
+            // Radio
             AnimatedContainer(
               duration: const Duration(milliseconds: 120),
               width: 22, height: 22,
@@ -1834,11 +1807,10 @@ class _UploadCandidateTile extends StatelessWidget {
                   color: selected ? color : Colors.grey.shade400,
                   width: 1.5,
                 ),
-                borderRadius: BorderRadius.circular(6),
+                shape: BoxShape.circle,
               ),
               child: selected
-                  ? const Icon(Icons.check_rounded,
-                      color: Colors.white, size: 14)
+                  ? const Icon(Icons.circle, color: Colors.white, size: 10)
                   : null,
             ),
             const SizedBox(width: 10),

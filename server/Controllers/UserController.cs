@@ -16,12 +16,14 @@ namespace UploadServer.Controllers
     public class UserController : ControllerBase
     {
         private readonly UserService _userService;
+        private readonly B2Service _b2;
         private readonly IConfiguration _config;
         private readonly ILogger<UserController> _logger;
 
-        public UserController(UserService userService, IConfiguration config, ILogger<UserController> logger)
+        public UserController(UserService userService, B2Service b2, IConfiguration config, ILogger<UserController> logger)
         {
             _userService = userService;
+            _b2          = b2;
             _config      = config;
             _logger      = logger;
         }
@@ -155,8 +157,21 @@ namespace UploadServer.Controllers
             return Ok(new { data = new InviteCodeResponse(code, status?.InviteCount ?? 0) });
         }
 
-        /// <summary>
-        /// POST /api/user/rewards/feedback — 提交問題回饋並領取獎勵（每日限 1 次）
+        /// <summary>        /// GET /api/user/rewards/feedback/image-upload-url — 取得回饋圖片上傳 URL
+        /// 回傳 pre-signed PUT URL（Flutter 直傳 B2 用）及 imageId
+        /// </summary>
+        [HttpGet("rewards/feedback/image-upload-url")]
+        public IActionResult GetFeedbackImageUploadUrl()
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var imageId   = Guid.NewGuid().ToString("N");
+            var uploadUrl = _b2.GenerateFeedbackImageUploadUrl(imageId);
+            return Ok(new { data = new FeedbackImageUploadUrlResponse(uploadUrl, imageId) });
+        }
+
+        /// <summary>        /// POST /api/user/rewards/feedback — 提交問題回饋並領取獎勵（每日限 1 次）
         /// Body: { "type": "bug|feature|other", "text": "..." }
         /// </summary>
         [HttpPost("rewards/feedback")]
@@ -169,7 +184,7 @@ namespace UploadServer.Controllers
                 return BadRequest(new { message = "回饋內容不得為空" });
 
             var result = await _userService.SubmitFeedbackAsync(
-                userId, req.Type, req.Text, req.VideoId, req.ImageBase64);
+                userId, req.Type, req.Text, req.VideoId, req.ImageB2Key);
             if (result == null) return NotFound(new { message = "用戶不存在" });
 
             if (result.Balls == 0)

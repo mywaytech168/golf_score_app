@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Golf Score App — 管理後臺</title>
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #263244;
+    --border: #334155; --accent: #38bdf8; --accent2: #818cf8;
+    --green: #4ade80; --red: #f87171; --yellow: #fbbf24;
+    --text: #e2e8f0; --muted: #94a3b8; --radius: 8px;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+  /* ── Login ── */
+  .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+    padding: 40px; width: 360px; }
+  .login-box h1 { font-size: 1.4rem; margin-bottom: 6px; }
+  .login-box p { color: var(--muted); font-size: .85rem; margin-bottom: 28px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 6px; }
+  .field input { width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 14px; color: var(--text); font-size: .95rem;
+    outline: none; transition: border-color .2s; }
+  .field input:focus { border-color: var(--accent); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px;
+    border: none; border-radius: var(--radius); cursor: pointer; font-size: .9rem;
+    font-weight: 600; transition: opacity .15s; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #0f172a; }
+  .btn-primary:hover:not(:disabled) { opacity: .85; }
+  .btn-sm { padding: 5px 12px; font-size: .8rem; }
+  .btn-danger { background: var(--red); color: #0f172a; }
+  .btn-success { background: var(--green); color: #0f172a; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-outline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .err-msg { color: var(--red); font-size: .82rem; margin-top: 10px; }
+
+  /* ── Shell ── */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 220px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 24px 0; flex-shrink: 0; }
+  .sidebar-logo { padding: 0 20px 24px; font-size: 1rem; font-weight: 700; color: var(--accent); border-bottom: 1px solid var(--border); }
+  .sidebar-logo small { display: block; font-size: .72rem; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 11px 20px;
+    cursor: pointer; font-size: .9rem; color: var(--muted); transition: all .15s;
+    border-left: 3px solid transparent; }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--surface2); color: var(--accent); border-left-color: var(--accent); }
+  .nav-icon { font-size: 1.1rem; width: 22px; text-align: center; }
+  .sidebar-footer { margin-top: auto; padding: 16px 20px; }
+  .main { flex: 1; overflow: auto; padding: 28px; }
+  .page-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 20px; }
+
+  /* ── Table ── */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  thead th { background: var(--surface2); padding: 10px 14px; text-align: left;
+    font-weight: 600; color: var(--muted); white-space: nowrap; }
+  tbody tr { border-top: 1px solid var(--border); transition: background .1s; }
+  tbody tr:hover { background: var(--surface2); }
+  td { padding: 10px 14px; vertical-align: middle; }
+
+  /* ── Filters / Toolbar ── */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: center; }
+  .toolbar select, .toolbar input[type=text], .toolbar input[type=number] {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 7px 12px; color: var(--text); font-size: .85rem; outline: none; }
+  .toolbar select:focus, .toolbar input:focus { border-color: var(--accent); }
+  .spacer { flex: 1; }
+
+  /* ── Pagination ── */
+  .pagination { display: flex; gap: 8px; align-items: center; margin-top: 16px; justify-content: flex-end; }
+  .pagination span { font-size: .82rem; color: var(--muted); }
+
+  /* ── Badges ── */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; }
+  .badge-green  { background: #166534; color: var(--green); }
+  .badge-yellow { background: #7c3800; color: var(--yellow); }
+  .badge-red    { background: #7f1d1d; color: var(--red); }
+  .badge-blue   { background: #0c4a6e; color: var(--accent); }
+  .badge-purple { background: #312e81; color: var(--accent2); }
+  .badge-gray   { background: var(--surface2); color: var(--muted); }
+
+  /* ── Cards ── */
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px; }
+  .stat-card .value { font-size: 1.8rem; font-weight: 700; color: var(--accent); }
+  .stat-card .label { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex;
+    align-items: center; justify-content: center; z-index: 1000; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 28px; width: 500px; max-width: 95vw; max-height: 80vh; overflow: auto; }
+  .modal h2 { font-size: 1.1rem; margin-bottom: 16px; }
+  .modal textarea { width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 12px; color: var(--text); font-size: .88rem;
+    resize: vertical; min-height: 100px; outline: none; }
+  .modal textarea:focus { border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .detail-row { display: flex; gap: 8px; margin-bottom: 8px; font-size: .85rem; }
+  .detail-row .key { color: var(--muted); min-width: 120px; flex-shrink: 0; }
+
+  /* ── Version form ── */
+  .version-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .version-grid .span2 { grid-column: 1 / -1; }
+  .form-group label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 6px; }
+  .form-group input, .form-group select { width: 100%; background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 9px 12px; color: var(--text); font-size: .88rem; outline: none; }
+  .form-group input:focus { border-color: var(--accent); }
+  .form-group .toggle { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+  .form-group .toggle input[type=checkbox] { width: 16px; height: 16px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
+  .panel-title { font-size: 1rem; font-weight: 600; margin-bottom: 18px; color: var(--accent); }
+  .loading { color: var(--muted); padding: 20px 0; text-align: center; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: #0f172a;
+    padding: 12px 20px; border-radius: var(--radius); font-weight: 600; z-index: 9999;
+    animation: slideIn .2s ease; }
+  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══ LOGIN ══ -->
+  <div class="login-wrap" v-if="!token">
+    <div class="login-box">
+      <h1>⛳ 管理後臺</h1>
+      <p>Golf Score App Admin Panel</p>
+      <div class="field">
+        <label>帳號</label>
+        <input v-model="login.username" @keyup.enter="doLogin" placeholder="admin" />
+      </div>
+      <div class="field">
+        <label>密碼</label>
+        <input v-model="login.password" type="password" @keyup.enter="doLogin" placeholder="••••••" />
+      </div>
+      <button class="btn btn-primary" style="width:100%" @click="doLogin" :disabled="login.loading">
+        {{ login.loading ? '登入中...' : '登入' }}
+      </button>
+      <div class="err-msg" v-if="login.error">{{ login.error }}</div>
+    </div>
+  </div>
+
+  <!-- ══ SHELL ══ -->
+  <div class="shell" v-else>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-logo">⛳ Admin<small>Golf Score App</small></div>
+      <div class="nav-item" :class="{active: tab==='users'}" @click="switchTab('users')">
+        <span class="nav-icon">👤</span> 用戶管理
+      </div>
+      <div class="nav-item" :class="{active: tab==='analyses'}" @click="switchTab('analyses')">
+        <span class="nav-icon">🤖</span> AI 分析記錄
+      </div>
+      <div class="nav-item" :class="{active: tab==='feedbacks'}" @click="switchTab('feedbacks')">
+        <span class="nav-icon">💬</span> 用戶回饋
+      </div>
+      <div class="nav-item" :class="{active: tab==='balls'}" @click="switchTab('balls')">
+        <span class="nav-icon">🏌</span> 球數流水帳
+      </div>
+      <div class="nav-item" :class="{active: tab==='version'}" @click="switchTab('version')">
+        <span class="nav-icon">📱</span> 版本管理
+      </div>
+      <div class="sidebar-footer">
+        <button class="btn btn-outline btn-sm" @click="logout">登出</button>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main">
+
+      <!-- ── USERS ── -->
+      <div v-if="tab==='users'">
+        <div class="page-title">👤 用戶管理</div>
+        <div class="toolbar">
+          <input type="text" v-model="users.search" placeholder="搜尋 Email / Username" @keyup.enter="loadUsers(1)" style="width:240px" />
+          <button class="btn btn-primary btn-sm" @click="loadUsers(1)">搜尋</button>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ users.total }} 筆</span>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="users.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>ID</th><th>Username</th><th>Email</th><th>方案</th>
+              <th>球數</th><th>今日用量</th><th>邀請</th><th>狀態</th><th>建立時間</th><th>操作</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="u in users.data" :key="u.id">
+                <td><span style="font-size:.75rem;color:var(--muted)">{{ u.id.slice(0,8) }}…</span></td>
+                <td>{{ u.username }}</td>
+                <td>{{ u.email }}</td>
+                <td><span class="badge" :class="planBadge(u.plan)">{{ u.plan }}</span></td>
+                <td><strong>{{ u.bonusBalls }}</strong></td>
+                <td>{{ u.todayUsed }}</td>
+                <td>{{ u.inviteCount }}</td>
+                <td><span class="badge" :class="u.status==='active'?'badge-green':'badge-red'">{{ u.status }}</span></td>
+                <td style="white-space:nowrap">{{ u.createdAt }}</td>
+                <td><button class="btn btn-outline btn-sm" @click="openAdjustBalls(u)">調整球數</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-outline btn-sm" @click="loadUsers(users.page-1)" :disabled="users.page<=1">◀</button>
+          <span>第 {{ users.page }} / {{ Math.ceil(users.total/users.size) || 1 }} 頁</span>
+          <button class="btn btn-outline btn-sm" @click="loadUsers(users.page+1)" :disabled="users.page*users.size>=users.total">▶</button>
+        </div>
+      </div>
+
+      <!-- ── ANALYSES ── -->
+      <div v-if="tab==='analyses'">
+        <div class="page-title">🤖 AI 分析記錄</div>
+        <div class="toolbar">
+          <select v-model="analyses.filterStatus" @change="loadAnalyses(1)">
+            <option value="">全部狀態</option>
+            <option>pending</option><option>queued</option>
+            <option>processing</option><option>completed</option><option>failed</option>
+          </select>
+          <input type="text" v-model="analyses.filterUser" placeholder="用戶 ID" style="width:220px" @keyup.enter="loadAnalyses(1)" />
+          <button class="btn btn-primary btn-sm" @click="loadAnalyses(1)">篩選</button>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ analyses.total }} 筆</span>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="analyses.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>ID</th><th>用戶</th><th>VideoId</th><th>狀態</th>
+              <th>嚴重度</th><th>摘要</th><th>重試</th><th>有結果</th><th>建立時間</th><th>完成時間</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="a in analyses.data" :key="a.id">
+                <td><span style="font-size:.75rem;color:var(--muted)">{{ a.id.slice(0,8) }}…</span></td>
+                <td><span style="font-size:.75rem">{{ (a.userId||'').slice(0,8) }}…</span></td>
+                <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.videoId }}</td>
+                <td><span class="badge" :class="statusBadge(a.status)">{{ a.status }}</span></td>
+                <td><span v-if="a.severity" class="badge" :class="severityBadge(a.severity)">{{ a.severity }}</span></td>
+                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="a.summary">{{ a.summary }}</td>
+                <td>{{ a.retryCount }}</td>
+                <td>{{ a.hasResult ? '✅' : '—' }}</td>
+                <td style="white-space:nowrap">{{ a.createdAt }}</td>
+                <td style="white-space:nowrap">{{ a.completedAt || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-outline btn-sm" @click="loadAnalyses(analyses.page-1)" :disabled="analyses.page<=1">◀</button>
+          <span>第 {{ analyses.page }} / {{ Math.ceil(analyses.total/analyses.size) || 1 }} 頁</span>
+          <button class="btn btn-outline btn-sm" @click="loadAnalyses(analyses.page+1)" :disabled="analyses.page*analyses.size>=analyses.total">▶</button>
+        </div>
+      </div>
+
+      <!-- ── FEEDBACKS ── -->
+      <div v-if="tab==='feedbacks'">
+        <div class="page-title">💬 用戶回饋</div>
+        <div class="toolbar">
+          <select v-model="feedbacks.filterType" @change="loadFeedbacks(1)">
+            <option value="">全部類型</option>
+            <option value="bug">bug</option>
+            <option value="feature">feature</option>
+            <option value="other">other</option>
+          </select>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ feedbacks.total }} 筆</span>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="feedbacks.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>ID</th><th>用戶</th><th>類型</th><th>內容</th>
+              <th>圖片</th><th>影片</th><th>回覆狀態</th><th>建立時間</th><th>操作</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="f in feedbacks.data" :key="f.id">
+                <td><span style="font-size:.75rem;color:var(--muted)">{{ f.id.slice(0,8) }}…</span></td>
+                <td><span style="font-size:.75rem">{{ (f.userId||'').slice(0,8) }}…</span></td>
+                <td><span class="badge" :class="typeBadge(f.type)">{{ f.type }}</span></td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="f.text">{{ f.text }}</td>
+                <td>{{ f.hasImage ? '🖼️' : '—' }}</td>
+                <td>{{ f.attachedVideoId ? '🎬' : '—' }}</td>
+                <td>
+                  <span class="badge badge-green" v-if="f.adminReply">已回覆</span>
+                  <span class="badge badge-gray" v-else>待回覆</span>
+                </td>
+                <td style="white-space:nowrap">{{ f.createdAt }}</td>
+                <td style="display:flex;gap:6px">
+                  <button class="btn btn-outline btn-sm" @click="viewFeedback(f)">詳情</button>
+                  <button class="btn btn-primary btn-sm" @click="openReply(f)">回覆</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-outline btn-sm" @click="loadFeedbacks(feedbacks.page-1)" :disabled="feedbacks.page<=1">◀</button>
+          <span>第 {{ feedbacks.page }} / {{ Math.ceil(feedbacks.total/feedbacks.size) || 1 }} 頁</span>
+          <button class="btn btn-outline btn-sm" @click="loadFeedbacks(feedbacks.page+1)" :disabled="feedbacks.page*feedbacks.size>=feedbacks.total">▶</button>
+        </div>
+      </div>
+
+      <!-- ── BALLS ── -->
+      <div v-if="tab==='balls'">
+        <div class="page-title">🏌 球數流水帳</div>
+        <div class="toolbar">
+          <input type="text" v-model="balls.filterUser" placeholder="用戶 ID" style="width:240px" @keyup.enter="loadBalls(1)" />
+          <select v-model="balls.filterReason" @change="loadBalls(1)">
+            <option value="">全部原因</option>
+            <option value="ad">廣告 (ad)</option>
+            <option value="feedback">回饋 (feedback)</option>
+            <option value="invite">邀請 (invite)</option>
+            <option value="upload">上傳 (upload)</option>
+            <option value="analysis">分析消耗 (analysis)</option>
+            <option value="manual">手動 (manual)</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="loadBalls(1)">篩選</button>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ balls.total }} 筆</span>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="balls.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>用戶</th><th>原因</th><th>變動量</th><th>變動後餘額</th><th>關聯ID</th><th>時間</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="b in balls.data" :key="b.id">
+                <td><span style="font-size:.75rem">{{ (b.userId||'').slice(0,8) }}…</span></td>
+                <td><span class="badge" :class="reasonBadge(b.reason)">{{ b.reason }}</span></td>
+                <td>
+                  <span :style="{color: b.delta>0?'var(--green)':'var(--red)', fontWeight:700}">
+                    {{ b.delta > 0 ? '+' : '' }}{{ b.delta }}
+                  </span>
+                </td>
+                <td>{{ b.balanceAfter }}</td>
+                <td style="font-size:.75rem;color:var(--muted)">{{ b.refId ? b.refId.slice(0,10)+'…' : '—' }}</td>
+                <td style="white-space:nowrap">{{ b.createdAt }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-outline btn-sm" @click="loadBalls(balls.page-1)" :disabled="balls.page<=1">◀</button>
+          <span>第 {{ balls.page }} / {{ Math.ceil(balls.total/balls.size) || 1 }} 頁</span>
+          <button class="btn btn-outline btn-sm" @click="loadBalls(balls.page+1)" :disabled="balls.page*balls.size>=balls.total">▶</button>
+        </div>
+      </div>
+
+      <!-- ── VERSION ── -->
+      <div v-if="tab==='version'">
+        <div class="page-title">📱 版本管理</div>
+        <div class="loading" v-if="version.loading">載入中...</div>
+        <template v-else>
+          <div class="panel" v-for="p in ['android','ios']" :key="p">
+            <div class="panel-title">{{ p === 'android' ? '🤖 Android' : '🍎 iOS' }}</div>
+            <div class="version-grid">
+              <div class="form-group">
+                <label>最新版本號 (latestVersion)</label>
+                <input v-model="version.form[p].latestVersion" placeholder="1.0.0" />
+              </div>
+              <div class="form-group">
+                <label>最低支援版本 (minRequiredVersion)</label>
+                <input v-model="version.form[p].minRequiredVersion" placeholder="1.0.0" />
+              </div>
+              <div class="form-group">
+                <label>發布日期 (releaseDate)</label>
+                <input v-model="version.form[p].releaseDate" placeholder="2026-05-25" />
+              </div>
+              <div class="form-group">
+                <label>商店 / 下載連結 (updateUrl)</label>
+                <input v-model="version.form[p].updateUrl" placeholder="https://play.google.com/..." />
+              </div>
+              <div class="form-group span2">
+                <label>更新說明（每行一條）</label>
+                <textarea v-model="version.form[p].releaseNotesText"
+                  style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:9px 12px;color:var(--text);font-size:.88rem;resize:vertical;min-height:80px;outline:none"
+                  placeholder="修正 A&#10;新增 B"></textarea>
+              </div>
+              <div class="form-group span2">
+                <label class="toggle">
+                  <input type="checkbox" v-model="version.form[p].forceUpdate" />
+                  強制更新 (forceUpdate)
+                </label>
+              </div>
+              <div class="span2" style="display:flex;gap:10px;align-items:center">
+                <button class="btn btn-primary" @click="saveVersion(p)" :disabled="version.saving[p]">
+                  {{ version.saving[p] ? '儲存中...' : '儲存設定' }}
+                </button>
+                <span v-if="version.savedAt[p]" style="font-size:.8rem;color:var(--green)">
+                  ✅ 已儲存 {{ version.savedAt[p] }}
+                </span>
+              </div>
+
+              <!-- ── APK Self-hosted Upload (Android only) ── -->
+              <div v-if="p === 'android'" class="span2" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                <div style="font-weight:600;margin-bottom:12px;font-size:.95rem">📦 APK 自託管更新</div>
+                <div v-if="version.apk.loading" style="color:var(--muted);font-size:.85rem">載入 APK 狀態...</div>
+                <template v-else>
+                  <div v-if="version.apk.info?.exists" style="background:var(--surface2);border-radius:var(--radius);padding:12px;margin-bottom:12px;font-size:.85rem">
+                    <div class="detail-row"><span class="key">檔名：</span>{{ version.apk.info.fileName }}</div>
+                    <div class="detail-row"><span class="key">大小：</span>{{ version.apk.info.sizeKb }} KB</div>
+                    <div class="detail-row"><span class="key">更新時間：</span>{{ version.apk.info.updatedAt }}</div>
+                    <div class="detail-row" style="align-items:flex-start">
+                      <span class="key">下載連結：</span>
+                      <a :href="version.apk.info.downloadUrl" target="_blank" style="color:var(--accent);word-break:break-all;font-size:.82rem">{{ version.apk.info.downloadUrl }}</a>
+                    </div>
+                    <div class="detail-row" style="align-items:flex-start">
+                      <span class="key">Latest：</span>
+                      <a :href="version.apk.info.latestUrl" target="_blank" style="color:var(--accent);word-break:break-all;font-size:.82rem">{{ version.apk.info.latestUrl }}</a>
+                    </div>
+                  </div>
+                  <div v-else style="color:var(--muted);font-size:.85rem;margin-bottom:12px">尚未上傳 APK，目前使用商店連結</div>
+
+                  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                    <label :style="version.apk.uploading ? 'opacity:.6;pointer-events:none' : ''" class="btn btn-primary" style="cursor:pointer;position:relative;overflow:hidden">
+                      {{ version.apk.uploading ? '上傳中...' : '📤 選擇並上傳 APK' }}
+                      <input type="file" accept=".apk" @change="uploadApk" :disabled="version.apk.uploading"
+                        style="position:absolute;opacity:0;width:100%;height:100%;top:0;left:0;cursor:pointer" />
+                    </label>
+                    <button v-if="version.apk.info?.exists"
+                      class="btn btn-sm" @click="deleteApk"
+                      style="background:#dc2626;color:#fff;border:none;padding:7px 14px;border-radius:var(--radius);font-size:.82rem;cursor:pointer">
+                      🗑 刪除 APK
+                    </button>
+                  </div>
+                  <div v-if="version.apk.status" style="margin-top:8px;font-size:.83rem;color:var(--green)">{{ version.apk.status }}</div>
+                  <div v-if="version.apk.error" class="err-msg" style="margin-top:8px">{{ version.apk.error }}</div>
+                </template>
+              </div>
+
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ══ MODAL: 調整球數 ══ -->
+  <div class="modal-overlay" v-if="modal.adjustBalls" @click.self="modal.adjustBalls=false">
+    <div class="modal">
+      <h2>🏌 調整球數 — {{ modal.adjustTarget?.username }}</h2>
+      <div class="detail-row"><span class="key">目前球數：</span><strong>{{ modal.adjustTarget?.bonusBalls }}</strong></div>
+      <div class="field" style="margin-top:16px">
+        <label>變動量（正數=增加，負數=扣除）</label>
+        <input type="number" v-model.number="modal.adjustDelta" placeholder="10 或 -5" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:9px 12px;color:var(--text);font-size:.95rem;outline:none" />
+      </div>
+      <div class="err-msg" v-if="modal.adjustError">{{ modal.adjustError }}</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" @click="modal.adjustBalls=false">取消</button>
+        <button class="btn btn-success" @click="submitAdjust" :disabled="modal.adjustLoading">
+          {{ modal.adjustLoading ? '處理中...' : '確認調整' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MODAL: 回覆 Feedback ══ -->
+  <div class="modal-overlay" v-if="modal.reply" @click.self="modal.reply=false">
+    <div class="modal">
+      <h2>💬 回覆回饋</h2>
+      <div class="detail-row"><span class="key">類型：</span>{{ modal.replyTarget?.type }}</div>
+      <div class="detail-row"><span class="key">內容：</span>{{ modal.replyTarget?.text }}</div>
+      <div v-if="modal.replyTarget?.adminReply" style="margin:10px 0;padding:10px;background:var(--surface2);border-radius:var(--radius);font-size:.85rem">
+        <div style="color:var(--muted);margin-bottom:4px">已有回覆：</div>
+        {{ modal.replyTarget.adminReply }}
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label>回覆內容</label>
+        <textarea v-model="modal.replyText" placeholder="輸入給用戶的回覆..."></textarea>
+      </div>
+      <div class="err-msg" v-if="modal.replyError">{{ modal.replyError }}</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" @click="modal.reply=false">取消</button>
+        <button class="btn btn-primary" @click="submitReply" :disabled="modal.replyLoading">
+          {{ modal.replyLoading ? '送出中...' : '送出回覆' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MODAL: Feedback 詳情 ══ -->
+  <div class="modal-overlay" v-if="modal.feedbackDetail" @click.self="modal.feedbackDetail=false">
+    <div class="modal">
+      <h2>💬 回饋詳情</h2>
+      <div class="detail-row"><span class="key">ID：</span>{{ modal.detailTarget?.id }}</div>
+      <div class="detail-row"><span class="key">用戶 ID：</span>{{ modal.detailTarget?.userId }}</div>
+      <div class="detail-row"><span class="key">類型：</span>{{ modal.detailTarget?.type }}</div>
+      <div class="detail-row"><span class="key">時間：</span>{{ modal.detailTarget?.createdAt }}</div>
+      <div style="margin:12px 0;padding:12px;background:var(--surface2);border-radius:var(--radius);font-size:.88rem;white-space:pre-wrap">{{ modal.detailTarget?.text }}</div>
+      <div v-if="modal.detailTarget?.hasImage">
+        <button class="btn btn-outline btn-sm" @click="loadFeedbackImage(modal.detailTarget)">查看圖片</button>
+        <div v-if="modal.imageUrl" style="margin-top:10px">
+          <img :src="modal.imageUrl" style="max-width:100%;border-radius:var(--radius)" />
+        </div>
+      </div>
+      <div v-if="modal.detailTarget?.adminReply" style="margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:var(--radius)">
+        <div style="font-size:.78rem;color:var(--muted);margin-bottom:4px">管理員回覆：</div>
+        {{ modal.detailTarget.adminReply }}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" @click="modal.feedbackDetail=false;modal.imageUrl=null">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" v-if="toast.show">{{ toast.msg }}</div>
+
+</div>
+
+<script>
+const { createApp, reactive, ref, onMounted } = Vue;
+
+const BASE = '';  // same origin
+
+createApp({
+  setup() {
+    const token = ref(localStorage.getItem('admin_token') || '');
+
+    const login = reactive({ username: '', password: '', loading: false, error: '' });
+
+    const tab = ref('users');
+
+    const users     = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, search: '' });
+    const analyses  = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterStatus: '', filterUser: '' });
+    const feedbacks = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterType: '' });
+    const balls     = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterUser: '', filterReason: '' });
+    const version   = reactive({ loading: false, saving: { android: false, ios: false }, savedAt: {}, form: {
+      android: { latestVersion:'', minRequiredVersion:'', forceUpdate:false, updateUrl:'', releaseDate:'', releaseNotesText:'' },
+      ios:     { latestVersion:'', minRequiredVersion:'', forceUpdate:false, updateUrl:'', releaseDate:'', releaseNotesText:'' },
+    }, apk: { loading: false, info: null, uploading: false, status: '', error: '' } });
+
+    const modal = reactive({
+      adjustBalls: false, adjustTarget: null, adjustDelta: 0, adjustError: '', adjustLoading: false,
+      reply: false, replyTarget: null, replyText: '', replyError: '', replyLoading: false,
+      feedbackDetail: false, detailTarget: null, imageUrl: null,
+    });
+
+    const toast = reactive({ show: false, msg: '' });
+
+    function showToast(msg) {
+      toast.msg = msg; toast.show = true;
+      setTimeout(() => { toast.show = false; }, 2500);
+    }
+
+    async function api(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value}` };
+      const res = await fetch(`${BASE}/api/admin${path}`, { ...opts, headers });
+      if (res.status === 401 || res.status === 403) { logout(); throw new Error('未授權'); }
+      return res;
+    }
+
+    // ── Login ──
+    async function doLogin() {
+      if (!login.username || !login.password) return;
+      login.loading = true; login.error = '';
+      try {
+        const res = await fetch(`${BASE}/api/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: login.username, password: login.password }),
+        });
+        if (!res.ok) { const d = await res.json(); login.error = d.message || '登入失敗'; return; }
+        const d = await res.json();
+        token.value = d.token;
+        localStorage.setItem('admin_token', d.token);
+        switchTab('users');
+      } catch(e) { login.error = '連線失敗：' + e.message; }
+      finally { login.loading = false; }
+    }
+
+    function logout() {
+      token.value = '';
+      localStorage.removeItem('admin_token');
+    }
+
+    // ── Tab switch ──
+    function switchTab(t) {
+      tab.value = t;
+      if (t === 'users')     loadUsers(1);
+      if (t === 'analyses')  loadAnalyses(1);
+      if (t === 'feedbacks') loadFeedbacks(1);
+      if (t === 'balls')     loadBalls(1);
+      if (t === 'version')   loadVersions();
+    }
+
+    // ── Users ──
+    async function loadUsers(page) {
+      users.loading = true; users.page = page;
+      try {
+        let url = `/users?page=${page}&size=${users.size}`;
+        if (users.search) url += `&search=${encodeURIComponent(users.search)}`;
+        const res = await api(url);
+        const d   = await res.json();
+        users.data  = d.data;
+        users.total = d.total;
+      } finally { users.loading = false; }
+    }
+
+    // ── Analyses ──
+    async function loadAnalyses(page) {
+      analyses.loading = true; analyses.page = page;
+      try {
+        let url = `/analyses?page=${page}&size=${analyses.size}`;
+        if (analyses.filterStatus) url += `&status=${analyses.filterStatus}`;
+        if (analyses.filterUser)   url += `&userId=${encodeURIComponent(analyses.filterUser)}`;
+        const res = await api(url);
+        const d   = await res.json();
+        analyses.data  = d.data;
+        analyses.total = d.total;
+      } finally { analyses.loading = false; }
+    }
+
+    // ── Feedbacks ──
+    async function loadFeedbacks(page) {
+      feedbacks.loading = true; feedbacks.page = page;
+      try {
+        let url = `/feedbacks?page=${page}&size=${feedbacks.size}`;
+        if (feedbacks.filterType) url += `&type=${feedbacks.filterType}`;
+        const res = await api(url);
+        const d   = await res.json();
+        feedbacks.data  = d.data;
+        feedbacks.total = d.total;
+      } finally { feedbacks.loading = false; }
+    }
+
+    // ── Ball Records ──
+    async function loadBalls(page) {
+      balls.loading = true; balls.page = page;
+      try {
+        let url = `/ball-records?page=${page}&size=${balls.size}`;
+        if (balls.filterUser)   url += `&userId=${encodeURIComponent(balls.filterUser)}`;
+        if (balls.filterReason) url += `&reason=${balls.filterReason}`;
+        const res = await api(url);
+        const d   = await res.json();
+        balls.data  = d.data;
+        balls.total = d.total;
+      } finally { balls.loading = false; }
+    }
+
+    // ── Versions ──
+    async function loadVersions() {
+      version.loading = true;
+      try {
+        const res = await api('/app/versions');
+        const d   = await res.json();
+        for (const v of d.data) {
+          const notes = (() => { try { return JSON.parse(v.releaseNotesJson); } catch { return []; } })();
+          version.form[v.platform] = {
+            latestVersion:      v.latestVersion,
+            minRequiredVersion: v.minRequiredVersion,
+            forceUpdate:        v.forceUpdate,
+            updateUrl:          v.updateUrl,
+            releaseDate:        v.releaseDate,
+            releaseNotesText:   notes.join('\n'),
+          };
+        }
+      } finally { version.loading = false; }
+      loadApkInfo();
+    }
+
+    async function loadApkInfo() {
+      version.apk.loading = true;
+      try {
+        const res = await api('/app/version/android/apk');
+        version.apk.info = await res.json();
+      } catch { version.apk.info = null; }
+      finally { version.apk.loading = false; }
+    }
+
+    async function uploadApk(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      event.target.value = '';   // reset input
+      version.apk.uploading = true;
+      version.apk.status = '';
+      version.apk.error  = '';
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch(`${BASE}/api/admin/app/version/android/apk`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token.value}` },
+          body: form,
+        });
+        const d = await res.json();
+        if (!res.ok) { version.apk.error = d.message || '上傳失敗'; return; }
+        version.apk.status = `✅ 上傳成功（${d.sizeKb} KB）`;
+        showToast('✅ APK 上傳成功');
+        await loadVersions();  // also refreshes APK info inside
+      } catch(e) { version.apk.error = '上傳失敗：' + e.message; }
+      finally { version.apk.uploading = false; }
+    }
+
+
+    async function deleteApk() {
+      if (!confirm('確定要刪除伺服器上的 APK？')) return;
+      version.apk.error = '';
+      try {
+        const res = await api('/app/version/android/apk', { method: 'DELETE' });
+        const d = await res.json();
+        if (!res.ok) { version.apk.error = d.message || '刪除失敗'; return; }
+        showToast('🗑 APK 已刪除');
+        version.apk.status = '';
+        await loadApkInfo();
+      } catch(e) { version.apk.error = '刪除失敗：' + e.message; }
+    }
+
+    async function saveVersion(platform) {
+      version.saving[platform] = true;
+      const f = version.form[platform];
+      const releaseNotes = f.releaseNotesText.split('\n').map(s=>s.trim()).filter(Boolean);
+      try {
+        const res = await api(`/app/version/${platform}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            latestVersion:      f.latestVersion,
+            minRequiredVersion: f.minRequiredVersion,
+            forceUpdate:        f.forceUpdate,
+            updateUrl:          f.updateUrl,
+            releaseDate:        f.releaseDate,
+            releaseNotes,
+          }),
+        });
+        if (!res.ok) { const d = await res.json(); showToast('❌ ' + (d.message||'儲存失敗')); return; }
+        const now = new Date().toLocaleTimeString('zh-TW');
+        version.savedAt[platform] = now;
+        showToast(`✅ ${platform} 版本已儲存`);
+      } finally { version.saving[platform] = false; }
+    }
+
+    // ── Adjust Balls ──
+    function openAdjustBalls(u) {
+      modal.adjustTarget = u; modal.adjustDelta = 0; modal.adjustError = '';
+      modal.adjustBalls = true;
+    }
+
+    async function submitAdjust() {
+      if (!modal.adjustDelta) { modal.adjustError = 'delta 不可為 0'; return; }
+      modal.adjustLoading = true; modal.adjustError = '';
+      try {
+        const res = await api(`/users/${modal.adjustTarget.id}/balls`, {
+          method: 'POST',
+          body: JSON.stringify({ delta: modal.adjustDelta }),
+        });
+        const d = await res.json();
+        if (!res.ok) { modal.adjustError = d.message || '失敗'; return; }
+        showToast(`✅ 球數已調整，現為 ${d.bonusBalls}`);
+        modal.adjustBalls = false;
+        loadUsers(users.page);
+      } finally { modal.adjustLoading = false; }
+    }
+
+    // ── Feedback Reply ──
+    function openReply(f) {
+      modal.replyTarget = f; modal.replyText = f.adminReply || ''; modal.replyError = '';
+      modal.reply = true;
+    }
+
+    async function submitReply() {
+      if (!modal.replyText.trim()) { modal.replyError = '回覆不可為空'; return; }
+      modal.replyLoading = true; modal.replyError = '';
+      try {
+        const res = await api(`/feedbacks/${modal.replyTarget.id}/reply`, {
+          method: 'POST',
+          body: JSON.stringify({ reply: modal.replyText }),
+        });
+        const d = await res.json();
+        if (!res.ok) { modal.replyError = d.message || '失敗'; return; }
+        showToast('✅ 回覆已儲存');
+        modal.reply = false;
+        loadFeedbacks(feedbacks.page);
+      } finally { modal.replyLoading = false; }
+    }
+
+    // ── Feedback Detail ──
+    function viewFeedback(f) {
+      modal.detailTarget = f; modal.imageUrl = null;
+      modal.feedbackDetail = true;
+    }
+
+    async function loadFeedbackImage(f) {
+      try {
+        const res = await api(`/feedbacks/${f.id}/image`);
+        const d = await res.json();
+        modal.imageUrl = d.data?.url || null;
+      } catch { modal.imageUrl = null; }
+    }
+
+    // ── Badge helpers ──
+    function planBadge(p)     { return p==='elite'?'badge-purple':p==='pro'?'badge-blue':'badge-gray'; }
+    function statusBadge(s)   { return {completed:'badge-green',failed:'badge-red',processing:'badge-yellow',queued:'badge-blue',pending:'badge-gray'}[s]||'badge-gray'; }
+    function severityBadge(s) { return {high:'badge-red',medium:'badge-yellow',low:'badge-green'}[s]||'badge-gray'; }
+    function typeBadge(t)     { return {bug:'badge-red',feature:'badge-blue',other:'badge-gray'}[t]||'badge-gray'; }
+    function reasonBadge(r)   { return {ad:'badge-yellow',feedback:'badge-blue',invite:'badge-purple',upload:'badge-green',analysis:'badge-red',manual:'badge-gray'}[r]||'badge-gray'; }
+
+    onMounted(() => { if (token.value) switchTab('users'); });
+
+    return {
+      token, login, tab,
+      users, analyses, feedbacks, balls, version, modal, toast,
+      doLogin, logout, switchTab,
+      loadUsers, loadAnalyses, loadFeedbacks, loadBalls, loadVersions, saveVersion,
+      loadApkInfo, uploadApk, deleteApk,
+      openAdjustBalls, submitAdjust,
+      openReply, submitReply,
+      viewFeedback, loadFeedbackImage,
+      planBadge, statusBadge, severityBadge, typeBadge, reasonBadge,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

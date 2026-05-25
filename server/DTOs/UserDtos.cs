@@ -47,7 +47,10 @@ namespace UploadServer.DTOs
         string Type,
         string Text,
         string? VideoId,
-        string? ImageBase64);
+        string? ImageB2Key);
+
+    /// <summary>GET /api/user/rewards/feedback/image-upload-url 回應</summary>
+    public record FeedbackImageUploadUrlResponse(string UploadUrl, string ImageId);
 
     /// <summary>POST /api/user/rewards/feedback 回應</summary>
     public record FeedbackRewardResponse(int Balls);

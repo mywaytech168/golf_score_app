@@ -279,8 +279,7 @@ class ShareService {
       );
     }
 
-    final existing = await RecordingHistoryStorage.instance.loadHistory();
-    await RecordingHistoryStorage.instance.saveHistory([entry, ...existing]);
+    await RecordingHistoryStorage.instance.upsertEntry(entry);
 
     return entry;
   }

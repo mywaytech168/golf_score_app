@@ -31,6 +31,8 @@ import '../widgets/share_upload_dialog.dart';
 /// 列表操作選項
 enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, delete }
 
+enum _ClipMenuAction { rename, share, delete }
+
 /// 排序選項
 enum _SortBy {
   /// 按時間排序（最新優先）
@@ -38,7 +40,9 @@ enum _SortBy {
   /// 按最佳速度（峰值）排序（最高優先）
   peakValue,
   /// 按聲音清脆度排序（最高優先）
-  audioCrispness;
+  audioCrispness,
+  /// 按片段時間排序（切片在原始影片中的開始秒數，由小到大）
+  clipTime;
 
   /// 中文標籤
   String get label {
@@ -49,6 +53,8 @@ enum _SortBy {
         return '最佳速度';
       case _SortBy.audioCrispness:
         return '聲音清脆度';
+      case _SortBy.clipTime:
+        return '片段時間';
     }
   }
 }
@@ -80,6 +86,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   bool? _aiAnalyzedFilter; // 分析狀態篩選 - null: 全部, true: 已分析, false: 未分析
   bool? _aiCoachFilter;    // AI教練篩選   - null: 全部, true: 已AI分析, false: 未AI分析
   bool? _clippedFilter;    // 切片狀態篩選 - null: 全部, true: 已切片, false: 未切片
+  String? _datePreset;         // 日期篩選 - null: 全部, 'today', 'week', 'month', 'custom'
+  DateTime? _customDateFrom;   // 自訂日期起始（_datePreset == 'custom' 時使用）
+  DateTime? _customDateTo;     // 自訂日期結束（_datePreset == 'custom' 時使用）
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
   bool _filtersExpanded = false;  // 篩選面板折疊狀態（預設收起）
 
@@ -161,7 +170,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       widget.onDelete?.call();
     }
 
-    await RecordingHistoryStorage.instance.saveHistory(_entries);
+    // 精確刪除單筆（原子操作，不影響其他記錄）
+    await RecordingHistoryStorage.instance.deleteEntry(entry.filePath);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -255,7 +265,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       _scheduleRebuild(); // 延後到安全時機再更新畫面
     }
 
-    await RecordingHistoryStorage.instance.saveHistory(_entries);
+    await RecordingHistoryStorage.instance.upsertEntry(_entries[index]);
 
     if (!mounted) return;
     final snackMessage = storedName.isEmpty
@@ -295,10 +305,13 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     final idx = _entries.indexWhere((e) => e.filePath == original.filePath);
     if (idx != -1) {
       _entries[idx] = _entries[idx].copyWith(isClipped: true);
+      RecordingHistoryStorage.instance.upsertEntry(_entries[idx]);
     }
     _entries.addAll(clips);
     setState(() {});
-    RecordingHistoryStorage.instance.saveHistory(_entries);
+    for (final clip in clips) {
+      RecordingHistoryStorage.instance.upsertEntry(clip);
+    }
   }
 
   /// 影片分析完成後，以新版 entry 取代舊版
@@ -307,7 +320,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (idx != -1) {
       _entries[idx] = newEntry;
       setState(() {});
-      RecordingHistoryStorage.instance.saveHistory(_entries);
+      RecordingHistoryStorage.instance.upsertEntry(newEntry);
     }
   }
 
@@ -360,12 +373,15 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   // ---------- 篩選持久化 ----------
 
-  static const _kGoodShot  = 'hf_good_shot';
-  static const _kVideoType = 'hf_video_type';
-  static const _kAnalyzed  = 'hf_analyzed';
-  static const _kAiCoach   = 'hf_ai_coach';
-  static const _kClipped   = 'hf_clipped';
-  static const _kSortBy    = 'hf_sort_by';
+  static const _kGoodShot   = 'hf_good_shot';
+  static const _kVideoType  = 'hf_video_type';
+  static const _kAnalyzed   = 'hf_analyzed';
+  static const _kAiCoach    = 'hf_ai_coach';
+  static const _kClipped    = 'hf_clipped';
+  static const _kSortBy     = 'hf_sort_by';
+  static const _kDatePreset = 'hf_date_preset';
+  static const _kDateFrom   = 'hf_date_from';
+  static const _kDateTo     = 'hf_date_to';
 
   /// 從 SharedPreferences 還原篩選狀態（initState 呼叫）
   Future<void> _loadFilters() async {
@@ -377,6 +393,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       _aiAnalyzedFilter = _prefBool(prefs, _kAnalyzed);
       _aiCoachFilter    = _prefBool(prefs, _kAiCoach);
       _clippedFilter    = _prefBool(prefs, _kClipped);
+      _datePreset = prefs.getString(_kDatePreset);
+      final fromMs = prefs.getInt(_kDateFrom);
+      final toMs   = prefs.getInt(_kDateTo);
+      _customDateFrom = fromMs != null ? DateTime.fromMillisecondsSinceEpoch(fromMs) : null;
+      _customDateTo   = toMs   != null ? DateTime.fromMillisecondsSinceEpoch(toMs)   : null;
       final name = prefs.getString(_kSortBy);
       if (name != null) {
         _sortBy = _SortBy.values.firstWhere(
@@ -394,6 +415,15 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     _setPrefBool(prefs, _kAiCoach,   _aiCoachFilter);
     _setPrefBool(prefs, _kClipped,   _clippedFilter);
     await prefs.setString(_kSortBy, _sortBy.name);
+    if (_datePreset == null) {
+      prefs.remove(_kDatePreset);
+      prefs.remove(_kDateFrom);
+      prefs.remove(_kDateTo);
+    } else {
+      prefs.setString(_kDatePreset, _datePreset!);
+      if (_customDateFrom != null) prefs.setInt(_kDateFrom, _customDateFrom!.millisecondsSinceEpoch);
+      if (_customDateTo   != null) prefs.setInt(_kDateTo,   _customDateTo!.millisecondsSinceEpoch);
+    }
   }
 
   static bool? _prefBool(SharedPreferences p, String key) {
@@ -451,6 +481,27 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   Widget _chip(String label, bool selected, Color color, VoidCallback onTap) =>
       _HistoryFilterChip(label: label, selected: selected, selectedColor: color, onTap: onTap);
 
+  /// 計算日期篩選的有效起迄範圍
+  (DateTime? from, DateTime? to) get _effectiveDateRange {
+    final now = DateTime.now();
+    switch (_datePreset) {
+      case 'today':
+        return (DateTime(now.year, now.month, now.day),
+                DateTime(now.year, now.month, now.day, 23, 59, 59));
+      case 'week':
+        final weekStart = now.subtract(Duration(days: now.weekday - 1));
+        return (DateTime(weekStart.year, weekStart.month, weekStart.day),
+                DateTime(now.year, now.month, now.day, 23, 59, 59));
+      case 'month':
+        return (DateTime(now.year, now.month, 1),
+                DateTime(now.year, now.month, now.day, 23, 59, 59));
+      case 'custom':
+        return (_customDateFrom, _customDateTo);
+      default:
+        return (null, null);
+    }
+  }
+
   /// 目前非預設值的篩選條件數量
   int get _activeFilterCount {
     int n = 0;
@@ -459,6 +510,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_aiAnalyzedFilter != null) n++;
     if (_aiCoachFilter    != null) n++;
     if (_clippedFilter    != null) n++;
+    if (_datePreset       != null) n++;
     if (_sortBy != _SortBy.date)   n++;
     return n;
   }
@@ -476,6 +528,15 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_aiCoachFilter    == false) items.add(('AI未分析', const Color(0xFF9AA6B2)));
     if (_clippedFilter    == true)  items.add(('已切片', const Color(0xFFFF9800)));
     if (_clippedFilter    == false) items.add(('未切片', const Color(0xFF9AA6B2)));
+    if (_datePreset == 'today')  items.add(('今天',     const Color(0xFF2196F3)));
+    if (_datePreset == 'week')   items.add(('本週',     const Color(0xFF2196F3)));
+    if (_datePreset == 'month')  items.add(('本月',     const Color(0xFF2196F3)));
+    if (_datePreset == 'custom' && _customDateFrom != null) {
+      final df = _customDateFrom!;
+      final dt = _customDateTo ?? _customDateFrom!;
+      final fmt = (DateTime d) => '${d.month}/${d.day}';
+      items.add(('${fmt(df)}–${fmt(dt)}', const Color(0xFF2196F3)));
+    }
     if (_sortBy != _SortBy.date)    items.add((_sortBy.label, const Color(0xFF1565C0)));
 
     if (items.isEmpty) {
@@ -580,14 +641,30 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           return crispnessB.compareTo(crispnessA);
         });
         break;
+
+      case _SortBy.clipTime:
+        // 按片段內播放位置排序（startSecond 小的前者先）
+        sorted.sort((a, b) {
+          final isClipA = a.videoType == VideoType.localClip;
+          final isClipB = b.videoType == VideoType.localClip;
+          // 切片排前，不是切片的按日期排序
+          if (isClipA != isClipB) return isClipA ? -1 : 1;
+          if (isClipA && isClipB) {
+            final ta = a.startSecond ?? a.hitSecond ?? 0.0;
+            final tb = b.startSecond ?? b.hitSecond ?? 0.0;
+            return ta.compareTo(tb);
+          }
+          return b.sortTime.compareTo(a.sortTime);
+        });
+        break;
     }
     
     return sorted;
   }
 
-  /// 使用 audioCrispness 作為音質峰值排序依據
+  /// 取得最高速度峰值（bestSpeedValue 欄位），用於「最佳速度」排序
   double? _getMaxPeakValue(RecordingHistoryEntry entry) {
-    return entry.audioCrispness;
+    return entry.bestSpeedValue;
   }
 
   // ---------- 畫面建構 ----------
@@ -601,7 +678,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     // 影片類型（長/短）
     if (_videoTypeIsLong != null) {
       filteredEntries = filteredEntries.where((e) {
-        final isLong = e.durationSeconds > 5 && e.durationSeconds <= 120;
+        final isLong = e.durationSeconds > 5 && e.durationSeconds <= 600;
         return _videoTypeIsLong! ? isLong : !isLong;
       }).toList();
     }
@@ -625,6 +702,21 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       filteredEntries = filteredEntries
           .where((e) => e.isClipped == _clippedFilter)
           .toList();
+    }
+
+    // 日期篩選
+    if (_datePreset != null) {
+      final (from, to) = _effectiveDateRange;
+      if (from != null) {
+        filteredEntries = filteredEntries
+            .where((e) => !e.recordedAt.isBefore(from))
+            .toList();
+      }
+      if (to != null) {
+        filteredEntries = filteredEntries
+            .where((e) => !e.recordedAt.isAfter(to))
+            .toList();
+      }
     }
 
     // 應用排序
@@ -811,9 +903,25 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                   _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
                                   _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
                                 ]),
+                                _filterRow('日期', [
+                                  _chip('全部', _datePreset == null,    const Color(0xFF1E8E5A), () { setState(() { _datePreset = null; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip('今天', _datePreset == 'today', const Color(0xFF2196F3), () { setState(() { _datePreset = 'today'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip('本週', _datePreset == 'week',  const Color(0xFF2196F3), () { setState(() { _datePreset = 'week';  _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip('本月', _datePreset == 'month', const Color(0xFF2196F3), () { setState(() { _datePreset = 'month'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _DateRangeChip(
+                                    selected: _datePreset == 'custom',
+                                    dateFrom: _customDateFrom,
+                                    dateTo: _customDateTo,
+                                    onPicked: (from, to) {
+                                      setState(() { _datePreset = 'custom'; _customDateFrom = from; _customDateTo = to; });
+                                      _saveFilters();
+                                    },
+                                  ),
+                                ]),
                                 _filterRow('排序', [
                                   _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1E8E5A), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
                                   _chip('最佳速度', _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
+                                  _chip('片段時間', _sortBy == _SortBy.clipTime,  const Color(0xFFFF9800), () { setState(() => _sortBy = _SortBy.clipTime);  _saveFilters(); }),
                                 ]),
                               ],
                             ),
@@ -848,6 +956,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           onClipsGenerated: _onClipsGenerated,
                           onEntryUpdated: _onEntryUpdated,
                           allEntries: _entries,
+                          onDeleteClip: _deleteEntry,
                         );
                       },
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -937,6 +1046,8 @@ class _HistoryTile extends StatefulWidget {
   final void Function(RecordingHistoryEntry old, RecordingHistoryEntry updated)? onEntryUpdated;
   /// 用於比較模式的所有其他 entry（過濾後供選擇第二部影片）
   final List<RecordingHistoryEntry> allEntries;
+  /// 刪除子切片的回呼（由 _ClipSubCard 觸發）
+  final void Function(RecordingHistoryEntry clip)? onDeleteClip;
 
   const _HistoryTile({
     super.key,
@@ -949,6 +1060,7 @@ class _HistoryTile extends StatefulWidget {
     this.onClipsGenerated,
     this.onEntryUpdated,
     this.allEntries = const [],
+    this.onDeleteClip,
   });
 
   @override
@@ -961,7 +1073,7 @@ class _HistoryTileState extends State<_HistoryTile> {
   bool _isAnalyzing = false;
   bool _isSubmittingAi = false;
   bool _isExpanded = false;
-  bool get _isLongVideo => widget.entry.durationSeconds > 5 && widget.entry.durationSeconds <= 120;
+  bool get _isLongVideo => widget.entry.durationSeconds > 5 && widget.entry.durationSeconds <= 600;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
   bool get _isClip => widget.entry.videoType == VideoType.localClip;
   bool get _isAnalyzed => widget.entry.isAnalyzed;
@@ -1234,6 +1346,12 @@ class _HistoryTileState extends State<_HistoryTile> {
           '  平均音訊值: ${avgAudio.toStringAsFixed(3)}\n'
           '  擊球幀位置: $hitFrames'
         );
+
+        // 計算最高速度峰值並儲存到 entry（供「最佳速度」排序使用）
+        final maxSpeed = hits.fold<double>(0.0, (m, h) => h.speedValue > m ? h.speedValue : m);
+        final entryWithSpeed = widget.entry.copyWith(bestSpeedValue: maxSpeed);
+        unawaited(RecordingHistoryStorage.instance.upsertEntry(entryWithSpeed));
+        debugPrint('[HitDetection] 💾 bestSpeedValue=$maxSpeed 已儲存');
       }
 
       if (hits.isEmpty) {
@@ -1372,8 +1490,8 @@ class _HistoryTileState extends State<_HistoryTile> {
       final durationSeconds = widget.entry.durationSeconds;
 
       // 檢查時長有效性
-      if (durationSeconds < 1 || durationSeconds > 120) {
-        throw '影片時長 ($durationSeconds 秒) 不符合要求 (1-120 秒)';
+      if (durationSeconds < 1 || durationSeconds > 600) {
+        throw '影片時長 ($durationSeconds 秒) 不符合要求 (1-600 秒)';
       }
 
       // Stage 1: 視頻分析（0-70%）
@@ -1748,7 +1866,8 @@ class _HistoryTileState extends State<_HistoryTile> {
             e.videoType == VideoType.localClip &&
             e.sourceVideoPath == widget.entry.filePath)
         .toList()
-      ..sort((a, b) => (a.hitSecond ?? 0).compareTo(b.hitSecond ?? 0));
+      ..sort((a, b) => (a.startSecond ?? a.hitSecond ?? 0)
+          .compareTo(b.startSecond ?? b.hitSecond ?? 0));
     final hasClips = clips.isNotEmpty;
 
     return Column(
@@ -2028,6 +2147,14 @@ class _HistoryTileState extends State<_HistoryTile> {
                       loading: _isDetecting,
                       onTap: _runDetection,
                     )
+                  else if (!_isAnalyzed)
+                    _actionBtn(
+                      icon: Icons.analytics_rounded,
+                      label: '完整分析',
+                      color: const Color(0xFF00838F),
+                      loading: _isAnalyzing,
+                      onTap: _runCombinedAnalysis,
+                    )
                   else
                     _actionBtn(
                       icon: Icons.psychology_rounded,
@@ -2061,6 +2188,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                     clip: e.value,
                     clipIndex: e.key + 1,
                     onEntryUpdated: widget.onEntryUpdated,
+                    onDelete: () => widget.onDeleteClip?.call(clips[e.key]),
                   ),
                 )).toList(),
               ),
@@ -2163,12 +2291,14 @@ class _ClipSubCard extends StatefulWidget {
   final RecordingHistoryEntry clip;
   final int clipIndex;
   final void Function(RecordingHistoryEntry old, RecordingHistoryEntry updated)? onEntryUpdated;
+  final VoidCallback? onDelete;
 
   const _ClipSubCard({
     super.key,
     required this.clip,
     required this.clipIndex,
     this.onEntryUpdated,
+    this.onDelete,
   });
 
   @override
@@ -2177,6 +2307,203 @@ class _ClipSubCard extends StatefulWidget {
 
 class _ClipSubCardState extends State<_ClipSubCard> {
   bool _isSubmittingAi = false;
+  bool _isAnalyzing = false;
+
+  /// 重新命名切片
+  Future<void> _rename() async {
+    final clip = widget.clip;
+    final initial = clip.customName?.trim().isNotEmpty == true
+        ? clip.customName!.trim()
+        : '第 ${widget.clipIndex} 球';
+    String tempName = initial;
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重新命名切片'),
+        content: TextField(
+          controller: TextEditingController(text: initial),
+          maxLength: 40,
+          decoration: const InputDecoration(labelText: '名稱', helperText: '可留空以恢復預設'),
+          onChanged: (v) => tempName = v,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(tempName),
+            child: const Text('確定'),
+          ),
+        ],
+      ),
+    );
+    if (newName == null || !mounted) return;
+    final trimmed = newName.trim();
+    widget.onEntryUpdated?.call(
+      clip,
+      clip.copyWith(customName: trimmed.isEmpty ? null : trimmed),
+    );
+  }
+
+  /// 分享切片
+  void _share() {
+    ShareUploadDialog.show(
+      context,
+      entry: widget.clip,
+      onShareSaved: (updated) => widget.onEntryUpdated?.call(widget.clip, updated),
+    );
+  }
+
+  /// 完整分析（短影片）
+  Future<void> _runCombinedAnalysis() async {
+    if (_isAnalyzing) return;
+
+    ExportQuality selectedQuality = ExportQuality.standard;
+    if (mounted) {
+      final skipToday = await _SkipHelper.shouldSkip('combined_analysis');
+      if (skipToday) {
+        selectedQuality = await _SkipHelper.savedQuality();
+      } else {
+        final lastQ = await _SkipHelper.savedQuality();
+        if (!mounted) return;
+        final result = await showDialog<_QualityDialogResult>(
+          context: context,
+          barrierDismissible: true,
+          builder: (ctx) => _ExportQualityDialog(initialQuality: lastQ),
+        );
+        if (result == null) return;
+        selectedQuality = result.quality;
+        if (result.skipToday) {
+          await _SkipHelper.markSkipToday('combined_analysis');
+          await _SkipHelper.saveQuality(selectedQuality);
+        }
+      }
+    }
+
+    setState(() => _isAnalyzing = true);
+    if (!mounted) return;
+
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ProgressWithAdDialog(
+        title: '🎬 完整分析中',
+        progressNotifier: progressNotifier,
+        progressColor: Colors.cyan,
+      ),
+    );
+
+    try {
+      final clip = widget.clip;
+      final clipPath = clip.filePath;
+      final sessionDir = p.dirname(clipPath);
+      final durationSeconds = clip.durationSeconds;
+
+      if (durationSeconds < 1 || durationSeconds > 600) {
+        throw '影片時長 ($durationSeconds 秒) 不符合要求 (1-600 秒)';
+      }
+
+      progressNotifier.value = (0.0, '視頻分析中...');
+      final result = await ClipPipelineService.analyze(
+        clipPath: clipPath,
+        sessionDir: sessionDir,
+        durationSeconds: durationSeconds,
+        hitSec: clip.hitSecond,
+        quality: selectedQuality,
+        onProgress: (label) => progressNotifier.value = (0.35, label),
+      );
+      if (result == null) throw '視頻分析失敗';
+
+      final silenceTags = result.hasSilence ? ['no_audio'] : null;
+      var updatedEntry = clip.copyWith(
+        filePath: result.finalPath,
+        isAnalyzed: true,
+        audioTags: silenceTags,
+      );
+
+      progressNotifier.value = (0.7, '音頻分析中...');
+      final wavFile = File(p.join(sessionDir, 'audio.wav'));
+      var wavExists = await wavFile.exists();
+      if (!wavExists) {
+        progressNotifier.value = (0.72, '提取音頻中...');
+        final samplesExtracted = await AudioExtractionService.extractAudioFromVideo(
+          videoPath: clipPath,
+          outputWavPath: wavFile.path,
+          onProgress: (progress, message) {
+            progressNotifier.value = (0.72 + progress * 0.08, message);
+          },
+        );
+        if (samplesExtracted > 0) wavExists = await wavFile.exists();
+      }
+
+      AudioAnalysisResult? audioResult;
+      if (wavExists) {
+        try {
+          final bytes = await wavFile.readAsBytes();
+          if (bytes.length >= 44) {
+            int dataStart = 44;
+            for (int i = 36; i < bytes.length - 8; i++) {
+              if (bytes[i] == 100 && bytes[i+1] == 97 && bytes[i+2] == 116 && bytes[i+3] == 97) {
+                dataStart = i + 8;
+                break;
+              }
+            }
+            final audioDataBytes = bytes.sublist(dataStart);
+            final pcmSamples = <double>[];
+            for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
+              final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
+              final s16 = (int16 > 32767) ? int16 - 65536 : int16;
+              pcmSamples.add(s16 / 32768.0);
+            }
+            if (pcmSamples.isNotEmpty) {
+              audioResult = await AudioExportService.analyzeFromPcm(
+                pcmSamples: pcmSamples,
+                sessionDir: sessionDir,
+                sampleRate: 44100,
+                onProgress: (progress) {
+                  progressNotifier.value = (0.8 + progress.progress * 0.2, progress.message);
+                },
+              );
+            }
+          }
+        } catch (e) {
+          debugPrint('[切片完整分析] 音頻分析異常：$e');
+        }
+      }
+
+      navigator.pop();
+      if (mounted) setState(() => _isAnalyzing = false);
+
+      if (audioResult != null) {
+        updatedEntry = updatedEntry.copyWith(
+          audioCrispness: audioResult.features.isNotEmpty
+              ? audioResult.features.first.sharpnessHfxLoud
+              : null,
+          goodShot: audioResult.predictedClass == 'pro' || audioResult.predictedClass == 'good',
+          audioLabel: audioResult.feedbackLabel,
+        );
+      }
+      widget.onEntryUpdated?.call(clip, updatedEntry);
+
+      final audioMsg = audioResult != null ? '\n🎵 音頻：${audioResult.feedbackLabel}' : '';
+      messenger.showSnackBar(SnackBar(
+        content: Text('完整分析完成 ✅$audioMsg'),
+        duration: const Duration(seconds: 4),
+      ));
+    } catch (e) {
+      debugPrint('[切片完整分析] 錯誤: $e');
+      navigator.pop();
+      if (mounted) setState(() => _isAnalyzing = false);
+      messenger.showSnackBar(SnackBar(
+        content: Text('完整分析失敗: $e'),
+        backgroundColor: Colors.red,
+      ));
+    } finally {
+      progressNotifier.dispose();
+    }
+  }
 
   Future<void> _play() async {
     final file = File(widget.clip.filePath);
@@ -2323,12 +2650,64 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '第 ${widget.clipIndex} 球',
-                                style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF123B70)),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      clip.customName?.trim().isNotEmpty == true
+                                          ? clip.customName!.trim()
+                                          : '第 ${widget.clipIndex} 球',
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF123B70)),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  // │││ 下拉選單
+                                  PopupMenuButton<_ClipMenuAction>(
+                                    icon: const Icon(Icons.more_vert_rounded,
+                                        size: 18, color: Color(0xFF9AA6B2)),
+                                    padding: EdgeInsets.zero,
+                                    onSelected: (action) {
+                                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                                        switch (action) {
+                                          case _ClipMenuAction.rename:
+                                            _rename();
+                                            break;
+                                          case _ClipMenuAction.share:
+                                            _share();
+                                            break;
+                                          case _ClipMenuAction.delete:
+                                            widget.onDelete?.call();
+                                            break;
+                                        }
+                                      });
+                                    },
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem<_ClipMenuAction>(
+                                        value: _ClipMenuAction.rename,
+                                        child: Text('重新命名'),
+                                      ),
+                                      if (clip.isAnalyzed)
+                                        const PopupMenuItem<_ClipMenuAction>(
+                                          value: _ClipMenuAction.share,
+                                          child: Row(children: [
+                                            Icon(Icons.share_outlined,
+                                                size: 16, color: Color(0xFF1E8E5A)),
+                                            SizedBox(width: 8),
+                                            Text('分享連結'),
+                                          ]),
+                                        ),
+                                      const PopupMenuItem<_ClipMenuAction>(
+                                        value: _ClipMenuAction.delete,
+                                        child: Text('刪除影片',
+                                            style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                               if (clip.hitSecond != null) ...[
                                 const SizedBox(height: 3),
@@ -2371,6 +2750,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     _smallBadge('已分析', const Color(0xFF1E8E5A)),
                                   if (clip.hasAiCoachAnalysis)
                                     _smallBadge('AI', const Color(0xFF7C3AED)),
+                                  if (clip.audioTags?.contains('no_audio') == true)
+                                    _smallBadge('無聲音', const Color(0xFF9E9E9E)),
                                   if (clip.audioCrispness != null)
                                     _smallBadge(
                                       '清脆 ${clip.audioCrispness!.toStringAsFixed(1)}',
@@ -2412,13 +2793,22 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         ),
                         const VerticalDivider(
                             width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
-                        _clipBtn(
-                          icon: Icons.psychology_rounded,
-                          label: 'AI 分析',
-                          color: const Color(0xFF7C3AED),
-                          loading: _isSubmittingAi,
-                          onTap: _runAiAnalysis,
-                        ),
+                        if (!clip.isAnalyzed)
+                          _clipBtn(
+                            icon: Icons.analytics_rounded,
+                            label: '完整分析',
+                            color: const Color(0xFF00838F),
+                            loading: _isAnalyzing,
+                            onTap: _runCombinedAnalysis,
+                          )
+                        else
+                          _clipBtn(
+                            icon: Icons.psychology_rounded,
+                            label: 'AI 分析',
+                            color: const Color(0xFF7C3AED),
+                            loading: _isSubmittingAi,
+                            onTap: _runAiAnalysis,
+                          ),
                       ],
                     ),
                   ),
@@ -2633,6 +3023,89 @@ class _ComparePickerSheet extends StatelessWidget {
 // ────────────────────────────────────────────────────────────────────────────
 // 篩選／排序用的 Chip（明確指定顏色，避免 M3 seed 色推導導致文字不可見）
 // ────────────────────────────────────────────────────────────────────────────
+
+/// 自訂日期區間 Chip：點擊後開啟 DateRangePicker，選好後回調
+class _DateRangeChip extends StatelessWidget {
+  final bool selected;
+  final DateTime? dateFrom;
+  final DateTime? dateTo;
+  final void Function(DateTime from, DateTime to) onPicked;
+
+  const _DateRangeChip({
+    required this.selected,
+    required this.dateFrom,
+    required this.dateTo,
+    required this.onPicked,
+  });
+
+  String get _label {
+    if (!selected || dateFrom == null) return '自訂日期';
+    final from = dateFrom!;
+    final to   = dateTo ?? from;
+    final fmt  = (DateTime d) => '${d.month}/${d.day}';
+    return '${fmt(from)} – ${fmt(to)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xFF2196F3);
+    return GestureDetector(
+      onTap: () async {
+        final now = DateTime.now();
+        final picked = await showDateRangePicker(
+          context: context,
+          firstDate: DateTime(2020),
+          lastDate: now,
+          initialDateRange: selected && dateFrom != null
+              ? DateTimeRange(start: dateFrom!, end: dateTo ?? dateFrom!)
+              : DateTimeRange(
+                  start: now.subtract(const Duration(days: 6)),
+                  end: now,
+                ),
+          locale: const Locale('zh', 'TW'),
+          helpText: '選擇日期範圍',
+          cancelText: '取消',
+          confirmText: '確定',
+          saveText: '確定',
+        );
+        if (picked != null) {
+          onPicked(picked.start, DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59));
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? color : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : const Color(0xFFBBC4CE),
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.date_range_rounded,
+              size: 13,
+              color: selected ? Colors.white : const Color(0xFF4A5568),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              _label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : const Color(0xFF4A5568),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _HistoryFilterChip extends StatelessWidget {
   final String label;

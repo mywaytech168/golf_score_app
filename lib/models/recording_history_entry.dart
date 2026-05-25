@@ -103,6 +103,10 @@ class RecordingHistoryEntry {
   /// hasAiCoachAnalysis == true 亦視為已上傳
   final bool isUploaded;
 
+  /// 擊球偵測後計算的最高速度峰值（speedValue），用於「最佳速度」排序
+  /// 來自 hits.json 中所有 SwingHit.speedValue 的最大值
+  final double? bestSpeedValue;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -127,6 +131,7 @@ class RecordingHistoryEntry {
     this.sharerName,
     this.hasAiCoachAnalysis = false,
     this.isUploaded = false,
+    this.bestSpeedValue,
   });
 
   /// 是否已上傳（明確標記 或 AI Coach 分析過）
@@ -166,6 +171,7 @@ class RecordingHistoryEntry {
     String? sharerName,
     bool? hasAiCoachAnalysis,
     bool? isUploaded,
+    double? bestSpeedValue,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -191,6 +197,7 @@ class RecordingHistoryEntry {
       sharerName: sharerName ?? this.sharerName,
       hasAiCoachAnalysis: hasAiCoachAnalysis ?? this.hasAiCoachAnalysis,
       isUploaded: isUploaded ?? this.isUploaded,
+      bestSpeedValue: bestSpeedValue ?? this.bestSpeedValue,
     );
   }
 
@@ -235,6 +242,7 @@ class RecordingHistoryEntry {
       'sharerName': sharerName,
       'hasAiCoachAnalysis': hasAiCoachAnalysis,
       'isUploaded': isUploaded,
+      'bestSpeedValue': bestSpeedValue,
     };
   }
 
@@ -290,6 +298,7 @@ class RecordingHistoryEntry {
       sharerName: json['sharerName'] as String?,
       hasAiCoachAnalysis: (json['hasAiCoachAnalysis'] as bool?) ?? false,
       isUploaded:         (json['isUploaded']         as bool?) ?? false,
+      bestSpeedValue:     (json['bestSpeedValue']     as num?)?.toDouble(),
     );
   }
 }

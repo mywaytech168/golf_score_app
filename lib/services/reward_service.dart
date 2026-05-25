@@ -221,14 +221,14 @@ class RewardService {
     required String type,
     required String text,
     String? videoId,
-    String? imageBase64,
+    String? imageB2Key,
   }) async {
     try {
       final result = await VideoServerClient.instance.submitFeedback(
         type: type,
         text: text,
         videoId: videoId,
-        imageBase64: imageBase64,
+        imageB2Key: imageB2Key,
       );
       if (result != null) {
         final balls = (result['balls'] as int?) ?? 0;
