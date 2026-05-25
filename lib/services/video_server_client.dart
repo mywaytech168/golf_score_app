@@ -508,6 +508,121 @@ class VideoServerClient {
     }
   }
 
+  // ============================================================
+  // 使用者個人資料
+  // ============================================================
+
+  /// 取得目前登入使用者資訊
+  ///
+  /// 回傳格式：`{ "id", "username", "email", "displayName", "googleLinked": bool }`
+  Future<Map<String, dynamic>?> getMe({bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http
+          .get(Uri.parse('$_baseUrl/api/user/me'), headers: headers)
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return getMe(isRetry: true);
+        throw UnauthorizedException('getMe 失敗: 401');
+      }
+      return null;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ getMe 異常: $e');
+      return null;
+    }
+  }
+
+  /// 更新顯示名稱（伺服器端同步）
+  ///
+  /// 端點：PATCH /api/user/me  body: `{ "displayName": "..." }`
+  Future<bool> updateProfileName(String displayName, {bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.patch(
+        Uri.parse('$_baseUrl/api/user/me'),
+        headers: headers,
+        body: jsonEncode({'displayName': displayName.trim()}),
+      );
+      if (response.statusCode == 200) return true;
+      if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return updateProfileName(displayName, isRetry: true);
+        throw UnauthorizedException('updateProfileName 失敗: 401');
+      }
+      debugPrint('❌ updateProfileName: ${response.statusCode}');
+      return false;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ updateProfileName 異常: $e');
+      return false;
+    }
+  }
+
+  /// 修改密碼（需要目前密碼驗證）
+  ///
+  /// 端點：POST /api/auth/change-password
+  /// body: `{ "currentPassword": "...", "newPassword": "..." }`
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/auth/change-password'),
+        headers: headers,
+        body: jsonEncode({
+          'currentPassword': currentPassword,
+          'newPassword': newPassword,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return changePassword(currentPassword: currentPassword, newPassword: newPassword, isRetry: true);
+        throw UnauthorizedException('changePassword 失敗: 401');
+      }
+      final err = jsonDecode(response.body) as Map<String, dynamic>;
+      return {'success': false, 'message': err['message'] ?? '修改失敗 (${response.statusCode})'};
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      return {'success': false, 'message': '網路錯誤: $e'};
+    }
+  }
+
+  /// 綁定 Google 帳號（idToken from google_sign_in）
+  ///
+  /// 端點：POST /api/auth/google/link  body: `{ "idToken": "..." }`
+  Future<Map<String, dynamic>> linkGoogleAccount(String idToken, {bool isRetry = false}) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/auth/google/link'),
+        headers: headers,
+        body: jsonEncode({'idToken': idToken}),
+      );
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return linkGoogleAccount(idToken, isRetry: true);
+        throw UnauthorizedException('linkGoogle 失敗: 401');
+      }
+      final err = jsonDecode(response.body) as Map<String, dynamic>;
+      return {'success': false, 'message': err['message'] ?? '綁定失敗 (${response.statusCode})'};
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      return {'success': false, 'message': '網路錯誤: $e'};
+    }
+  }
+
   /// 套用邀請碼（每帳號限一次）
   ///
   /// 回傳格式：`{ "success": true, "message": "...", "ballsEarned": 5 }`

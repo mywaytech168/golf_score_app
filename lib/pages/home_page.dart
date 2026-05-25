@@ -18,6 +18,7 @@ import '../services/plan_service.dart';
 import '../widgets/green_page_header.dart';
 import '../widgets/language_selector.dart';
 import 'reward_page.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -387,6 +388,13 @@ class _HomePageState extends State<HomePage> {
           subtitle: quotaText,
           actions: [
             planBadge,
+            IconButton(
+              tooltip: '設定',
+              icon: const Icon(Icons.settings_rounded, color: Colors.white),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              ),
+            ),
             IconButton(
               tooltip: '獎勵球數',
               icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
