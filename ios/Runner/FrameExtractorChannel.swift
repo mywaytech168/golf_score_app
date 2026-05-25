@@ -69,7 +69,7 @@ private func extractFrame(videoPath: String, timeMs: Int64, maxWidth: Int) throw
   var nv21 = Data(count: frameSize * 3 / 2)
   let rgba = pixelData.assumingMemoryBound(to: UInt8.self)
 
-  nv21.withUnsafeMutableBytes { ptr in
+  nv21.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) in
     guard let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
 
     // Y plane  (RGBA→Y)
@@ -77,7 +77,8 @@ private func extractFrame(videoPath: String, timeMs: Int64, maxWidth: Int) throw
       let r = Int(rgba[i * 4])
       let g = Int(rgba[i * 4 + 1])
       let b = Int(rgba[i * 4 + 2])
-      base[i] = UInt8(min(255, max(0, (299 * r + 587 * g + 114 * b) / 1000)))
+      let y = (299 * r + 587 * g + 114 * b) / 1000
+      base[i] = UInt8(max(0, min(255, y)))
     }
 
     // UV plane — NV21 layout: V first, then U, 2×2 sub-sampled
@@ -87,8 +88,10 @@ private func extractFrame(videoPath: String, timeMs: Int64, maxWidth: Int) throw
         let r = Int(rgba[idx * 4])
         let g = Int(rgba[idx * 4 + 1])
         let b = Int(rgba[idx * 4 + 2])
-        let u = max(0, min(255, (-169 * r - 331 * g + 500 * b) / 1000 + 128))
-        let v = max(0, min(255, ( 500 * r - 419 * g -  81 * b) / 1000 + 128))
+        let uRaw = (-169 * r - 331 * g + 500 * b) / 1000 + 128
+        let vRaw = ( 500 * r - 419 * g -  81 * b) / 1000 + 128
+        let u = max(0, min(255, uRaw))
+        let v = max(0, min(255, vRaw))
         let uvBase = frameSize + (j / 2) * outW + i
         base[uvBase]     = UInt8(v)
         base[uvBase + 1] = UInt8(u)

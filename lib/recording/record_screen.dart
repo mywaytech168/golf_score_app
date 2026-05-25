@@ -205,7 +205,11 @@ class _RecordScreenState extends State<RecordScreen> {
                   top: 16,
                   right: 16,
                   child: GestureDetector(
-                    onTap: () => setState(() => _isFrontCamera = !_isFrontCamera),
+                    onTap: () => setState(() {
+                      _isFrontCamera = !_isFrontCamera;
+                      _poses = [];
+                      _analysisImageSize = Size.zero;
+                    }),
                     child: Container(
                       width: 48,
                       height: 48,
@@ -381,9 +385,14 @@ class _RecordScreenState extends State<RecordScreen> {
     if (_isPoseProcessing) return;
     _isPoseProcessing = true;
     try {
+      debugPrint('[Pose] cam=${_isFrontCamera ? "front" : "back"} rot=${image.rotation} size=${image.width}x${image.height}');
       final inputImage = image.toInputImage();
-      if (inputImage == null) return;
+      if (inputImage == null) {
+        debugPrint('[Pose] inputImage is null!');
+        return;
+      }
       final poses = await _poseService.detect(inputImage);
+      debugPrint('[Pose] detected ${poses.length} poses');
       if (!mounted) return;
 
       final timeSec = _recordingStartTime != null

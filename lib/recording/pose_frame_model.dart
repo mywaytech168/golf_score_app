@@ -26,8 +26,9 @@ class PoseFrameModel {
       final type = PoseLandmarkType.values[i];
       final lm = pose.landmarks[type];
       if (lm == null) return LandmarkData.empty();
-      // 前鏡頭預覽水平鏡像，X 座標翻轉使 CSV 與視覺畫面一致
-      final rawX  = isFrontCamera ? (imgWidth - lm.x) : lm.x;
+      // 錄製影片不鏡像（MIRROR_MODE_OFF），CSV 直接使用 ML Kit 原始座標
+      // SkeletonPainter 在預覽時負責 X 翻轉以對齊鏡像預覽
+      final rawX = lm.x;
       return LandmarkData(
         xNorm: rawX / imgWidth,
         yNorm: lm.y / imgHeight,
