@@ -63,6 +63,8 @@ dependencies:
   fl_chart: ^0.68.0
   pay: ^2.0.0
   flutter_secure_storage: ^9.2.4
+  url_launcher: ^6.3.0
+  package_info_plus: ^8.1.0
   # ffmpeg_kit_flutter_min_gpl removed temporarily due to Android AGP namespace issue
  
   assets_audio_player:
@@ -112,6 +114,7 @@ flutter:
     - assets/sounds/1.mp3
     - assets/overlays/stance_overlay.png
     - assets/overlays/golf png.png
+    - assets/overlays/person_ball_outline_transparent.png
     - assets/audio/audio_class_stats.json
     - assets/pay/google_pay_config.json
   # To add assets to your application, add an assets section, like this:

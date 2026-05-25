@@ -1,9 +1,13 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'login_page.dart';
+
+const _kPrivacyPolicyUrl = 'https://tekswing.atk.tw/privacy';
 
 /// 首次啟動顯示使用者條款，同意後才進入登入流程
 class TermsOfServicePage extends StatefulWidget {
@@ -15,10 +19,17 @@ class TermsOfServicePage extends StatefulWidget {
     return prefs.getBool('terms_accepted') ?? false;
   }
 
-  /// 記錄同意條款
-  static Future<void> markAccepted() async {
+  /// 記錄同意條款，並儲存使用統計追蹤偏好
+  static Future<void> markAccepted({required bool analyticsConsent}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('terms_accepted', true);
+    await prefs.setBool('analytics_consent', analyticsConsent);
+  }
+
+  /// 取得使用者是否同意使用統計追蹤
+  static Future<bool> analyticsConsentGranted() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('analytics_consent') ?? false;
   }
 
   @override
@@ -29,6 +40,7 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
   final _scrollController = ScrollController();
   bool _hasScrolledToBottom = false;
   bool _agreed = false;
+  bool _analyticsConsent = true; // 預設同意（可自由取消勾選）
 
   @override
   void initState() {
@@ -52,7 +64,7 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
   }
 
   Future<void> _accept() async {
-    await TermsOfServicePage.markAccepted();
+    await TermsOfServicePage.markAccepted(analyticsConsent: _analyticsConsent);
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -78,6 +90,16 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
         ],
       ),
     );
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    final uri = Uri.parse(_kPrivacyPolicyUrl);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('無法開啟隱私政策頁面，請稍後再試')),
+      );
+    }
   }
 
   @override
@@ -176,12 +198,13 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 同意勾選
+                    // ── 同意條款勾選（含隱私政策可點擊連結）──────
                     GestureDetector(
                       onTap: _hasScrolledToBottom
                           ? () => setState(() => _agreed = !_agreed)
                           : null,
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           Checkbox(
                             value: _agreed,
@@ -198,13 +221,32 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                             ),
                           ),
                           Expanded(
-                            child: Text(
-                              '我已閱讀並同意《使用者條款》與《隱私政策》',
-                              style: TextStyle(
-                                color: _hasScrolledToBottom
-                                    ? Colors.white
-                                    : Colors.white54,
-                                fontSize: 13,
+                            child: RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  color: _hasScrolledToBottom
+                                      ? Colors.white
+                                      : Colors.white54,
+                                  fontSize: 13,
+                                ),
+                                children: [
+                                  const TextSpan(text: '我已閱讀並同意《使用者條款》與《'),
+                                  TextSpan(
+                                    text: '隱私政策',
+                                    style: TextStyle(
+                                      color: _hasScrolledToBottom
+                                          ? Colors.lightGreenAccent
+                                          : Colors.white38,
+                                      decoration: TextDecoration.underline,
+                                      decorationColor: _hasScrolledToBottom
+                                          ? Colors.lightGreenAccent
+                                          : Colors.white38,
+                                    ),
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = _openPrivacyPolicy,
+                                  ),
+                                  const TextSpan(text: '》'),
+                                ],
                               ),
                             ),
                           ),
@@ -212,17 +254,48 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                       ),
                     ),
 
+                    // ── 使用統計追蹤同意 ──────────────────────────
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Checkbox(
+                          value: _analyticsConsent,
+                          onChanged: (v) =>
+                              setState(() => _analyticsConsent = v ?? true),
+                          activeColor: const Color(0xFF1E8E5A),
+                          checkColor: Colors.white,
+                          side: const BorderSide(color: Colors.white70, width: 1.5),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text(
+                                '允許使用統計追蹤（選用）',
+                                style: TextStyle(color: Colors.white, fontSize: 13),
+                              ),
+                              Text(
+                                '協助我們改善 App 體驗，不包含個人身份資訊',
+                                style: TextStyle(color: Colors.white60, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
                     if (!_hasScrolledToBottom)
                       Padding(
-                        padding: const EdgeInsets.only(top: 4, bottom: 8),
+                        padding: const EdgeInsets.only(top: 4, bottom: 4),
                         child: Text(
                           '請先滑動閱讀完整條款後方可勾選同意',
                           style: theme.textTheme.bodySmall?.copyWith(color: Colors.white54),
                         ),
                       ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
 
-                    // 按鈕列
+                    // ── 按鈕列 ────────────────────────────────────
                     Row(
                       children: [
                         Expanded(
@@ -301,15 +374,17 @@ TekSwing（以下簡稱「本服務」）由 TekSwing 團隊提供，旨在協�
 • 揮桿影片及分析結果
 • 裝置資訊與使用紀錄
 
-使用目的：
-• 提供揮桿分析與統計服務
-• 改善服務品質與使用者體驗
-• 必要時與您聯繫
+使用統計追蹤（需您同意）：
+• 我們可能收集匿名使用資料（功能點擊、頁面瀏覽等）
+• 用於改善 App 體驗與功能設計
+• 不包含個人身份資訊，可隨時在設定中關閉
 
 資料保護：
 • 所有資料傳輸採用 TLS 加密
 • 伺服器端資料進行加密儲存
-• 定期進行安全稽核'''),
+• 定期進行安全稽核
+
+完整隱私政策請見：$_kPrivacyPolicyUrl'''),
         _section('六、智慧財產權', '''
 1. 本服務的軟體、介面設計、商標及所有相關內容均屬 TekSwing 所有，受著作權法保護。
 2. 您上傳的影片著作權歸您所有，但您授予本服務使用這些內容以提供分析服務的有限授權。
@@ -328,8 +403,9 @@ TekSwing（以下簡稱「本服務」）由 TekSwing 團隊提供，旨在協�
 
 電子郵件：support@tekswing.com
 服務網站：https://tekswing.atk.tw
+隱私政策：$_kPrivacyPolicyUrl
 
-本條款最後更新日期：2026 年 5 月 19 日'''),
+本條款最後更新日期：2026 年 5 月 25 日'''),
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(12),

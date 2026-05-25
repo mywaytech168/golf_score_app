@@ -63,6 +63,9 @@ class _RecordScreenState extends State<RecordScreen> {
   // 鏡頭方向
   bool _isFrontCamera = false;
 
+  // 輪廓疊加
+  bool _showOverlay = true;
+
   // 錄製設定
   RecordingConfig _config = RecordingConfig();
 
@@ -116,6 +119,14 @@ class _RecordScreenState extends State<RecordScreen> {
         title: const Text('高爾夫揮桿錄製'),
         actions: [
           IconButton(
+            tooltip: '輪廓疊加切換',
+            icon: Icon(
+              Icons.person_outline_rounded,
+              color: _showOverlay ? Colors.greenAccent : Colors.white38,
+            ),
+            onPressed: () => setState(() => _showOverlay = !_showOverlay),
+          ),
+          IconButton(
             tooltip: '骨架顯示切換',
             icon: Icon(
               Icons.accessibility_new,
@@ -162,6 +173,13 @@ class _RecordScreenState extends State<RecordScreen> {
                   painter: SkeletonPainter(
                     poses: _poses,
                     imageSize: _analysisImageSize,
+                  ),
+                ),
+              if (_showOverlay)
+                Center(
+                  child: Image.asset(
+                    'assets/overlays/person_ball_outline_transparent.png',
+                    fit: BoxFit.contain,
                   ),
                 ),
               if (_isRecording)

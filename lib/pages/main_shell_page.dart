@@ -9,6 +9,8 @@ import 'recording_history_page.dart';
 import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
+import '../services/app_update_service.dart';
+import '../widgets/update_dialog.dart';
 
 /// 主應用殼層：統一管理底部導覽列，確保跨頁面持久化
 /// 
@@ -32,6 +34,16 @@ class _MainShellPageState extends State<MainShellPage> {
     super.initState();
     _pageController = PageController(initialPage: 0);
     _loadHistory();
+    // 在首幀繪製完成後才做版本檢查，避免阻塞 UI
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  /// 向後端查詢更新，依結果決定顯示強制 / 非強制對話框
+  Future<void> _checkForUpdate() async {
+    if (!mounted) return;
+    final result = await AppUpdateService.check();
+    if (!mounted || !result.needsUpdate) return;
+    await showUpdateDialog(context, result);
   }
 
   Future<void> _loadHistory() async {

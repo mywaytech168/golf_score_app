@@ -39,6 +39,50 @@ class VideoServerClient {
       AuthTokenStorage.instance.tryRefreshToken();
 
   // ============================================================
+  // 版本檢查（不需要登入 Token）
+  // ============================================================
+
+  /// 查詢最新版本資訊。
+  ///
+  /// 端點：GET /api/app/version?platform=android|ios&version=1.0.0
+  ///
+  /// 預期回傳：
+  /// ```json
+  /// {
+  ///   "latestVersion": "1.2.0",
+  ///   "minRequiredVersion": "1.1.0",
+  ///   "forceUpdate": false,
+  ///   "updateUrl": "https://play.google.com/...",
+  ///   "releaseNotes": ["修正 A", "新增 B"],
+  ///   "releaseDate": "2026-05-25"
+  /// }
+  /// ```
+  /// 若網路異常或後端回傳非 200，回傳 null（呼叫端視為不需更新）。
+  Future<Map<String, dynamic>?> checkVersion({
+    required String platform,
+    required String version,
+  }) async {
+    try {
+      final url = Uri.parse(
+          '$_baseUrl/api/app/version?platform=$platform&version=$version');
+      debugPrint('🔄 版本檢查 → $url');
+      final response = await http
+          .get(url, headers: {'Content-Type': 'application/json'})
+          .timeout(const Duration(seconds: 8));
+      debugPrint('📥 版本檢查回應: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ 版本檢查異常: $e');
+      return null;
+    }
+  }
+
+  // ============================================================
   // 身份驗證方法
   // ============================================================
 

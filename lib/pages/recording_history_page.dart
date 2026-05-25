@@ -684,12 +684,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                       width: 18, height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     ),
-                  )
-                else
-                  IconButton(
-                    onPressed: _showDebugJsonInfo,
-                    tooltip: 'Debug',
-                    icon: const Icon(Icons.bug_report_outlined, color: Colors.white),
                   ),
               ],
             ),

@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using UploadServer.Data;
+using UploadServer.DTOs;
+using UploadServer.Services;
 
 namespace UploadServer.Controllers
 {
@@ -14,12 +16,18 @@ namespace UploadServer.Controllers
         private readonly VideoDbContext _db;
         private readonly IConfiguration _config;
         private readonly ILogger<AdminController> _logger;
+        private readonly AppVersionService _versionService;
 
-        public AdminController(VideoDbContext db, IConfiguration config, ILogger<AdminController> logger)
+        public AdminController(
+            VideoDbContext db,
+            IConfiguration config,
+            ILogger<AdminController> logger,
+            AppVersionService versionService)
         {
-            _db     = db;
-            _config = config;
-            _logger = logger;
+            _db             = db;
+            _config         = config;
+            _logger         = logger;
+            _versionService = versionService;
         }
 
         private bool IsAdmin() =>
@@ -99,6 +107,94 @@ namespace UploadServer.Controllers
                 .ToListAsync();
 
             return Ok(new { total, page, size, data = items });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // App 版本管理
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/admin/app/versions — 查看所有平台的版本設定
+        /// </summary>
+        [HttpGet("app/versions")]
+        public async Task<IActionResult> GetAppVersions()
+        {
+            if (!IsAdmin())
+                return StatusCode(403, new { message = "需要管理員權限" });
+
+            var versions = await _versionService.GetAllAsync();
+            var data = versions.Select(v => new
+            {
+                v.Id,
+                v.Platform,
+                v.LatestVersion,
+                v.MinRequiredVersion,
+                v.ForceUpdate,
+                v.UpdateUrl,
+                v.ReleaseNotesJson,
+                v.ReleaseDate,
+                UpdatedAt = v.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+            });
+
+            return Ok(new { data });
+        }
+
+        /// <summary>
+        /// PUT /api/admin/app/version/{platform} — 建立或更新版本設定
+        ///
+        /// Path: platform = android | ios
+        ///
+        /// Body:
+        /// {
+        ///   "latestVersion": "1.2.0",
+        ///   "minRequiredVersion": "1.0.0",
+        ///   "forceUpdate": false,
+        ///   "updateUrl": "https://play.google.com/...",
+        ///   "releaseNotes": ["修正 A", "新增 B"],
+        ///   "releaseDate": "2026-05-25"
+        /// }
+        /// </summary>
+        [HttpPut("app/version/{platform}")]
+        public async Task<IActionResult> UpsertAppVersion(
+            string platform,
+            [FromBody] UpdateAppVersionRequest req)
+        {
+            if (!IsAdmin())
+                return StatusCode(403, new { message = "需要管理員權限" });
+
+            if (platform != "android" && platform != "ios")
+                return BadRequest(new { message = "platform 必須為 android 或 ios" });
+
+            if (string.IsNullOrWhiteSpace(req.LatestVersion) ||
+                string.IsNullOrWhiteSpace(req.MinRequiredVersion))
+                return BadRequest(new { message = "latestVersion 與 minRequiredVersion 為必填" });
+
+            try
+            {
+                var record = await _versionService.UpsertVersionAsync(platform, req);
+                _logger.LogInformation("管理員更新版本設定 platform={Platform} latest={Latest}",
+                    platform, record.LatestVersion);
+
+                return Ok(new
+                {
+                    message = $"版本設定已更新（{platform}）",
+                    data = new
+                    {
+                        record.Platform,
+                        record.LatestVersion,
+                        record.MinRequiredVersion,
+                        record.ForceUpdate,
+                        record.UpdateUrl,
+                        record.ReleaseDate,
+                        UpdatedAt = record.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "更新版本設定失敗 platform={Platform}", platform);
+                return StatusCode(500, new { message = "伺服器錯誤" });
+            }
         }
     }
 }

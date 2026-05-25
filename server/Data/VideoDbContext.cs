@@ -19,6 +19,7 @@ namespace UploadServer.Data
         public DbSet<UserFeedback> UserFeedbacks { get; set; }
         public DbSet<AiCoachAnalysis> AiCoachAnalyses { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
+        public DbSet<AppVersion> AppVersions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -613,6 +614,60 @@ namespace UploadServer.Data
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // AppVersions
+            // ============================================================
+            modelBuilder.Entity<AppVersion>(entity =>
+            {
+                entity.ToTable("app_versions");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .ValueGeneratedOnAdd();
+
+                entity.Property(e => e.Platform)
+                    .HasColumnName("platform")
+                    .HasMaxLength(16)
+                    .IsRequired();
+
+                entity.Property(e => e.LatestVersion)
+                    .HasColumnName("latest_version")
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                entity.Property(e => e.MinRequiredVersion)
+                    .HasColumnName("min_required_version")
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                entity.Property(e => e.ForceUpdate)
+                    .HasColumnName("force_update")
+                    .HasDefaultValue(false);
+
+                entity.Property(e => e.UpdateUrl)
+                    .HasColumnName("update_url")
+                    .HasMaxLength(500);
+
+                entity.Property(e => e.ReleaseNotesJson)
+                    .HasColumnName("release_notes_json")
+                    .HasColumnType("TEXT")
+                    .HasDefaultValue("[]");
+
+                entity.Property(e => e.ReleaseDate)
+                    .HasColumnName("release_date")
+                    .HasMaxLength(20);
+
+                entity.Property(e => e.UpdatedAt)
+                    .HasColumnName("updated_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.Platform)
+                    .IsUnique()
+                    .HasDatabaseName("uk_appversion_platform");
             });
         }
     }
