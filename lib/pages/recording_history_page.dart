@@ -902,6 +902,30 @@ class _HistoryTileState extends State<_HistoryTile> {
       return;
     }
     if (_isDetecting) return;
+
+    // ── 確認對話框（今日不再提醒）────────────────────────────────────
+    if (mounted) {
+      final skipToday = await _SkipHelper.shouldSkip('detection');
+      if (!skipToday) {
+        if (!mounted) return;
+        final result = await showDialog<_ConfirmResult>(
+          context: context,
+          barrierDismissible: true,
+          builder: (_) => const _ConfirmActionDialog(
+            icon: Icons.sports_golf_rounded,
+            iconColor: Color(0xFFE65100),
+            title: '確定偵測擊球？',
+            description: '系統將分析整支影片，自動偵測所有擊球時刻並裁切為獨立片段，時間依影片長度而定。',
+            confirmLabel: '開始偵測',
+          ),
+        );
+        if (result == null) return; // 使用者取消
+        if (result.skipToday) {
+          await _SkipHelper.markSkipToday('detection');
+        }
+      }
+    }
+
     setState(() => _isDetecting = true);
 
     if (!mounted) return;
@@ -1200,13 +1224,25 @@ class _HistoryTileState extends State<_HistoryTile> {
     // ── 品質選擇對話框（僅短影片需要編碼，長影片直接跳過）────────────
     ExportQuality selectedQuality = ExportQuality.standard;
     if (!_isLongVideo && mounted) {
-      final chosen = await showDialog<ExportQuality>(
-        context: context,
-        barrierDismissible: true,
-        builder: (ctx) => _ExportQualityDialog(initialQuality: selectedQuality),
-      );
-      if (chosen == null) return; // 使用者取消
-      selectedQuality = chosen;
+      final skipToday = await _SkipHelper.shouldSkip('combined_analysis');
+      if (skipToday) {
+        // 今日已勾選「不再提醒」→ 直接使用上次儲存的品質
+        selectedQuality = await _SkipHelper.savedQuality();
+      } else {
+        final lastQ = await _SkipHelper.savedQuality();
+        if (!mounted) return;
+        final result = await showDialog<_QualityDialogResult>(
+          context: context,
+          barrierDismissible: true,
+          builder: (ctx) => _ExportQualityDialog(initialQuality: lastQ),
+        );
+        if (result == null) return; // 使用者取消
+        selectedQuality = result.quality;
+        if (result.skipToday) {
+          await _SkipHelper.markSkipToday('combined_analysis');
+          await _SkipHelper.saveQuality(selectedQuality);
+        }
+      }
     }
 
     setState(() => _isAnalyzing = true);
@@ -1427,7 +1463,32 @@ class _HistoryTileState extends State<_HistoryTile> {
   /// 提交影片到 AI 教練後端，並跳轉至結果頁面
   Future<void> _runAiAnalysis() async {
     if (_isSubmittingAi) return;
+
+    // ── 確認對話框（今日不再提醒）────────────────────────────────────
+    if (mounted) {
+      final skipToday = await _SkipHelper.shouldSkip('ai_analysis');
+      if (!skipToday) {
+        if (!mounted) return;
+        final result = await showDialog<_ConfirmResult>(
+          context: context,
+          barrierDismissible: true,
+          builder: (_) => const _ConfirmActionDialog(
+            icon: Icons.psychology_rounded,
+            iconColor: Color(0xFF7C3AED),
+            title: '確定送出 AI 分析？',
+            description: '影片將上傳至 AI 教練系統進行分析，請確認網路連線正常。',
+            confirmLabel: '送出分析',
+          ),
+        );
+        if (result == null) return; // 使用者取消
+        if (result.skipToday) {
+          await _SkipHelper.markSkipToday('ai_analysis');
+        }
+      }
+    }
+
     setState(() => _isSubmittingAi = true);
+    if (!mounted) { setState(() => _isSubmittingAi = false); return; }
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
@@ -1436,6 +1497,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 符合後端 video_id varchar(255) 長度限制，避免送完整路徑超長
       final videoId    = p.basename(sessionDir);
 
+      // ignore: use_build_context_synchronously
       await AiCoachPage.submitAndPush(
         context:  context,
         videoId:  videoId,
@@ -2034,13 +2096,39 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
   Future<void> _runAiAnalysis() async {
     if (_isSubmittingAi) return;
+
+    // ── 確認對話框（今日不再提醒）────────────────────────────────────
+    if (mounted) {
+      final skipToday = await _SkipHelper.shouldSkip('ai_analysis');
+      if (!skipToday) {
+        if (!mounted) return;
+        final result = await showDialog<_ConfirmResult>(
+          context: context,
+          barrierDismissible: true,
+          builder: (_) => const _ConfirmActionDialog(
+            icon: Icons.psychology_rounded,
+            iconColor: Color(0xFF7C3AED),
+            title: '確定送出 AI 分析？',
+            description: '影片將上傳至 AI 教練系統進行分析，請確認網路連線正常。',
+            confirmLabel: '送出分析',
+          ),
+        );
+        if (result == null) return; // 使用者取消
+        if (result.skipToday) {
+          await _SkipHelper.markSkipToday('ai_analysis');
+        }
+      }
+    }
+
     setState(() => _isSubmittingAi = true);
+    if (!mounted) { setState(() => _isSubmittingAi = false); return; }
     try {
       final sessionDir = p.dirname(widget.clip.filePath);
       final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
       final hasCsv     = File(csvPath).existsSync();
       final videoId    = p.basename(sessionDir);
 
+      // ignore: use_build_context_synchronously
       await AiCoachPage.submitAndPush(
         context:  context,
         videoId:  videoId,
@@ -2486,11 +2574,173 @@ class _HistoryFilterChip extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// 輸出品質選擇對話框
+// 「今日不再提醒」SharedPreferences 輔助
 // ────────────────────────────────────────────────────────────────────────────
 
-/// 在執行完整分析前讓使用者選擇輸出品質模式（SMALL / STANDARD / HIGH）。
-/// 回傳選取的 [ExportQuality]，使用者按取消回傳 null。
+/// 管理各操作「今日不再提醒」與最後選擇品質的持久化。
+class _SkipHelper {
+  _SkipHelper._();
+
+  static String _dateKey(String action) {
+    final d = DateTime.now();
+    // e.g. skip_confirm_ai_analysis_2026_5_25
+    return 'skip_confirm_${action}_${d.year}_${d.month}_${d.day}';
+  }
+
+  /// 今天是否已勾選「不再提醒」。
+  static Future<bool> shouldSkip(String action) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_dateKey(action)) ?? false;
+  }
+
+  /// 儲存「今日不再提醒」。
+  static Future<void> markSkipToday(String action) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_dateKey(action), true);
+  }
+
+  // ── 完整分析品質持久化 ──────────────────────────────────────
+  static const _kLastQuality = 'last_export_quality';
+
+  static Future<ExportQuality> savedQuality() async {
+    final prefs = await SharedPreferences.getInstance();
+    final val = prefs.getString(_kLastQuality);
+    return ExportQuality.values.firstWhere(
+      (q) => q.channelKey == val,
+      orElse: () => ExportQuality.standard,
+    );
+  }
+
+  static Future<void> saveQuality(ExportQuality q) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLastQuality, q.channelKey);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 結果資料類別
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 確認對話框回傳：使用者已確認，並標記是否今日不再提醒。
+class _ConfirmResult {
+  final bool skipToday;
+  const _ConfirmResult({required this.skipToday});
+}
+
+/// 品質選擇對話框回傳：選取的品質 + 是否今日不再提醒。
+class _QualityDialogResult {
+  final ExportQuality quality;
+  final bool skipToday;
+  const _QualityDialogResult({required this.quality, required this.skipToday});
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 通用確認對話框（AI分析 / 偵測擊球）
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 帶有「今日不再提醒」核取方塊的確認對話框。
+/// 使用者確認 → 回傳 [_ConfirmResult]；取消 → pop(null)。
+class _ConfirmActionDialog extends StatefulWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String description;
+  final String confirmLabel;
+
+  const _ConfirmActionDialog({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.description,
+    this.confirmLabel = '確定',
+  });
+
+  @override
+  State<_ConfirmActionDialog> createState() => _ConfirmActionDialogState();
+}
+
+class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
+  bool _skipToday = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+      title: Row(
+        children: [
+          Icon(widget.icon, color: widget.iconColor, size: 22),
+          const SizedBox(width: 8),
+          Text(
+            widget.title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.description,
+            style: const TextStyle(fontSize: 13.5, color: Color(0xFF4B5563), height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          // ── 今日不再提醒 ──
+          GestureDetector(
+            onTap: () => setState(() => _skipToday = !_skipToday),
+            behavior: HitTestBehavior.opaque,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Checkbox(
+                    value: _skipToday,
+                    onChanged: (v) => setState(() => _skipToday = v ?? false),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                    activeColor: const Color(0xFF6B7280),
+                    side: const BorderSide(color: Color(0xFFB0B8C1)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  '今日不再提醒',
+                  style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: widget.iconColor,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: () => Navigator.of(context).pop(_ConfirmResult(skipToday: _skipToday)),
+          child: Text(widget.confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 輸出品質選擇對話框（含「今日不再提醒」）
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 在執行完整分析前讓使用者選擇輸出品質模式並確認。
+/// 回傳 [_QualityDialogResult]，使用者取消回傳 null。
 class _ExportQualityDialog extends StatefulWidget {
   final ExportQuality initialQuality;
   const _ExportQualityDialog({required this.initialQuality});
@@ -2501,6 +2751,7 @@ class _ExportQualityDialog extends StatefulWidget {
 
 class _ExportQualityDialogState extends State<_ExportQualityDialog> {
   late ExportQuality _selected;
+  bool _skipToday = false;
 
   @override
   void initState() {
@@ -2524,90 +2775,130 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
-        children: ExportQuality.values.map((q) {
-          final isSelected = _selected == q;
-          return GestureDetector(
-            onTap: () => setState(() => _selected = q),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? const Color(0xFF1E8E5A).withValues(alpha: 0.08)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
+        children: [
+          // ── 品質選項 ──
+          ...ExportQuality.values.map((q) {
+            final isSelected = _selected == q;
+            return GestureDetector(
+              onTap: () => setState(() => _selected = q),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF1E8E5A)
-                      : const Color(0xFFDDE1E7),
-                  width: isSelected ? 1.5 : 1.0,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isSelected
-                        ? Icons.radio_button_checked_rounded
-                        : Icons.radio_button_off_rounded,
+                      ? const Color(0xFF1E8E5A).withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
                     color: isSelected
                         ? const Color(0xFF1E8E5A)
-                        : const Color(0xFFB0B8C1),
-                    size: 20,
+                        : const Color(0xFFDDE1E7),
+                    width: isSelected ? 1.5 : 1.0,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          q.label,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: isSelected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: isSelected
-                                ? const Color(0xFF1E8E5A)
-                                : const Color(0xFF1A1A2E),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          q.sizeHint,
-                          style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF6B7280)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    q.bitrateHint,
-                    style: TextStyle(
-                      fontSize: 11,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isSelected
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded,
                       color: isSelected
                           ? const Color(0xFF1E8E5A)
                           : const Color(0xFFB0B8C1),
-                      fontWeight: FontWeight.w500,
+                      size: 20,
                     ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            q.label,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight:
+                                  isSelected ? FontWeight.w700 : FontWeight.w500,
+                              color: isSelected
+                                  ? const Color(0xFF1E8E5A)
+                                  : const Color(0xFF1A1A2E),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            q.sizeHint,
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF6B7280)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      q.bitrateHint,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isSelected
+                            ? const Color(0xFF1E8E5A)
+                            : const Color(0xFFB0B8C1),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          // ── 今日不再提醒 ──
+          const Divider(height: 16, thickness: 0.8, color: Color(0xFFF0F2F5)),
+          GestureDetector(
+            onTap: () => setState(() => _skipToday = !_skipToday),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Checkbox(
+                      value: _skipToday,
+                      onChanged: (v) =>
+                          setState(() => _skipToday = v ?? false),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4)),
+                      activeColor: const Color(0xFF6B7280),
+                      side: const BorderSide(color: Color(0xFFB0B8C1)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '今日不再提醒',
+                    style:
+                        TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
                   ),
                 ],
               ),
             ),
-          );
-        }).toList(),
+          ),
+          const SizedBox(height: 4),
+        ],
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
-          child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+          child:
+              const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF1E8E5A),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
           ),
-          onPressed: () => Navigator.of(context).pop(_selected),
+          onPressed: () => Navigator.of(context).pop(
+            _QualityDialogResult(quality: _selected, skipToday: _skipToday),
+          ),
           child: const Text('開始分析'),
         ),
       ],
