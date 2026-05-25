@@ -43,7 +43,11 @@ namespace UploadServer.DTOs
     public record InviteCodeResponse(string Code, int InviteCount);
 
     /// <summary>POST /api/user/rewards/feedback 請求</summary>
-    public record SubmitFeedbackRequest(string Type, string Text);
+    public record SubmitFeedbackRequest(
+        string Type,
+        string Text,
+        string? VideoId,
+        string? ImageBase64);
 
     /// <summary>POST /api/user/rewards/feedback 回應</summary>
     public record FeedbackRewardResponse(int Balls);

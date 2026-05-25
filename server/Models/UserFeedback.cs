@@ -20,6 +20,12 @@ namespace UploadServer.Models
         /// <summary>提交時間（UTC）</summary>
         public DateTime CreatedAt { get; set; }
 
+        /// <summary>附加影片 Session ID（用戶從歷史錄影中選擇）；null 表示未附加</summary>
+        public string? AttachedVideoId { get; set; }
+
+        /// <summary>附加圖片（Base64 JPEG）；null 表示未附加</summary>
+        public string? AttachedImageBase64 { get; set; }
+
         // ── 導航屬性 ──────────────────────────────────────────────
         public User User { get; set; } = null!;
     }

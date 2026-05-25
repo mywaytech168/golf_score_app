@@ -1,5 +1,4 @@
 ﻿import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -29,7 +28,7 @@ import 'recording_detail_page.dart';
 import '../widgets/share_upload_dialog.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, resetAnalysisState, resetClippingState, delete }
+enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -524,46 +523,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     );
   }
 
-  /// 顯示影片紀錄的 JSON debug 資訊
-  Future<void> _showDebugJsonInfo() async {
-    if (!mounted) return;
-    
-    try {
-      // 將所有紀錄轉換為格式化的 JSON（帶換行和縮進）
-      final jsonList = _entries.map((entry) => entry.toJson()).toList();
-      final jsonString = const JsonEncoder.withIndent('  ').convert(jsonList);
-      
-      if (!mounted) return;
-      
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('影片紀錄 (JSON Debug)'),
-          content: SingleChildScrollView(
-            child: SelectableText(
-              jsonString,
-              style: const TextStyle(
-                fontSize: 11,
-                fontFamily: 'Courier',
-                color: Color(0xFF123B70),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('關閉'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('無法顯示 JSON：$e')),
-      );
-    }
-  }
 
   /// 根據排序選項對條目進行排序
   List<RecordingHistoryEntry> _sortEntries(List<RecordingHistoryEntry> entries) {
@@ -660,6 +619,13 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     // 應用排序
     filteredEntries = _sortEntries(filteredEntries);
+
+    // 排除已有父影片的切片（改為巢狀顯示於父卡片下）
+    final parentPaths = _entries.map((e) => e.filePath).toSet();
+    filteredEntries = filteredEntries.where((e) =>
+        !(e.videoType == VideoType.localClip &&
+          e.sourceVideoPath != null &&
+          parentPaths.contains(e.sourceVideoPath))).toList();
 
     // 統計文字
     final goodCount = _entries.where((e) => e.goodShot == true).length;
@@ -891,6 +857,7 @@ class _HistoryTileState extends State<_HistoryTile> {
   bool _isDetecting = false;
   bool _isAnalyzing = false;
   bool _isSubmittingAi = false;
+  bool _isExpanded = false;
   bool get _isLongVideo => widget.entry.durationSeconds > 5 && widget.entry.durationSeconds <= 120;
   bool get _isOriginalVideo => widget.entry.videoType == VideoType.original;
   bool get _isClip => widget.entry.videoType == VideoType.localClip;
@@ -1492,26 +1459,6 @@ class _HistoryTileState extends State<_HistoryTile> {
     );
   }
 
-  Future<void> _resetAnalysisState() async {
-    final updatedEntry = widget.entry.copyWith(
-      isAnalyzed: false,
-      audioLabel: null,
-      goodShot: null,
-      audioCrispness: null,
-    );
-    
-    widget.onEntryUpdated?.call(widget.entry, updatedEntry);
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ 分析狀態已重置'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
-  }
-
   /// 比較模式：先顯示第二部影片選擇器，再跳到比較頁面
   Future<void> _runCompare() async {
     // 候選影片：短影片、不是自己、檔案存在
@@ -1548,25 +1495,6 @@ class _HistoryTileState extends State<_HistoryTile> {
         ),
       ),
     );
-  }
-
-  /// 重置切片狀態（測試功能）
-  Future<void> _resetClippingState() async {
-    final updatedEntry = widget.entry.copyWith(
-      isClipped: false,
-    );
-    
-    widget.onEntryUpdated?.call(widget.entry, updatedEntry);
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ 切片狀態已重置，可重新執行偵測擊球'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      setState(() {});
-    }
   }
 
   // ── Badge 輔助 ────────────────────────────────────────────────
@@ -1635,7 +1563,21 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    // 計算屬於此影片的切片（按擊球時間排序）
+    final clips = widget.allEntries
+        .where((e) =>
+            e.videoType == VideoType.localClip &&
+            e.sourceVideoPath == widget.entry.filePath)
+        .toList()
+      ..sort((a, b) => (a.hitSecond ?? 0).compareTo(b.hitSecond ?? 0));
+    final hasClips = clips.isNotEmpty;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── 主卡片 ──────────────────────────────────────────────
+        Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(16),
       shadowColor: Colors.black.withValues(alpha: 0.08),
@@ -1707,12 +1649,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                                     case _HistoryMenuAction.share:
                                       _shareSession();
                                       break;
-                                    case _HistoryMenuAction.resetAnalysisState:
-                                      _resetAnalysisState();
-                                      break;
-                                    case _HistoryMenuAction.resetClippingState:
-                                      _resetClippingState();
-                                      break;
                                     case _HistoryMenuAction.delete:
                                       widget.onDelete();
                                       break;
@@ -1724,28 +1660,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                                   value: _HistoryMenuAction.rename,
                                   child: Text('重新命名'),
                                 ),
-                                if (_isLongVideo &&
-                                    _isOriginalVideo &&
-                                    !widget.entry.isClipped)
-                                  PopupMenuItem<_HistoryMenuAction>(
-                                    value: _HistoryMenuAction.detectHits,
-                                    child: Row(children: [
-                                      Text(
-                                          _isDetecting ? '偵測中...' : '偵測擊球',
-                                          style: TextStyle(
-                                              color: _isDetecting
-                                                  ? Colors.grey
-                                                  : null)),
-                                      if (_isDetecting) ...[
-                                        const SizedBox(width: 8),
-                                        const SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                                strokeWidth: 2)),
-                                      ],
-                                    ]),
-                                  ),
                                 if ((_isClip ||
                                         (!_isLongVideo && _isOriginalVideo)) &&
                                     !_isAnalyzed)
@@ -1790,14 +1704,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                                       Text('分享連結'),
                                     ]),
                                   ),
-                                const PopupMenuItem<_HistoryMenuAction>(
-                                  value: _HistoryMenuAction.resetAnalysisState,
-                                  child: Text('🧪 測試: 重置分析狀態'),
-                                ),
-                                const PopupMenuItem<_HistoryMenuAction>(
-                                  value: _HistoryMenuAction.resetClippingState,
-                                  child: Text('🧪 測試: 重置切片狀態'),
-                                ),
                                 const PopupMenuItem<_HistoryMenuAction>(
                                   value: _HistoryMenuAction.delete,
                                   child: Text('刪除影片'),
@@ -1909,15 +1815,6 @@ class _HistoryTileState extends State<_HistoryTile> {
               child: Row(
                 children: [
                   _actionBtn(
-                    icon: Icons.psychology_rounded,
-                    label: 'AI 分析',
-                    color: const Color(0xFF7C3AED),
-                    loading: _isSubmittingAi,
-                    onTap: _runAiAnalysis,
-                  ),
-                  const VerticalDivider(
-                      width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
-                  _actionBtn(
                     icon: Icons.bar_chart_rounded,
                     label: '圖表',
                     color: const Color(0xFF1565C0),
@@ -1933,13 +1830,66 @@ class _HistoryTileState extends State<_HistoryTile> {
                     color: const Color(0xFF1E8E5A),
                     onTap: widget.onTap,
                   ),
+                  const VerticalDivider(
+                      width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  if (_isLongVideo && _isOriginalVideo && widget.entry.isClipped && hasClips)
+                    _actionBtn(
+                      icon: _isExpanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      label: _isExpanded ? '折疊擊球' : '展開擊球',
+                      color: const Color(0xFFE65100),
+                      onTap: () => setState(() => _isExpanded = !_isExpanded),
+                    )
+                  else if (_isLongVideo && _isOriginalVideo && !widget.entry.isClipped)
+                    _actionBtn(
+                      icon: Icons.sports_golf_rounded,
+                      label: '偵測擊球',
+                      color: const Color(0xFFE65100),
+                      loading: _isDetecting,
+                      onTap: _runDetection,
+                    )
+                  else
+                    _actionBtn(
+                      icon: Icons.psychology_rounded,
+                      label: 'AI 分析',
+                      color: const Color(0xFF7C3AED),
+                      loading: _isSubmittingAi,
+                      onTap: _runAiAnalysis,
+                    ),
                 ],
               ),
             ),
           ],
         ),
       ),
-    );
+    ),
+    // ── 展開的切片卡片（AnimatedSize 平滑動畫）────────────────
+    AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      alignment: Alignment.topCenter,
+      child: _isExpanded && hasClips
+          ? Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: clips.asMap().entries.map((e) => Padding(
+                  padding: EdgeInsets.only(
+                      bottom: e.key < clips.length - 1 ? 8 : 0),
+                  child: _ClipSubCard(
+                    key: ValueKey(clips[e.key].filePath),
+                    clip: e.value,
+                    clipIndex: e.key + 1,
+                    onEntryUpdated: widget.onEntryUpdated,
+                  ),
+                )).toList(),
+              ),
+            )
+          : const SizedBox.shrink(),
+    ),
+  ],
+  );
   }
 }
 
@@ -2019,6 +1969,372 @@ class _HistoryPreview extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: overlayDeco,
             child: Text(_fmtDur(durationSeconds), style: overlayStyle),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 切片子卡片：巢狀顯示在長影片卡片下方
+// ────────────────────────────────────────────────────────────────────────────
+
+class _ClipSubCard extends StatefulWidget {
+  final RecordingHistoryEntry clip;
+  final int clipIndex;
+  final void Function(RecordingHistoryEntry old, RecordingHistoryEntry updated)? onEntryUpdated;
+
+  const _ClipSubCard({
+    super.key,
+    required this.clip,
+    required this.clipIndex,
+    this.onEntryUpdated,
+  });
+
+  @override
+  State<_ClipSubCard> createState() => _ClipSubCardState();
+}
+
+class _ClipSubCardState extends State<_ClipSubCard> {
+  bool _isSubmittingAi = false;
+
+  Future<void> _play() async {
+    final file = File(widget.clip.filePath);
+    if (!await file.exists()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('影片檔案不存在，可能已被刪除')),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(videoPath: widget.clip.filePath),
+      ),
+    );
+  }
+
+  Future<void> _runAiAnalysis() async {
+    if (_isSubmittingAi) return;
+    setState(() => _isSubmittingAi = true);
+    try {
+      final sessionDir = p.dirname(widget.clip.filePath);
+      final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
+      final hasCsv     = File(csvPath).existsSync();
+      final videoId    = p.basename(sessionDir);
+
+      await AiCoachPage.submitAndPush(
+        context:  context,
+        videoId:  videoId,
+        clipPath: widget.clip.filePath,
+        csvPath:  hasCsv ? csvPath : null,
+      );
+
+      if (mounted && !widget.clip.hasAiCoachAnalysis) {
+        widget.onEntryUpdated?.call(
+          widget.clip,
+          widget.clip.copyWith(hasAiCoachAnalysis: true),
+        );
+      }
+    } catch (e) {
+      debugPrint('[切片AI分析] 提交失敗: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('AI 分析提交失敗: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmittingAi = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final clip = widget.clip;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── 左側連結線 + 序號徽章 ─────────────────────────────
+        SizedBox(
+          width: 28,
+          child: Column(
+            children: [
+              Container(
+                width: 2,
+                height: 16,
+                color: const Color(0xFFE65100).withValues(alpha: 0.35),
+              ),
+              Container(
+                width: 22,
+                height: 22,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFE65100),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '${widget.clipIndex}',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        // ── 切片卡片本體 ─────────────────────────────────────
+        Expanded(
+          child: Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            elevation: 1,
+            shadowColor: Colors.black.withValues(alpha: 0.06),
+            child: InkWell(
+              onTap: _play,
+              borderRadius: BorderRadius.circular(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── 卡片主體 ────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 縮圖（小尺寸）
+                        _ClipThumbnail(
+                          thumbnailPath: clip.thumbnailPath,
+                          durationSeconds: clip.durationSeconds,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '第 ${widget.clipIndex} 球',
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF123B70)),
+                              ),
+                              if (clip.hitSecond != null) ...[
+                                const SizedBox(height: 3),
+                                Row(children: [
+                                  const Icon(Icons.sports_golf_rounded,
+                                      size: 11, color: Color(0xFFE65100)),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '擊球 @ ${clip.hitSecond!.toStringAsFixed(1)}s',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF9AA6B2)),
+                                  ),
+                                ]),
+                              ],
+                              if (clip.startSecond != null &&
+                                  clip.endSecond != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  '片段 ${clip.startSecond!.toStringAsFixed(1)}s ~ ${clip.endSecond!.toStringAsFixed(1)}s',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF9AA6B2)),
+                                ),
+                              ],
+                              const SizedBox(height: 5),
+                              // 標籤
+                              Wrap(
+                                spacing: 4,
+                                runSpacing: 3,
+                                children: [
+                                  if (clip.goodShot != null)
+                                    _smallBadge(
+                                      clip.goodShot == true ? '好球' : '壞球',
+                                      clip.goodShot == true
+                                          ? const Color(0xFF4CAF50)
+                                          : const Color(0xFFF44336),
+                                    ),
+                                  if (clip.isAnalyzed)
+                                    _smallBadge('已分析', const Color(0xFF1E8E5A)),
+                                  if (clip.hasAiCoachAnalysis)
+                                    _smallBadge('AI', const Color(0xFF7C3AED)),
+                                  if (clip.audioCrispness != null)
+                                    _smallBadge(
+                                      '清脆 ${clip.audioCrispness!.toStringAsFixed(1)}',
+                                      const Color(0xFFFF6F00),
+                                    ),
+                                  if (clip.audioLabel != null)
+                                    _smallBadge(
+                                        clip.audioLabel!, const Color(0xFFFF6F00)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ── 操作列 ──────────────────────────────────
+                  const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  IntrinsicHeight(
+                    child: Row(
+                      children: [
+                        _clipBtn(
+                          icon: Icons.bar_chart_rounded,
+                          label: '圖表',
+                          color: const Color(0xFF1565C0),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    RecordingDetailPage(entry: clip)),
+                          ),
+                        ),
+                        const VerticalDivider(
+                            width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                        _clipBtn(
+                          icon: Icons.play_arrow_rounded,
+                          label: '播放',
+                          color: const Color(0xFF1E8E5A),
+                          onTap: _play,
+                        ),
+                        const VerticalDivider(
+                            width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                        _clipBtn(
+                          icon: Icons.psychology_rounded,
+                          label: 'AI 分析',
+                          color: const Color(0xFF7C3AED),
+                          loading: _isSubmittingAi,
+                          onTap: _runAiAnalysis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _smallBadge(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withValues(alpha: 0.45)),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 9, color: color, fontWeight: FontWeight.w600)),
+      );
+
+  Widget _clipBtn({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool loading = false,
+  }) =>
+      Expanded(
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                loading
+                    ? SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: color))
+                    : Icon(icon, size: 16, color: color),
+                const SizedBox(height: 2),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: color,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+/// 切片縮圖：較小尺寸，無輪次標籤
+class _ClipThumbnail extends StatelessWidget {
+  final String? thumbnailPath;
+  final int durationSeconds;
+
+  const _ClipThumbnail({
+    required this.thumbnailPath,
+    required this.durationSeconds,
+  });
+
+  String _fmtDur(int s) {
+    if (s >= 60) {
+      return '${s ~/ 60}m${s % 60}s';
+    }
+    return '${s}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filePath = thumbnailPath?.trim() ?? '';
+    final hasThumbnail = filePath.isNotEmpty && File(filePath).existsSync();
+
+    final Widget content = hasThumbnail
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              File(filePath),
+              width: 90,
+              height: 60,
+              fit: BoxFit.cover,
+            ),
+          )
+        : Container(
+            width: 90,
+            height: 60,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE5EBF5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.content_cut_rounded,
+                color: Color(0xFFE65100), size: 24),
+          );
+
+    return Stack(
+      children: [
+        content,
+        Positioned(
+          right: 4,
+          bottom: 4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              _fmtDur(durationSeconds),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600),
+            ),
           ),
         ),
       ],

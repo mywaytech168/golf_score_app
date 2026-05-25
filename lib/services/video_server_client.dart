@@ -554,16 +554,24 @@ class VideoServerClient {
   Future<Map<String, dynamic>?> submitFeedback({
     required String type,
     required String text,
+    String? videoId,
+    String? imageBase64,
     bool isRetry = false,
   }) async {
     try {
       final headers = await _getAuthHeaders();
       final url = Uri.parse('$_baseUrl/api/user/rewards/feedback');
       debugPrint('💬 提交回饋 → $url');
+      final body = <String, dynamic>{
+        'type': type,
+        'text': text,
+        if (videoId != null) 'videoId': videoId,
+        if (imageBase64 != null) 'imageBase64': imageBase64,
+      };
       final response = await http.post(
         url,
         headers: headers,
-        body: jsonEncode({'type': type, 'text': text}),
+        body: jsonEncode(body),
       );
       debugPrint('📥 Response: ${response.statusCode}');
 
@@ -572,7 +580,11 @@ class VideoServerClient {
         return (json['data'] as Map<String, dynamic>?) ?? json;
       } else if (response.statusCode == 401 && !isRetry) {
         final ok = await _tryRefreshToken();
-        if (ok) return submitFeedback(type: type, text: text, isRetry: true);
+        if (ok) {
+          return submitFeedback(
+              type: type, text: text,
+              videoId: videoId, imageBase64: imageBase64, isRetry: true);
+        }
         throw UnauthorizedException('提交回饋失敗: 401');
       } else {
         debugPrint('❌ 提交回饋失敗: ${response.statusCode}');

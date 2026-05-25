@@ -220,11 +220,15 @@ class RewardService {
   static Future<int> submitFeedback({
     required String type,
     required String text,
+    String? videoId,
+    String? imageBase64,
   }) async {
     try {
       final result = await VideoServerClient.instance.submitFeedback(
         type: type,
         text: text,
+        videoId: videoId,
+        imageBase64: imageBase64,
       );
       if (result != null) {
         final balls = (result['balls'] as int?) ?? 0;

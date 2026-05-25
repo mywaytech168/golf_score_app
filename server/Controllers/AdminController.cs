@@ -65,6 +65,8 @@ namespace UploadServer.Controllers
                     f.UserId,
                     f.Type,
                     f.Text,
+                    f.AttachedVideoId,
+                    HasImage  = f.AttachedImageBase64 != null,
                     CreatedAt = f.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
                 })
                 .ToListAsync();

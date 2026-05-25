@@ -168,7 +168,8 @@ namespace UploadServer.Controllers
             if (string.IsNullOrWhiteSpace(req.Text))
                 return BadRequest(new { message = "回饋內容不得為空" });
 
-            var result = await _userService.SubmitFeedbackAsync(userId, req.Type, req.Text);
+            var result = await _userService.SubmitFeedbackAsync(
+                userId, req.Type, req.Text, req.VideoId, req.ImageBase64);
             if (result == null) return NotFound(new { message = "用戶不存在" });
 
             if (result.Balls == 0)

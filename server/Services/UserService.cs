@@ -310,7 +310,8 @@ namespace UploadServer.Services
         // ════════════════════════════════════════════════════════════════
 
         public async Task<FeedbackRewardResponse?> SubmitFeedbackAsync(
-            string userId, string type, string text)
+            string userId, string type, string text,
+            string? videoId = null, string? imageBase64 = null)
         {
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return null;
@@ -325,13 +326,21 @@ namespace UploadServer.Services
             if (string.IsNullOrWhiteSpace(text) || text.Length > 2000)
                 return new FeedbackRewardResponse(0);
 
+            // 限制 imageBase64 大小（最多 1MB base64 ≈ 750KB 原始資料）
+            const int maxImageBase64Length = 1_048_576;
+            var safeImageBase64 = imageBase64?.Length > maxImageBase64Length
+                ? null
+                : imageBase64;
+
             _db.UserFeedbacks.Add(new UserFeedback
             {
-                Id        = Guid.NewGuid().ToString(),
-                UserId    = userId,
-                Type      = type is "bug" or "feature" or "other" ? type : "other",
-                Text      = text.Trim(),
-                CreatedAt = DateTime.UtcNow,
+                Id                   = Guid.NewGuid().ToString(),
+                UserId               = userId,
+                Type                 = type is "bug" or "feature" or "other" ? type : "other",
+                Text                 = text.Trim(),
+                CreatedAt            = DateTime.UtcNow,
+                AttachedVideoId      = string.IsNullOrWhiteSpace(videoId) ? null : videoId.Trim()[..Math.Min(255, videoId.Trim().Length)],
+                AttachedImageBase64  = safeImageBase64,
             });
 
             user.FeedbackClaimedDate = today;

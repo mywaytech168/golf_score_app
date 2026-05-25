@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
 import '../models/recording_history_entry.dart';
 import '../services/ad_service.dart';
@@ -340,7 +345,7 @@ class _RewardCard extends StatelessWidget {
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
-                height: 42,
+                height: 56,
                 child: ElevatedButton(
                   onPressed: (isAvailable && !buttonBusy) ? onTap : null,
                   style: ElevatedButton.styleFrom(
@@ -894,7 +899,7 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
                     ),
                     const Spacer(),
                     SizedBox(
-                      height: 38,
+                      height: 56,
                       child: ElevatedButton.icon(
                         onPressed: _busy ? null : _submit,
                         icon: _busy
@@ -941,10 +946,60 @@ class _FeedbackCardState extends State<_FeedbackCard> {
   bool _busy = false;
   bool _expanded = false;
 
+  RecordingHistoryEntry? _selectedVideo;
+  File? _selectedImageFile;
+  Uint8List? _previewImageBytes;
+
   @override
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  /// 從歷史錄影選取影片
+  Future<void> _pickVideo() async {
+    final entries = await RecordingHistoryStorage.instance.loadHistory();
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<RecordingHistoryEntry>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _VideoPickerSheet(entries: entries),
+    );
+    if (picked != null) {
+      setState(() => _selectedVideo = picked);
+    }
+  }
+
+  /// 從相簿/檔案選取圖片並壓縮
+  Future<void> _pickImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final path = result.files.single.path;
+    if (path == null) return;
+
+    final file = File(path);
+    try {
+      final bytes = await file.readAsBytes();
+      final decoded = await Isolate.run(() => _decodeAndCompress(bytes));
+      if (mounted) {
+        setState(() {
+          _selectedImageFile = file;
+          _previewImageBytes = decoded;
+        });
+      }
+    } catch (e) {
+      debugPrint('[圖片壓縮] 錯誤: $e');
+      if (mounted) {
+        setState(() {
+          _selectedImageFile = file;
+          _previewImageBytes = null;
+        });
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -955,9 +1010,30 @@ class _FeedbackCardState extends State<_FeedbackCard> {
     }
     setState(() => _busy = true);
     try {
-      final balls = await RewardService.submitFeedback(type: _type, text: text);
+      // 附加影片 Session ID
+      String? videoId;
+      if (_selectedVideo != null) {
+        videoId = p.basename(p.dirname(_selectedVideo!.filePath));
+      }
+      // 附加圖片（base64）
+      String? imageBase64;
+      if (_previewImageBytes != null) {
+        imageBase64 = base64Encode(_previewImageBytes!);
+      }
+
+      final balls = await RewardService.submitFeedback(
+        type: _type,
+        text: text,
+        videoId: videoId,
+        imageBase64: imageBase64,
+      );
       _ctrl.clear();
-      setState(() => _expanded = false);
+      setState(() {
+        _expanded = false;
+        _selectedVideo = null;
+        _selectedImageFile = null;
+        _previewImageBytes = null;
+      });
       widget.onEarned(balls);
     } catch (e) {
       widget.onError('提交失敗：$e');
@@ -1018,6 +1094,129 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                     counterStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
                   ),
                 ),
+                const SizedBox(height: 10),
+                // ── 附件按鈕列 ─────────────────────────────────
+                Row(
+                  children: [
+                    _attachBtn(
+                      icon: Icons.videocam_rounded,
+                      label: _selectedVideo == null ? '選擇影片' : '更換影片',
+                      onTap: _pickVideo,
+                    ),
+                    const SizedBox(width: 8),
+                    _attachBtn(
+                      icon: Icons.image_rounded,
+                      label: _selectedImageFile == null ? '上傳圖片' : '更換圖片',
+                      onTap: _pickImage,
+                    ),
+                  ],
+                ),
+                // ── 已選影片 chip ──────────────────────────────
+                if (_selectedVideo != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E5F5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFCE93D8)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.videocam_rounded,
+                            size: 14, color: Color(0xFF9C27B0)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _selectedVideo!.displayTitle,
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF7B1FA2)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () =>
+                              setState(() => _selectedVideo = null),
+                          child: const Icon(Icons.close,
+                              size: 14, color: Color(0xFF9C27B0)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // ── 已選圖片預覽 ───────────────────────────────
+                if (_previewImageBytes != null) ...[
+                  const SizedBox(height: 8),
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(
+                          _previewImageBytes!,
+                          height: 110,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: 4, right: 4,
+                        child: GestureDetector(
+                          onTap: () => setState(() {
+                            _selectedImageFile = null;
+                            _previewImageBytes = null;
+                          }),
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(2),
+                            child: const Icon(Icons.close,
+                                size: 16, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else if (_selectedImageFile != null) ...[
+                  // 圖片壓縮失敗時顯示路徑
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E5F5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFCE93D8)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.image_rounded,
+                            size: 14, color: Color(0xFF9C27B0)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            p.basename(_selectedImageFile!.path),
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF7B1FA2)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            _selectedImageFile = null;
+                            _previewImageBytes = null;
+                          }),
+                          child: const Icon(Icons.close,
+                              size: 14, color: Color(0xFF9C27B0)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -1027,7 +1226,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                     ),
                     const Spacer(),
                     SizedBox(
-                      height: 38,
+                      height: 56,
                       child: ElevatedButton(
                         onPressed: _busy ? null : _submit,
                         style: ElevatedButton.styleFrom(
@@ -1051,6 +1250,36 @@ class _FeedbackCardState extends State<_FeedbackCard> {
       onTap: claimed ? null : () => setState(() => _expanded = true),
     );
   }
+
+  Widget _attachBtn({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) =>
+      OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 15),
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF9C27B0),
+          side: const BorderSide(color: Color(0xFFCE93D8)),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+}
+
+/// 背景 isolate：解碼並壓縮圖片至最大 1024px / JPEG Q75
+Uint8List _decodeAndCompress(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return bytes;
+  final resized = decoded.width > 1024
+      ? img.copyResize(decoded, width: 1024)
+      : decoded;
+  return Uint8List.fromList(img.encodeJpg(resized, quality: 75));
 }
 
 class _TypeChip extends StatelessWidget {
@@ -1083,6 +1312,155 @@ class _TypeChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 影片選擇器底部彈出
+// ════════════════════════════════════════════════════════════════
+
+class _VideoPickerSheet extends StatelessWidget {
+  final List<RecordingHistoryEntry> entries;
+  const _VideoPickerSheet({required this.entries});
+
+  @override
+  Widget build(BuildContext context) {
+    final usable = entries
+        .where((e) => e.videoType == VideoType.original)
+        .toList()
+      ..sort((a, b) => b.sortTime.compareTo(a.sortTime));
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.65,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 拖曳把手
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 8),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.videocam_rounded,
+                    color: Color(0xFF9C27B0), size: 18),
+                SizedBox(width: 8),
+                Text('選擇影片',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF123B70))),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          if (usable.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('尚無歷史錄影',
+                  style: TextStyle(color: Color(0xFF9AA6B2), fontSize: 13)),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shrinkWrap: true,
+                itemCount: usable.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  final e = usable[index];
+                  final dur = e.durationSeconds;
+                  final durStr = dur >= 60
+                      ? '${dur ~/ 60}m${dur % 60}s'
+                      : '${dur}s';
+                  return InkWell(
+                    onTap: () => Navigator.of(context).pop(e),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      child: Row(
+                        children: [
+                          // 縮圖
+                          _MiniThumb(thumbnailPath: e.thumbnailPath),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  e.displayTitle,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF123B70)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '$durStr · ${e.durationSeconds > 5 && e.durationSeconds <= 120 ? '長影片' : '短影片'}',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Color(0xFF9AA6B2)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded,
+                              color: Color(0xFF9AA6B2), size: 18),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 極小縮圖（影片選擇器用）
+class _MiniThumb extends StatelessWidget {
+  final String? thumbnailPath;
+  const _MiniThumb({this.thumbnailPath});
+
+  @override
+  Widget build(BuildContext context) {
+    final path = thumbnailPath?.trim() ?? '';
+    final has = path.isNotEmpty && File(path).existsSync();
+    if (has) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.file(File(path),
+            width: 52, height: 36, fit: BoxFit.cover),
+      );
+    }
+    return Container(
+      width: 52,
+      height: 36,
+      decoration: BoxDecoration(
+        color: const Color(0xFFE5EBF5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Icon(Icons.videocam_outlined,
+          size: 18, color: Color(0xFF9AA6B2)),
     );
   }
 }

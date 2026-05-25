@@ -489,6 +489,16 @@ namespace UploadServer.Data
                     .HasColumnName("created_at")
                     .HasColumnType("datetime");
 
+                entity.Property(e => e.AttachedVideoId)
+                    .HasColumnName("attached_video_id")
+                    .HasMaxLength(255)
+                    .IsRequired(false);
+
+                entity.Property(e => e.AttachedImageBase64)
+                    .HasColumnName("attached_image_base64")
+                    .HasColumnType("MEDIUMTEXT")
+                    .IsRequired(false);
+
                 entity.HasIndex(e => e.UserId).HasDatabaseName("idx_feedback_user_id");
                 entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_feedback_created_at");
 
