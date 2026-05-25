@@ -68,6 +68,17 @@ flutter {
     source = "../.."
 }
 
+// ── 強制降版：避免部分 AndroidX 依賴要求 AGP 8.9.1+（目前環境使用 8.6.0）
+// androidx.browser 1.9.0 / core 1.17.0 的 AAR metadata 有 minAndroidGradlePlugin=8.9.1
+// 固定在這裡的版本不含該限制，功能上完全相容
+configurations.all {
+    resolutionStrategy {
+        force("androidx.browser:browser:1.8.0")
+        force("androidx.core:core:1.15.0")
+        force("androidx.core:core-ktx:1.15.0")
+    }
+}
+
 dependencies {
     // Media3 Transformer removed — VideoTrimmer now uses MediaExtractor+MediaMuxer directly
     // ---------- 圖片方向解析 ----------
