@@ -44,9 +44,13 @@ post_install do |installer|
     # Flutter 原本需要的設定（一定要留）
     flutter_additional_ios_build_settings(target)
 
-    # 強制所有 Pods 使用 iOS 15.5（解 Xcode 26 問題）
     target.build_configurations.each do |config|
+      # 強制所有 Pods 使用 iOS 15.5（解 Xcode 26 問題）
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
+
+      # MLImage.framework 只有 device arm64 slice，沒有 simulator arm64 slice。
+      # 在 Apple Silicon Mac 上排除 simulator 的 arm64，改用 x86_64 (Rosetta) 跑模擬器。
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
     end
   end
 end
