@@ -83,11 +83,19 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   _SortBy _sortBy = _SortBy.date; // 排序選項，預設按時間排序
   bool _filtersExpanded = false;  // 篩選面板折疊狀態（預設收起）
 
+  // ── 文字搜尋 ──────────────────────────────────────────────────
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _loadFromStorage();
     _loadFilters();
+    _searchController.addListener(() {
+      final q = _searchController.text.trim();
+      if (q != _searchQuery) setState(() => _searchQuery = q);
+    });
   }
 
   Future<void> _loadFromStorage() async {
@@ -101,6 +109,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -628,12 +637,26 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           e.sourceVideoPath != null &&
           parentPaths.contains(e.sourceVideoPath))).toList();
 
+    // 文字搜尋
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      filteredEntries = filteredEntries.where((e) {
+        if (e.displayTitle.toLowerCase().contains(q)) return true;
+        if ((e.customName ?? '').toLowerCase().contains(q)) return true;
+        if (_formatTimestamp(e.recordedAt).contains(q)) return true;
+        return false;
+      }).toList();
+    }
+
     // 統計文字
     final goodCount = _entries.where((e) => e.goodShot == true).length;
     final badCount  = _entries.where((e) => e.goodShot == false).length;
+    final totalShown = filteredEntries.length;
     final subtitle  = _isLoading
         ? '載入中…'
-        : '共 ${_entries.length} 筆 · 好球 $goodCount · 壞球 $badCount';
+        : _searchQuery.isNotEmpty
+            ? '搜尋結果 $totalShown / ${_entries.length} 筆'
+            : '共 ${_entries.length} 筆 · 好球 $goodCount · 壞球 $badCount';
 
     return Scaffold(
         backgroundColor: const Color(0xFFF4F6F9),
@@ -653,6 +676,46 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     ),
                   ),
               ],
+            ),
+            // ── 文字搜尋欄（常駐）────────────────────────────────
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: SizedBox(
+                height: 38,
+                child: TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  style: const TextStyle(fontSize: 14, color: Color(0xFF1A1A2E)),
+                  decoration: InputDecoration(
+                    hintText: '搜尋影片名稱、日期…',
+                    hintStyle: const TextStyle(fontSize: 13.5, color: Color(0xFFB0B8C1)),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF9AA6B2)),
+                    prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () {
+                              _searchController.clear();
+                              FocusScope.of(context).unfocus();
+                            },
+                            child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF9AA6B2)),
+                          )
+                        : null,
+                    suffixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    filled: true,
+                    fillColor: const Color(0xFFF4F6F9),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFF1E8E5A), width: 1.2),
+                    ),
+                  ),
+                ),
+              ),
             ),
             // ── 篩選 & 排序面板（可折疊）────────────────────────
             Container(
@@ -764,7 +827,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             // 影片列表
             Expanded(
               child: filteredEntries.isEmpty
-                  ? const _EmptyHistoryView()
+                  ? (_searchQuery.isNotEmpty
+                      ? _SearchEmptyView(query: _searchQuery,
+                          onClear: () { _searchController.clear(); FocusScope.of(context).unfocus(); })
+                      : const _EmptyHistoryView())
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                       itemBuilder: (context, index) {
@@ -814,6 +880,42 @@ class _EmptyHistoryView extends StatelessWidget {
           Text(
             '完成一次錄影後即可在此查看歷史影片。',
             style: TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 搜尋無結果空狀態
+class _SearchEmptyView extends StatelessWidget {
+  final String query;
+  final VoidCallback onClear;
+  const _SearchEmptyView({required this.query, required this.onClear});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.search_off_rounded, size: 64, color: Color(0xFF9AA6B2)),
+          const SizedBox(height: 16),
+          const Text(
+            '找不到符合的影片',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Color(0xFF123B70)),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '沒有包含「$query」的紀錄',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+          ),
+          const SizedBox(height: 20),
+          TextButton.icon(
+            onPressed: onClear,
+            icon: const Icon(Icons.close_rounded, size: 16),
+            label: const Text('清除搜尋'),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF1E8E5A)),
           ),
         ],
       ),
