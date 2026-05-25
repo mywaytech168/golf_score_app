@@ -77,6 +77,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
         csvPath: String,
         startSec: Double,
         outputPath: String,
+        quality: ExportQuality = ExportQuality.STANDARD,
         onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
     ): Boolean {
         // 1. 解析 CSV + 時域平滑（消除 ML Kit 偵測雜訊抖動）
@@ -154,15 +155,9 @@ class SkeletonOverlayRenderer(private val context: Context) {
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
         // 骨架疊加限制在 720p（長邊），避免 JVM 像素迴圈在 1080p 耗費過久
-        // ✅ 高質量編碼：根據解析度動態調整係數
-        // 從 0.25-0.8 bpp 改為 0.8-1.0 bpp，保留清晰度
-        val bitRateCoeff = when {
-            displayW >= 1440 -> 1.0   // 2K+ 解析度
-            displayW >= 1080 -> 0.8   // 1080p
-            else              -> 0.6   // 720p 以下
-        }
-        val bitRate = (displayW.toLong() * displayH * fps * bitRateCoeff)
-            .toLong().coerceIn(8_000_000L, 25_000_000L).toInt()
+        // ✅ 品質模式：根據 ExportQuality 動態調整位元率
+        val bitRate = (displayW.toLong() * displayH * fps * quality.bppCoeff)
+            .toLong().coerceIn(quality.minBitRate, quality.maxBitRate).toInt()
         // 部分硬體編碼器要求寬高為 16 的倍數
         val encW = (displayW + 15) and -16
         val encH = (displayH + 15) and -16
@@ -172,7 +167,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
-        Log.d(TAG, "骨架編碼: ${encW}x${encH}（display=${displayW}x${displayH}）bitRate=${bitRate/1_000_000}Mbps (coeff=$bitRateCoeff)")
+        Log.d(TAG, "骨架編碼: ${encW}x${encH}（display=${displayW}x${displayH}）bitRate=${bitRate/1_000_000}Mbps (quality=$quality)")
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 

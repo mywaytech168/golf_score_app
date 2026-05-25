@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../models/export_quality.dart';
+
 /// 骨架疊加服務：呼叫 Android 原生渲染器，將 pose CSV 骨架疊加到裁切片段上。
 class SkeletonOverlayService {
   static const _channel =
@@ -9,6 +11,7 @@ class SkeletonOverlayService {
   /// 在 [clipPath] 上渲染 [csvPath] 的骨架，輸出到 [outputPath]。
   ///
   /// [startSec] 為片段在原始影片中的起始秒數，用於對齊 CSV 幀索引。
+  /// [quality] 控制輸出位元率（SMALL / STANDARD / HIGH）。
   ///
   /// 成功回傳 [outputPath]，失敗回傳 null。
   static Future<String?> render({
@@ -16,6 +19,7 @@ class SkeletonOverlayService {
     required String csvPath,
     required double startSec,
     required String outputPath,
+    ExportQuality quality = ExportQuality.standard,
   }) async {
     try {
       final ok = await _channel.invokeMethod<bool>('render', {
@@ -23,6 +27,7 @@ class SkeletonOverlayService {
         'csvPath': csvPath,
         'startSec': startSec,
         'outputPath': outputPath,
+        'quality': quality.channelKey,
       });
       return ok == true ? outputPath : null;
     } catch (e) {

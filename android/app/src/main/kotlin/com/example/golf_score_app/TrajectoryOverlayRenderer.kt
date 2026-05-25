@@ -111,6 +111,7 @@ class TrajectoryOverlayRenderer {
         outputPath: String,
         trackPts: List<Map<String, Any>>,
         roiSize: Int = 0,
+        quality: ExportQuality = ExportQuality.STANDARD,
         onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
     ): Boolean {
         if (!File(inputPath).exists()) {
@@ -188,22 +189,16 @@ class TrajectoryOverlayRenderer {
             Log.e(TAG, "無法建立編碼器: $e")
             decoder.stop(); decoder.release(); extractor.release(); return false
         }
-        // ✅ 高質量編碼：根據解析度動態調整係數
-        // 從 0.25 bpp 改為 0.8-1.0 bpp，保留球軌跡清晰度
-        val bitRateCoeff = when {
-            videoW >= 1440 -> 1.0   // 2K+ 解析度
-            videoW >= 1080 -> 0.8   // 1080p
-            else              -> 0.6   // 720p 以下
-        }
-        val bitRate = (videoW.toLong() * videoH * fps * bitRateCoeff)
-            .toLong().coerceIn(8_000_000L, 25_000_000L).toInt()
+        // ✅ 品質模式：根據 ExportQuality 動態調整位元率
+        val bitRate = (videoW.toLong() * videoH * fps * quality.bppCoeff)
+            .toLong().coerceIn(quality.minBitRate, quality.maxBitRate).toInt()
         val encFmt = MediaFormat.createVideoFormat("video/avc", encW, encH).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
-        Log.d(TAG, "編碼器 bitRate=${bitRate/1_000_000}Mbps (${videoW}x${videoH}@${fps}fps, coeff=$bitRateCoeff)")
+        Log.d(TAG, "編碼器 bitRate=${bitRate/1_000_000}Mbps (${videoW}x${videoH}@${fps}fps, quality=$quality)")
         encoder.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         encoder.start()
 

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
+import '../models/export_quality.dart';
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import 'analysis_progress_service.dart';
@@ -248,6 +249,7 @@ class ClipPipelineService {
     required String sessionDir,
     required int durationSeconds,
     double? hitSec,
+    ExportQuality quality = ExportQuality.standard,
     void Function(String label)? onProgress,
   }) async {
     final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
@@ -302,6 +304,7 @@ class ClipPipelineService {
       csvPath: csvPath,
       startSec: 0,
       outputPath: skelOut,
+      quality: quality,
     );
     progressSvc.progress.removeListener(_listenSkeleton);
     if (overlaid != null && !await File(overlaid).exists()) {
@@ -387,6 +390,7 @@ class ClipPipelineService {
             outputPath: trajOut,
             trackPts: trackPts.map((pt) => pt.toMap()).toList(),
             roiSize: roiSize,
+            quality: quality,
           );
           progressSvc.progress.removeListener(_listenOverlay);
           if (withTraj != null) {

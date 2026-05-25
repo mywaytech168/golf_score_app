@@ -259,6 +259,7 @@ class MainActivity: FlutterActivity() {
                     val csvPath = call.argument<String>("csvPath")
                     val startSec = call.argument<Double>("startSec") ?: 0.0
                     val outputPath = call.argument<String>("outputPath")
+                    val quality = ExportQuality.fromString(call.argument<String>("quality"))
 
                     if (clipPath.isNullOrBlank() || csvPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
                         result.error("invalid_args", "缺少必要參數", null)
@@ -272,6 +273,7 @@ class MainActivity: FlutterActivity() {
                                 csvPath = csvPath,
                                 startSec = startSec,
                                 outputPath = outputPath,
+                                quality = quality,
                                 onProgress = ::sendProgress,
                             )
                             if (!ok) {
@@ -347,6 +349,7 @@ class MainActivity: FlutterActivity() {
                         @Suppress("UNCHECKED_CAST")
                         val trackPts   = call.argument<List<Map<String, Any>>>("trackPts")
                         val roiSize    = call.argument<Int>("roiSize") ?: 0  // 可選，預設 0（不繪製 ROI）
+                        val quality    = ExportQuality.fromString(call.argument<String>("quality"))
 
                         if (inputPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
                             result.error("invalid_args", "缺少 inputPath / outputPath", null)
@@ -360,6 +363,7 @@ class MainActivity: FlutterActivity() {
                                     outputPath = outputPath,
                                     trackPts   = trackPts ?: emptyList(),
                                     roiSize    = roiSize,
+                                    quality    = quality,
                                     onProgress = ::sendProgress,
                                 )
                                 runOnUiThread { result.success(ok) }

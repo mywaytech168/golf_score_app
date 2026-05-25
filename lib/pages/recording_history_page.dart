@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/export_quality.dart';
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
 import '../services/recording_history_storage.dart';
@@ -1195,6 +1196,19 @@ class _HistoryTileState extends State<_HistoryTile> {
   /// 執行完整分析（視頻 + 音頻），合併結果
   Future<void> _runCombinedAnalysis() async {
     if (_isAnalyzing) return;
+
+    // ── 品質選擇對話框（僅短影片需要編碼，長影片直接跳過）────────────
+    ExportQuality selectedQuality = ExportQuality.standard;
+    if (!_isLongVideo && mounted) {
+      final chosen = await showDialog<ExportQuality>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => _ExportQualityDialog(initialQuality: selectedQuality),
+      );
+      if (chosen == null) return; // 使用者取消
+      selectedQuality = chosen;
+    }
+
     setState(() => _isAnalyzing = true);
 
     if (!mounted) return;
@@ -1257,6 +1271,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
           hitSec: widget.entry.hitSecond,
+          quality: selectedQuality,
           onProgress: (label) {
             progressNotifier.value = (0.35, label);
           },
@@ -2466,6 +2481,136 @@ class _HistoryFilterChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 輸出品質選擇對話框
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 在執行完整分析前讓使用者選擇輸出品質模式（SMALL / STANDARD / HIGH）。
+/// 回傳選取的 [ExportQuality]，使用者按取消回傳 null。
+class _ExportQualityDialog extends StatefulWidget {
+  final ExportQuality initialQuality;
+  const _ExportQualityDialog({required this.initialQuality});
+
+  @override
+  State<_ExportQualityDialog> createState() => _ExportQualityDialogState();
+}
+
+class _ExportQualityDialogState extends State<_ExportQualityDialog> {
+  late ExportQuality _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.initialQuality;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+      title: const Row(
+        children: [
+          Icon(Icons.high_quality_rounded, color: Color(0xFF1E8E5A), size: 22),
+          SizedBox(width: 8),
+          Text('選擇輸出品質', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: ExportQuality.values.map((q) {
+          final isSelected = _selected == q;
+          return GestureDetector(
+            onTap: () => setState(() => _selected = q),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF1E8E5A).withValues(alpha: 0.08)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isSelected
+                      ? const Color(0xFF1E8E5A)
+                      : const Color(0xFFDDE1E7),
+                  width: isSelected ? 1.5 : 1.0,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                    color: isSelected
+                        ? const Color(0xFF1E8E5A)
+                        : const Color(0xFFB0B8C1),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          q.label,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: isSelected
+                                ? const Color(0xFF1E8E5A)
+                                : const Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          q.sizeHint,
+                          style: const TextStyle(
+                              fontSize: 12, color: Color(0xFF6B7280)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    q.bitrateHint,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isSelected
+                          ? const Color(0xFF1E8E5A)
+                          : const Color(0xFFB0B8C1),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF1E8E5A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: () => Navigator.of(context).pop(_selected),
+          child: const Text('開始分析'),
+        ),
+      ],
     );
   }
 }

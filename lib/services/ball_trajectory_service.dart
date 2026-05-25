@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../models/export_quality.dart';
 import 'ball_tracker.dart';
 import 'detection_config.dart';  // [新增] 動態配置
 
@@ -101,6 +102,7 @@ class BallTrajectoryService {
   ///   [{'x': int, 'y': int, 'pts': int (μs)}, ...]
   ///
   /// [roiSize] - 可選，ROI 尺寸（像素），若 > 0 則繪製 ROI 邊界框，預設 = 0（不繪製）
+  /// [quality] - 輸出品質模式，控制 Kotlin 編碼位元率
   ///
   /// 成功回傳 [outputPath]，失敗回傳 null。
   static Future<String?> renderOverlay({
@@ -108,6 +110,7 @@ class BallTrajectoryService {
     required String outputPath,
     required List<Map<String, dynamic>> trackPts,
     int roiSize = 0,
+    ExportQuality quality = ExportQuality.standard,
   }) async {
     try {
       // 🔍 DEBUG: 打印即將渲製的軌跡信息
@@ -126,6 +129,7 @@ class BallTrajectoryService {
           'outputPath': outputPath,
           'trackPts':   trackPts,
           'roiSize':    roiSize,
+          'quality':    quality.channelKey,
         },
       );
       return ok == true ? outputPath : null;
