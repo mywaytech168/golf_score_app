@@ -25,6 +25,7 @@ typedef RecordCompleteCallback = void Function({
   required int durationSeconds,
   required String? thumbnailPath,
   required String? audioLabel,
+  required String aspectRatioMode,
   List<String>? audioTags,
 });
 
@@ -331,6 +332,7 @@ class _RecordScreenState extends State<RecordScreen> {
         durationSeconds: duration,
         thumbnailPath: thumbnailPath,
         audioLabel: null,
+        aspectRatioMode: _config.aspectRatio.name,
         audioTags: audioTags,
       );
     } catch (e) {

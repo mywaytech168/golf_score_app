@@ -117,6 +117,7 @@ class _MainShellPageState extends State<MainShellPage> {
     required int durationSeconds,
     required String? thumbnailPath,
     required String? audioLabel,
+    required String aspectRatioMode,
     List<String>? audioTags,
   }) async {
     try {
@@ -130,6 +131,7 @@ class _MainShellPageState extends State<MainShellPage> {
         durationSeconds: durationSeconds,
         thumbnailPath: thumbnailPath,
         audioLabel: audioLabel,
+        recordedAspectRatio: aspectRatioMode,
         audioTags: audioTags,
       );
       
@@ -170,6 +172,7 @@ class _MainShellPageState extends State<MainShellPage> {
               required durationSeconds,
               required thumbnailPath,
               required audioLabel,
+              required aspectRatioMode,
               List<String>? audioTags,
             }) {
               _handleRecordingComplete(
@@ -179,6 +182,7 @@ class _MainShellPageState extends State<MainShellPage> {
                 durationSeconds: durationSeconds,
                 thumbnailPath: thumbnailPath,
                 audioLabel: audioLabel,
+                aspectRatioMode: aspectRatioMode,
                 audioTags: audioTags,
               );
               // 完成後返回 Home

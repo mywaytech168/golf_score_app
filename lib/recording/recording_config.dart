@@ -24,14 +24,14 @@ enum FrameRate {
 /// 預覽／錄製裁切比例
 enum AspectRatioMode {
   square('1:1',   1 / 1),
-  standard('4:3', 4 / 3),
-  wide('16:9',    16 / 9),
+  standard('4:3', 3 / 4),   // 直式 4:3（寬/高 = 3/4）
+  wide('16:9',    9 / 16),   // 直式 16:9（寬/高 = 9/16）
   full('全螢幕',   null);
 
   /// 顯示標籤
   final String label;
 
-  /// 寬高比；null 表示全螢幕（不做裁切）
+  /// 寬高比（Flutter AspectRatio = width/height）；null 表示全螢幕（不做裁切）
   final double? ratio;
 
   const AspectRatioMode(this.label, this.ratio);

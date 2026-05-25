@@ -107,6 +107,9 @@ class RecordingHistoryEntry {
   /// 來自 hits.json 中所有 SwingHit.speedValue 的最大值
   final double? bestSpeedValue;
 
+  /// 錄製時選擇的影片尺寸（AspectRatioMode.name）；null 或 'full' 表示全螢幕
+  final String? recordedAspectRatio;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -132,6 +135,7 @@ class RecordingHistoryEntry {
     this.hasAiCoachAnalysis = false,
     this.isUploaded = false,
     this.bestSpeedValue,
+    this.recordedAspectRatio,
   });
 
   /// 是否已上傳（明確標記 或 AI Coach 分析過）
@@ -172,6 +176,7 @@ class RecordingHistoryEntry {
     bool? hasAiCoachAnalysis,
     bool? isUploaded,
     double? bestSpeedValue,
+    String? recordedAspectRatio,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -198,6 +203,7 @@ class RecordingHistoryEntry {
       hasAiCoachAnalysis: hasAiCoachAnalysis ?? this.hasAiCoachAnalysis,
       isUploaded: isUploaded ?? this.isUploaded,
       bestSpeedValue: bestSpeedValue ?? this.bestSpeedValue,
+      recordedAspectRatio: recordedAspectRatio ?? this.recordedAspectRatio,
     );
   }
 
@@ -243,6 +249,7 @@ class RecordingHistoryEntry {
       'hasAiCoachAnalysis': hasAiCoachAnalysis,
       'isUploaded': isUploaded,
       'bestSpeedValue': bestSpeedValue,
+      'recordedAspectRatio': recordedAspectRatio,
     };
   }
 
@@ -299,6 +306,7 @@ class RecordingHistoryEntry {
       hasAiCoachAnalysis: (json['hasAiCoachAnalysis'] as bool?) ?? false,
       isUploaded:         (json['isUploaded']         as bool?) ?? false,
       bestSpeedValue:     (json['bestSpeedValue']     as num?)?.toDouble(),
+      recordedAspectRatio: json['recordedAspectRatio'] as String?,
     );
   }
 }

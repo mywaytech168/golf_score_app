@@ -54,10 +54,10 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
             required durationSeconds,
             required thumbnailPath,
             required audioLabel,
+            required aspectRatioMode,
             List<String>? audioTags,
           }) {
             debugPrint('[RecordingSelection] 錄製完成，調用回調');
-            // 調用父頁面的回調
             widget.onComplete?.call(
               videoPath: videoPath,
               csvPath: csvPath,
@@ -65,9 +65,9 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
               durationSeconds: durationSeconds,
               thumbnailPath: thumbnailPath,
               audioLabel: audioLabel,
+              aspectRatioMode: aspectRatioMode,
               audioTags: audioTags,
             );
-            // 返回到選擇屏幕
             Navigator.pop(context);
           },
         ),

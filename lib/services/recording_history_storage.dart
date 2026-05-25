@@ -22,7 +22,7 @@ class RecordingHistoryStorage {
   static const String _folderName  = 'golf_recordings';
   static const String _legacyJson  = 'recording_history.json';
   static const String _dbName      = 'recording_history.db';
-  static const int    _dbVersion   = 1;
+  static const int    _dbVersion   = 2;
   static const String _table       = 'recordings';
 
   Database? _db;
@@ -66,13 +66,19 @@ class RecordingHistoryStorage {
             shareCode         TEXT,
             shareExpiresAt    TEXT,
             sharerName        TEXT,
-            hasAiCoachAnalysis INTEGER NOT NULL DEFAULT 0,
-            isUploaded         INTEGER NOT NULL DEFAULT 0
+            hasAiCoachAnalysis  INTEGER NOT NULL DEFAULT 0,
+            isUploaded          INTEGER NOT NULL DEFAULT 0,
+            recordedAspectRatio TEXT
           )
         ''');
         // 索引加速常用排序/篩選
         await db.execute('CREATE INDEX idx_recordedAt ON $_table (recordedAt DESC)');
         await db.execute('CREATE INDEX idx_sourceVideoPath ON $_table (sourceVideoPath)');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN recordedAspectRatio TEXT');
+        }
       },
     );
 
@@ -220,8 +226,9 @@ class RecordingHistoryStorage {
     'shareCode':          e.shareCode,
     'shareExpiresAt':     e.shareExpiresAt?.toUtc().toIso8601String(),
     'sharerName':         e.sharerName,
-    'hasAiCoachAnalysis': e.hasAiCoachAnalysis ? 1 : 0,
-    'isUploaded':         e.isUploaded         ? 1 : 0,
+    'hasAiCoachAnalysis':  e.hasAiCoachAnalysis  ? 1 : 0,
+    'isUploaded':          e.isUploaded          ? 1 : 0,
+    'recordedAspectRatio': e.recordedAspectRatio,
   };
 
   static RecordingHistoryEntry _fromRow(Map<String, dynamic> row) {
@@ -269,8 +276,9 @@ class RecordingHistoryStorage {
           ? DateTime.tryParse(row['shareExpiresAt'] as String)
           : null,
       sharerName:         row['sharerName']          as String?,
-      hasAiCoachAnalysis: (row['hasAiCoachAnalysis'] as int?)    == 1,
-      isUploaded:         (row['isUploaded']         as int?)    == 1,
+      hasAiCoachAnalysis:  (row['hasAiCoachAnalysis']  as int?) == 1,
+      isUploaded:          (row['isUploaded']          as int?) == 1,
+      recordedAspectRatio:  row['recordedAspectRatio']          as String?,
     );
   }
 }
