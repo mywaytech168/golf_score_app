@@ -107,7 +107,7 @@ class RecordingHistoryEntry {
   /// 來自 hits.json 中所有 SwingHit.speedValue 的最大值
   final double? bestSpeedValue;
 
-  /// 錄製時選擇的影片尺寸（AspectRatioMode.name）；null 或 'full' 表示全螢幕
+  /// 錄製時的影片尺寸名稱；固定為 'wide'（16:9）
   final String? recordedAspectRatio;
 
   const RecordingHistoryEntry({

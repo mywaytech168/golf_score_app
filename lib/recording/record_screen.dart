@@ -150,12 +150,12 @@ class _RecordScreenState extends State<RecordScreen> {
   // ─── 相機 UI ─────────────────────────────────────────────────────────────
 
   /// 依目前設定建立 SensorConfig，傳給 CameraAwesome 的原生相機 API
-  /// aspectRatio 決定實際錄製的 mp4 尺寸（非 UI 裁切）
+  /// 固定 16:9，影響實際錄製的 mp4 尺寸（非 UI 裁切）
   SensorConfig _buildSensorConfig() => SensorConfig.single(
     sensor: Sensor.position(
       _isFrontCamera ? SensorPosition.front : SensorPosition.back,
     ),
-    aspectRatio: _config.aspectRatio.cameraRatio,
+    aspectRatio: CameraAspectRatios.ratio_16_9,
   );
 
   Widget _buildCameraUI() {
@@ -184,6 +184,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   painter: SkeletonPainter(
                     poses: _poses,
                     imageSize: _analysisImageSize,
+                    isFrontCamera: _isFrontCamera,
                   ),
                 ),
               if (_showOverlay)
@@ -243,17 +244,12 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
     );
 
-    // 全螢幕：相機錄製 16:9，預覽填滿整個螢幕
-    // 其他比例：用 AspectRatio 框住預覽，讓預覽區域與錄製尺寸一致
-    final ratio = _config.aspectRatio.ratio;
-    if (ratio == null) {
-      return cameraWidget;
-    }
+    // 預覽容器固定 9:16，與錄製尺寸一致，避免預覽與實際影片不符
     return Container(
       color: Colors.black,
       child: Center(
         child: AspectRatio(
-          aspectRatio: ratio,
+          aspectRatio: 9 / 16,
           child: cameraWidget,
         ),
       ),
@@ -338,7 +334,7 @@ class _RecordScreenState extends State<RecordScreen> {
         durationSeconds: duration,
         thumbnailPath: thumbnailPath,
         audioLabel: null,
-        aspectRatioMode: _config.aspectRatio.name,
+        aspectRatioMode: 'wide',
         audioTags: audioTags,
       );
     } catch (e) {
@@ -417,6 +413,7 @@ class _RecordScreenState extends State<RecordScreen> {
                 pose: poses.first,
                 imgWidth: visualSize.width,
                 imgHeight: visualSize.height,
+                isFrontCamera: _isFrontCamera,
               )
             : PoseFrameModel.empty(
                 frame: _frameCount,
@@ -439,7 +436,6 @@ class _RecordScreenState extends State<RecordScreen> {
     // 暫存設定，確認後才套用
     VideoQuality pendingQuality = _config.quality;
     FrameRate pendingFps = _config.fps;
-    AspectRatioMode pendingRatio = _config.aspectRatio;
 
     showModalBottomSheet<void>(
       context: context,
@@ -486,26 +482,6 @@ class _RecordScreenState extends State<RecordScreen> {
                               label: q.label,
                               selected: selected,
                               onTap: () => setSheet(() => pendingQuality = q),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // ── 影片尺寸 ──────────────────────────────────────
-                    const Text('影片尺寸', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: AspectRatioMode.values.map((r) {
-                        final selected = pendingRatio == r;
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: _SettingChip(
-                              label: r.label,
-                              selected: selected,
-                              onTap: () => setSheet(() => pendingRatio = r),
                             ),
                           ),
                         );
@@ -562,14 +538,12 @@ class _RecordScreenState extends State<RecordScreen> {
                         onPressed: () {
                           Navigator.pop(ctx);
                           final changed = pendingQuality != _config.quality ||
-                              pendingFps != _config.fps ||
-                              pendingRatio != _config.aspectRatio;
+                              pendingFps != _config.fps;
                           if (changed) {
                             setState(() {
                               _config = RecordingConfig(
                                 quality: pendingQuality,
                                 fps: pendingFps,
-                                aspectRatio: pendingRatio,
                               );
                             });
                           }
@@ -640,7 +614,7 @@ class _ConfigBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        '${config.quality.label}  ${config.fps.label}  ${config.aspectRatio.label}',
+        '${config.quality.label}  ${config.fps.label}',
         style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
       ),
     );

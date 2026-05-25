@@ -20,17 +20,20 @@ class PoseFrameModel {
     required Pose pose,
     required double imgWidth,
     required double imgHeight,
+    bool isFrontCamera = false,
   }) {
     final lms = List<LandmarkData>.generate(33, (i) {
       final type = PoseLandmarkType.values[i];
       final lm = pose.landmarks[type];
       if (lm == null) return LandmarkData.empty();
+      // 前鏡頭預覽水平鏡像，X 座標翻轉使 CSV 與視覺畫面一致
+      final rawX  = isFrontCamera ? (imgWidth - lm.x) : lm.x;
       return LandmarkData(
-        xNorm: lm.x / imgWidth,
+        xNorm: rawX / imgWidth,
         yNorm: lm.y / imgHeight,
         z: lm.z,
         visibility: lm.likelihood,
-        xPx: lm.x,
+        xPx: rawX,
         yPx: lm.y,
       );
     });

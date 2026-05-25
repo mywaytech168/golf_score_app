@@ -15,13 +15,13 @@ class AppConfig {
       // iOS Client ID - 需要在 Google Cloud Console 創建 iOS 類型的 OAuth Client
       // TODO: 替換為你的 iOS Client ID
       return isProduction
-          ? '446697241300-YOUR_IOS_PROD_CLIENT_ID.apps.googleusercontent.com'
-          : '446697241300-YOUR_IOS_DEV_CLIENT_ID.apps.googleusercontent.com';
+          ? '446697241300-2o58ae8nku99m9ojs49upe1srfs6e75c.apps.googleusercontent.com'
+          : '446697241300-2o58ae8nku99m9ojs49upe1srfs6e75c.apps.googleusercontent.com';
     } else if (Platform.isAndroid) {
       // Android Client ID
       return isProduction
-          ? '446697241300-YOUR_ANDROID_PROD_CLIENT_ID.apps.googleusercontent.com'
-          : '446697241300-YOUR_ANDROID_DEV_CLIENT_ID.apps.googleusercontent.com';
+          ? '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com'
+          : '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com';
     }
     // Web Client ID (用於其他平台)
     return '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com';

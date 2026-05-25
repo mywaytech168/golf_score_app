@@ -31,6 +31,11 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // IIS in-process 部署：請求體上限由 web.config requestLimits 控管
+    // 這裡將 Kestrel 層設為 null（不限制），讓 IIS 及 [RequestSizeLimit] 屬性生效
+    builder.WebHost.ConfigureKestrel(o =>
+        o.Limits.MaxRequestBodySize = null);
+
     // 使用 NLog 作為日誌提供程序
     builder.Logging.ClearProviders();  // 清除預設日誌提供者
     builder.Host.UseNLog();
@@ -90,7 +95,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("MobileApp", policy =>
         policy.WithOrigins(
                 "https://tekswing.com",
-                "http://localhost:3000"   // 本機開發用
+                "https://tekswing.api.atk.tw",  // 管理後臺同站請求
+                "http://localhost:3000"           // 本機開發用
             )
             .AllowAnyHeader()
             .AllowAnyMethod());
@@ -118,9 +124,9 @@ builder.Services
                 System.Text.Encoding.UTF8.GetBytes(jwtSecret)
             ),
             ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidIssuers = new[] { builder.Configuration["Jwt:Issuer"]!, "GolfAdmin" },
             ValidateAudience = true,
-            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidAudiences = new[] { builder.Configuration["Jwt:Audience"]!, "GolfAdminUI" },
             ValidateLifetime = true,
             ClockSkew = System.TimeSpan.Zero,
         };
@@ -196,8 +202,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// 提供 wwwroot 靜態檔案（包含管理後臺 /admin/）
-app.UseStaticFiles();
+// 提供 wwwroot 靜態檔案（包含管理後臺 /admin/ 與 APK 下載）
+// 需額外註冊 .apk MIME 類型，否則靜態檔案中介層預設不服務未知副檔名
+var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+contentTypeProvider.Mappings[".apk"] = "application/vnd.android.package-archive";
+app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypeProvider });
 
 // 安全 HTTP headers
 app.Use(async (ctx, next) =>

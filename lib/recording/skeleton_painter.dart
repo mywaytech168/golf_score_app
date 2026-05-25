@@ -26,9 +26,14 @@ const _edges = [
 class SkeletonPainter extends CustomPainter {
   final List<Pose> poses;
   final Size imageSize;
+  final bool isFrontCamera;
   static const double minVisibility = 0.2;
 
-  SkeletonPainter({required this.poses, required this.imageSize});
+  SkeletonPainter({
+    required this.poses,
+    required this.imageSize,
+    this.isFrontCamera = false,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -64,10 +69,14 @@ class SkeletonPainter extends CustomPainter {
     }
   }
 
-  Offset _scale(PoseLandmark lm, Size canvas) => Offset(
-    lm.x / imageSize.width * canvas.width,
-    lm.y / imageSize.height * canvas.height,
-  );
+  // 前置鏡頭預覽水平鏡像，landmark X 也需對應鏡像才能對齊人體
+  Offset _scale(PoseLandmark lm, Size canvas) {
+    final xRatio = lm.x / imageSize.width;
+    final scaledX = isFrontCamera
+        ? (1.0 - xRatio) * canvas.width
+        : xRatio * canvas.width;
+    return Offset(scaledX, lm.y / imageSize.height * canvas.height);
+  }
 
   @override
   bool shouldRepaint(SkeletonPainter old) => old.poses != poses;

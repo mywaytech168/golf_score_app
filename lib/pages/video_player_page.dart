@@ -6,7 +6,6 @@ import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
-import '../recording/recording_config.dart';
 import '../services/analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../theme/app_theme.dart';
@@ -308,42 +307,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     );
   }
 
-  /// 計算影片顯示比例：優先用錄製時選的尺寸，全螢幕/未知則 fallback 到影片本身的比例
-  double _displayAspectRatio(VideoPlayerController ctrl) {
-    final ratioName = widget.entry?.recordedAspectRatio;
-    if (ratioName == null) return ctrl.value.aspectRatio;
-    try {
-      final mode = AspectRatioMode.values.byName(ratioName);
-      return mode.ratio ?? ctrl.value.aspectRatio;
-    } catch (_) {
-      return ctrl.value.aspectRatio;
-    }
-  }
-
   Widget _buildVideo() {
     final ctrl = _controller;
     if (ctrl == null || !_initialized) {
       return const Center(child: CircularProgressIndicator(color: Colors.white54));
     }
-    final displayRatio = _displayAspectRatio(ctrl);
-    final videoRatio   = ctrl.value.aspectRatio;
-    // 若顯示比例與影片本身不同（裁切模式），用 FittedBox.cover 模擬裁切效果
-    final needsCrop = (displayRatio - videoRatio).abs() > 0.01;
     return Center(
       child: AspectRatio(
-        aspectRatio: displayRatio,
-        child: needsCrop
-            ? ClipRect(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: ctrl.value.size.width,
-                    height: ctrl.value.size.height,
-                    child: VideoPlayer(ctrl),
-                  ),
-                ),
-              )
-            : VideoPlayer(ctrl),
+        aspectRatio: 9 / 16,
+        child: VideoPlayer(ctrl),
       ),
     );
   }

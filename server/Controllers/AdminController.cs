@@ -483,7 +483,8 @@ namespace UploadServer.Controllers
         /// 回應: { message, fileName, downloadUrl, sizeKb }
         /// </summary>
         [HttpPost("app/version/android/apk")]
-        [RequestSizeLimit(300 * 1024 * 1024)]   // 300 MB hard cap
+        [RequestSizeLimit(500 * 1024 * 1024)]                        // 整體請求上限 500 MB
+        [RequestFormLimits(MultipartBodyLengthLimit = 500 * 1024 * 1024)]  // multipart 單段上限（預設僅 128 MB）
         public async Task<IActionResult> UploadApk(IFormFile file)
         {
             if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
@@ -513,20 +514,40 @@ namespace UploadServer.Controllers
             var versionedPath = Path.Combine(ApksDir, fileName);
             var latestPath    = Path.Combine(ApksDir, "android-latest.apk");
 
-            await using (var stream = System.IO.File.Create(versionedPath))
-                await file.CopyToAsync(stream);
+            try
+            {
+                await using (var stream = System.IO.File.Create(versionedPath))
+                    await file.CopyToAsync(stream);
 
-            System.IO.File.Copy(versionedPath, latestPath, overwrite: true);
+                System.IO.File.Copy(versionedPath, latestPath, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "APK 寫入失敗 path={Path}", versionedPath);
+                return StatusCode(500, new { message = $"APK 寫入失敗：{ex.Message}" });
+            }
 
-            // 更新 AppVersion.UpdateUrl & ApkFileName
+            // 更新 AppVersion.UpdateUrl & ApkFileName（若記錄不存在則自動建立）
             var downloadUrl = $"{BaseUrl}/apks/{fileName}";
             if (record != null)
             {
                 record.UpdateUrl   = downloadUrl;
                 record.ApkFileName = fileName;
                 record.UpdatedAt   = DateTime.UtcNow;
-                await _db.SaveChangesAsync();
             }
+            else
+            {
+                _db.AppVersions.Add(new Models.AppVersion
+                {
+                    Platform           = "android",
+                    LatestVersion      = version == "unknown" ? "1.0.0" : version,
+                    MinRequiredVersion = "1.0.0",
+                    UpdateUrl          = downloadUrl,
+                    ApkFileName        = fileName,
+                    UpdatedAt          = DateTime.UtcNow,
+                });
+            }
+            await _db.SaveChangesAsync();
 
             _logger.LogInformation("管理員上傳 APK: {File} size={Size}KB", fileName, file.Length / 1024);
 
