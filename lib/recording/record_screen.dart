@@ -149,10 +149,20 @@ class _RecordScreenState extends State<RecordScreen> {
 
   // ─── 相機 UI ─────────────────────────────────────────────────────────────
 
+  /// 依目前設定建立 SensorConfig，傳給 CameraAwesome 的原生相機 API
+  /// aspectRatio 決定實際錄製的 mp4 尺寸（非 UI 裁切）
+  SensorConfig _buildSensorConfig() => SensorConfig.single(
+    sensor: Sensor.position(
+      _isFrontCamera ? SensorPosition.front : SensorPosition.back,
+    ),
+    aspectRatio: _config.aspectRatio.cameraRatio,
+  );
+
   Widget _buildCameraUI() {
     final cameraWidget = KeyedSubtree(
       key: ValueKey(_config.cameraKey),
       child: CameraAwesomeBuilder.custom(
+        sensorConfig: _buildSensorConfig(),
         saveConfig: SaveConfig.video(
           pathBuilder: _buildCaptureRequest,
           videoOptions: _config.toVideoOptions(),
@@ -189,7 +199,6 @@ class _RecordScreenState extends State<RecordScreen> {
                   right: 16,
                   child: _RecordingBadge(elapsed: _elapsed, frameCount: _frameCount),
                 ),
-              // 右上：切換鏡頭（錄影中不可操作）
               if (!_isRecording)
                 Positioned(
                   top: 16,
@@ -215,7 +224,6 @@ class _RecordScreenState extends State<RecordScreen> {
                     ),
                   ),
                 ),
-              // 左下：目前設定標籤
               Positioned(
                 bottom: 120,
                 left: 16,
@@ -238,7 +246,8 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
     );
 
-    // 全螢幕：直接回傳相機 widget；其他比例：加黑框裁切
+    // 全螢幕：相機錄製 16:9，預覽填滿整個螢幕
+    // 其他比例：用 AspectRatio 框住預覽，讓預覽區域與錄製尺寸一致
     final ratio = _config.aspectRatio.ratio;
     if (ratio == null) {
       return cameraWidget;
@@ -248,7 +257,7 @@ class _RecordScreenState extends State<RecordScreen> {
       child: Center(
         child: AspectRatio(
           aspectRatio: ratio,
-          child: ClipRect(child: cameraWidget),
+          child: cameraWidget,
         ),
       ),
     );

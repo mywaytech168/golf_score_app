@@ -1,3 +1,4 @@
+import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:camerawesome/pigeon.dart';
 
 /// 影片畫質（對應 camerawesome VideoRecordingQuality）
@@ -31,10 +32,24 @@ enum AspectRatioMode {
   /// 顯示標籤
   final String label;
 
-  /// 寬高比（Flutter AspectRatio = width/height）；null 表示全螢幕（不做裁切）
+  /// 寬高比（Flutter AspectRatio = width/height）；null 表示全螢幕
   final double? ratio;
 
   const AspectRatioMode(this.label, this.ratio);
+
+  /// 對應 CameraAwesome 的原生比例設定（傳給 SensorConfig，影響實際錄製的 mp4 尺寸）
+  /// 全螢幕使用 ratio_16_9（最接近現代手機螢幕比例，錄製 9:16 直式影片）
+  CameraAspectRatios get cameraRatio {
+    switch (this) {
+      case AspectRatioMode.square:
+        return CameraAspectRatios.ratio_1_1;
+      case AspectRatioMode.standard:
+        return CameraAspectRatios.ratio_4_3;
+      case AspectRatioMode.wide:
+      case AspectRatioMode.full:
+        return CameraAspectRatios.ratio_16_9;
+    }
+  }
 }
 
 /// 錄製設定
