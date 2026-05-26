@@ -142,75 +142,77 @@ private func analyzeVideoNatively(
   var lastPxMap: [Int: (CGFloat, CGFloat)] = [:]
 
   while reader.status == .reading {
-    guard let sampleBuffer = trackOutput.copyNextSampleBuffer() else { break }
-    let pts    = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-    let ptsSec = CMTimeGetSeconds(pts)
-    decodedFrames += 1
+    autoreleasepool {
+      guard let sampleBuffer = trackOutput.copyNextSampleBuffer() else { return }
+      let pts    = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+      let ptsSec = CMTimeGetSeconds(pts)
+      decodedFrames += 1
 
-    guard ptsSec >= nextSampleSec - toleranceSec else { continue }
-    nextSampleSec = ptsSec + frameIntervalSec
+      guard ptsSec >= nextSampleSec - toleranceSec else { return }
+      nextSampleSec = ptsSec + frameIntervalSec
 
-    let timeSec = ptsSec
+      let timeSec = ptsSec
 
-    // 取得 CVPixelBuffer
-    guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-      streamWrite(stream, string: nanRow(frame: frameCount, timeSec: timeSec, poseUpdateId: poseUpdateId))
-      frameCount += 1
-      continue
-    }
-
-    // 若需要縮放，先用 CIContext 縮小
-    let workBuffer: CVPixelBuffer
-    if scale < 0.99 {
-      workBuffer = scalePixelBuffer(pixelBuffer, toWidth: outW, height: outH) ?? pixelBuffer
-    } else {
-      workBuffer = pixelBuffer
-    }
-
-    // Vision 推理
-    let handler = VNImageRequestHandler(cvPixelBuffer: workBuffer, orientation: orientation, options: [:])
-    try? handler.perform([poseRequest])
-    let observation = poseRequest.results?.first
-
-    // 取出 landmark map
-    let lmMap = landmarkMap(from: observation, frameW: CGFloat(outW), frameH: CGFloat(outH))
-
-    // 偵測 pose 是否更新
-    if !lmMap.isEmpty {
-      let changed = lmMap.contains { (idx, pt) in
-        guard let last = lastPxMap[idx] else { return true }
-        return abs(pt.0 - last.0) > 0.5 || abs(pt.1 - last.1) > 0.5
+      // 取得 CVPixelBuffer
+      guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+        streamWrite(stream, string: nanRow(frame: frameCount, timeSec: timeSec, poseUpdateId: poseUpdateId))
+        frameCount += 1
+        return
       }
-      if changed {
-        poseUpdateId += 1
-        lastPxMap = lmMap.mapValues { ($0.0, $0.1) }
-      }
-    }
 
-    // 寫 CSV 行
-    var row = "\(frameCount),\(timeSec),\(poseUpdateId)"
-    for i in 0 ..< 33 {
-      if let pt = lmMap[i] {
-        let (xPx, yPx, conf) = pt
-        row += ",\(xPx / CGFloat(outW)),\(yPx / CGFloat(outH)),0.0,\(conf),\(xPx),\(yPx)"
+      // 若需要縮放，先用 CIContext 縮小
+      let workBuffer: CVPixelBuffer
+      if scale < 0.99 {
+        workBuffer = scalePixelBuffer(pixelBuffer, toWidth: outW, height: outH) ?? pixelBuffer
       } else {
-        row += ",NaN,NaN,NaN,0.0,NaN,NaN"
+        workBuffer = pixelBuffer
       }
-    }
-    row += "\n"
-    streamWrite(stream, string: row)
-    frameCount += 1
 
-    // 每 10 幀推一次進度
-    if decodedFrames % 10 == 0 {
-      let prog = min(0.95, Double(decodedFrames) / Double(expectedFrames))
-      AnalysisProgressSink.shared.send(
-        op: "analyzePose",
-        progress: prog,
-        label: "骨架分析中 \(Int(prog * 100))%",
-        current: decodedFrames,
-        total: expectedFrames
-      )
+      // Vision 推理
+      let handler = VNImageRequestHandler(cvPixelBuffer: workBuffer, orientation: orientation, options: [:])
+      try? handler.perform([poseRequest])
+      let observation = poseRequest.results?.first
+
+      // 取出 landmark map
+      let lmMap = landmarkMap(from: observation, frameW: CGFloat(outW), frameH: CGFloat(outH))
+
+      // 偵測 pose 是否更新
+      if !lmMap.isEmpty {
+        let changed = lmMap.contains { (idx, pt) in
+          guard let last = lastPxMap[idx] else { return true }
+          return abs(pt.0 - last.0) > 0.5 || abs(pt.1 - last.1) > 0.5
+        }
+        if changed {
+          poseUpdateId += 1
+          lastPxMap = lmMap.mapValues { ($0.0, $0.1) }
+        }
+      }
+
+      // 寫 CSV 行
+      var row = "\(frameCount),\(timeSec),\(poseUpdateId)"
+      for i in 0 ..< 33 {
+        if let pt = lmMap[i] {
+          let (xPx, yPx, conf) = pt
+          row += ",\(xPx / CGFloat(outW)),\(yPx / CGFloat(outH)),0.0,\(conf),\(xPx),\(yPx)"
+        } else {
+          row += ",NaN,NaN,NaN,0.0,NaN,NaN"
+        }
+      }
+      row += "\n"
+      streamWrite(stream, string: row)
+      frameCount += 1
+
+      // 每 10 幀推一次進度
+      if decodedFrames % 10 == 0 {
+        let prog = min(0.95, Double(decodedFrames) / Double(expectedFrames))
+        AnalysisProgressSink.shared.send(
+          op: "analyzePose",
+          progress: prog,
+          label: "骨架分析中 \(Int(prog * 100))%",
+          current: decodedFrames,
+          total: expectedFrames
+        )
+      }
     }
   }
 

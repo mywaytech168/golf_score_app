@@ -117,65 +117,67 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
   var frameIdx = 0
 
   while reader.status == .reading {
-    guard let sample = readerOut.copyNextSampleBuffer() else { break }
-    guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { continue }
-    let pts   = CMSampleBufferGetPresentationTimeStamp(sample)
-    let ptsUs = Int64(CMTimeGetSeconds(pts) * 1_000_000)
+    autoreleasepool {
+      guard let sample = readerOut.copyNextSampleBuffer() else { return }
+      guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { return }
+      let pts   = CMSampleBufferGetPresentationTimeStamp(sample)
+      let ptsUs = Int64(CMTimeGetSeconds(pts) * 1_000_000)
 
-    CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
-    let base = CVPixelBufferGetBaseAddress(pixBuf)!
-    let bpr  = CVPixelBufferGetBytesPerRow(pixBuf)
-    let rgba = base.assumingMemoryBound(to: UInt8.self)
+      CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
+      let base = CVPixelBufferGetBaseAddress(pixBuf)!
+      let bpr  = CVPixelBufferGetBytesPerRow(pixBuf)
+      let rgba = base.assumingMemoryBound(to: UInt8.self)
 
-    var currY = [UInt8](repeating: 0, count: pixCount)
-    for j in 0..<displayH {
-      let rowOff = j * bpr
-      let yOff   = j * displayW
-      for i in 0..<displayW {
-        let o = rowOff + i * 4
-        let b = Int(rgba[o]), g = Int(rgba[o + 1]), r = Int(rgba[o + 2])
-        currY[yOff + i] = UInt8(min(255, (299 * r + 587 * g + 114 * b) / 1000))
+      var currY = [UInt8](repeating: 0, count: pixCount)
+      for j in 0..<displayH {
+        let rowOff = j * bpr
+        let yOff   = j * displayW
+        for i in 0..<displayW {
+          let o = rowOff + i * 4
+          let b = Int(rgba[o]), g = Int(rgba[o + 1]), r = Int(rgba[o + 2])
+          currY[yOff + i] = UInt8(min(255, (299 * r + 587 * g + 114 * b) / 1000))
+        }
       }
-    }
-    CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly)
+      CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly)
 
-    var frameBlobs: [[String: Any]] = []
+      var frameBlobs: [[String: Any]] = []
 
-    if let prev = prevY {
-      // Frame diff: raw intensity + binary mask (kept separate so diffMean is meaningful)
-      var rawDiff = [UInt8](repeating: 0, count: pixCount)
-      var binMask = [UInt8](repeating: 0, count: pixCount)
-      for i in 0..<pixCount {
-        let d = abs(Int(currY[i]) - Int(prev[i]))
-        rawDiff[i] = UInt8(min(255, d))
-        binMask[i] = d >= config.diffThresh ? 1 : 0
+      if let prev = prevY {
+        // Frame diff: raw intensity + binary mask (kept separate so diffMean is meaningful)
+        var rawDiff = [UInt8](repeating: 0, count: pixCount)
+        var binMask = [UInt8](repeating: 0, count: pixCount)
+        for i in 0..<pixCount {
+          let d = abs(Int(currY[i]) - Int(prev[i]))
+          rawDiff[i] = UInt8(min(255, d))
+          binMask[i] = d >= config.diffThresh ? 1 : 0
+        }
+
+        // Morphological opening (erode → dilate)
+        let opened = btMorphOpen(mask: binMask, w: displayW, h: displayH, k: config.morphK)
+
+        // BFS 4-connected blob detection
+        let blobs = btBfsBlobs(
+          mask: opened, rawDiff: rawDiff, w: displayW, h: displayH,
+          areaLo: config.areaLo, areaHi: config.areaHi, circMin: config.circMin)
+
+        for b in blobs {
+          frameBlobs.append([
+            "cx": b.cx, "cy": b.cy,
+            "area": b.area, "circ": b.circ, "diffMean": b.diffMean,
+          ])
+        }
       }
 
-      // Morphological opening (erode → dilate)
-      let opened = btMorphOpen(mask: binMask, w: displayW, h: displayH, k: config.morphK)
+      frames.append(["ptsUs": ptsUs, "blobs": frameBlobs])
+      prevY = currY
+      frameIdx += 1
 
-      // BFS 4-connected blob detection
-      let blobs = btBfsBlobs(
-        mask: opened, rawDiff: rawDiff, w: displayW, h: displayH,
-        areaLo: config.areaLo, areaHi: config.areaHi, circMin: config.circMin)
-
-      for b in blobs {
-        frameBlobs.append([
-          "cx": b.cx, "cy": b.cy,
-          "area": b.area, "circ": b.circ, "diffMean": b.diffMean,
-        ])
+      if frameIdx % 10 == 0 {
+        let prog = min(0.95, Double(frameIdx) / Double(totalFrames))
+        AnalysisProgressSink.shared.send(
+          op: "extractBlobs", progress: prog,
+          label: "球體偵測中 \(Int(prog * 100))%", current: frameIdx, total: totalFrames)
       }
-    }
-
-    frames.append(["ptsUs": ptsUs, "blobs": frameBlobs])
-    prevY = currY
-    frameIdx += 1
-
-    if frameIdx % 10 == 0 {
-      let prog = min(0.95, Double(frameIdx) / Double(totalFrames))
-      AnalysisProgressSink.shared.send(
-        op: "extractBlobs", progress: prog,
-        label: "球體偵測中 \(Int(prog * 100))%", current: frameIdx, total: totalFrames)
     }
   }
 

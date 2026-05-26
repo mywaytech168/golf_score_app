@@ -138,58 +138,63 @@ private func renderSkeletonOverlay(
   var encodedFrames  = 0
 
   while reader.status == .reading {
-    guard let sample = readerOut.copyNextSampleBuffer() else { break }
-    let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-    if !sessionStarted { writer.startSession(atSourceTime: pts); sessionStarted = true }
-    guard let srcBuf = CMSampleBufferGetImageBuffer(sample) else { continue }
+    autoreleasepool {
+      guard let sample = readerOut.copyNextSampleBuffer() else { return }
+      let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+      if !sessionStarted { writer.startSession(atSourceTime: pts); sessionStarted = true }
+      guard let srcBuf = CMSampleBufferGetImageBuffer(sample) else { return }
 
-    // Wait for writer before allocating, to avoid pool exhaustion / dropped frames
-    while !writerInput.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.005) }
-    guard let pool = adaptor.pixelBufferPool else { continue }
-    var dstBuf: CVPixelBuffer?
-    guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dstBuf) == kCVReturnSuccess,
-          let dstBuf = dstBuf else { continue }
+      // Wait for writer before allocating, to avoid pool exhaustion / dropped frames
+      while !writerInput.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.005) }
+      guard let pool = adaptor.pixelBufferPool else { return }
+      var dstBuf: CVPixelBuffer?
+      guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dstBuf) == kCVReturnSuccess,
+            let dstBuf = dstBuf else { return }
 
-    // Copy source → destination
-    CVPixelBufferLockBaseAddress(srcBuf, .readOnly)
-    CVPixelBufferLockBaseAddress(dstBuf, [])
-    let srcBase = CVPixelBufferGetBaseAddress(srcBuf)!
-    let dstBase = CVPixelBufferGetBaseAddress(dstBuf)!
-    let srcBPR  = CVPixelBufferGetBytesPerRow(srcBuf)
-    let dstBPR  = CVPixelBufferGetBytesPerRow(dstBuf)
-    if srcBPR == dstBPR {
-      memcpy(dstBase, srcBase, dstBPR * displayH)
-    } else {
-      let copyW = min(srcBPR, dstBPR)
-      for row in 0..<displayH {
-        memcpy(dstBase + row * dstBPR, srcBase + row * srcBPR, copyW)
+      // Copy source → destination
+      CVPixelBufferLockBaseAddress(srcBuf, .readOnly)
+      CVPixelBufferLockBaseAddress(dstBuf, [])
+      defer {
+        CVPixelBufferUnlockBaseAddress(srcBuf, .readOnly)
+        CVPixelBufferUnlockBaseAddress(dstBuf, [])
       }
-    }
-    CVPixelBufferUnlockBaseAddress(srcBuf, .readOnly)
+      let srcBase = CVPixelBufferGetBaseAddress(srcBuf)!
+      let dstBase = CVPixelBufferGetBaseAddress(dstBuf)!
+      let srcBPR  = CVPixelBufferGetBytesPerRow(srcBuf)
+      let dstBPR  = CVPixelBufferGetBytesPerRow(dstBuf)
+      if srcBPR == dstBPR {
+        memcpy(dstBase, srcBase, dstBPR * displayH)
+      } else {
+        let copyW = min(srcBPR, dstBPR)
+        for row in 0..<displayH {
+          memcpy(dstBase + row * dstBPR, srcBase + row * srcBPR, copyW)
+        }
+      }
 
-    // Draw skeleton onto destination (still locked)
-    let ptsSec      = CMTimeGetSeconds(pts)
-    let csvFrameIdx = Int((( startSec + ptsSec) * 1000.0 / 33.0).rounded())
-    if let lms = getSmoothedLandmarks(frameData: frameData, target: csvFrameIdx, keys: sortedKeys),
-       let ctx = makeCGContext(base: dstBase, w: displayW, h: displayH, bpr: dstBPR) {
-      // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y axis
-      ctx.translateBy(x: 0, y: CGFloat(displayH))
-      ctx.scaleBy(x: 1, y: -1)
-      drawSkeleton(ctx: ctx, landmarks: lms,
-                   poseW: poseW, poseH: poseH,
-                   displayW: displayW, displayH: displayH,
-                   strokeW: strokeW, dotR: dotR)
-    }
-    CVPixelBufferUnlockBaseAddress(dstBuf, [])
+      // Draw skeleton onto destination (still locked)
+      let ptsSec      = CMTimeGetSeconds(pts)
+      let csvFrameIdx = Int((( startSec + ptsSec) * 1000.0 / 33.0).rounded())
+      if let lms = getSmoothedLandmarks(frameData: frameData, target: csvFrameIdx, keys: sortedKeys),
+         let ctx = makeCGContext(base: dstBase, w: displayW, h: displayH, bpr: dstBPR) {
+        // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y axis
+        ctx.translateBy(x: 0, y: CGFloat(displayH))
+        ctx.scaleBy(x: 1, y: -1)
+        drawSkeleton(ctx: ctx, landmarks: lms,
+                     poseW: poseW, poseH: poseH,
+                     displayW: displayW, displayH: displayH,
+                     strokeW: strokeW, dotR: dotR)
+      }
+      // defer handles unlock above
 
-    if adaptor.append(dstBuf, withPresentationTime: pts) { encodedFrames += 1 }
-    frameCount += 1
+      if adaptor.append(dstBuf, withPresentationTime: pts) { encodedFrames += 1 }
+      frameCount += 1
 
-    if frameCount % 10 == 0 && totalFrames > 0 {
-      let prog = min(0.95, Double(frameCount) / Double(totalFrames))
-      AnalysisProgressSink.shared.send(
-        op: "renderSkeleton", progress: prog,
-        label: "骨架渲染中 \(Int(prog * 100))%", current: frameCount, total: totalFrames)
+      if frameCount % 10 == 0 && totalFrames > 0 {
+        let prog = min(0.95, Double(frameCount) / Double(totalFrames))
+        AnalysisProgressSink.shared.send(
+          op: "renderSkeleton", progress: prog,
+          label: "骨架渲染中 \(Int(prog * 100))%", current: frameCount, total: totalFrames)
+      }
     }
   }
 

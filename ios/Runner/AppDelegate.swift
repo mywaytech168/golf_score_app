@@ -157,21 +157,23 @@ private extension AppDelegate {
     var totalBytes = 0
 
     while reader.status == .reading {
-      guard
-        let sampleBuffer = output.copyNextSampleBuffer(),
-        let blockBuffer  = CMSampleBufferGetDataBuffer(sampleBuffer)
-      else { break }
+      autoreleasepool {
+        guard
+          let sampleBuffer = output.copyNextSampleBuffer(),
+          let blockBuffer  = CMSampleBufferGetDataBuffer(sampleBuffer)
+        else { return }
 
-      let length = CMBlockBufferGetDataLength(blockBuffer)
-      var data   = Data(count: length)
-      data.withUnsafeMutableBytes { pointer in
-        if let baseAddress = pointer.baseAddress {
-          CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
+        let length = CMBlockBufferGetDataLength(blockBuffer)
+        var data   = Data(count: length)
+        data.withUnsafeMutableBytes { pointer in
+          if let baseAddress = pointer.baseAddress {
+            CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
+          }
         }
+        handle.write(data)
+        totalBytes += length
+        CMSampleBufferInvalidate(sampleBuffer)
       }
-      handle.write(data)
-      totalBytes += length
-      CMSampleBufferInvalidate(sampleBuffer)
     }
 
     if reader.status == .failed || reader.status == .unknown {

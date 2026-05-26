@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -140,17 +140,16 @@ class VideoAnalysisService {
     final writer = PoseCsvWriter(csvPath);
     final totalMs = durationSeconds * 1000;
     final totalSteps = (totalMs / _frameIntervalMs).ceil().clamp(1, 99999);
-    double imgW = 720, imgH = 1280;
+    const double imgW = 720, imgH = 1280;
+    const batchSize = 4;
 
-    // 📊 並行優化: 同時處理多幀以提升性能 (預期 3x 改進: 20-32s → 7-11s)
-    const batchSize = 4; // 同時處理 4 幀
-    final List<PoseFrameModel> allFrames = [];
-    var processedFrames = 0;
-
-    // ⏱️ 性能統計
     final overallSw = Stopwatch()..start();
-    final batchTimings = <int, Duration>{};
+    var processedFrames = 0;
+    var successFrames = 0;
     var successBatches = 0;
+    int poseUpdateId = 0;
+    // 只保留「上一幀」用於比對 pose 是否更新，不累積全部幀
+    PoseFrameModel? prevFrame;
 
     // 步驟 1️⃣: 收集所有幀時間戳
     final frameTimestamps = <int>[];
@@ -158,50 +157,35 @@ class VideoAnalysisService {
       frameTimestamps.add(ms);
     }
 
-    debugPrint('[VideoAnalysis] 📊 配置: ${frameTimestamps.length} 幀, ${_frameIntervalMs}ms 間隔, $batchSize 幀/批次');
-    // 步驟 2️⃣: 並行批量處理幀
-    debugPrint('[VideoAnalysis] 開始並行分析 ($batchSize 幀/批次, ${frameTimestamps.length} 幀總數)');
-
-    int poseUpdateId = 0;  // ✅ 追踪骨架是否真正更新
+    debugPrint('[VideoAnalysis] 配置: ${frameTimestamps.length} 幀, ${_frameIntervalMs}ms 間隔, $batchSize 幀/批次');
 
     for (int batchStart = 0; batchStart < frameTimestamps.length; batchStart += batchSize) {
       final batchEnd = (batchStart + batchSize).clamp(0, frameTimestamps.length);
       final batchFrames = frameTimestamps.sublist(batchStart, batchEnd);
 
-      // ⏱️ 批次計時
-      final batchSw = Stopwatch()..start();
-
-      // 並行處理這批幀
       final futures = <Future<PoseFrameModel>>[];
       for (int i = 0; i < batchFrames.length; i++) {
-        final ms = batchFrames[i];
-        final frameIndex = batchStart + i;
-
         futures.add(_processFrameAsync(
           videoPath: videoPath,
-          timeMs: ms,
-          frameIndex: frameIndex,
+          timeMs: batchFrames[i],
+          frameIndex: batchStart + i,
           imgW: imgW,
           imgH: imgH,
           poseService: poseService,
-          poseUpdateId: poseUpdateId,  // ✅ 傳遞
+          poseUpdateId: poseUpdateId,
         ));
       }
 
-      // 等待批次完成
       try {
         final batchResults = await Future.wait(futures);
+        // 逐幀比對後立即寫入 CSV，不累積到 List
         for (final frame in batchResults) {
-          // ✅ 改進：只在「完整骨架真的變」時才增加 poseUpdateId
           bool isSamePose = false;
-          if (allFrames.isNotEmpty) {
-            final prev = allFrames.last;
-            // 比較完整 33 點骨架
+          if (prevFrame != null) {
             isSamePose = true;
             for (int i = 0; i < 33; i++) {
-              final pa = prev.landmarks[i];
+              final pa = prevFrame!.landmarks[i];
               final pb = frame.landmarks[i];
-              
               if ((pa.xPx - pb.xPx).abs() > 0.01 ||
                   (pa.yPx - pb.yPx).abs() > 0.01 ||
                   (pa.z - pb.z).abs() > 0.01) {
@@ -209,124 +193,33 @@ class VideoAnalysisService {
                 break;
               }
             }
-          } else {
-            isSamePose = false;  // 第一幀總是新的
           }
-          
-          if (!isSamePose) {
-            poseUpdateId++;  // 只在真的變時才加
-          }
-          
-          allFrames.add(frame);
+          if (!isSamePose) poseUpdateId++;
+          prevFrame = frame;
+          writer.addFrame(frame);
+          successFrames++;
         }
-
-        batchSw.stop();
-        batchTimings[batchStart] = batchSw.elapsed;
         successBatches++;
-        final avgMs = batchSw.elapsedMilliseconds / batchFrames.length;
-        debugPrint('[Batch ${batchStart ~/ batchSize + 1}] ✅ ${batchFrames.length} 幀完成: ${batchSw.elapsedMilliseconds}ms (平均 ${avgMs.toStringAsFixed(1)}ms/幀)');
-
         processedFrames += batchFrames.length;
         onProgress?.call(processedFrames / totalSteps);
       } catch (e) {
-        batchSw.stop();
         debugPrint('[VideoAnalysis] 批次 $batchStart-$batchEnd 失敗: $e');
-        // 繼續處理下一批
       }
     }
-
-    // 步驟 3️⃣: 按順序寫入 CSV
-    debugPrint('[VideoAnalysis] 寫入 ${allFrames.length} 幀到 CSV...');
-    for (final frame in allFrames) {
-      writer.addFrame(frame);
-    }
-
     await writer.flush();
     overallSw.stop();
 
-    // � 骨架數據驗證 - 檢測是否所有幀相同
-    if (allFrames.isNotEmpty) {
-      final firstLm16X = allFrames.first.landmarks[16].xPx;
-      final firstLm16Y = allFrames.first.landmarks[16].yPx;
-      
-      int unchangedCount = 0;
-      for (final frame in allFrames) {
-        if (frame.landmarks[16].xPx == firstLm16X && frame.landmarks[16].yPx == firstLm16Y) {
-          unchangedCount++;
-        }
-      }
-      
-      if (unchangedCount == allFrames.length) {
-        debugPrint('[VideoAnalysis] 🚨 警告：所有 ${allFrames.length} 幀的右手腕坐標完全相同！');
-        debugPrint('[VideoAnalysis]   右手腕 (${firstLm16X.toStringAsFixed(1)}, ${firstLm16Y.toStringAsFixed(1)})');
-        debugPrint('[VideoAnalysis]   💡 可能的原因：');
-        debugPrint('[VideoAnalysis]      1. 幀提取失敗，所有幀都是相同的圖像');
-        debugPrint('[VideoAnalysis]      2. ML Kit Pose 檢測返回相同結果');
-        debugPrint('[VideoAnalysis]      3. 視頻本身是靜止畫面');
-      } else {
-        final minX = allFrames.map((f) => f.landmarks[16].xPx).reduce((a, b) => a < b ? a : b);
-        final maxX = allFrames.map((f) => f.landmarks[16].xPx).reduce((a, b) => a > b ? a : b);
-        final minY = allFrames.map((f) => f.landmarks[16].yPx).reduce((a, b) => a < b ? a : b);
-        final maxY = allFrames.map((f) => f.landmarks[16].yPx).reduce((a, b) => a > b ? a : b);
-        debugPrint('[VideoAnalysis] ✅ 骨架正常：右手腕移動範圍 X=[${minX.toStringAsFixed(1)}, ${maxX.toStringAsFixed(1)}], Y=[${minY.toStringAsFixed(1)}, ${maxY.toStringAsFixed(1)}]');
-      }
-      
-      // ✅ 新增：檢查完整骨架（33點）是否重複
-      int repeatedFullPoseCount = 0;
-      int changedFullPoseCount = 0;
-      
-      bool isSameFullPose(int frameA, int frameB) {
-        for (int i = 0; i < 33; i++) {
-          final pa = allFrames[frameA].landmarks[i];
-          final pb = allFrames[frameB].landmarks[i];
-          
-          if ((pa.xPx - pb.xPx).abs() > 0.01 ||
-              (pa.yPx - pb.yPx).abs() > 0.01 ||
-              (pa.z - pb.z).abs() > 0.01) {
-            return false;
-          }
-        }
-        return true;
-      }
-      
-      for (int i = 1; i < allFrames.length; i++) {
-        if (isSameFullPose(i - 1, i)) {
-          repeatedFullPoseCount++;
-        } else {
-          changedFullPoseCount++;
-        }
-      }
-      
-      final repeatRate = repeatedFullPoseCount / math.max(1, allFrames.length - 1);
-      debugPrint('[VideoAnalysis] 📊 完整骨架重複幀比例: ${(repeatRate * 100).toStringAsFixed(1)}%');
-      debugPrint('[VideoAnalysis]   changed=$changedFullPoseCount, repeated=$repeatedFullPoseCount');
-      
-      if (repeatRate > 0.5) {
-        debugPrint('[VideoAnalysis] ⚠️ 骨架更新頻率異常，可能是重複使用上一幀 landmarks');
-      }
-      
-      // ✅ 新增：pose_update_id 統計
-      final uniqueUpdateIds = allFrames.map((f) => f.poseUpdateId).toSet().length;
-      debugPrint('[VideoAnalysis] 📊 骨架更新次數: $uniqueUpdateIds (${allFrames.length} 幀)');
-    }
-
-    // �📊 統計報告
-    final avgBatchMs = batchTimings.isNotEmpty
-        ? batchTimings.values.fold<int>(0, (s, d) => s + d.inMilliseconds) / batchTimings.length
-        : 0;
-    final framesPerSec = allFrames.length > 0 && overallSw.elapsedMilliseconds > 0
-        ? (allFrames.length * 1000 / overallSw.elapsedMilliseconds).toStringAsFixed(2)
+    final framesPerSec = successFrames > 0 && overallSw.elapsedMilliseconds > 0
+        ? (successFrames * 1000 / overallSw.elapsedMilliseconds).toStringAsFixed(2)
         : 'N/A';
-
     debugPrint(
-      '[VideoAnalysis] 📊 統計:\n'
+      '[VideoAnalysis] 統計:\n'
       '  總時間: ${overallSw.elapsedMilliseconds}ms\n'
-      '  成功幀: ${allFrames.length}/${frameTimestamps.length}\n'
+      '  成功幀: $successFrames/${frameTimestamps.length}\n'
       '  批次: $successBatches 成功\n'
-      '  平均批次時間: ${avgBatchMs.toStringAsFixed(1)}ms\n'
       '  吞吐率: $framesPerSec fps',
     );
-    debugPrint('[VideoAnalysis] ✅ 並行分析完成: ${allFrames.length} 幀 → $csvPath');
+    debugPrint('[VideoAnalysis] 並行分析完成: $successFrames 幀 → $csvPath');
   }
 
   /// 讀取 CSV 並統計有效的骨架幀
