@@ -125,7 +125,8 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
       }
       guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { return }
       let pts   = CMSampleBufferGetPresentationTimeStamp(sample)
-      let ptsUs = Int64(CMTimeGetSeconds(pts) * 1_000_000)
+      let ptsSec: Double = CMTimeGetSeconds(pts)
+      let ptsUs = Int64(ptsSec * 1_000_000)
 
       CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
       let base = CVPixelBufferGetBaseAddress(pixBuf)!
