@@ -116,9 +116,13 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
   var prevY: [UInt8]? = nil
   var frameIdx = 0
 
-  while reader.status == .reading {
+  var shouldBreak = false
+  while reader.status == .reading && !shouldBreak {
     autoreleasepool {
-      guard let sample = readerOut.copyNextSampleBuffer() else { return }
+      guard let sample = readerOut.copyNextSampleBuffer() else {
+        shouldBreak = true
+        return
+      }
       guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { return }
       let pts   = CMSampleBufferGetPresentationTimeStamp(sample)
       let ptsUs = Int64(CMTimeGetSeconds(pts) * 1_000_000)

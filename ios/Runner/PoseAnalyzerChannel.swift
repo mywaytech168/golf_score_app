@@ -141,9 +141,13 @@ private func analyzeVideoNatively(
   var poseUpdateId   = 0
   var lastPxMap: [Int: (CGFloat, CGFloat)] = [:]
 
-  while reader.status == .reading {
+  var shouldBreak = false
+  while reader.status == .reading && !shouldBreak {
     autoreleasepool {
-      guard let sampleBuffer = trackOutput.copyNextSampleBuffer() else { return }
+      guard let sampleBuffer = trackOutput.copyNextSampleBuffer() else {
+        shouldBreak = true
+        return
+      }
       let pts    = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
       let ptsSec = CMTimeGetSeconds(pts)
       decodedFrames += 1

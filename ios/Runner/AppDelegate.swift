@@ -156,12 +156,14 @@ private extension AppDelegate {
     try handle.seek(toOffset: 44)
     var totalBytes = 0
 
-    while reader.status == .reading {
+    var shouldBreak = false
+    while reader.status == .reading && !shouldBreak {
       autoreleasepool {
-        guard
-          let sampleBuffer = output.copyNextSampleBuffer(),
-          let blockBuffer  = CMSampleBufferGetDataBuffer(sampleBuffer)
-        else { return }
+        guard let sampleBuffer = output.copyNextSampleBuffer() else {
+          shouldBreak = true
+          return
+        }
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
         let length = CMBlockBufferGetDataLength(blockBuffer)
         var data   = Data(count: length)

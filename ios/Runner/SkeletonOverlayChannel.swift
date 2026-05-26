@@ -137,9 +137,13 @@ private func renderSkeletonOverlay(
   var frameCount     = 0
   var encodedFrames  = 0
 
-  while reader.status == .reading {
+  var shouldBreak = false
+  while reader.status == .reading && !shouldBreak {
     autoreleasepool {
-      guard let sample = readerOut.copyNextSampleBuffer() else { return }
+      guard let sample = readerOut.copyNextSampleBuffer() else {
+        shouldBreak = true
+        return
+      }
       let pts = CMSampleBufferGetPresentationTimeStamp(sample)
       if !sessionStarted { writer.startSession(atSourceTime: pts); sessionStarted = true }
       guard let srcBuf = CMSampleBufferGetImageBuffer(sample) else { return }
