@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/export_quality.dart';
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
+import '../models/swing_posture.dart';
 import '../services/recording_history_storage.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/swing_impact_detector.dart';
@@ -86,6 +87,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   bool? _aiAnalyzedFilter; // 分析狀態篩選 - null: 全部, true: 已分析, false: 未分析
   bool? _aiCoachFilter;    // AI教練篩選   - null: 全部, true: 已AI分析, false: 未AI分析
   bool? _clippedFilter;    // 切片狀態篩選 - null: 全部, true: 已切片, false: 未切片
+  /// 姿勢篩選：null=全部，''=完美，其餘=對應 SwingPosture error label
+  String? _postureFilter;
   String? _datePreset;         // 日期篩選 - null: 全部, 'today', 'week', 'month', 'custom'
   DateTime? _customDateFrom;   // 自訂日期起始（_datePreset == 'custom' 時使用）
   DateTime? _customDateTo;     // 自訂日期結束（_datePreset == 'custom' 時使用）
@@ -378,6 +381,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
   static const _kAnalyzed   = 'hf_analyzed';
   static const _kAiCoach    = 'hf_ai_coach';
   static const _kClipped    = 'hf_clipped';
+  static const _kPosture    = 'hf_posture';
   static const _kSortBy     = 'hf_sort_by';
   static const _kDatePreset = 'hf_date_preset';
   static const _kDateFrom   = 'hf_date_from';
@@ -393,6 +397,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       _aiAnalyzedFilter = _prefBool(prefs, _kAnalyzed);
       _aiCoachFilter    = _prefBool(prefs, _kAiCoach);
       _clippedFilter    = _prefBool(prefs, _kClipped);
+      // 姿勢篩選：'__none__' 代表未設定（避免與合法的 '' 混淆）
+      final rawPosture = prefs.getString(_kPosture);
+      _postureFilter = rawPosture == '__none__' ? null : rawPosture;
       _datePreset = prefs.getString(_kDatePreset);
       final fromMs = prefs.getInt(_kDateFrom);
       final toMs   = prefs.getInt(_kDateTo);
@@ -414,6 +421,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     _setPrefBool(prefs, _kAnalyzed,  _aiAnalyzedFilter);
     _setPrefBool(prefs, _kAiCoach,   _aiCoachFilter);
     _setPrefBool(prefs, _kClipped,   _clippedFilter);
+    prefs.setString(_kPosture, _postureFilter ?? '__none__');
     await prefs.setString(_kSortBy, _sortBy.name);
     if (_datePreset == null) {
       prefs.remove(_kDatePreset);
@@ -510,6 +518,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_aiAnalyzedFilter != null) n++;
     if (_aiCoachFilter    != null) n++;
     if (_clippedFilter    != null) n++;
+    if (_postureFilter    != null) n++;
     if (_datePreset       != null) n++;
     if (_sortBy != _SortBy.date)   n++;
     return n;
@@ -528,6 +537,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_aiCoachFilter    == false) items.add(('AI未分析', const Color(0xFF9AA6B2)));
     if (_clippedFilter    == true)  items.add(('已切片', const Color(0xFFFF9800)));
     if (_clippedFilter    == false) items.add(('未切片', const Color(0xFF9AA6B2)));
+    if (_postureFilter != null) {
+      final color = SwingPosture.isPerfect(_postureFilter)
+          ? const Color(0xFF4CAF50)
+          : const Color(0xFFE57373);
+      items.add((SwingPosture.zhName(_postureFilter!), color));
+    }
     if (_datePreset == 'today')  items.add(('今天',     const Color(0xFF2196F3)));
     if (_datePreset == 'week')   items.add(('本週',     const Color(0xFF2196F3)));
     if (_datePreset == 'month')  items.add(('本月',     const Color(0xFF2196F3)));
@@ -701,6 +716,13 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_clippedFilter != null) {
       filteredEntries = filteredEntries
           .where((e) => e.isClipped == _clippedFilter)
+          .toList();
+    }
+
+    // 姿勢篩選（只顯示 swingPostureLabel != null 的條目）
+    if (_postureFilter != null) {
+      filteredEntries = filteredEntries
+          .where((e) => e.swingPostureLabel == _postureFilter)
           .toList();
     }
 
@@ -902,6 +924,22 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                   _chip('全部',   _clippedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
                                   _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
                                   _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
+                                ]),
+                                _filterRow('姿勢', [
+                                  _chip('全部', _postureFilter == null, const Color(0xFF1E8E5A), () { setState(() => _postureFilter = null); _saveFilters(); }),
+                                  _chip(
+                                    SwingPosture.zhName(SwingPosture.good),
+                                    _postureFilter == SwingPosture.good,
+                                    const Color(0xFF4CAF50),
+                                    () { setState(() => _postureFilter = SwingPosture.good); _saveFilters(); },
+                                  ),
+                                  for (final label in SwingPosture.errorLabels)
+                                    _chip(
+                                      SwingPosture.zhName(label),
+                                      _postureFilter == label,
+                                      const Color(0xFFE57373),
+                                      () { setState(() => _postureFilter = label); _saveFilters(); },
+                                    ),
                                 ]),
                                 _filterRow('日期', [
                                   _chip('全部', _datePreset == null,    const Color(0xFF1E8E5A), () { setState(() { _datePreset = null; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
@@ -1723,14 +1761,22 @@ class _HistoryTileState extends State<_HistoryTile> {
         videoId:  videoId,
         clipPath: widget.entry.filePath,
         csvPath:  hasCsv ? csvPath : null,
+        onAnalysisComplete: (errorType) {
+          if (!mounted) return;
+          final updated = widget.entry.copyWith(
+            hasAiCoachAnalysis: true,
+            swingPostureLabel:  errorType,
+          );
+          widget.onEntryUpdated?.call(widget.entry, updated);
+          RecordingHistoryStorage.instance.upsertEntry(updated);
+        },
       );
 
-      // 成功進入 AI Coach 頁面後，標記此影片已送出過 AI 分析
+      // 若 onAnalysisComplete 尚未觸發（分析仍在進行），至少先標記已送出
       if (mounted && !widget.entry.hasAiCoachAnalysis) {
-        widget.onEntryUpdated?.call(
-          widget.entry,
-          widget.entry.copyWith(hasAiCoachAnalysis: true),
-        );
+        final updated = widget.entry.copyWith(hasAiCoachAnalysis: true);
+        widget.onEntryUpdated?.call(widget.entry, updated);
+        RecordingHistoryStorage.instance.upsertEntry(updated);
       }
     } catch (e) {
       debugPrint('[AI分析] 提交失敗: $e');
@@ -2563,13 +2609,22 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         videoId:  videoId,
         clipPath: widget.clip.filePath,
         csvPath:  hasCsv ? csvPath : null,
+        onAnalysisComplete: (errorType) {
+          if (!mounted) return;
+          final updated = widget.clip.copyWith(
+            hasAiCoachAnalysis: true,
+            swingPostureLabel:  errorType,
+          );
+          widget.onEntryUpdated?.call(widget.clip, updated);
+          RecordingHistoryStorage.instance.upsertEntry(updated);
+        },
       );
 
+      // 若 onAnalysisComplete 尚未觸發（分析仍在進行），至少先標記已送出
       if (mounted && !widget.clip.hasAiCoachAnalysis) {
-        widget.onEntryUpdated?.call(
-          widget.clip,
-          widget.clip.copyWith(hasAiCoachAnalysis: true),
-        );
+        final updated = widget.clip.copyWith(hasAiCoachAnalysis: true);
+        widget.onEntryUpdated?.call(widget.clip, updated);
+        RecordingHistoryStorage.instance.upsertEntry(updated);
       }
     } catch (e) {
       debugPrint('[切片AI分析] 提交失敗: $e');

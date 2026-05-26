@@ -43,6 +43,9 @@ class CoachPrimaryError {
     required this.evidence,
   });
 
+  /// Good class：後端 error_type 為空字串時表示完美揮桿
+  bool get isPerfect => errorType.isEmpty;
+
   factory CoachPrimaryError.fromJson(Map<String, dynamic> j) =>
       CoachPrimaryError(
         errorType: j['error_type'] as String? ?? '',

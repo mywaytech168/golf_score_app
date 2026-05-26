@@ -10,6 +10,10 @@ class StatisticsResponse {
   final PeakValueStats peakValue;
   final AudioCrispnessStats audioCrispness;
 
+  /// 姿勢分類統計：key = SwingPosture label（'' = 完美），value = 次數
+  /// 只含 swingPostureLabel != null 的條目（已做 AI Coach 分析）
+  final Map<String, int> postureBreakdown;
+
   StatisticsResponse({
     required this.success,
     required this.period,
@@ -20,10 +24,15 @@ class StatisticsResponse {
     required this.sweetSpotPercentage,
     required this.peakValue,
     required this.audioCrispness,
-  });
+    Map<String, int>? postureBreakdown,
+  }) : postureBreakdown = postureBreakdown ?? {};
 
   /// 從 JSON 解析統計數據
   factory StatisticsResponse.fromJson(Map<String, dynamic> json) {
+    final rawPosture = json['postureBreakdown'] as Map<String, dynamic>?;
+    final postureBreakdown = rawPosture?.map(
+      (k, v) => MapEntry(k, (v as num).toInt()),
+    );
     return StatisticsResponse(
       success: json['success'] as bool? ?? false,
       period: json['period'] as String? ?? 'all',
@@ -34,6 +43,7 @@ class StatisticsResponse {
       sweetSpotPercentage: (json['sweetSpotPercentage'] as num?)?.toDouble() ?? 0.0,
       peakValue: PeakValueStats.fromJson(json['peakValue'] as Map<String, dynamic>? ?? {}),
       audioCrispness: AudioCrispnessStats.fromJson(json['audioCrispness'] as Map<String, dynamic>? ?? {}),
+      postureBreakdown: postureBreakdown,
     );
   }
 
@@ -49,6 +59,7 @@ class StatisticsResponse {
       'sweetSpotPercentage': sweetSpotPercentage,
       'peakValue': peakValue.toJson(),
       'audioCrispness': audioCrispness.toJson(),
+      'postureBreakdown': postureBreakdown,
     };
   }
 

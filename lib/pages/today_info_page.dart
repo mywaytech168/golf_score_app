@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/statistics_response.dart';
 import '../services/local_statistics_calculator.dart';
 import '../theme/app_theme.dart';
+import '../widgets/posture_breakdown_card.dart';
 
 class TodayInfoPage extends StatefulWidget {
   const TodayInfoPage({super.key});
@@ -152,6 +153,13 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                     const SizedBox(height: kSpaceMD),
                     if (!_loading && _practice > 0)
                       _GoodShotRateCard(good: _good, bad: _bad),
+                    if (!_loading && (_stats?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
+                      const SizedBox(height: kSpaceMD),
+                      PostureBreakdownCard(
+                        breakdown: _stats!.postureBreakdown,
+                        title: isToday ? '今日姿勢分析' : '姿勢分析',
+                      ),
+                    ],
                     if (!_loading && _practice == 0)
                       _EmptyState(isToday: isToday),
                     const SizedBox(height: kSpaceXL),

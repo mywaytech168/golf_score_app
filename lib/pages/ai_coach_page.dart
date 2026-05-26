@@ -13,6 +13,8 @@ class AiCoachPage extends StatefulWidget {
   /// 供「重新分析」按鈕使用
   final String? videoId;
   final String? csvPath;
+  /// 分析完成後回呼，傳入 errorType（'' = 完美，其餘為錯誤類型）
+  final void Function(String errorType)? onAnalysisComplete;
 
   const AiCoachPage({
     super.key,
@@ -20,6 +22,7 @@ class AiCoachPage extends StatefulWidget {
     this.clipPath,
     this.videoId,
     this.csvPath,
+    this.onAnalysisComplete,
   });
 
   /// 從 clip 路徑一次完成提交並導向本頁。
@@ -33,6 +36,7 @@ class AiCoachPage extends StatefulWidget {
     required String clipPath,
     String? csvPath,
     bool forceReanalyze = false,
+    void Function(String errorType)? onAnalysisComplete,
   }) async {
     // ── 快取判斷：若已有分析且不強制重新，直接導向 ──────────
     if (!forceReanalyze) {
@@ -45,10 +49,11 @@ class AiCoachPage extends StatefulWidget {
           if (context.mounted) {
             Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => AiCoachPage(
-                analysisId: existing.analysisId,
-                clipPath:   clipPath,
-                videoId:    videoId,
-                csvPath:    csvPath,
+                analysisId:          existing.analysisId,
+                clipPath:            clipPath,
+                videoId:             videoId,
+                csvPath:             csvPath,
+                onAnalysisComplete:  onAnalysisComplete,
               ),
             ));
           }
@@ -68,10 +73,11 @@ class AiCoachPage extends StatefulWidget {
     if (context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => AiCoachPage(
-          analysisId: analysisId,
-          clipPath:   clipPath,
-          videoId:    videoId,
-          csvPath:    csvPath,
+          analysisId:          analysisId,
+          clipPath:            clipPath,
+          videoId:             videoId,
+          csvPath:             csvPath,
+          onAnalysisComplete:  onAnalysisComplete,
         ),
       ));
     }
@@ -87,6 +93,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
   AnalysisStatus? _status;
   Timer? _timer;
   String? _error;
+  bool _resultReported = false;
 
   @override
   void initState() {
@@ -132,7 +139,15 @@ class _AiCoachPageState extends State<AiCoachPage> {
           _status = status;
           _error  = null;
         });
-        if (status.isDone) _timer?.cancel();
+        if (status.isDone) {
+          _timer?.cancel();
+          // 分析完成時回呼一次，傳出 errorType 供上層寫入 swingPostureLabel
+          if (status.isCompleted && !_resultReported) {
+            _resultReported = true;
+            final errorType = status.result?.primaryError.errorType ?? '';
+            widget.onAnalysisComplete?.call(errorType);
+          }
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());

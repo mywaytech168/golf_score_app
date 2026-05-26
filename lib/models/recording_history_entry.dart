@@ -110,6 +110,11 @@ class RecordingHistoryEntry {
   /// 錄製時的影片尺寸名稱；固定為 'wide'（16:9）
   final String? recordedAspectRatio;
 
+  /// 揮桿姿勢分類 label（來自 AI Coach ONNX 推論）
+  /// '' = 完美(Good)；其餘對應 SwingPosture 5 種錯誤常數
+  /// null = 尚未分析
+  final String? swingPostureLabel;
+
   const RecordingHistoryEntry({
     required this.filePath,
     required this.roundIndex,
@@ -136,6 +141,7 @@ class RecordingHistoryEntry {
     this.isUploaded = false,
     this.bestSpeedValue,
     this.recordedAspectRatio,
+    this.swingPostureLabel,
   });
 
   /// 是否已上傳（明確標記 或 AI Coach 分析過）
@@ -177,6 +183,7 @@ class RecordingHistoryEntry {
     bool? isUploaded,
     double? bestSpeedValue,
     String? recordedAspectRatio,
+    String? swingPostureLabel,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -204,6 +211,7 @@ class RecordingHistoryEntry {
       isUploaded: isUploaded ?? this.isUploaded,
       bestSpeedValue: bestSpeedValue ?? this.bestSpeedValue,
       recordedAspectRatio: recordedAspectRatio ?? this.recordedAspectRatio,
+      swingPostureLabel: swingPostureLabel ?? this.swingPostureLabel,
     );
   }
 
@@ -250,6 +258,7 @@ class RecordingHistoryEntry {
       'isUploaded': isUploaded,
       'bestSpeedValue': bestSpeedValue,
       'recordedAspectRatio': recordedAspectRatio,
+      'swingPostureLabel': swingPostureLabel,
     };
   }
 
@@ -307,6 +316,7 @@ class RecordingHistoryEntry {
       isUploaded:         (json['isUploaded']         as bool?) ?? false,
       bestSpeedValue:     (json['bestSpeedValue']     as num?)?.toDouble(),
       recordedAspectRatio: json['recordedAspectRatio'] as String?,
+      swingPostureLabel:   json['swingPostureLabel']   as String?,
     );
   }
 }

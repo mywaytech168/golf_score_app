@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
+import '../models/swing_posture.dart';
 import 'recording_history_storage.dart';
 
 /// 從本地錄影歷史 JSON 計算統計數據，取代後端 API
@@ -96,10 +97,24 @@ class LocalStatisticsCalculator {
         ? crispValues.reduce((a, b) => a < b ? a : b)
         : 0.0;
 
+    // 姿勢分佈統計（只含已做 AI Coach 分析的條目）
+    final postureBreakdown = <String, int>{};
+    for (final e in entries) {
+      final label = e.swingPostureLabel;
+      if (label == null) continue;
+      postureBreakdown[label] = (postureBreakdown[label] ?? 0) + 1;
+    }
+
+    // 確保所有 label 都有 key（沒出現過的補 0），方便 UI 直接取用
+    for (final label in SwingPosture.allLabels) {
+      postureBreakdown.putIfAbsent(label, () => 0);
+    }
+
     debugPrint(
       '$_tag → total=$totalCount good=$goodCount bad=$badCount '
       'sweet=${sweetSpot.toStringAsFixed(1)}% '
-      'crispAvg=${crispAvg.toStringAsFixed(1)} crispMin=${crispMin.toStringAsFixed(1)}',
+      'crispAvg=${crispAvg.toStringAsFixed(1)} crispMin=${crispMin.toStringAsFixed(1)} '
+      'posture=$postureBreakdown',
     );
 
     return StatisticsResponse(
@@ -113,6 +128,7 @@ class LocalStatisticsCalculator {
       // 揮桿速度目前未存入本地，保留 0 待後續擴充
       peakValue: PeakValueStats(average: 0, maximum: 0),
       audioCrispness: AudioCrispnessStats(average: crispAvg, minimum: crispMin),
+      postureBreakdown: postureBreakdown,
     );
   }
 }

@@ -17,6 +17,7 @@ import '../services/purchase_service.dart';
 import '../services/plan_service.dart';
 import '../widgets/green_page_header.dart';
 import '../widgets/language_selector.dart';
+import '../widgets/posture_breakdown_card.dart';
 import 'reward_page.dart';
 import 'settings_page.dart';
 
@@ -309,6 +310,13 @@ class _HomePageState extends State<HomePage> {
                                 good: today?.goodShot ?? 0,
                                 bad: today?.badShot ?? 0,
                               ),
+                            if (!isLoading && (today?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
+                              const SizedBox(height: kSpaceMD),
+                              PostureBreakdownCard(
+                                breakdown: today!.postureBreakdown,
+                                title: '今日姿勢分析',
+                              ),
+                            ],
                           ],
                         ),
                       ),

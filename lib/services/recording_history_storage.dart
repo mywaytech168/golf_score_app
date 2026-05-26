@@ -22,7 +22,7 @@ class RecordingHistoryStorage {
   static const String _folderName  = 'golf_recordings';
   static const String _legacyJson  = 'recording_history.json';
   static const String _dbName      = 'recording_history.db';
-  static const int    _dbVersion   = 2;
+  static const int    _dbVersion   = 3;
   static const String _table       = 'recordings';
 
   Database? _db;
@@ -68,7 +68,8 @@ class RecordingHistoryStorage {
             sharerName        TEXT,
             hasAiCoachAnalysis  INTEGER NOT NULL DEFAULT 0,
             isUploaded          INTEGER NOT NULL DEFAULT 0,
-            recordedAspectRatio TEXT
+            recordedAspectRatio TEXT,
+            swingPostureLabel   TEXT
           )
         ''');
         // 索引加速常用排序/篩選
@@ -78,6 +79,9 @@ class RecordingHistoryStorage {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await db.execute('ALTER TABLE $_table ADD COLUMN recordedAspectRatio TEXT');
+        }
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN swingPostureLabel TEXT');
         }
       },
     );
@@ -229,6 +233,7 @@ class RecordingHistoryStorage {
     'hasAiCoachAnalysis':  e.hasAiCoachAnalysis  ? 1 : 0,
     'isUploaded':          e.isUploaded          ? 1 : 0,
     'recordedAspectRatio': e.recordedAspectRatio,
+    'swingPostureLabel':   e.swingPostureLabel,
   };
 
   static RecordingHistoryEntry _fromRow(Map<String, dynamic> row) {
@@ -279,6 +284,7 @@ class RecordingHistoryStorage {
       hasAiCoachAnalysis:  (row['hasAiCoachAnalysis']  as int?) == 1,
       isUploaded:          (row['isUploaded']          as int?) == 1,
       recordedAspectRatio:  row['recordedAspectRatio']          as String?,
+      swingPostureLabel:    row['swingPostureLabel']             as String?,
     );
   }
 }
