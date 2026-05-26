@@ -13,6 +13,7 @@ import '../models/hits_summary.dart';
 import '../models/swing_posture.dart';
 import '../services/recording_history_storage.dart';
 import '../services/hits_summary_storage.dart';
+import '../services/statistics_service.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/video_analysis_pipeline_service.dart';
@@ -1769,6 +1770,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           );
           widget.onEntryUpdated?.call(widget.entry, updated);
           RecordingHistoryStorage.instance.upsertEntry(updated);
+          StatisticsService().loadAllStatistics();
         },
       );
 
@@ -2622,6 +2624,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
           );
           widget.onEntryUpdated?.call(widget.clip, updated);
           RecordingHistoryStorage.instance.upsertEntry(updated);
+          StatisticsService().loadAllStatistics();
         },
       );
 

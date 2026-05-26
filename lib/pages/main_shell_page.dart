@@ -10,6 +10,7 @@ import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
 import '../services/app_update_service.dart';
+import '../services/statistics_service.dart';
 import '../widgets/update_dialog.dart';
 
 /// 主應用殼層：統一管理底部導覽列，確保跨頁面持久化
@@ -67,7 +68,8 @@ class _MainShellPageState extends State<MainShellPage> {
     // 對應不同的頁面跳轉
     switch (index) {
       case 0:
-        // Home
+        // Home — 切回首頁時刷新統計，確保姿勢分析結果即時反映
+        StatisticsService().loadAllStatistics();
         _pageController.animateToPage(
           0,
           duration: const Duration(milliseconds: 300),
