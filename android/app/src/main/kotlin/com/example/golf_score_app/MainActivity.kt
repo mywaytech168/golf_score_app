@@ -755,7 +755,14 @@ class MainActivity: FlutterActivity() {
             Log.i(logTag, "[PoseAnalyzer] coded=${codedW}x${codedH} display=${displayW}x${displayH} rotation=$rotation duration=${durationMs}ms actualVideoFps=$actualVideoFps expected≈$expectedFrames")
 
             extractor.selectTrack(videoTrackIndex)
-            codec = MediaCodec.createDecoderByType(mime)
+            // Dolby Vision containers are typically HEVC-compatible; fall back to video/hevc
+            // on devices that lack a hardware Dolby Vision decoder (NAME_NOT_FOUND error).
+            val decodeMime = if (mime == "video/dolby-vision") "video/hevc" else mime
+            if (decodeMime != mime) {
+                videoFormat.setString(MediaFormat.KEY_MIME, decodeMime)
+                Log.i(logTag, "[PoseAnalyzer] Dolby Vision → falling back to $decodeMime")
+            }
+            codec = MediaCodec.createDecoderByType(decodeMime)
             codec.configure(videoFormat, null, null, 0)
             codec.start()
 
