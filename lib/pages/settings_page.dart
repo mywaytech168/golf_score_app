@@ -15,6 +15,7 @@ import '../models/export_quality.dart';
 import '../providers/user_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/auth_token_storage.dart';
+import '../services/ball_detection_prefs.dart';
 import '../services/video_server_client.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/update_dialog.dart';
@@ -47,8 +48,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _displayName = '';
   String _email = '';
   bool _googleLinked = false;
-  ExportQuality _quality = ExportQuality.standard;
-  bool _isLoadingProfile = true;
+  ExportQuality _quality = ExportQuality.standard;  BallDetectionMode _ballMode = BallDetectionMode.original;  bool _isLoadingProfile = true;
   bool _isCheckingUpdate = false;
 
   @override
@@ -66,7 +66,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
     // 2. 上次選的輸出品質
     _quality = await _SkipHelperQuality.savedQuality();
-
+    // 3a. 球偵測模式
+    final ballMode = await BallDetectionPrefs.getMode();
+    if (mounted) setState(() => _ballMode = ballMode);
     // 3. 伺服器 /me（email + googleLinked）
     try {
       final me = await VideoServerClient.instance.getMe();
@@ -385,6 +387,116 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) _showSnack(AppLocalizations.of(context).settingsQualityUpdated(result.label));
   }
 
+  // ── 球偵測模式選擇器 ──────────────────────────────────────────
+  Future<void> _showBallModePicker() async {
+    BallDetectionMode selected = _ballMode;
+    final result = await showModalBottomSheet<BallDetectionMode>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(color: const Color(0xFFDDE1E7), borderRadius: BorderRadius.circular(2)),
+            ),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '球偵測演算法',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E)),
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'TFLite 模式使用深度學習分類器過濾候選球體，可降低假陽性',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...BallDetectionMode.values.map((mode) {
+              final isSelected = selected == mode;
+              final accentColor = mode == BallDetectionMode.tflite
+                  ? const Color(0xFF7C3AED)
+                  : const Color(0xFF1E8E5A);
+              return GestureDetector(
+                onTap: () => setS(() => selected = mode),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 130),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? accentColor.withValues(alpha: 0.07) : const Color(0xFFF4F6F9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected ? accentColor : const Color(0xFFDDE1E7),
+                      width: isSelected ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(children: [
+                    Icon(
+                      isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                      color: isSelected ? accentColor : const Color(0xFFB0B8C1),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(mode.label, style: TextStyle(
+                        fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                        color: isSelected ? accentColor : const Color(0xFF1A1A2E),
+                      )),
+                      const SizedBox(height: 2),
+                      Text(mode.description, style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                    ])),
+                    if (mode == BallDetectionMode.tflite)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF7C3AED).withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'AI',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF7C3AED)),
+                        ),
+                      ),
+                  ]),
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E8E5A),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () => Navigator.pop(ctx, selected),
+                child: const Text('套用'),
+              ),
+            ),
+          ]),
+        );
+      }),
+    );
+
+    if (result == null || result == _ballMode) return;
+    setState(() => _ballMode = result);
+    await BallDetectionPrefs.setMode(result);
+    if (mounted) {
+      _showSnack('球偵測模式已更新：${result.label}');
+    }
+  }
+
   // ── 登出 ─────────────────────────────────────────────────────
   Future<void> _logout() async {
     final l = AppLocalizations.of(context);
@@ -512,8 +624,32 @@ class _SettingsPageState extends State<SettingsPage> {
             title: l.settingsAnalysisQuality,
             subtitle: _quality.label,
             onTap: _showQualityPicker,
-          ),
-          const SizedBox(height: 16),
+          ),          _SettingsTile(
+            icon: Icons.track_changes_rounded,
+            iconColor: const Color(0xFF7C3AED),
+            title: '球偵測演算法',
+            subtitle: _ballMode.label,
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: _ballMode == BallDetectionMode.tflite
+                    ? const Color(0xFF7C3AED).withValues(alpha: 0.12)
+                    : const Color(0xFF6B7280).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                _ballMode.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _ballMode == BallDetectionMode.tflite
+                      ? const Color(0xFF7C3AED)
+                      : const Color(0xFF6B7280),
+                ),
+              ),
+            ),
+            onTap: _showBallModePicker,
+          ),          const SizedBox(height: 16),
           // ── 訂閱 ────────────────────────────────────────────
           _SectionHeader(l.settingsSectionSubscription),
           _SettingsTile(
