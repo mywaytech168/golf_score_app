@@ -114,71 +114,23 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
 
   var frames: [[String: Any]] = []
   var prevY: [UInt8]? = nil
-  var frameIdx = 0
+  var frameIdx: Int = 0
 
-  var shouldBreak = false
-  while reader.status == .reading && !shouldBreak {
-    autoreleasepool { () -> Void in
-      guard let sample = readerOut.copyNextSampleBuffer() else {
-        shouldBreak = true
-        return
-      }
-      guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { return }
-      let pts   = CMSampleBufferGetPresentationTimeStamp(sample)
-      let ptsSec: Double = CMTimeGetSeconds(pts)
-      let ptsUs = Int64(ptsSec * 1_000_000)
+  while reader.status == .reading {
+    guard let sample: CMSampleBuffer = readerOut.copyNextSampleBuffer() else { break }
 
-      CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
-      let base = CVPixelBufferGetBaseAddress(pixBuf)!
-      let bpr  = CVPixelBufferGetBytesPerRow(pixBuf)
-      let rgba = base.assumingMemoryBound(to: UInt8.self)
-
-      var currY = [UInt8](repeating: 0, count: pixCount)
-      for j in 0..<displayH {
-        let rowOff = j * bpr
-        let yOff   = j * displayW
-        for i in 0..<displayW {
-          let o = rowOff + i * 4
-          let b = Int(rgba[o]), g = Int(rgba[o + 1]), r = Int(rgba[o + 2])
-          currY[yOff + i] = UInt8(min(255, (299 * r + 587 * g + 114 * b) / 1000))
-        }
-      }
-      CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly)
-
-      var frameBlobs: [[String: Any]] = []
-
-      if let prev = prevY {
-        // Frame diff: raw intensity + binary mask (kept separate so diffMean is meaningful)
-        var rawDiff = [UInt8](repeating: 0, count: pixCount)
-        var binMask = [UInt8](repeating: 0, count: pixCount)
-        for i in 0..<pixCount {
-          let d = abs(Int(currY[i]) - Int(prev[i]))
-          rawDiff[i] = UInt8(min(255, d))
-          binMask[i] = d >= config.diffThresh ? 1 : 0
-        }
-
-        // Morphological opening (erode → dilate)
-        let opened = btMorphOpen(mask: binMask, w: displayW, h: displayH, k: config.morphK)
-
-        // BFS 4-connected blob detection
-        let blobs = btBfsBlobs(
-          mask: opened, rawDiff: rawDiff, w: displayW, h: displayH,
-          areaLo: config.areaLo, areaHi: config.areaHi, circMin: config.circMin)
-
-        for b in blobs {
-          frameBlobs.append([
-            "cx": b.cx, "cy": b.cy,
-            "area": b.area, "circ": b.circ, "diffMean": b.diffMean,
-          ])
-        }
-      }
-
-      frames.append(["ptsUs": ptsUs, "blobs": frameBlobs])
-      prevY = currY
+    if let result: BtFrameResult = autoreleasepool(invoking: {
+      btProcessFrame(
+        sample: sample, config: config,
+        pixCount: pixCount, displayW: displayW, displayH: displayH,
+        prevY: prevY)
+    }) {
+      frames.append(result.entry)
+      prevY = result.currY
       frameIdx += 1
 
       if frameIdx % 10 == 0 {
-        let prog = min(0.95, Double(frameIdx) / Double(totalFrames))
+        let prog: Double = min(0.95, Double(frameIdx) / Double(totalFrames))
         AnalysisProgressSink.shared.send(
           op: "extractBlobs", progress: prog,
           label: "球體偵測中 \(Int(prog * 100))%", current: frameIdx, total: totalFrames)
@@ -191,6 +143,75 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
     current: frameIdx, total: frameIdx)
 
   return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]
+}
+
+// MARK: - Per-frame processing
+
+private struct BtFrameResult {
+  let entry: [String: Any]
+  let currY: [UInt8]
+}
+
+private func btProcessFrame(
+  sample: CMSampleBuffer,
+  config: BlobConfig,
+  pixCount: Int,
+  displayW: Int,
+  displayH: Int,
+  prevY: [UInt8]?
+) -> BtFrameResult? {
+  guard let pixBuf: CVPixelBuffer = CMSampleBufferGetImageBuffer(sample) else { return nil }
+  let pts: CMTime = CMSampleBufferGetPresentationTimeStamp(sample)
+  let ptsSec: Double = CMTimeGetSeconds(pts)
+  let ptsUs: Int64 = Int64(ptsSec * 1_000_000)
+
+  CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
+  let base = CVPixelBufferGetBaseAddress(pixBuf)!
+  let bpr: Int = CVPixelBufferGetBytesPerRow(pixBuf)
+  let rgba = base.assumingMemoryBound(to: UInt8.self)
+
+  var currY = [UInt8](repeating: 0, count: pixCount)
+  for j in 0..<displayH {
+    let rowOff: Int = j * bpr
+    let yOff: Int   = j * displayW
+    for i in 0..<displayW {
+      let o: Int = rowOff + i * 4
+      let b = Int(rgba[o]), g = Int(rgba[o + 1]), r = Int(rgba[o + 2])
+      let luma: Int = (299 * r + 587 * g + 114 * b) / 1000
+      currY[yOff + i] = UInt8(min(255, luma))
+    }
+  }
+  CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly)
+
+  var frameBlobs: [[String: Any]] = []
+  if let prev: [UInt8] = prevY {
+    // Frame diff: raw intensity + binary mask
+    var rawDiff = [UInt8](repeating: 0, count: pixCount)
+    var binMask = [UInt8](repeating: 0, count: pixCount)
+    for i in 0..<pixCount {
+      let d: Int = abs(Int(currY[i]) - Int(prev[i]))
+      rawDiff[i] = UInt8(min(255, d))
+      binMask[i] = d >= config.diffThresh ? 1 : 0
+    }
+
+    // Morphological opening (erode → dilate)
+    let opened: [UInt8] = btMorphOpen(mask: binMask, w: displayW, h: displayH, k: config.morphK)
+
+    // BFS 4-connected blob detection
+    let blobs: [BlobResult] = btBfsBlobs(
+      mask: opened, rawDiff: rawDiff, w: displayW, h: displayH,
+      areaLo: config.areaLo, areaHi: config.areaHi, circMin: config.circMin)
+
+    for b in blobs {
+      let blobEntry: [String: Any] = [
+        "cx": b.cx, "cy": b.cy,
+        "area": b.area, "circ": b.circ, "diffMean": b.diffMean,
+      ]
+      frameBlobs.append(blobEntry)
+    }
+  }
+
+  return BtFrameResult(entry: ["ptsUs": ptsUs, "blobs": frameBlobs], currY: currY)
 }
 
 // MARK: - Morphological helpers
