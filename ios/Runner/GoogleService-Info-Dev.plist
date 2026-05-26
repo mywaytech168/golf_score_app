@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>YOUR_DEV_CLIENT_ID.apps.googleusercontent.com</string>
+	<string>446697241300-2o58ae8nku99m9ojs49upe1srfs6e75c.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.YOUR_DEV_CLIENT_ID</string>
+	<string>com.googleusercontent.apps.446697241300-2o58ae8nku99m9ojs49upe1srfs6e75c</string>
 	<key>BUNDLE_ID</key>
 	<string>atk.golfscoreapp</string>
 </dict>

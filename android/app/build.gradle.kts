@@ -5,8 +5,6 @@ plugins {
     id("org.jetbrains.kotlin.android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // Google Services plugin for Firebase and Google Sign-In
-    id("com.google.gms.google-services")
 }
 
 // 👇 配置编译器以支持 Java 17 (系统当前版本)

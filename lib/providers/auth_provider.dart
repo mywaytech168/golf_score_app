@@ -9,7 +9,9 @@ import '../services/auth_token_storage.dart';
 /// 管理用戶登入/登出狀態、令牌和用戶信息
 class AuthProvider with ChangeNotifier {
   final AuthTokenStorage _tokenStorage = AuthTokenStorage.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com',
+  );
 
   // 狀態變數
   bool _isLoading = false;
