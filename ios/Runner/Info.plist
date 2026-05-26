@@ -59,6 +59,8 @@
 	<string>需要存取照片庫，以便選取高爾夫揮桿影片進行分析。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>需要將高爾夫揮桿影片、截圖或分析結果儲存到照片庫。</string>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
