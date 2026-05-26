@@ -167,5 +167,147 @@
   "langZhTW": "繁體中文",
   "langZhCN": "简体中文",
   "langEn": "English",
-  "langSelectTitle": "选择语言"
+  "langSelectTitle": "选择语言",
+
+  "settingsTitle": "设置",
+  "settingsSectionAccount": "账号",
+  "settingsChangeName": "修改名称",
+  "settingsChangeNameHint": "请输入显示名称",
+  "settingsChangePassword": "修改密码",
+  "settingsCurrentPassword": "当前密码",
+  "settingsNewPassword": "新密码",
+  "settingsConfirmNewPassword": "确认新密码",
+  "settingsCurrentPasswordRequired": "请输入当前密码",
+  "settingsConfirmChange": "确认修改",
+  "settingsPasswordChanged": "密码已修改",
+  "settingsGoogleLogin": "Google 登录",
+  "settingsGoogleLinked": "已绑定",
+  "settingsGoogleNotLinked": "未绑定，点击链接 Google 账号",
+  "settingsSectionAnalysis": "分析偏好",
+  "settingsAnalysisQuality": "完整分析输出质量",
+  "settingsQualityHint": "保存后作为默认值，下次分析自动应用",
+  "settingsApply": "应用",
+  "settingsQualityUpdated": "输出质量已更新为「{quality}」",
+  "@settingsQualityUpdated": {
+    "placeholders": { "quality": {"type": "String"} }
+  },
+  "settingsSectionSubscription": "订阅",
+  "settingsViewSubscription": "查看订阅方案",
+  "settingsSectionGeneral": "通用",
+  "settingsLanguage": "语言 / Language",
+  "settingsCheckUpdate": "检查更新",
+  "settingsAlreadyLatest": "已是最新版本 v{version}",
+  "@settingsAlreadyLatest": {
+    "placeholders": { "version": {"type": "String"} }
+  },
+  "settingsUpdateCheckFailed": "检查更新失败，请稍后重试",
+  "settingsConfirmLogout": "确定退出？",
+  "settingsLogoutWarning": "退出后需重新登录才能使用云端功能。",
+  "settingsNameUpdated": "名称已更新",
+  "settingsPickFromGallery": "从相册选择",
+  "settingsRemoveAvatar": "移除头像",
+
+  "homeTodayOverview": "今日概况",
+  "homeHi": "嗨，{name} 👋",
+  "@homeHi": {
+    "placeholders": { "name": {"type": "String"} }
+  },
+  "homeRounds": "练习轮次",
+  "homePractices": "练习次数",
+  "homeTodayGoodRate": "今日好球率",
+  "homeGoodTimes": "好球 {count} 次",
+  "@homeGoodTimes": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "homeBadTimes": "坏球 {count} 次",
+  "@homeBadTimes": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "homeTodayPosture": "今日姿势分析",
+  "homeTopSpeed": "最佳速度",
+  "homeSweetSpot": "甜蜜点",
+  "homeCrispness": "清脆度",
+  "homeAnnouncements": "公告栏",
+  "homeRewardBalls": "奖励球数",
+  "weekdayMon": "周一",
+  "weekdayTue": "周二",
+  "weekdayWed": "周三",
+  "weekdayThu": "周四",
+  "weekdayFri": "周五",
+  "weekdaySat": "周六",
+  "weekdaySun": "周日",
+
+  "todayTitleToday": "今日概况",
+  "todayTitleHistory": "历史概况",
+  "todayLoadFailed": "加载失败，请下拉刷新",
+  "todaySweetSpotHit": "甜蜜点命中",
+  "todayCrispness": "声音清脆度",
+  "todayTopSpeed": "最佳速度",
+  "todayNoRecord": "今天还没有练习记录",
+  "todayNoRecordDate": "这天没有练习记录",
+  "todayGoRecord": "去录一次挥杆吧！",
+  "todayPostureToday": "今日姿势分析",
+  "todayPosture": "姿势分析",
+
+  "annBoardTitle": "公告栏",
+  "annUnreadCount": "{count} 条未读",
+  "@annUnreadCount": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annAllAnnouncements": "全部公告",
+  "annMarkAllRead": "全部已读",
+  "annRefresh": "刷新",
+  "annLoadFailed": "加载失败，请下拉重试",
+  "annMinutesAgo": "{count} 分钟前",
+  "@annMinutesAgo": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annHoursAgo": "{count} 小时前",
+  "@annHoursAgo": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annDaysAgo": "{count} 天前",
+  "@annDaysAgo": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annDetailTitle": "公告详情",
+  "annExpiresAt": "有效期至 {date}",
+  "@annExpiresAt": {
+    "placeholders": { "date": {"type": "String"} }
+  },
+  "annEmpty": "暂无公告",
+  "annEmptySubtitle": "新公告将显示在这里",
+
+  "updateNotes": "更新内容",
+  "updateForcedWarning": "此版本已停止支持，请更新后继续使用",
+  "updateNow": "立即更新",
+  "updateRemindLater": "稍后提醒",
+  "updateDontRemind": "不再提醒",
+  "updateCannotOpenStore": "无法打开商店页面，请手动前往更新",
+  "updateRequiredTitle": "必要更新",
+  "updateRequiredSubtitle": "请更新后继续使用 TekSwing",
+  "updateFoundTitle": "发现新版本",
+  "updateFoundSubtitle": "建议更新以获得最佳体验",
+  "updateCurrentVersion": "当前版本",
+  "updateLatestVersion": "最新版本",
+
+  "upgradePageTitle": "升级您的方案",
+  "upgradePageSubtitle": "解锁更多挥杆分析功能，提升您的球技",
+  "upgradeFullComparison": "完整功能对比",
+  "upgradeFeatureColumn": "功能",
+  "upgradeSubscribePlan": "升级 {plan} 方案",
+  "@upgradeSubscribePlan": {
+    "placeholders": { "plan": {"type": "String"} }
+  },
+  "upgradeSelectPayment": "选择付款方式",
+  "upgradeApplePayFailed": "Apple Pay 配置加载失败",
+  "upgradeGooglePayFailed": "Google Pay 配置加载失败",
+  "upgradePaymentFailed": "付款验证失败，请稍后重试",
+  "upgradeSuccessMsg": "升级成功",
+  "upgradeAlreadyFree": "您目前使用的已是免费方案",
+
+  "learningTitle": "挥杆学习",
+  "learningMoreComing": "更多课程持续更新中",
+  "learningVideoComingSoon": "示范视频待补充，先提供重点与标记供对照学习。",
+  "learningKeyMarkers": "关键标记"
 }

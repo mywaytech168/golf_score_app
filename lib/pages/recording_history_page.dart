@@ -1928,7 +1928,9 @@ class _HistoryTileState extends State<_HistoryTile> {
       borderRadius: BorderRadius.circular(16),
       shadowColor: Colors.black.withValues(alpha: 0.08),
       elevation: 2,
-      child: InkWell(
+      child: Stack(
+        children: [
+        InkWell(
         onTap: widget.onTap,
         borderRadius: BorderRadius.circular(16),
         child: Column(
@@ -1936,7 +1938,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           children: [
             // ── 主體區域 ──────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 4, 10),
+              padding: const EdgeInsets.fromLTRB(12, 12, 40, 10),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1952,111 +1954,17 @@ class _HistoryTileState extends State<_HistoryTile> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // 標題列 + 更多選單
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                widget.entry.displayTitle,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF123B70),
-                                  height: 1.3,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            PopupMenuButton<_HistoryMenuAction>(
-                              tooltip: '更多操作',
-                              icon: const Icon(
-                                  Icons.more_vert,
-                                  color: Color(0xFF9AA6B2),
-                                  size: 20),
-                              padding: EdgeInsets.zero,
-                              onSelected: (action) {
-                                WidgetsBinding.instance
-                                    .addPostFrameCallback((_) {
-                                  switch (action) {
-                                    case _HistoryMenuAction.rename:
-                                      widget.onRename();
-                                      break;
-                                    case _HistoryMenuAction.detectHits:
-                                      _runDetection();
-                                      break;
-                                    case _HistoryMenuAction.analyze:
-                                      _runCombinedAnalysis();
-                                      break;
-                                    case _HistoryMenuAction.compare:
-                                      _runCompare();
-                                      break;
-                                    case _HistoryMenuAction.share:
-                                      _shareSession();
-                                      break;
-                                    case _HistoryMenuAction.delete:
-                                      widget.onDelete();
-                                      break;
-                                  }
-                                });
-                              },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem<_HistoryMenuAction>(
-                                  value: _HistoryMenuAction.rename,
-                                  child: Text('重新命名'),
-                                ),
-                                if ((_isClip ||
-                                        (!_isLongVideo && _isOriginalVideo)) &&
-                                    !_isAnalyzed)
-                                  PopupMenuItem<_HistoryMenuAction>(
-                                    value: _HistoryMenuAction.analyze,
-                                    child: Row(children: [
-                                      Text(
-                                          _isAnalyzing ? '分析中...' : '完整分析',
-                                          style: TextStyle(
-                                              color: _isAnalyzing
-                                                  ? Colors.grey
-                                                  : null)),
-                                      if (_isAnalyzing) ...[
-                                        const SizedBox(width: 8),
-                                        const SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                                strokeWidth: 2)),
-                                      ],
-                                    ]),
-                                  ),
-                                if (!_isLongVideo &&
-                                    widget.allEntries
-                                        .where((e) =>
-                                            e.filePath !=
-                                                widget.entry.filePath &&
-                                            e.durationSeconds <= 5 &&
-                                            File(e.filePath).existsSync())
-                                        .isNotEmpty)
-                                  const PopupMenuItem<_HistoryMenuAction>(
-                                    value: _HistoryMenuAction.compare,
-                                    child: Text('與另一部影片比較'),
-                                  ),
-                                if (!_isLongVideo && _isAnalyzed)
-                                  const PopupMenuItem<_HistoryMenuAction>(
-                                    value: _HistoryMenuAction.share,
-                                    child: Row(children: [
-                                      Icon(Icons.share_outlined,
-                                          size: 16, color: Color(0xFF1E8E5A)),
-                                      SizedBox(width: 8),
-                                      Text('分享連結'),
-                                    ]),
-                                  ),
-                                const PopupMenuItem<_HistoryMenuAction>(
-                                  value: _HistoryMenuAction.delete,
-                                  child: Text('刪除影片'),
-                                ),
-                              ],
-                            ),
-                          ],
+                        // 標題
+                        Text(
+                          widget.entry.displayTitle,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF123B70),
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 5),
                         // 時間資訊
@@ -2221,6 +2129,107 @@ class _HistoryTileState extends State<_HistoryTile> {
             ),
           ],
         ),
+        ),
+        // ── 右上角更多選單按鈕 ──────────────────────────────────
+        Positioned(
+          top: 4,
+          right: 4,
+          child: PopupMenuButton<_HistoryMenuAction>(
+            tooltip: '更多操作',
+            icon: const Icon(
+                Icons.more_vert_rounded,
+                color: Color(0xFF9AA6B2),
+                size: 20),
+            padding: EdgeInsets.zero,
+            onSelected: (action) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                switch (action) {
+                  case _HistoryMenuAction.rename:
+                    widget.onRename();
+                    break;
+                  case _HistoryMenuAction.detectHits:
+                    _runDetection();
+                    break;
+                  case _HistoryMenuAction.analyze:
+                    _runCombinedAnalysis();
+                    break;
+                  case _HistoryMenuAction.compare:
+                    _runCompare();
+                    break;
+                  case _HistoryMenuAction.share:
+                    _shareSession();
+                    break;
+                  case _HistoryMenuAction.delete:
+                    widget.onDelete();
+                    break;
+                }
+              });
+            },
+            itemBuilder: (context) {
+              final canAnalyze = (_isClip || (!_isLongVideo && _isOriginalVideo)) && !_isAnalyzed;
+              final canCompare = !_isLongVideo && widget.allEntries
+                  .where((e) =>
+                      e.filePath != widget.entry.filePath &&
+                      e.durationSeconds <= 5 &&
+                      File(e.filePath).existsSync())
+                  .isNotEmpty;
+              final canShare = !_isLongVideo && _isAnalyzed;
+              return [
+                const PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.rename,
+                  child: Text('重新命名'),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.analyze,
+                  enabled: canAnalyze && !_isAnalyzing,
+                  child: Row(children: [
+                    Text(
+                        _isAnalyzing ? '分析中...' : '完整分析',
+                        style: TextStyle(
+                            color: (!canAnalyze || _isAnalyzing)
+                                ? Colors.grey
+                                : null)),
+                    if (_isAnalyzing) ...[
+                      const SizedBox(width: 8),
+                      const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2)),
+                    ],
+                  ]),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.compare,
+                  enabled: canCompare,
+                  child: Text('與另一部影片比較',
+                      style: TextStyle(
+                          color: canCompare ? null : Colors.grey)),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.share,
+                  enabled: canShare,
+                  child: Row(children: [
+                    Icon(Icons.share_outlined,
+                        size: 16,
+                        color: canShare
+                            ? const Color(0xFF1E8E5A)
+                            : Colors.grey),
+                    const SizedBox(width: 8),
+                    Text('分享連結',
+                        style: TextStyle(
+                            color: canShare ? null : Colors.grey)),
+                  ]),
+                ),
+                const PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.delete,
+                  child: Text('刪除影片'),
+                ),
+              ];
+            },
+          ),
+        ),
+        ],
       ),
     ),
     // ── 展開的切片卡片（AnimatedSize 平滑動畫）────────────────
@@ -2686,7 +2695,9 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         const SizedBox(width: 6),
         // ── 切片卡片本體 ─────────────────────────────────────
         Expanded(
-          child: Material(
+          child: Stack(
+            children: [
+          Material(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             elevation: 1,
@@ -2699,7 +2710,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                 children: [
                   // ── 卡片主體 ────────────────────────────────
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                    padding: const EdgeInsets.fromLTRB(10, 10, 36, 8),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -2713,64 +2724,16 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      clip.customName?.trim().isNotEmpty == true
-                                          ? clip.customName!.trim()
-                                          : '第 ${widget.clipIndex} 球',
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF123B70)),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  // │││ 下拉選單
-                                  PopupMenuButton<_ClipMenuAction>(
-                                    icon: const Icon(Icons.more_vert_rounded,
-                                        size: 18, color: Color(0xFF9AA6B2)),
-                                    padding: EdgeInsets.zero,
-                                    onSelected: (action) {
-                                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                                        switch (action) {
-                                          case _ClipMenuAction.rename:
-                                            _rename();
-                                            break;
-                                          case _ClipMenuAction.share:
-                                            _share();
-                                            break;
-                                          case _ClipMenuAction.delete:
-                                            widget.onDelete?.call();
-                                            break;
-                                        }
-                                      });
-                                    },
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem<_ClipMenuAction>(
-                                        value: _ClipMenuAction.rename,
-                                        child: Text('重新命名'),
-                                      ),
-                                      if (clip.isAnalyzed)
-                                        const PopupMenuItem<_ClipMenuAction>(
-                                          value: _ClipMenuAction.share,
-                                          child: Row(children: [
-                                            Icon(Icons.share_outlined,
-                                                size: 16, color: Color(0xFF1E8E5A)),
-                                            SizedBox(width: 8),
-                                            Text('分享連結'),
-                                          ]),
-                                        ),
-                                      const PopupMenuItem<_ClipMenuAction>(
-                                        value: _ClipMenuAction.delete,
-                                        child: Text('刪除影片',
-                                            style: TextStyle(color: Colors.red)),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                              Text(
+                                clip.customName?.trim().isNotEmpty == true
+                                    ? clip.customName!.trim()
+                                    : '第 ${widget.clipIndex} 球',
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF123B70)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               if (clip.hitSecond != null) ...[
                                 const SizedBox(height: 3),
@@ -2884,7 +2847,62 @@ class _ClipSubCardState extends State<_ClipSubCard> {
               ),
             ),
           ),
+          // ── 右上角選單按鈕 ───────────────────────────────────
+          Positioned(
+            top: 2,
+            right: 2,
+            child: PopupMenuButton<_ClipMenuAction>(
+              tooltip: '更多操作',
+              icon: const Icon(Icons.more_vert_rounded,
+                  size: 18, color: Color(0xFF9AA6B2)),
+              padding: EdgeInsets.zero,
+              onSelected: (action) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  switch (action) {
+                    case _ClipMenuAction.rename:
+                      _rename();
+                      break;
+                    case _ClipMenuAction.share:
+                      _share();
+                      break;
+                    case _ClipMenuAction.delete:
+                      widget.onDelete?.call();
+                      break;
+                  }
+                });
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.rename,
+                  child: Text('重新命名'),
+                ),
+                PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.share,
+                  enabled: clip.isAnalyzed,
+                  child: Row(children: [
+                    Icon(Icons.share_outlined,
+                        size: 16,
+                        color: clip.isAnalyzed
+                            ? const Color(0xFF1E8E5A)
+                            : Colors.grey),
+                    const SizedBox(width: 8),
+                    Text('分享連結',
+                        style: TextStyle(
+                            color:
+                                clip.isAnalyzed ? null : Colors.grey)),
+                  ]),
+                ),
+                const PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.delete,
+                  child: Text('刪除影片',
+                      style: TextStyle(color: Colors.red)),
+                ),
+              ],
+            ),
+          ),
+        ],
         ),
+      ),
       ],
     );
   }

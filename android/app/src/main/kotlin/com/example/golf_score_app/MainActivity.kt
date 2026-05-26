@@ -72,6 +72,9 @@ class MainActivity: FlutterActivity() {
     private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
     private val ballBlobExtractor      by lazy { BallBlobExtractor() }
     private val trajectoryOverlayRenderer by lazy { TrajectoryOverlayRenderer() }
+    private val ballYoloExtractor      by lazy {
+        BallYoloExtractor(applicationContext.assets).also { it.tryLoadModel() }
+    }
     
     // ✅ ML Kit Pose Detector (延遲初始化)
     private val poseDetector: PoseDetector by lazy {
@@ -338,6 +341,27 @@ class MainActivity: FlutterActivity() {
                             } catch (e: Exception) {
                                 Log.e(logTag, "blob 偵測例外: ${e.message}", e)
                                 runOnUiThread { result.error("extract_failed", e.message, null) }
+                            }
+                        }
+                    }
+
+                    // ── [YOLOv8] TFLite 模式 → 每幀 blob ─────────────────
+                    "extractBlobsYolo" -> {
+                        val inputPath = call.argument<String>("inputPath")
+                        if (inputPath.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 inputPath", null)
+                            return@setMethodCallHandler
+                        }
+                        ballTrajExecutor.execute {
+                            try {
+                                val data = ballYoloExtractor.extract(inputPath, onProgress = ::sendProgress)
+                                runOnUiThread {
+                                    if (data != null) result.success(data)
+                                    else result.error("yolo_failed", "YOLOv8 偵測失敗（模型未載入或解碼錯誤）", null)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "YOLOv8 偵測例外: ${e.message}", e)
+                                runOnUiThread { result.error("yolo_failed", e.message, null) }
                             }
                         }
                     }

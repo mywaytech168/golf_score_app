@@ -475,6 +475,334 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get langSelectTitle => '選擇語言';
+
+  @override
+  String get settingsTitle => '設定';
+
+  @override
+  String get settingsSectionAccount => '帳號';
+
+  @override
+  String get settingsChangeName => '修改名稱';
+
+  @override
+  String get settingsChangeNameHint => '請輸入顯示名稱';
+
+  @override
+  String get settingsChangePassword => '修改密碼';
+
+  @override
+  String get settingsCurrentPassword => '目前密碼';
+
+  @override
+  String get settingsNewPassword => '新密碼';
+
+  @override
+  String get settingsConfirmNewPassword => '確認新密碼';
+
+  @override
+  String get settingsCurrentPasswordRequired => '請輸入目前密碼';
+
+  @override
+  String get settingsConfirmChange => '確認修改';
+
+  @override
+  String get settingsPasswordChanged => '密碼已修改';
+
+  @override
+  String get settingsGoogleLogin => 'Google 登入';
+
+  @override
+  String get settingsGoogleLinked => '已綁定';
+
+  @override
+  String get settingsGoogleNotLinked => '尚未綁定，點擊連結 Google 帳號';
+
+  @override
+  String get settingsSectionAnalysis => '分析偏好';
+
+  @override
+  String get settingsAnalysisQuality => '完整分析輸出品質';
+
+  @override
+  String get settingsQualityHint => '選擇後將作為預設值，下次分析自動套用';
+
+  @override
+  String get settingsApply => '套用';
+
+  @override
+  String settingsQualityUpdated(String quality) {
+    return '輸出品質已更新為「$quality」';
+  }
+
+  @override
+  String get settingsSectionSubscription => '訂閱';
+
+  @override
+  String get settingsViewSubscription => '查看訂閱方案';
+
+  @override
+  String get settingsSectionGeneral => '一般';
+
+  @override
+  String get settingsLanguage => '語言 / Language';
+
+  @override
+  String get settingsCheckUpdate => '檢查更新';
+
+  @override
+  String settingsAlreadyLatest(String version) {
+    return '已是最新版本 v$version';
+  }
+
+  @override
+  String get settingsUpdateCheckFailed => '檢查更新失敗，請稍後再試';
+
+  @override
+  String get settingsConfirmLogout => '確定登出？';
+
+  @override
+  String get settingsLogoutWarning => '登出後需重新登入才能使用雲端功能。';
+
+  @override
+  String get settingsNameUpdated => '名稱已更新';
+
+  @override
+  String get settingsPickFromGallery => '從相簿選擇';
+
+  @override
+  String get settingsRemoveAvatar => '移除大頭貼';
+
+  @override
+  String get homeTodayOverview => '今日概況';
+
+  @override
+  String homeHi(String name) {
+    return '嗨，$name 👋';
+  }
+
+  @override
+  String get homeRounds => '練習輪次';
+
+  @override
+  String get homePractices => '練習次數';
+
+  @override
+  String get homeTodayGoodRate => '今日好球率';
+
+  @override
+  String homeGoodTimes(int count) {
+    return '好球 $count 次';
+  }
+
+  @override
+  String homeBadTimes(int count) {
+    return '壞球 $count 次';
+  }
+
+  @override
+  String get homeTodayPosture => '今日姿勢分析';
+
+  @override
+  String get homeTopSpeed => '最佳速度';
+
+  @override
+  String get homeSweetSpot => '甜蜜點';
+
+  @override
+  String get homeCrispness => '清脆度';
+
+  @override
+  String get homeAnnouncements => '公告欄';
+
+  @override
+  String get homeRewardBalls => '獎勵球數';
+
+  @override
+  String get weekdayMon => '週一';
+
+  @override
+  String get weekdayTue => '週二';
+
+  @override
+  String get weekdayWed => '週三';
+
+  @override
+  String get weekdayThu => '週四';
+
+  @override
+  String get weekdayFri => '週五';
+
+  @override
+  String get weekdaySat => '週六';
+
+  @override
+  String get weekdaySun => '週日';
+
+  @override
+  String get todayTitleToday => '今日概況';
+
+  @override
+  String get todayTitleHistory => '歷史概況';
+
+  @override
+  String get todayLoadFailed => '載入失敗，請下拉重新整理';
+
+  @override
+  String get todaySweetSpotHit => '甜蜜點命中';
+
+  @override
+  String get todayCrispness => '聲音清脆度';
+
+  @override
+  String get todayTopSpeed => '最佳速度';
+
+  @override
+  String get todayNoRecord => '今天還沒有練習記錄';
+
+  @override
+  String get todayNoRecordDate => '這天沒有練習記錄';
+
+  @override
+  String get todayGoRecord => '去錄一支揮桿吧！';
+
+  @override
+  String get todayPostureToday => '今日姿勢分析';
+
+  @override
+  String get todayPosture => '姿勢分析';
+
+  @override
+  String get annBoardTitle => '公告欄';
+
+  @override
+  String annUnreadCount(int count) {
+    return '$count 則未讀';
+  }
+
+  @override
+  String get annAllAnnouncements => '所有公告';
+
+  @override
+  String get annMarkAllRead => '全部已讀';
+
+  @override
+  String get annRefresh => '重新整理';
+
+  @override
+  String get annLoadFailed => '載入失敗，請下拉重試';
+
+  @override
+  String annMinutesAgo(int count) {
+    return '$count 分鐘前';
+  }
+
+  @override
+  String annHoursAgo(int count) {
+    return '$count 小時前';
+  }
+
+  @override
+  String annDaysAgo(int count) {
+    return '$count 天前';
+  }
+
+  @override
+  String get annDetailTitle => '公告詳情';
+
+  @override
+  String annExpiresAt(String date) {
+    return '有效期限至 $date';
+  }
+
+  @override
+  String get annEmpty => '目前沒有公告';
+
+  @override
+  String get annEmptySubtitle => '新公告將會顯示在這裡';
+
+  @override
+  String get updateNotes => '更新內容';
+
+  @override
+  String get updateForcedWarning => '此版本已停止支援，請更新後繼續使用';
+
+  @override
+  String get updateNow => '立即更新';
+
+  @override
+  String get updateRemindLater => '稍後提醒';
+
+  @override
+  String get updateDontRemind => '不再提醒';
+
+  @override
+  String get updateCannotOpenStore => '無法開啟商店頁面，請手動前往更新';
+
+  @override
+  String get updateRequiredTitle => '必要更新';
+
+  @override
+  String get updateRequiredSubtitle => '請更新後繼續使用 TekSwing';
+
+  @override
+  String get updateFoundTitle => '發現新版本';
+
+  @override
+  String get updateFoundSubtitle => '建議更新以獲得最佳體驗';
+
+  @override
+  String get updateCurrentVersion => '目前版本';
+
+  @override
+  String get updateLatestVersion => '最新版本';
+
+  @override
+  String get upgradePageTitle => '升級您的方案';
+
+  @override
+  String get upgradePageSubtitle => '解鎖更多揮桿分析功能，精進您的球技';
+
+  @override
+  String get upgradeFullComparison => '完整功能比較';
+
+  @override
+  String get upgradeFeatureColumn => '功能';
+
+  @override
+  String upgradeSubscribePlan(String plan) {
+    return '升級 $plan 方案';
+  }
+
+  @override
+  String get upgradeSelectPayment => '選擇付款方式';
+
+  @override
+  String get upgradeApplePayFailed => 'Apple Pay 設定載入失敗';
+
+  @override
+  String get upgradeGooglePayFailed => 'Google Pay 設定載入失敗';
+
+  @override
+  String get upgradePaymentFailed => '付款驗證失敗，請稍後重試';
+
+  @override
+  String get upgradeSuccessMsg => '升級成功';
+
+  @override
+  String get upgradeAlreadyFree => '您目前使用的已是免費方案';
+
+  @override
+  String get learningTitle => '揮桿學習';
+
+  @override
+  String get learningMoreComing => '更多課程陸續更新中';
+
+  @override
+  String get learningVideoComingSoon => '示範影片待補充，先提供重點與標記供對照學習。';
+
+  @override
+  String get learningKeyMarkers => '關鍵標記';
 }
 
 /// The translations for Chinese, as used in China (`zh_CN`).
@@ -948,6 +1276,334 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get langSelectTitle => '选择语言';
+
+  @override
+  String get settingsTitle => '设置';
+
+  @override
+  String get settingsSectionAccount => '账号';
+
+  @override
+  String get settingsChangeName => '修改名称';
+
+  @override
+  String get settingsChangeNameHint => '请输入显示名称';
+
+  @override
+  String get settingsChangePassword => '修改密码';
+
+  @override
+  String get settingsCurrentPassword => '当前密码';
+
+  @override
+  String get settingsNewPassword => '新密码';
+
+  @override
+  String get settingsConfirmNewPassword => '确认新密码';
+
+  @override
+  String get settingsCurrentPasswordRequired => '请输入当前密码';
+
+  @override
+  String get settingsConfirmChange => '确认修改';
+
+  @override
+  String get settingsPasswordChanged => '密码已修改';
+
+  @override
+  String get settingsGoogleLogin => 'Google 登录';
+
+  @override
+  String get settingsGoogleLinked => '已绑定';
+
+  @override
+  String get settingsGoogleNotLinked => '未绑定，点击链接 Google 账号';
+
+  @override
+  String get settingsSectionAnalysis => '分析偏好';
+
+  @override
+  String get settingsAnalysisQuality => '完整分析输出质量';
+
+  @override
+  String get settingsQualityHint => '保存后作为默认值，下次分析自动应用';
+
+  @override
+  String get settingsApply => '应用';
+
+  @override
+  String settingsQualityUpdated(String quality) {
+    return '输出质量已更新为「$quality」';
+  }
+
+  @override
+  String get settingsSectionSubscription => '订阅';
+
+  @override
+  String get settingsViewSubscription => '查看订阅方案';
+
+  @override
+  String get settingsSectionGeneral => '通用';
+
+  @override
+  String get settingsLanguage => '语言 / Language';
+
+  @override
+  String get settingsCheckUpdate => '检查更新';
+
+  @override
+  String settingsAlreadyLatest(String version) {
+    return '已是最新版本 v$version';
+  }
+
+  @override
+  String get settingsUpdateCheckFailed => '检查更新失败，请稍后重试';
+
+  @override
+  String get settingsConfirmLogout => '确定退出？';
+
+  @override
+  String get settingsLogoutWarning => '退出后需重新登录才能使用云端功能。';
+
+  @override
+  String get settingsNameUpdated => '名称已更新';
+
+  @override
+  String get settingsPickFromGallery => '从相册选择';
+
+  @override
+  String get settingsRemoveAvatar => '移除头像';
+
+  @override
+  String get homeTodayOverview => '今日概况';
+
+  @override
+  String homeHi(String name) {
+    return '嗨，$name 👋';
+  }
+
+  @override
+  String get homeRounds => '练习轮次';
+
+  @override
+  String get homePractices => '练习次数';
+
+  @override
+  String get homeTodayGoodRate => '今日好球率';
+
+  @override
+  String homeGoodTimes(int count) {
+    return '好球 $count 次';
+  }
+
+  @override
+  String homeBadTimes(int count) {
+    return '坏球 $count 次';
+  }
+
+  @override
+  String get homeTodayPosture => '今日姿势分析';
+
+  @override
+  String get homeTopSpeed => '最佳速度';
+
+  @override
+  String get homeSweetSpot => '甜蜜点';
+
+  @override
+  String get homeCrispness => '清脆度';
+
+  @override
+  String get homeAnnouncements => '公告栏';
+
+  @override
+  String get homeRewardBalls => '奖励球数';
+
+  @override
+  String get weekdayMon => '周一';
+
+  @override
+  String get weekdayTue => '周二';
+
+  @override
+  String get weekdayWed => '周三';
+
+  @override
+  String get weekdayThu => '周四';
+
+  @override
+  String get weekdayFri => '周五';
+
+  @override
+  String get weekdaySat => '周六';
+
+  @override
+  String get weekdaySun => '周日';
+
+  @override
+  String get todayTitleToday => '今日概况';
+
+  @override
+  String get todayTitleHistory => '历史概况';
+
+  @override
+  String get todayLoadFailed => '加载失败，请下拉刷新';
+
+  @override
+  String get todaySweetSpotHit => '甜蜜点命中';
+
+  @override
+  String get todayCrispness => '声音清脆度';
+
+  @override
+  String get todayTopSpeed => '最佳速度';
+
+  @override
+  String get todayNoRecord => '今天还没有练习记录';
+
+  @override
+  String get todayNoRecordDate => '这天没有练习记录';
+
+  @override
+  String get todayGoRecord => '去录一次挥杆吧！';
+
+  @override
+  String get todayPostureToday => '今日姿势分析';
+
+  @override
+  String get todayPosture => '姿势分析';
+
+  @override
+  String get annBoardTitle => '公告栏';
+
+  @override
+  String annUnreadCount(int count) {
+    return '$count 条未读';
+  }
+
+  @override
+  String get annAllAnnouncements => '全部公告';
+
+  @override
+  String get annMarkAllRead => '全部已读';
+
+  @override
+  String get annRefresh => '刷新';
+
+  @override
+  String get annLoadFailed => '加载失败，请下拉重试';
+
+  @override
+  String annMinutesAgo(int count) {
+    return '$count 分钟前';
+  }
+
+  @override
+  String annHoursAgo(int count) {
+    return '$count 小时前';
+  }
+
+  @override
+  String annDaysAgo(int count) {
+    return '$count 天前';
+  }
+
+  @override
+  String get annDetailTitle => '公告详情';
+
+  @override
+  String annExpiresAt(String date) {
+    return '有效期至 $date';
+  }
+
+  @override
+  String get annEmpty => '暂无公告';
+
+  @override
+  String get annEmptySubtitle => '新公告将显示在这里';
+
+  @override
+  String get updateNotes => '更新内容';
+
+  @override
+  String get updateForcedWarning => '此版本已停止支持，请更新后继续使用';
+
+  @override
+  String get updateNow => '立即更新';
+
+  @override
+  String get updateRemindLater => '稍后提醒';
+
+  @override
+  String get updateDontRemind => '不再提醒';
+
+  @override
+  String get updateCannotOpenStore => '无法打开商店页面，请手动前往更新';
+
+  @override
+  String get updateRequiredTitle => '必要更新';
+
+  @override
+  String get updateRequiredSubtitle => '请更新后继续使用 TekSwing';
+
+  @override
+  String get updateFoundTitle => '发现新版本';
+
+  @override
+  String get updateFoundSubtitle => '建议更新以获得最佳体验';
+
+  @override
+  String get updateCurrentVersion => '当前版本';
+
+  @override
+  String get updateLatestVersion => '最新版本';
+
+  @override
+  String get upgradePageTitle => '升级您的方案';
+
+  @override
+  String get upgradePageSubtitle => '解锁更多挥杆分析功能，提升您的球技';
+
+  @override
+  String get upgradeFullComparison => '完整功能对比';
+
+  @override
+  String get upgradeFeatureColumn => '功能';
+
+  @override
+  String upgradeSubscribePlan(String plan) {
+    return '升级 $plan 方案';
+  }
+
+  @override
+  String get upgradeSelectPayment => '选择付款方式';
+
+  @override
+  String get upgradeApplePayFailed => 'Apple Pay 配置加载失败';
+
+  @override
+  String get upgradeGooglePayFailed => 'Google Pay 配置加载失败';
+
+  @override
+  String get upgradePaymentFailed => '付款验证失败，请稍后重试';
+
+  @override
+  String get upgradeSuccessMsg => '升级成功';
+
+  @override
+  String get upgradeAlreadyFree => '您目前使用的已是免费方案';
+
+  @override
+  String get learningTitle => '挥杆学习';
+
+  @override
+  String get learningMoreComing => '更多课程持续更新中';
+
+  @override
+  String get learningVideoComingSoon => '示范视频待补充，先提供重点与标记供对照学习。';
+
+  @override
+  String get learningKeyMarkers => '关键标记';
 }
 
 /// The translations for Chinese, as used in Taiwan (`zh_TW`).
@@ -1421,4 +2077,332 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get langSelectTitle => '選擇語言';
+
+  @override
+  String get settingsTitle => '設定';
+
+  @override
+  String get settingsSectionAccount => '帳號';
+
+  @override
+  String get settingsChangeName => '修改名稱';
+
+  @override
+  String get settingsChangeNameHint => '請輸入顯示名稱';
+
+  @override
+  String get settingsChangePassword => '修改密碼';
+
+  @override
+  String get settingsCurrentPassword => '目前密碼';
+
+  @override
+  String get settingsNewPassword => '新密碼';
+
+  @override
+  String get settingsConfirmNewPassword => '確認新密碼';
+
+  @override
+  String get settingsCurrentPasswordRequired => '請輸入目前密碼';
+
+  @override
+  String get settingsConfirmChange => '確認修改';
+
+  @override
+  String get settingsPasswordChanged => '密碼已修改';
+
+  @override
+  String get settingsGoogleLogin => 'Google 登入';
+
+  @override
+  String get settingsGoogleLinked => '已綁定';
+
+  @override
+  String get settingsGoogleNotLinked => '尚未綁定，點擊連結 Google 帳號';
+
+  @override
+  String get settingsSectionAnalysis => '分析偏好';
+
+  @override
+  String get settingsAnalysisQuality => '完整分析輸出品質';
+
+  @override
+  String get settingsQualityHint => '選擇後將作為預設值，下次分析自動套用';
+
+  @override
+  String get settingsApply => '套用';
+
+  @override
+  String settingsQualityUpdated(String quality) {
+    return '輸出品質已更新為「$quality」';
+  }
+
+  @override
+  String get settingsSectionSubscription => '訂閱';
+
+  @override
+  String get settingsViewSubscription => '查看訂閱方案';
+
+  @override
+  String get settingsSectionGeneral => '一般';
+
+  @override
+  String get settingsLanguage => '語言 / Language';
+
+  @override
+  String get settingsCheckUpdate => '檢查更新';
+
+  @override
+  String settingsAlreadyLatest(String version) {
+    return '已是最新版本 v$version';
+  }
+
+  @override
+  String get settingsUpdateCheckFailed => '檢查更新失敗，請稍後再試';
+
+  @override
+  String get settingsConfirmLogout => '確定登出？';
+
+  @override
+  String get settingsLogoutWarning => '登出後需重新登入才能使用雲端功能。';
+
+  @override
+  String get settingsNameUpdated => '名稱已更新';
+
+  @override
+  String get settingsPickFromGallery => '從相簿選擇';
+
+  @override
+  String get settingsRemoveAvatar => '移除大頭貼';
+
+  @override
+  String get homeTodayOverview => '今日概況';
+
+  @override
+  String homeHi(String name) {
+    return '嗨，$name 👋';
+  }
+
+  @override
+  String get homeRounds => '練習輪次';
+
+  @override
+  String get homePractices => '練習次數';
+
+  @override
+  String get homeTodayGoodRate => '今日好球率';
+
+  @override
+  String homeGoodTimes(int count) {
+    return '好球 $count 次';
+  }
+
+  @override
+  String homeBadTimes(int count) {
+    return '壞球 $count 次';
+  }
+
+  @override
+  String get homeTodayPosture => '今日姿勢分析';
+
+  @override
+  String get homeTopSpeed => '最佳速度';
+
+  @override
+  String get homeSweetSpot => '甜蜜點';
+
+  @override
+  String get homeCrispness => '清脆度';
+
+  @override
+  String get homeAnnouncements => '公告欄';
+
+  @override
+  String get homeRewardBalls => '獎勵球數';
+
+  @override
+  String get weekdayMon => '週一';
+
+  @override
+  String get weekdayTue => '週二';
+
+  @override
+  String get weekdayWed => '週三';
+
+  @override
+  String get weekdayThu => '週四';
+
+  @override
+  String get weekdayFri => '週五';
+
+  @override
+  String get weekdaySat => '週六';
+
+  @override
+  String get weekdaySun => '週日';
+
+  @override
+  String get todayTitleToday => '今日概況';
+
+  @override
+  String get todayTitleHistory => '歷史概況';
+
+  @override
+  String get todayLoadFailed => '載入失敗，請下拉重新整理';
+
+  @override
+  String get todaySweetSpotHit => '甜蜜點命中';
+
+  @override
+  String get todayCrispness => '聲音清脆度';
+
+  @override
+  String get todayTopSpeed => '最佳速度';
+
+  @override
+  String get todayNoRecord => '今天還沒有練習記錄';
+
+  @override
+  String get todayNoRecordDate => '這天沒有練習記錄';
+
+  @override
+  String get todayGoRecord => '去錄一支揮桿吧！';
+
+  @override
+  String get todayPostureToday => '今日姿勢分析';
+
+  @override
+  String get todayPosture => '姿勢分析';
+
+  @override
+  String get annBoardTitle => '公告欄';
+
+  @override
+  String annUnreadCount(int count) {
+    return '$count 則未讀';
+  }
+
+  @override
+  String get annAllAnnouncements => '所有公告';
+
+  @override
+  String get annMarkAllRead => '全部已讀';
+
+  @override
+  String get annRefresh => '重新整理';
+
+  @override
+  String get annLoadFailed => '載入失敗，請下拉重試';
+
+  @override
+  String annMinutesAgo(int count) {
+    return '$count 分鐘前';
+  }
+
+  @override
+  String annHoursAgo(int count) {
+    return '$count 小時前';
+  }
+
+  @override
+  String annDaysAgo(int count) {
+    return '$count 天前';
+  }
+
+  @override
+  String get annDetailTitle => '公告詳情';
+
+  @override
+  String annExpiresAt(String date) {
+    return '有效期限至 $date';
+  }
+
+  @override
+  String get annEmpty => '目前沒有公告';
+
+  @override
+  String get annEmptySubtitle => '新公告將會顯示在這裡';
+
+  @override
+  String get updateNotes => '更新內容';
+
+  @override
+  String get updateForcedWarning => '此版本已停止支援，請更新後繼續使用';
+
+  @override
+  String get updateNow => '立即更新';
+
+  @override
+  String get updateRemindLater => '稍後提醒';
+
+  @override
+  String get updateDontRemind => '不再提醒';
+
+  @override
+  String get updateCannotOpenStore => '無法開啟商店頁面，請手動前往更新';
+
+  @override
+  String get updateRequiredTitle => '必要更新';
+
+  @override
+  String get updateRequiredSubtitle => '請更新後繼續使用 TekSwing';
+
+  @override
+  String get updateFoundTitle => '發現新版本';
+
+  @override
+  String get updateFoundSubtitle => '建議更新以獲得最佳體驗';
+
+  @override
+  String get updateCurrentVersion => '目前版本';
+
+  @override
+  String get updateLatestVersion => '最新版本';
+
+  @override
+  String get upgradePageTitle => '升級您的方案';
+
+  @override
+  String get upgradePageSubtitle => '解鎖更多揮桿分析功能，精進您的球技';
+
+  @override
+  String get upgradeFullComparison => '完整功能比較';
+
+  @override
+  String get upgradeFeatureColumn => '功能';
+
+  @override
+  String upgradeSubscribePlan(String plan) {
+    return '升級 $plan 方案';
+  }
+
+  @override
+  String get upgradeSelectPayment => '選擇付款方式';
+
+  @override
+  String get upgradeApplePayFailed => 'Apple Pay 設定載入失敗';
+
+  @override
+  String get upgradeGooglePayFailed => 'Google Pay 設定載入失敗';
+
+  @override
+  String get upgradePaymentFailed => '付款驗證失敗，請稍後重試';
+
+  @override
+  String get upgradeSuccessMsg => '升級成功';
+
+  @override
+  String get upgradeAlreadyFree => '您目前使用的已是免費方案';
+
+  @override
+  String get learningTitle => '揮桿學習';
+
+  @override
+  String get learningMoreComing => '更多課程陸續更新中';
+
+  @override
+  String get learningVideoComingSoon => '示範影片待補充，先提供重點與標記供對照學習。';
+
+  @override
+  String get learningKeyMarkers => '關鍵標記';
 }

@@ -1,9 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:share_plus/share_plus.dart';
-import '../services/video_overlay_processor.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -28,7 +26,6 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   VideoPlayerController? _ctrl;
   bool _isProcessingShare = false;
   final List<String> _generatedTempFiles = [];
-  static const MethodChannel _shareChannel = MethodChannel('share_intent_channel');
 
   @override
   void initState() {

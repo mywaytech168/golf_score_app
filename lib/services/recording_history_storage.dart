@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -136,7 +137,7 @@ class RecordingHistoryStorage {
       // 重命名 JSON 為備份，不刪除避免意外
       await jsonFile.rename('${jsonFile.path}.bak');
     } catch (e) {
-      // 遷移失敗靜默處理，不影響 App 正常啟動
+      debugPrint('⚠️ [RecordingHistoryStorage] JSON→SQLite 遷移失敗: $e');
     }
   }
 
@@ -149,7 +150,8 @@ class RecordingHistoryStorage {
       final db   = await _openDb();
       final rows = await db.query(_table, orderBy: 'recordedAt DESC');
       return rows.map(_fromRow).toList();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('❌ [RecordingHistoryStorage] loadHistory 失敗: $e');
       return [];
     }
   }
@@ -182,7 +184,9 @@ class RecordingHistoryStorage {
         }
         await batch.commit(noResult: true);
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('❌ [RecordingHistoryStorage] saveHistory 失敗: $e');
+    }
   }
 
   /// 精確插入或更新單筆記錄（原子操作，無競態風險）
@@ -194,7 +198,9 @@ class RecordingHistoryStorage {
         _toRow(entry),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('❌ [RecordingHistoryStorage] upsertEntry 失敗: $e');
+    }
   }
 
   /// 精確刪除單筆記錄（原子操作）
@@ -202,7 +208,9 @@ class RecordingHistoryStorage {
     try {
       final db = await _openDb();
       await db.delete(_table, where: 'filePath = ?', whereArgs: [filePath]);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('❌ [RecordingHistoryStorage] deleteEntry 失敗: $e');
+    }
   }
 
   // ── 序列化工具 ────────────────────────────────────────────────

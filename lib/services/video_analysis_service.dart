@@ -129,7 +129,7 @@ class VideoAnalysisService {
     onProgress?.call(0.75, '骨架分析完成');
   }
 
-  // ── 以下保留供相容，已不被 analyze() 呼叫 ──────────────
+  // ignore: unused_element — 保留供日後 fallback 使用
   Future<void> _analyzePose({
     required String videoPath,
     required String csvPath,

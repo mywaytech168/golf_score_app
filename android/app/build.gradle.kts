@@ -90,4 +90,7 @@ dependencies {
     // 使用 beta1 會導致 mediapipe-internal 版本衝突 → JNI NoSuchFieldError
     implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
     implementation("com.google.mlkit:vision-common:17.3.0")
+
+    // ✅ TFLite Android API（YOLOv8 球偵測，Kotlin 側推論）
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 }

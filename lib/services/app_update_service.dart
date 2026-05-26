@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'video_server_client.dart';
 
@@ -47,6 +48,20 @@ class AppUpdateResult {
 
 class AppUpdateService {
   AppUpdateService._();
+
+  static const _snoozeKey = 'update_snoozed_version';
+
+  /// 取得使用者選擇「不再提醒」的版本號，若無則回傳 null。
+  static Future<String?> snoozedVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_snoozeKey);
+  }
+
+  /// 儲存使用者選擇「不再提醒」的版本，下次遇到相同版本不再彈出對話框。
+  static Future<void> snoozeVersion(String version) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_snoozeKey, version);
+  }
 
   /// 向後端查詢最新版本，回傳更新結果。
   ///

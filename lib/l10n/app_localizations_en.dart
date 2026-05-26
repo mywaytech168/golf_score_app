@@ -483,4 +483,343 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get langSelectTitle => 'Select Language';
+
+  @override
+  String get settingsTitle => 'Settings';
+
+  @override
+  String get settingsSectionAccount => 'Account';
+
+  @override
+  String get settingsChangeName => 'Change Name';
+
+  @override
+  String get settingsChangeNameHint => 'Enter display name';
+
+  @override
+  String get settingsChangePassword => 'Change Password';
+
+  @override
+  String get settingsCurrentPassword => 'Current Password';
+
+  @override
+  String get settingsNewPassword => 'New Password';
+
+  @override
+  String get settingsConfirmNewPassword => 'Confirm New Password';
+
+  @override
+  String get settingsCurrentPasswordRequired => 'Please enter current password';
+
+  @override
+  String get settingsConfirmChange => 'Confirm Change';
+
+  @override
+  String get settingsPasswordChanged => 'Password changed';
+
+  @override
+  String get settingsGoogleLogin => 'Google Sign-In';
+
+  @override
+  String get settingsGoogleLinked => 'Linked';
+
+  @override
+  String get settingsGoogleNotLinked =>
+      'Not linked. Tap to link Google account';
+
+  @override
+  String get settingsSectionAnalysis => 'Analysis Preferences';
+
+  @override
+  String get settingsAnalysisQuality => 'Analysis Output Quality';
+
+  @override
+  String get settingsQualityHint => 'Saved as default for future analyses';
+
+  @override
+  String get settingsApply => 'Apply';
+
+  @override
+  String settingsQualityUpdated(String quality) {
+    return 'Output quality updated to \"$quality\"';
+  }
+
+  @override
+  String get settingsSectionSubscription => 'Subscription';
+
+  @override
+  String get settingsViewSubscription => 'View Subscription Plans';
+
+  @override
+  String get settingsSectionGeneral => 'General';
+
+  @override
+  String get settingsLanguage => 'Language';
+
+  @override
+  String get settingsCheckUpdate => 'Check for Updates';
+
+  @override
+  String settingsAlreadyLatest(String version) {
+    return 'Already on latest version v$version';
+  }
+
+  @override
+  String get settingsUpdateCheckFailed =>
+      'Update check failed, please try again later';
+
+  @override
+  String get settingsConfirmLogout => 'Confirm Logout?';
+
+  @override
+  String get settingsLogoutWarning =>
+      'You\'ll need to sign in again to use cloud features.';
+
+  @override
+  String get settingsNameUpdated => 'Name updated';
+
+  @override
+  String get settingsPickFromGallery => 'Choose from Gallery';
+
+  @override
+  String get settingsRemoveAvatar => 'Remove Avatar';
+
+  @override
+  String get homeTodayOverview => 'Today\'s Overview';
+
+  @override
+  String homeHi(String name) {
+    return 'Hi, $name 👋';
+  }
+
+  @override
+  String get homeRounds => 'Rounds';
+
+  @override
+  String get homePractices => 'Practice';
+
+  @override
+  String get homeTodayGoodRate => 'Today\'s Good Rate';
+
+  @override
+  String homeGoodTimes(int count) {
+    return 'Good $count';
+  }
+
+  @override
+  String homeBadTimes(int count) {
+    return 'Bad $count';
+  }
+
+  @override
+  String get homeTodayPosture => 'Today\'s Posture';
+
+  @override
+  String get homeTopSpeed => 'Peak Speed';
+
+  @override
+  String get homeSweetSpot => 'Sweet Spot';
+
+  @override
+  String get homeCrispness => 'Crispness';
+
+  @override
+  String get homeAnnouncements => 'Announcements';
+
+  @override
+  String get homeRewardBalls => 'Reward Balls';
+
+  @override
+  String get weekdayMon => 'Mon';
+
+  @override
+  String get weekdayTue => 'Tue';
+
+  @override
+  String get weekdayWed => 'Wed';
+
+  @override
+  String get weekdayThu => 'Thu';
+
+  @override
+  String get weekdayFri => 'Fri';
+
+  @override
+  String get weekdaySat => 'Sat';
+
+  @override
+  String get weekdaySun => 'Sun';
+
+  @override
+  String get todayTitleToday => 'Today\'s Summary';
+
+  @override
+  String get todayTitleHistory => 'History Summary';
+
+  @override
+  String get todayLoadFailed => 'Failed to load, pull down to refresh';
+
+  @override
+  String get todaySweetSpotHit => 'Sweet Spot Hit';
+
+  @override
+  String get todayCrispness => 'Sound Crispness';
+
+  @override
+  String get todayTopSpeed => 'Peak Speed';
+
+  @override
+  String get todayNoRecord => 'No practice records today';
+
+  @override
+  String get todayNoRecordDate => 'No practice records on this day';
+
+  @override
+  String get todayGoRecord => 'Go record a swing!';
+
+  @override
+  String get todayPostureToday => 'Today\'s Posture Analysis';
+
+  @override
+  String get todayPosture => 'Posture Analysis';
+
+  @override
+  String get annBoardTitle => 'Announcements';
+
+  @override
+  String annUnreadCount(int count) {
+    return '$count unread';
+  }
+
+  @override
+  String get annAllAnnouncements => 'All Announcements';
+
+  @override
+  String get annMarkAllRead => 'Mark All Read';
+
+  @override
+  String get annRefresh => 'Refresh';
+
+  @override
+  String get annLoadFailed => 'Failed to load, pull down to retry';
+
+  @override
+  String annMinutesAgo(int count) {
+    return '${count}m ago';
+  }
+
+  @override
+  String annHoursAgo(int count) {
+    return '${count}h ago';
+  }
+
+  @override
+  String annDaysAgo(int count) {
+    return '${count}d ago';
+  }
+
+  @override
+  String get annDetailTitle => 'Announcement Detail';
+
+  @override
+  String annExpiresAt(String date) {
+    return 'Valid until $date';
+  }
+
+  @override
+  String get annEmpty => 'No announcements';
+
+  @override
+  String get annEmptySubtitle => 'New announcements will appear here';
+
+  @override
+  String get updateNotes => 'What\'s New';
+
+  @override
+  String get updateForcedWarning =>
+      'This version is no longer supported. Please update to continue.';
+
+  @override
+  String get updateNow => 'Update Now';
+
+  @override
+  String get updateRemindLater => 'Remind Me Later';
+
+  @override
+  String get updateDontRemind => 'Don\'t Remind';
+
+  @override
+  String get updateCannotOpenStore =>
+      'Cannot open store. Please update manually.';
+
+  @override
+  String get updateRequiredTitle => 'Required Update';
+
+  @override
+  String get updateRequiredSubtitle =>
+      'Please update to continue using TekSwing';
+
+  @override
+  String get updateFoundTitle => 'New Version Available';
+
+  @override
+  String get updateFoundSubtitle =>
+      'Update recommended for the best experience';
+
+  @override
+  String get updateCurrentVersion => 'Current Version';
+
+  @override
+  String get updateLatestVersion => 'Latest Version';
+
+  @override
+  String get upgradePageTitle => 'Upgrade Your Plan';
+
+  @override
+  String get upgradePageSubtitle =>
+      'Unlock more swing analysis features and sharpen your game';
+
+  @override
+  String get upgradeFullComparison => 'Full Feature Comparison';
+
+  @override
+  String get upgradeFeatureColumn => 'Feature';
+
+  @override
+  String upgradeSubscribePlan(String plan) {
+    return 'Upgrade to $plan';
+  }
+
+  @override
+  String get upgradeSelectPayment => 'Select Payment Method';
+
+  @override
+  String get upgradeApplePayFailed => 'Apple Pay configuration failed to load';
+
+  @override
+  String get upgradeGooglePayFailed =>
+      'Google Pay configuration failed to load';
+
+  @override
+  String get upgradePaymentFailed =>
+      'Payment verification failed, please try again';
+
+  @override
+  String get upgradeSuccessMsg => 'Upgrade successful';
+
+  @override
+  String get upgradeAlreadyFree => 'You are already on the free plan';
+
+  @override
+  String get learningTitle => 'Swing Learning';
+
+  @override
+  String get learningMoreComing => 'More courses coming soon';
+
+  @override
+  String get learningVideoComingSoon =>
+      'Demo video coming soon. Key points and markers available for reference.';
+
+  @override
+  String get learningKeyMarkers => 'Key Markers';
 }

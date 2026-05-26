@@ -92,6 +92,37 @@ class BallTrajectoryService {
   }
 
   // ──────────────────────────────────────────────────────────────
+  // Step 1c：TFLite 模式 → Kotlin YOLOv8n 偵測
+  // ──────────────────────────────────────────────────────────────
+
+  /// TFLite 模式：呼叫 Kotlin 端 YOLOv8n int8 模型直接偵測每幀中的高爾夫球。
+  ///
+  /// 與原版 extractBlobs 不同，此方法不做幀差——每幀獨立推論，
+  /// 適合場景變化大或背景複雜的情況。
+  ///
+  /// 當 Kotlin 回傳 error（模型未載入或推論失敗），自動 fallback 至原版 extractBlobs。
+  /// 失敗回傳 null。
+  static Future<FrameExtractionResult?> extractBlobsTflite({
+    required String inputPath,
+  }) async {
+    debugPrint('[BallTraj] TFLite 模式：呼叫 Kotlin YOLOv8 偵測器');
+    try {
+      final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'extractBlobsYolo',
+        {'inputPath': inputPath},
+      );
+      if (raw == null) return null;
+      final result = FrameExtractionResult._fromMap(raw);
+      final totalDets = result.frames.fold<int>(0, (s, f) => s + f.blobs.length);
+      debugPrint('[BallTraj] YOLOv8 完成：${result.frames.length} 幀，$totalDets 偵測');
+      return result;
+    } on PlatformException catch (e) {
+      debugPrint('[BallTraj] YOLOv8 失敗（${e.code}）：${e.message}，fallback 至原版');
+      return extractBlobs(inputPath: inputPath);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────
   // Step 2：Kotlin I/O 層 → 疊加軌跡
   // ──────────────────────────────────────────────────────────────
 

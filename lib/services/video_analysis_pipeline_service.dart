@@ -53,11 +53,6 @@ class VideoAnalysisPipelineService {
         onProgress: (progress, label) => onProgress?.call(label),
       );
 
-      if (analysis == null) {
-        debugPrint('[VideoAnalysisPipeline] ❌ 基礎分析失敗');
-        return null;
-      }
-
       final hasCSV = await File(csvPath).exists();
       final hasAudio = analysis.audioPath.isNotEmpty && await File(analysis.audioPath).exists();
 

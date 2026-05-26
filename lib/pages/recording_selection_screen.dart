@@ -6,7 +6,6 @@ import 'package:video_player/video_player.dart';
 
 import '../recording/record_screen.dart';
 import 'external_video_importer_local.dart';
-import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
 import 'share_import_page.dart';
 
@@ -219,7 +218,6 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
         return;
       }
 
-      final updated = <RecordingHistoryEntry>[entry, ...existing];
       await RecordingHistoryStorage.instance.upsertEntry(entry);
 
       if (!mounted) return;

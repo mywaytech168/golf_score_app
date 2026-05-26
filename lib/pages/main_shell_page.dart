@@ -44,6 +44,14 @@ class _MainShellPageState extends State<MainShellPage> {
     if (!mounted) return;
     final result = await AppUpdateService.check();
     if (!mounted || !result.needsUpdate) return;
+
+    // 非強制更新：若使用者已對此版本選擇「不再提醒」則略過
+    if (!result.isForced) {
+      final snoozed = await AppUpdateService.snoozedVersion();
+      if (snoozed == result.latestVersion) return;
+    }
+
+    if (!mounted) return;
     await showUpdateDialog(context, result);
   }
 

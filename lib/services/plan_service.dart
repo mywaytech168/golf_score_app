@@ -174,7 +174,9 @@ class PlanService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKey, plan.key);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('⚠️ [PlanService] 快取方案寫入失敗: $e');
+    }
   }
 
   static Future<UserPlan> _readCachedPlan() async {

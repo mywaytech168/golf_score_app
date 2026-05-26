@@ -4,6 +4,13 @@ class StatisticsResponse {
   final String period;
   final String? date;
   final int totalCount;
+
+  /// 練習輪次：VideoType.original（長影片）的筆數
+  final int roundCount;
+
+  /// 練習次數：VideoType.localClip（短影片／切片）的筆數
+  final int practiceCount;
+
   final int goodShot;
   final int badShot;
   final double sweetSpotPercentage;
@@ -19,6 +26,8 @@ class StatisticsResponse {
     required this.period,
     this.date,
     required this.totalCount,
+    this.roundCount = 0,
+    this.practiceCount = 0,
     required this.goodShot,
     required this.badShot,
     required this.sweetSpotPercentage,
@@ -37,7 +46,9 @@ class StatisticsResponse {
       success: json['success'] as bool? ?? false,
       period: json['period'] as String? ?? 'all',
       date: json['date'] as String?,
-      totalCount: json['totalCount'] as int? ?? 0,
+      totalCount:    json['totalCount']    as int? ?? 0,
+      roundCount:    json['roundCount']    as int? ?? 0,
+      practiceCount: json['practiceCount'] as int? ?? 0,
       goodShot: json['goodShot'] as int? ?? 0,
       badShot: json['badShot'] as int? ?? 0,
       sweetSpotPercentage: (json['sweetSpotPercentage'] as num?)?.toDouble() ?? 0.0,
@@ -53,7 +64,9 @@ class StatisticsResponse {
       'success': success,
       'period': period,
       'date': date,
-      'totalCount': totalCount,
+      'totalCount':    totalCount,
+      'roundCount':    roundCount,
+      'practiceCount': practiceCount,
       'goodShot': goodShot,
       'badShot': badShot,
       'sweetSpotPercentage': sweetSpotPercentage,

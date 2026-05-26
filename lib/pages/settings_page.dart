@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -13,10 +13,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/export_quality.dart';
 import '../providers/user_provider.dart';
+import '../services/app_update_service.dart';
 import '../services/auth_token_storage.dart';
+import '../services/ball_detection_prefs.dart';
 import '../services/video_server_client.dart';
+import '../widgets/language_selector.dart';
+import '../widgets/update_dialog.dart';
 import 'login_page.dart';
 import 'upgrade_page.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 // ── 頭像壓縮（isolate 中執行）────────────────────────────────────────────
 Uint8List _compressAvatar(Uint8List bytes) {
@@ -43,8 +48,8 @@ class _SettingsPageState extends State<SettingsPage> {
   String _displayName = '';
   String _email = '';
   bool _googleLinked = false;
-  ExportQuality _quality = ExportQuality.standard;
-  bool _isLoadingProfile = true;
+  ExportQuality _quality = ExportQuality.standard;  BallDetectionMode _ballMode = BallDetectionMode.original;  bool _isLoadingProfile = true;
+  bool _isCheckingUpdate = false;
 
   @override
   void initState() {
@@ -61,7 +66,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
     // 2. 上次選的輸出品質
     _quality = await _SkipHelperQuality.savedQuality();
-
+    // 3a. 球偵測模式
+    final ballMode = await BallDetectionPrefs.getMode();
+    if (mounted) setState(() => _ballMode = ballMode);
     // 3. 伺服器 /me（email + googleLinked）
     try {
       final me = await VideoServerClient.instance.getMe();
@@ -115,26 +122,27 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ── 修改名稱 ──────────────────────────────────────────────────
   Future<void> _showRenameDialog() async {
+    final l = AppLocalizations.of(context);
     final controller = TextEditingController(text: _displayName);
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('修改名稱', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        title: Text(l.settingsChangeName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLength: 30,
-          decoration: const InputDecoration(
-            hintText: '請輸入顯示名稱',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            hintText: l.settingsChangeNameHint,
+            border: const OutlineInputBorder(),
             counterText: '',
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, null),
-            child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+            child: Text(l.commonCancel, style: const TextStyle(color: Color(0xFF6B7280))),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -142,7 +150,7 @@ class _SettingsPageState extends State<SettingsPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('儲存'),
+            child: Text(l.commonSave),
           ),
         ],
       ),
@@ -158,11 +166,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
     // 伺服器同步（背景，失敗不影響）
     VideoServerClient.instance.updateProfileName(result).ignore();
-    if (mounted) _showSnack('名稱已更新');
+    if (mounted) _showSnack(AppLocalizations.of(context).settingsNameUpdated);
   }
 
   // ── 修改密碼 ──────────────────────────────────────────────────
   Future<void> _showChangePasswordDialog() async {
+    final l = AppLocalizations.of(context);
     final formKey = GlobalKey<FormState>();
     final curCtrl  = TextEditingController();
     final newCtrl  = TextEditingController();
@@ -181,28 +190,28 @@ class _SettingsPageState extends State<SettingsPage> {
           titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
           contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
           actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-          title: const Row(children: [
-            Icon(Icons.lock_outline_rounded, color: Color(0xFF1E8E5A), size: 20),
-            SizedBox(width: 8),
-            Text('修改密碼', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          title: Row(children: [
+            const Icon(Icons.lock_outline_rounded, color: Color(0xFF1E8E5A), size: 20),
+            const SizedBox(width: 8),
+            Text(l.settingsChangePassword, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           ]),
           content: Form(
             key: formKey,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              _pwField('目前密碼', curCtrl, obscureCur, () => setS(() => obscureCur = !obscureCur),
-                  validator: (v) => (v == null || v.isEmpty) ? '請輸入目前密碼' : null),
+              _pwField(l.settingsCurrentPassword, curCtrl, obscureCur, () => setS(() => obscureCur = !obscureCur),
+                  validator: (v) => (v == null || v.isEmpty) ? l.settingsCurrentPasswordRequired : null),
               const SizedBox(height: 10),
-              _pwField('新密碼', newCtrl, obscureNew, () => setS(() => obscureNew = !obscureNew),
-                  validator: (v) => (v == null || v.length < 6) ? '至少 6 個字元' : null),
+              _pwField(l.settingsNewPassword, newCtrl, obscureNew, () => setS(() => obscureNew = !obscureNew),
+                  validator: (v) => (v == null || v.length < 6) ? l.validationPasswordTooShort : null),
               const SizedBox(height: 10),
-              _pwField('確認新密碼', confCtrl, obscureConf, () => setS(() => obscureConf = !obscureConf),
-                  validator: (v) => v != newCtrl.text ? '兩次輸入不一致' : null),
+              _pwField(l.settingsConfirmNewPassword, confCtrl, obscureConf, () => setS(() => obscureConf = !obscureConf),
+                  validator: (v) => v != newCtrl.text ? l.validationPasswordMismatch : null),
             ]),
           ),
           actions: [
             TextButton(
               onPressed: isLoading ? null : () => Navigator.pop(ctx),
-              child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+              child: Text(l.commonCancel, style: const TextStyle(color: Color(0xFF6B7280))),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -220,17 +229,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (!ctx.mounted) return;
                 if (res['success'] == false) {
                   ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                    content: Text(res['message']?.toString() ?? '修改失敗'),
+                    content: Text(res['message']?.toString() ?? l.settingsConfirmChange),
                     backgroundColor: Colors.red,
                   ));
                 } else {
                   Navigator.pop(ctx);
-                  if (mounted) _showSnack('密碼已修改');
+                  if (mounted) _showSnack(l.settingsPasswordChanged);
                 }
               },
               child: isLoading
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('確認修改'),
+                  : Text(l.settingsConfirmChange),
             ),
           ],
         );
@@ -268,7 +277,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final auth     = await account.authentication;
       final idToken  = auth.idToken;
       if (idToken == null) {
-        if (mounted) _showSnack('無法取得 Google token', isError: true);
+        if (mounted) _showSnack(AppLocalizations.of(context).settingsGoogleNotLinked, isError: true);
         return;
       }
 
@@ -276,18 +285,19 @@ class _SettingsPageState extends State<SettingsPage> {
       final res = await VideoServerClient.instance.linkGoogleAccount(idToken);
       if (!mounted) return;
       if (res['success'] == false) {
-        _showSnack(res['message']?.toString() ?? '綁定失敗', isError: true);
+        _showSnack(res['message']?.toString() ?? AppLocalizations.of(context).settingsGoogleLinked, isError: true);
       } else {
         setState(() => _googleLinked = true);
-        _showSnack('已成功綁定 Google 帳號');
+        _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
       }
     } catch (e) {
-      if (mounted) _showSnack('Google 登入失敗: $e', isError: true);
+      if (mounted) _showSnack('Google: $e', isError: true);
     }
   }
 
   // ── 完整分析畫質 ──────────────────────────────────────────────
   Future<void> _showQualityPicker() async {
+    final l = AppLocalizations.of(context);
     ExportQuality selected = _quality;
     final result = await showModalBottomSheet<ExportQuality>(
       context: context,
@@ -302,16 +312,16 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(color: const Color(0xFFDDE1E7), borderRadius: BorderRadius.circular(2))),
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text('完整分析輸出品質',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E))),
+              child: Text(l.settingsAnalysisQuality,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E))),
             ),
             const SizedBox(height: 4),
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text('選擇後將作為預設值，下次分析自動套用',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+              child: Text(l.settingsQualityHint,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
             ),
             const SizedBox(height: 14),
             ...ExportQuality.values.map((q) {
@@ -363,7 +373,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onPressed: () => Navigator.pop(ctx, selected),
-                child: const Text('套用'),
+                child: Text(l.settingsApply),
               ),
             ),
           ]),
@@ -374,21 +384,132 @@ class _SettingsPageState extends State<SettingsPage> {
     if (result == null || result == _quality) return;
     setState(() => _quality = result);
     await _SkipHelperQuality.saveQuality(result);
-    if (mounted) _showSnack('輸出品質已更新為「${result.label}」');
+    if (mounted) _showSnack(AppLocalizations.of(context).settingsQualityUpdated(result.label));
+  }
+
+  // ── 球偵測模式選擇器 ──────────────────────────────────────────
+  Future<void> _showBallModePicker() async {
+    BallDetectionMode selected = _ballMode;
+    final result = await showModalBottomSheet<BallDetectionMode>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(color: const Color(0xFFDDE1E7), borderRadius: BorderRadius.circular(2)),
+            ),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '球偵測演算法',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E)),
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'TFLite 模式使用深度學習分類器過濾候選球體，可降低假陽性',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...BallDetectionMode.values.map((mode) {
+              final isSelected = selected == mode;
+              final accentColor = mode == BallDetectionMode.tflite
+                  ? const Color(0xFF7C3AED)
+                  : const Color(0xFF1E8E5A);
+              return GestureDetector(
+                onTap: () => setS(() => selected = mode),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 130),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? accentColor.withValues(alpha: 0.07) : const Color(0xFFF4F6F9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected ? accentColor : const Color(0xFFDDE1E7),
+                      width: isSelected ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(children: [
+                    Icon(
+                      isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                      color: isSelected ? accentColor : const Color(0xFFB0B8C1),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(mode.label, style: TextStyle(
+                        fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                        color: isSelected ? accentColor : const Color(0xFF1A1A2E),
+                      )),
+                      const SizedBox(height: 2),
+                      Text(mode.description, style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                    ])),
+                    if (mode == BallDetectionMode.tflite)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF7C3AED).withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'AI',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF7C3AED)),
+                        ),
+                      ),
+                  ]),
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E8E5A),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () => Navigator.pop(ctx, selected),
+                child: const Text('套用'),
+              ),
+            ),
+          ]),
+        );
+      }),
+    );
+
+    if (result == null || result == _ballMode) return;
+    setState(() => _ballMode = result);
+    await BallDetectionPrefs.setMode(result);
+    if (mounted) {
+      _showSnack('球偵測模式已更新：${result.label}');
+    }
   }
 
   // ── 登出 ─────────────────────────────────────────────────────
   Future<void> _logout() async {
+    final l = AppLocalizations.of(context);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('確定登出？', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-        content: const Text('登出後需重新登入才能使用雲端功能。'),
+        title: Text(l.settingsConfirmLogout, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: Text(l.settingsLogoutWarning),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+            child: Text(l.commonCancel, style: const TextStyle(color: Color(0xFF6B7280))),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -396,7 +517,7 @@ class _SettingsPageState extends State<SettingsPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('登出'),
+            child: Text(l.homeLogout),
           ),
         ],
       ),
@@ -408,6 +529,26 @@ class _SettingsPageState extends State<SettingsPage> {
       MaterialPageRoute(builder: (_) => const LoginPage()),
       (_) => false,
     );
+  }
+
+  // ── 檢查更新 ──────────────────────────────────────────────────
+  Future<void> _checkUpdate() async {
+    if (_isCheckingUpdate) return;
+    setState(() => _isCheckingUpdate = true);
+    try {
+      final result = await AppUpdateService.check();
+      if (!mounted) return;
+      final l = AppLocalizations.of(context);
+      if (!result.needsUpdate) {
+        _showSnack(l.settingsAlreadyLatest(result.currentVersion));
+      } else {
+        await showUpdateDialog(context, result);
+      }
+    } catch (e) {
+      if (mounted) _showSnack(AppLocalizations.of(context).settingsUpdateCheckFailed, isError: true);
+    } finally {
+      if (mounted) setState(() => _isCheckingUpdate = false);
+    }
   }
 
   void _showSnack(String msg, {bool isError = false}) {
@@ -425,13 +566,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final user = context.watch<UserProvider>();
     final avatarPath = user.avatarPath;
 
+    final l = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E8E5A),
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('設定', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+        title: Text(l.settingsTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         centerTitle: true,
       ),
       body: ListView(
@@ -448,25 +590,25 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 16),
           // ── 帳號設定 ────────────────────────────────────────
-          _SectionHeader('帳號'),
+          _SectionHeader(l.settingsSectionAccount),
           _SettingsTile(
             icon: Icons.badge_outlined,
             iconColor: const Color(0xFF1565C0),
-            title: '修改名稱',
+            title: l.settingsChangeName,
             subtitle: user.displayName,
             onTap: _showRenameDialog,
           ),
           _SettingsTile(
             icon: Icons.lock_outline_rounded,
             iconColor: const Color(0xFF7C3AED),
-            title: '修改密碼',
+            title: l.settingsChangePassword,
             onTap: _showChangePasswordDialog,
           ),
           _SettingsTile(
             icon: Icons.g_mobiledata_rounded,
             iconColor: const Color(0xFF1E8E5A),
-            title: 'Google 登入',
-            subtitle: _googleLinked ? '已綁定' : '尚未綁定，點擊連結 Google 帳號',
+            title: l.settingsGoogleLogin,
+            subtitle: _googleLinked ? l.settingsGoogleLinked : l.settingsGoogleNotLinked,
             subtitleColor: _googleLinked ? const Color(0xFF1E8E5A) : const Color(0xFF9AA6B2),
             trailing: _googleLinked
                 ? const Icon(Icons.check_circle_rounded, color: Color(0xFF1E8E5A), size: 18)
@@ -475,25 +617,70 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 16),
           // ── 分析偏好 ────────────────────────────────────────
-          _SectionHeader('分析偏好'),
+          _SectionHeader(l.settingsSectionAnalysis),
           _SettingsTile(
             icon: Icons.high_quality_rounded,
             iconColor: const Color(0xFF0288D1),
-            title: '完整分析輸出品質',
+            title: l.settingsAnalysisQuality,
             subtitle: _quality.label,
             onTap: _showQualityPicker,
-          ),
-          const SizedBox(height: 16),
+          ),          _SettingsTile(
+            icon: Icons.track_changes_rounded,
+            iconColor: const Color(0xFF7C3AED),
+            title: '球偵測演算法',
+            subtitle: _ballMode.label,
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: _ballMode == BallDetectionMode.tflite
+                    ? const Color(0xFF7C3AED).withValues(alpha: 0.12)
+                    : const Color(0xFF6B7280).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                _ballMode.label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _ballMode == BallDetectionMode.tflite
+                      ? const Color(0xFF7C3AED)
+                      : const Color(0xFF6B7280),
+                ),
+              ),
+            ),
+            onTap: _showBallModePicker,
+          ),          const SizedBox(height: 16),
           // ── 訂閱 ────────────────────────────────────────────
-          _SectionHeader('訂閱'),
+          _SectionHeader(l.settingsSectionSubscription),
           _SettingsTile(
             icon: Icons.workspace_premium_rounded,
             iconColor: const Color(0xFFFF9800),
-            title: '查看訂閱方案',
+            title: l.settingsViewSubscription,
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const UpgradePage()),
             ),
+          ),
+          const SizedBox(height: 16),
+          // ── 一般 ────────────────────────────────────────────
+          _SectionHeader(l.settingsSectionGeneral),
+          _SettingsTile(
+            icon: Icons.language_rounded,
+            iconColor: const Color(0xFF0288D1),
+            title: l.settingsLanguage,
+            onTap: () => LanguageSelectorSheet.show(context),
+          ),
+          _SettingsTile(
+            icon: Icons.system_update_rounded,
+            iconColor: const Color(0xFF1E8E5A),
+            title: l.settingsCheckUpdate,
+            trailing: _isCheckingUpdate
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1E8E5A)),
+                  )
+                : null,
+            onTap: _isCheckingUpdate ? null : _checkUpdate,
           ),
           const SizedBox(height: 28),
           // ── 登出按鈕 ────────────────────────────────────────
@@ -501,7 +688,7 @@ class _SettingsPageState extends State<SettingsPage> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: OutlinedButton.icon(
               icon: const Icon(Icons.logout_rounded, size: 18),
-              label: const Text('登出'),
+              label: Text(l.homeLogout),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
@@ -601,14 +788,14 @@ class _ProfileCard extends StatelessWidget {
               decoration: BoxDecoration(color: const Color(0xFFDDE1E7), borderRadius: BorderRadius.circular(2))),
           ListTile(
             leading: const Icon(Icons.photo_library_rounded, color: Color(0xFF1E8E5A)),
-            title: const Text('從相簿選擇'),
+            title: Text(AppLocalizations.of(context).settingsPickFromGallery),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             onTap: () { Navigator.pop(context); onTapAvatar(); },
           ),
           if (onRemoveAvatar != null)
             ListTile(
               leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
-              title: const Text('移除大頭貼', style: TextStyle(color: Colors.red)),
+              title: Text(AppLocalizations.of(context).settingsRemoveAvatar, style: const TextStyle(color: Colors.red)),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               onTap: () { Navigator.pop(context); onRemoveAvatar!(); },
             ),

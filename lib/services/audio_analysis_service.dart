@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'audio_analyzer.dart';
 
@@ -140,16 +141,6 @@ class AudioAnalysisService {
     return (v is num) ? v.toDouble() : null;
   }
 
-  // ================================================================
-  // 🔽 下面所有函式 **完全保留你的原始版本**（不要改）
-  // ================================================================
-
-  // (你原本的 detectPeaks, FFT, spectrum, _readWav, analyzeVideo 全部保留不動)
-  // ↓↓↓↓↓ 直接把你原本底下的程式碼接上即可 ↓↓↓↓↓
-
-  // Minimal analyzeVideo stub to satisfy callers in UI while a full
-  // implementation (audio extraction + segment analysis) is present or
-  // being integrated. Returns a safe placeholder structure.
   static Future<Map<String, dynamic>> analyzeVideo(String videoPath) async {
     final Stopwatch sw = Stopwatch()..start();
     String? wavPath;
@@ -159,7 +150,7 @@ class AudioAnalysisService {
           await ch.invokeMapMethod<dynamic, dynamic>('extractAudio', <String, dynamic>{'videoPath': videoPath});
       wavPath = resp?['path'] as String?;
     } catch (e) {
-      print('Error extracting audio: $e');
+      debugPrint('⚠️ [AudioAnalysis] Error extracting audio: $e');
     }
 
     if ((wavPath == null || wavPath.isEmpty) && videoPath.toLowerCase().endsWith('.wav')) {
@@ -167,7 +158,7 @@ class AudioAnalysisService {
     }
 
     if (wavPath == null || wavPath.isEmpty) {
-      print('No valid WAV path found.');
+      debugPrint('⚠️ [AudioAnalysis] No valid WAV path found.');
       return <String, dynamic>{
         'summary': {
           'audio_class': 'no_audio',
@@ -182,7 +173,7 @@ class AudioAnalysisService {
     try {
       final _WavData wav = await _readWav(wavPath);
       if (wav.samples.isEmpty) {
-        print('WAV file contains no samples.');
+        debugPrint('⚠️ [AudioAnalysis] WAV file contains no samples.');
         return <String, dynamic>{
           'summary': {
             'audio_class': 'no_audio',
@@ -197,7 +188,7 @@ class AudioAnalysisService {
       // 檢測無聲音
       final bool isSilent = _isSilentAudio(wav.samples);
       if (isSilent) {
-        print('Audio is silent (RMS < $_silenceRmsThreshold and Peak < $_silencePeakThreshold).');
+        debugPrint('🔇 [AudioAnalysis] Audio is silent (RMS < $_silenceRmsThreshold and Peak < $_silencePeakThreshold).');
         return <String, dynamic>{
           'summary': {
             'audio_class': 'no_audio',
@@ -211,10 +202,10 @@ class AudioAnalysisService {
 
       // Detect peaks and segment audio
       final List<int> peakIndices = _detectPeaks(wav.samples, wav.sampleRate);
-      print('Detected ${peakIndices.length} peaks.');
+      debugPrint('🎵 [AudioAnalysis] Detected ${peakIndices.length} peaks.');
 
       final List<Map<String, dynamic>> segments = _segmentAudio(wav.samples, wav.sampleRate, peakIndices);
-      print('Created ${segments.length} segments.');
+      debugPrint('🎵 [AudioAnalysis] Created ${segments.length} segments.');
 
       // Analyze each segment and find the best hit
       Map<String, dynamic>? bestSegment;
@@ -224,12 +215,12 @@ class AudioAnalysisService {
         final List<double> segmentSamples = segment['samples'];
         final AudioFeatures features = analyzeFromSamples(segmentSamples, wav.sampleRate);
         final Map<String, dynamic> summary = features.toMap();
-        print('Extracted features: $summary');
+        debugPrint('🎵 [AudioAnalysis] Extracted features: $summary');
 
         final _AudioScore? score = await scoreSummary(summary);
 
         if (score != null) {
-          print('Segment score: ${score.distances}, Predicted class: ${score.predictedClass}');
+          debugPrint('🎵 [AudioAnalysis] Segment score: ${score.distances}, Predicted class: ${score.predictedClass}');
           final double segmentScore = score.distances.values.isEmpty
               ? double.infinity
               : score.distances.values.reduce((a, b) => a + b);
@@ -247,7 +238,7 @@ class AudioAnalysisService {
             };
           }
         } else {
-          print('Score for segment is null.');
+          debugPrint('⚠️ [AudioAnalysis] Score for segment is null.');
         }
       }
 
@@ -272,7 +263,7 @@ class AudioAnalysisService {
         'analysis_seconds': elapsedSeconds,
       };
     } catch (e) {
-      print('Error during analysis: $e');
+      debugPrint('❌ [AudioAnalysis] Error during analysis: $e');
       return <String, dynamic>{
         'summary': {
           'audio_class': 'error',
@@ -303,9 +294,9 @@ class AudioAnalysisService {
     final bool isSilent = rms < _silenceRmsThreshold && peakVal < _silencePeakThreshold;
     
     if (isSilent) {
-      print('🔇 無聲音檢測：RMS=${rms.toStringAsFixed(4)} < $_silenceRmsThreshold, Peak=${peakVal.toStringAsFixed(4)} < $_silencePeakThreshold');
+      debugPrint('🔇 [AudioAnalysis] 無聲音檢測：RMS=${rms.toStringAsFixed(4)} < $_silenceRmsThreshold, Peak=${peakVal.toStringAsFixed(4)} < $_silencePeakThreshold');
     } else {
-      print('🔊 有聲音檢測：RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
+      debugPrint('🔊 [AudioAnalysis] 有聲音檢測：RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
     }
 
     return isSilent;
@@ -319,19 +310,19 @@ class AudioAnalysisService {
     // simple local-max detector with min distance ~0.35s
     final int minDist = (0.35 * sampleRate).toInt();
     int lastPeak = -minDist;
-    print('Peak detection threshold: $threshold');
+    debugPrint('🎵 [AudioAnalysis] Peak detection threshold: $threshold');
     for (int i = 1; i < samples.length - 1; i++) {
       final double v = samples[i].abs();
       if (v >= threshold && v >= samples[i - 1].abs() && v >= samples[i + 1].abs()) {
         if (i - lastPeak >= minDist) {
           peaks.add(i);
           lastPeak = i;
-          print('Detected peak at index $i with value ${samples[i]}');
+          debugPrint('🎵 [AudioAnalysis] Detected peak at index $i with value ${samples[i]}');
         }
       }
     }
     if (peaks.isEmpty) {
-      print('No peaks detected. Max sample value: $maxAbs');
+      debugPrint('⚠️ [AudioAnalysis] No peaks detected. Max sample value: $maxAbs');
     }
     return peaks;
   }
