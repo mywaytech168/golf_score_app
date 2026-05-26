@@ -2123,6 +2123,11 @@ class _HistoryTileState extends State<_HistoryTile> {
                             if (widget.entry.hasAiCoachAnalysis)
                               _badgeWithIcon('AI', const Color(0xFF7C3AED),
                                   Icons.psychology_rounded),
+                            if (widget.entry.swingPostureLabel != null)
+                              _badge(
+                                SwingPosture.zhName(widget.entry.swingPostureLabel!),
+                                SwingPosture.color(widget.entry.swingPostureLabel!),
+                              ),
                             if (widget.entry.audioCrispness != null)
                               _badge(
                                 '清脆 ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
@@ -2805,6 +2810,11 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     _smallBadge('已分析', const Color(0xFF1E8E5A)),
                                   if (clip.hasAiCoachAnalysis)
                                     _smallBadge('AI', const Color(0xFF7C3AED)),
+                                  if (clip.swingPostureLabel != null)
+                                    _smallBadge(
+                                      SwingPosture.zhName(clip.swingPostureLabel!),
+                                      SwingPosture.color(clip.swingPostureLabel!),
+                                    ),
                                   if (clip.audioTags?.contains('no_audio') == true)
                                     _smallBadge('無聲音', const Color(0xFF9E9E9E)),
                                   if (clip.audioCrispness != null)
