@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
@@ -93,10 +94,26 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   void _selectLocalVideo() async {
     debugPrint('[RecordingSelection] 使用者選擇本地影片');
 
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: false,
-    );
+    // iOS 額外詢問來源：相簿 or 檔案 App
+    FilePickerResult? result;
+    if (Platform.isIOS) {
+      final source = await _showIOSSourceSheet();
+      if (source == null) return; // 使用者取消
+      result = await FilePicker.platform.pickFiles(
+        type: source == _VideoSource.files
+            ? FileType.custom
+            : FileType.video,
+        allowedExtensions: source == _VideoSource.files
+            ? ['mp4', 'mov', 'avi', 'mkv', 'm4v']
+            : null,
+        allowMultiple: false,
+      );
+    } else {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        allowMultiple: false,
+      );
+    }
 
     if (result == null || result.files.isEmpty || result.files.single.path == null) {
       debugPrint('[RecordingSelection] 使用者取消選擇');
@@ -245,6 +262,31 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
       progressNotifier.dispose();
       if (mounted) setState(() => _isImporting = false);
     }
+  }
+
+  /// iOS 來源選擇 sheet：相簿 or 檔案 App
+  Future<_VideoSource?> _showIOSSourceSheet() {
+    return showCupertinoModalPopup<_VideoSource>(
+      context: context,
+      builder: (_) => CupertinoActionSheet(
+        title: const Text('選擇影片來源'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context, _VideoSource.photoLibrary),
+            child: const Text('相簿'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context, _VideoSource.files),
+            child: const Text('檔案 App（資料夾）'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          isDestructiveAction: false,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+      ),
+    );
   }
 
   /// 顯示通知消息
@@ -459,3 +501,5 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     );
   }
 }
+
+enum _VideoSource { photoLibrary, files }
