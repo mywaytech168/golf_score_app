@@ -118,7 +118,7 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
 
   var shouldBreak = false
   while reader.status == .reading && !shouldBreak {
-    autoreleasepool {
+    autoreleasepool { () -> Void in
       guard let sample = readerOut.copyNextSampleBuffer() else {
         shouldBreak = true
         return

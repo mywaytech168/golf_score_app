@@ -143,7 +143,7 @@ private func analyzeVideoNatively(
 
   var shouldBreak = false
   while reader.status == .reading && !shouldBreak {
-    autoreleasepool {
+    autoreleasepool { () -> Void in
       guard let sampleBuffer = trackOutput.copyNextSampleBuffer() else {
         shouldBreak = true
         return

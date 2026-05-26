@@ -158,7 +158,7 @@ private extension AppDelegate {
 
     var shouldBreak = false
     while reader.status == .reading && !shouldBreak {
-      autoreleasepool {
+      autoreleasepool { () -> Void in
         guard let sampleBuffer = output.copyNextSampleBuffer() else {
           shouldBreak = true
           return
