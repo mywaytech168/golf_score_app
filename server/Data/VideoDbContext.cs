@@ -20,6 +20,7 @@ namespace UploadServer.Data
         public DbSet<AiCoachAnalysis> AiCoachAnalyses { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<AppVersion> AppVersions { get; set; }
+        public DbSet<Announcement> Announcements { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -678,6 +679,64 @@ namespace UploadServer.Data
                 entity.HasIndex(e => e.Platform)
                     .IsUnique()
                     .HasDatabaseName("uk_appversion_platform");
+            });
+
+            // ============================================================
+            // Announcements
+            // ============================================================
+            modelBuilder.Entity<Announcement>(entity =>
+            {
+                entity.ToTable("announcements");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.Title)
+                    .HasColumnName("title")
+                    .HasMaxLength(255)
+                    .IsRequired();
+
+                entity.Property(e => e.Body)
+                    .HasColumnName("body")
+                    .HasColumnType("TEXT")
+                    .IsRequired();
+
+                entity.Property(e => e.Type)
+                    .HasColumnName("type")
+                    .HasMaxLength(20)
+                    .HasDefaultValue("info");
+
+                entity.Property(e => e.PublishedAt)
+                    .HasColumnName("published_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.ExpiresAt)
+                    .HasColumnName("expires_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.ImageUrl)
+                    .HasColumnName("image_url")
+                    .HasMaxLength(500);
+
+                entity.Property(e => e.IsActive)
+                    .HasColumnName("is_active")
+                    .HasDefaultValue(true);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.UpdatedAt)
+                    .HasColumnName("updated_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.IsActive).HasDatabaseName("idx_ann_is_active");
+                entity.HasIndex(e => e.PublishedAt).HasDatabaseName("idx_ann_published_at");
+                entity.HasIndex(e => e.ExpiresAt).HasDatabaseName("idx_ann_expires_at");
             });
         }
     }

@@ -114,7 +114,7 @@ class StatisticsProvider with ChangeNotifier {
       'goodShots': goodShots,
       'badShots': stats.badShot,
       'accuracy': '$accuracy%',
-      'averagePeak': (stats.peakValue.average ?? 0).toStringAsFixed(2),
+      'averagePeak': stats.peakValue.average.toStringAsFixed(2),
     };
   }
 

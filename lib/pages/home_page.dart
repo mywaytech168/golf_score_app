@@ -1,23 +1,23 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
 import '../providers/user_provider.dart';
 import '../theme/app_theme.dart';
 import '../services/recording_history_storage.dart';
-import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 import '../services/plan_service.dart';
+import '../services/announcement_service.dart';
 import '../widgets/green_page_header.dart';
-import '../widgets/language_selector.dart';
 import '../widgets/posture_breakdown_card.dart';
+import 'announcement_page.dart';
 import 'reward_page.dart';
 import 'settings_page.dart';
 
@@ -39,6 +39,8 @@ class _HomePageState extends State<HomePage> {
     dailyLimit: 10,
   );
 
+  int _unreadAnnouncements = 0;
+
   @override
   void initState() {
     super.initState();
@@ -46,16 +48,35 @@ class _HomePageState extends State<HomePage> {
     _initializeStatistics();
     _initializePurchaseService();
     _loadPlanStatus();
+    _loadUnreadCount();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserProvider>().loadProfile();
     });
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await AnnouncementService.instance.getUnreadCount();
+      if (mounted) setState(() => _unreadAnnouncements = count);
+    } catch (e) {
+      debugPrint('⚠️ [HomePage] 載入公告未讀數失敗: $e');
+    }
+  }
+
+  Future<void> _openAnnouncements() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AnnouncementPage()),
+    );
+    _loadUnreadCount(); // 返回後刷新未讀數
   }
 
   Future<void> _loadPlanStatus() async {
     try {
       final status = await PlanService.getPlanStatus();
       if (mounted) setState(() => _planStatus = status);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('⚠️ [HomePage] 載入方案狀態失敗: $e');
+    }
   }
 
   @override
@@ -83,155 +104,6 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint('⚠️ 初始化統計服務失敗: $e');
     }
-  }
-
-  Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => _buildLogoutDialog(),
-    );
-    if (confirmed != true) return;
-
-    await AuthTokenStorage.instance.clearTokens();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('user_email');
-    if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed('/login');
-  }
-
-  Widget _buildLogoutDialog() {
-    return Dialog(
-      elevation: 0,
-      backgroundColor: Colors.transparent,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x20000000),
-              blurRadius: 24,
-              offset: Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── 頂部標題區 ──
-            Container(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-              child: Column(
-                children: [
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(
-                      Icons.logout_rounded,
-                      color: Colors.red,
-                      size: 32,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '確認登出',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF0B2A2E),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // ── 內容 ──
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                '您確定要登出嗎？您可以稍後再次登入。',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: const Color(0xFF0B2A2E).withOpacity(0.7),
-                  height: 1.5,
-                ),
-              ),
-            ),
-            // ── 按鈕區 ──
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Row(
-                children: [
-                  // 取消按鈕
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: const Color(0xFF0B2A2E).withOpacity(0.1),
-                            width: 1.5,
-                          ),
-                        ),
-                      ),
-                      child: const Text(
-                        '取消',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6F7B86),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // 登出按鈕
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.red.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          '確定登出',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _loadInitialHistory() async {
@@ -301,20 +173,20 @@ class _HomePageState extends State<HomePage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _TodayOverviewCard(stats: today, loading: isLoading),
+                            _TodayOverviewCard(
+                              rounds: today?.roundCount ?? 0,
+                              practices: today?.practiceCount ?? 0,
+                              good: today?.goodShot ?? 0,
+                              bad: today?.badShot ?? 0,
+                              loading: isLoading,
+                            ),
                             const SizedBox(height: kSpaceMD),
                             _KeyMetricsRow(stats: today, loading: isLoading),
-                            const SizedBox(height: kSpaceMD),
-                            if (!isLoading && (today?.totalCount ?? 0) > 0)
-                              _GoodRateCard(
-                                good: today?.goodShot ?? 0,
-                                bad: today?.badShot ?? 0,
-                              ),
                             if (!isLoading && (today?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
                               const SizedBox(height: kSpaceMD),
                               PostureBreakdownCard(
                                 breakdown: today!.postureBreakdown,
-                                title: '今日姿勢分析',
+                                title: AppLocalizations.of(context).homeTodayPosture,
                               ),
                             ],
                           ],
@@ -332,6 +204,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGreenHeader(BuildContext context) {
+    final l         = AppLocalizations.of(context);
     final plan      = _planStatus.plan;
     final used      = _planStatus.todayUsed;
     final baseLimit = _planStatus.dailyLimit;   // 方案原始上限（不含獎勵）
@@ -341,11 +214,11 @@ class _HomePageState extends State<HomePage> {
     final overLimit = !plan.isUnlimited && used >= total;
     String quotaText;
     if (plan.isUnlimited) {
-      quotaText = '今日無限制 🏆';
+      quotaText = l.homeTodayUnlimited;
     } else if (overLimit) {
-      quotaText = '今日用量 $used / $baseLimit 球  ⚠️ 已達上限';
+      quotaText = '${l.homeTodayUsage(used, baseLimit)}  ${l.homeTodayLimit}';
     } else {
-      quotaText = '今日用量 $used / $baseLimit 球';
+      quotaText = l.homeTodayUsage(used, baseLimit);
     }
 
     return Consumer<UserProvider>(
@@ -392,106 +265,58 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.only(left: kSpaceMD, right: kSpaceSM),
             child: avatar,
           ),
-          title: '嗨，${user.displayName} 👋',
+          title: l.homeHi(user.displayName),
           subtitle: quotaText,
           actions: [
             planBadge,
-            IconButton(
-              tooltip: '設定',
-              icon: const Icon(Icons.settings_rounded, color: Colors.white),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
-              ),
+            // 公告鈴鐺
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  tooltip: l.annBoardTitle,
+                  icon: const Icon(Icons.notifications_rounded, color: Colors.white),
+                  onPressed: _openAnnouncements,
+                ),
+                if (_unreadAnnouncements > 0)
+                  Positioned(
+                    top: 6, right: 6,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 16),
+                      height: 16,
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFE05252),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          _unreadAnnouncements > 99
+                              ? '99+'
+                              : '$_unreadAnnouncements',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             IconButton(
-              tooltip: '獎勵球數',
+              tooltip: l.homeRewardBalls,
               icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const RewardPage()),
               ).then((_) => _loadPlanStatus()),
             ),
-            PopupMenuButton<String>(
-              offset: const Offset(0, 50),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              elevation: 12,
-              surfaceTintColor: Colors.white,
-              color: Colors.white,
-              onSelected: (v) {
-                if (v == 'logout') _logout();
-                if (v == 'language') LanguageSelectorSheet.show(context);
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'language',
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.language_rounded,
-                          size: 20,
-                          color: Color(0xFF1E8E5A),
-                        ),
-                        SizedBox(width: 12),
-                        Text(
-                          '語言 / Language',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Color(0xFF0B2A2E),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                PopupMenuDivider(
-                  height: 8,
-                  indent: 12,
-                  endIndent: 12,
-                ),
-                PopupMenuItem(
-                  value: 'logout',
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.logout_rounded,
-                          size: 20,
-                          color: Colors.red,
-                        ),
-                        SizedBox(width: 12),
-                        Text(
-                          '登出',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.red,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.more_vert_rounded,
-                  color: Colors.white,
-                  size: 24,
-                ),
+            IconButton(
+              tooltip: l.settingsTitle,
+              icon: const Icon(Icons.settings_rounded, color: Colors.white),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
               ),
             ),
           ],
@@ -504,18 +329,24 @@ class _HomePageState extends State<HomePage> {
 // ── 今日快覽卡片 ──────────────────────────────────────────────────
 
 class _TodayOverviewCard extends StatelessWidget {
-  final StatisticsResponse? stats;
+  final int rounds;
+  final int practices;
+  final int good;
+  final int bad;
   final bool loading;
-  const _TodayOverviewCard({required this.stats, required this.loading});
+  const _TodayOverviewCard({
+    required this.rounds,
+    required this.practices,
+    required this.good,
+    required this.bad,
+    required this.loading,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final practice = stats?.totalCount ?? 0;
-    final good = stats?.goodShot ?? 0;
-    final bad = stats?.badShot ?? 0;
-
+    final l   = AppLocalizations.of(context);
     final now = DateTime.now();
-    final weekdays = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'];
+    final weekdays = [l.weekdayMon, l.weekdayTue, l.weekdayWed, l.weekdayThu, l.weekdayFri, l.weekdaySat, l.weekdaySun];
     final label =
         '${weekdays[now.weekday - 1]}  ${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
 
@@ -530,9 +361,9 @@ class _TodayOverviewCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text(
-                '今日概況',
-                style: TextStyle(
+              Text(
+                l.homeTodayOverview,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -550,17 +381,22 @@ class _TodayOverviewCard extends StatelessWidget {
               : Row(
                   children: [
                     _OverviewStat(
-                        label: '練習次數',
-                        value: practice.toString(),
+                        label: l.homeRounds,
+                        value: rounds.toString(),
+                        icon: Icons.videocam_rounded),
+                    const _WhiteDivider(),
+                    _OverviewStat(
+                        label: l.homePractices,
+                        value: practices.toString(),
                         icon: Icons.sports_golf_rounded),
                     const _WhiteDivider(),
                     _OverviewStat(
-                        label: '好球',
+                        label: l.homeGoodShot,
                         value: good.toString(),
                         icon: Icons.thumb_up_rounded),
                     const _WhiteDivider(),
                     _OverviewStat(
-                        label: '壞球',
+                        label: l.homeBadShot,
                         value: bad.toString(),
                         icon: Icons.thumb_down_rounded),
                   ],
@@ -574,7 +410,7 @@ class _TodayOverviewCard extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: List.generate(
-        3,
+        4,
         (_) => Column(
           children: [
             Container(
@@ -656,11 +492,12 @@ class _KeyMetricsRow extends StatelessWidget {
         ? stats!.audioCrispness.average
         : null;
 
+    final l = AppLocalizations.of(context);
     return Row(
       children: [
         Expanded(
           child: _MetricMini(
-            label: '最佳速度',
+            label: l.homeTopSpeed,
             value: speed != null
                 ? '${speed.toStringAsFixed(1)} MPH'
                 : '--',
@@ -672,7 +509,7 @@ class _KeyMetricsRow extends StatelessWidget {
         const SizedBox(width: kSpaceSM),
         Expanded(
           child: _MetricMini(
-            label: '甜蜜點',
+            label: l.homeSweetSpot,
             value: sweet != null
                 ? '${sweet.toStringAsFixed(0)}%'
                 : '--',
@@ -684,7 +521,7 @@ class _KeyMetricsRow extends StatelessWidget {
         const SizedBox(width: kSpaceSM),
         Expanded(
           child: _MetricMini(
-            label: '清脆度',
+            label: l.homeCrispness,
             value: crisp != null
                 ? crisp.toStringAsFixed(0)
                 : '--',
@@ -769,73 +606,6 @@ class _MetricMini extends StatelessWidget {
                     overflow: TextOverflow.ellipsis),
               ],
             ),
-    );
-  }
-}
-
-// ── 好球率卡片 ────────────────────────────────────────────────────
-
-class _GoodRateCard extends StatelessWidget {
-  final int good;
-  final int bad;
-  const _GoodRateCard({required this.good, required this.bad});
-
-  @override
-  Widget build(BuildContext context) {
-    final total = good + bad;
-    final rate = total > 0 ? good / total : 0.0;
-    final pct = (rate * 100).round();
-
-    return Container(
-      padding: const EdgeInsets.all(kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusMD),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.bar_chart_rounded,
-                  color: kPrimaryGreen, size: 18),
-              const SizedBox(width: kSpaceSM),
-              const Text(
-                '今日好球率',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: kTextPrimary,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '$pct%',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
-                  color: kPrimaryGreen,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: kSpaceMD),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: rate,
-              backgroundColor: kBadColor.withValues(alpha: 0.15),
-              color: kGoodColor,
-              minHeight: 8,
-            ),
-          ),
-          const SizedBox(height: kSpaceSM),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _Dot(color: kGoodColor, label: '好球 $good 次'),
-              _Dot(color: kBadColor, label: '壞球 $bad 次'),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

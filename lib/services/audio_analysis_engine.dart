@@ -20,6 +20,7 @@ class AudioAnalysisEngine {
   final AudioAnalysisConfig config;
   final List<double> pcmSamples;
 
+  // ignore: unused_field
   _AudioAnalysisState _state = _AudioAnalysisState.idle;
   final List<AudioFeatureFrame> _features = [];
   AudioClassResult? _classification;

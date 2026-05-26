@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 class LearningHubPage extends StatelessWidget {
   const LearningHubPage({super.key});
@@ -7,12 +8,26 @@ class LearningHubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final contents = _demoContents;
     return Scaffold(
-      appBar: AppBar(title: const Text('揮桿學習')),
+      appBar: AppBar(title: Text(AppLocalizations.of(context).learningTitle)),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: contents.length,
+        itemCount: contents.length + 1,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
+          if (index == contents.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.update_rounded, size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(AppLocalizations.of(context).learningMoreComing,
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+                ],
+              ),
+            );
+          }
           final c = contents[index];
           return Card(
             elevation: 2,
@@ -64,7 +79,7 @@ class LearningDetailPage extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '示範影片待補充，先提供重點與標記供對照學習。',
+                        AppLocalizations.of(context).learningVideoComingSoon,
                         style: const TextStyle(fontSize: 14),
                       ),
                     ),
@@ -73,7 +88,7 @@ class LearningDetailPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            const Text('關鍵標記', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(AppLocalizations.of(context).learningKeyMarkers, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: ListView.separated(
@@ -113,7 +128,7 @@ class _Marker {
 
 final List<_LearningContent> _demoContents = [
   _LearningContent(
-    title: '良好揮桿示範（Placeholder）',
+    title: '良好揮桿示範',
     description: '節奏平順、重心穩定、擊球後收桿完整。',
     type: 'good',
     markers: const [
@@ -123,7 +138,7 @@ final List<_LearningContent> _demoContents = [
     ],
   ),
   _LearningContent(
-    title: '常見錯誤：提前釋放（Placeholder）',
+    title: '常見錯誤：提前釋放',
     description: '手腕提前放鬆，導致桿頭加速度不足，球路弱/右曲。',
     type: 'error',
     markers: const [

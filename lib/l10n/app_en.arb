@@ -194,5 +194,147 @@
   "langZhTW": "繁體中文",
   "langZhCN": "简体中文",
   "langEn": "English",
-  "langSelectTitle": "Select Language"
+  "langSelectTitle": "Select Language",
+
+  "settingsTitle": "Settings",
+  "settingsSectionAccount": "Account",
+  "settingsChangeName": "Change Name",
+  "settingsChangeNameHint": "Enter display name",
+  "settingsChangePassword": "Change Password",
+  "settingsCurrentPassword": "Current Password",
+  "settingsNewPassword": "New Password",
+  "settingsConfirmNewPassword": "Confirm New Password",
+  "settingsCurrentPasswordRequired": "Please enter current password",
+  "settingsConfirmChange": "Confirm Change",
+  "settingsPasswordChanged": "Password changed",
+  "settingsGoogleLogin": "Google Sign-In",
+  "settingsGoogleLinked": "Linked",
+  "settingsGoogleNotLinked": "Not linked. Tap to link Google account",
+  "settingsSectionAnalysis": "Analysis Preferences",
+  "settingsAnalysisQuality": "Analysis Output Quality",
+  "settingsQualityHint": "Saved as default for future analyses",
+  "settingsApply": "Apply",
+  "settingsQualityUpdated": "Output quality updated to \"{quality}\"",
+  "@settingsQualityUpdated": {
+    "placeholders": { "quality": {"type": "String"} }
+  },
+  "settingsSectionSubscription": "Subscription",
+  "settingsViewSubscription": "View Subscription Plans",
+  "settingsSectionGeneral": "General",
+  "settingsLanguage": "Language",
+  "settingsCheckUpdate": "Check for Updates",
+  "settingsAlreadyLatest": "Already on latest version v{version}",
+  "@settingsAlreadyLatest": {
+    "placeholders": { "version": {"type": "String"} }
+  },
+  "settingsUpdateCheckFailed": "Update check failed, please try again later",
+  "settingsConfirmLogout": "Confirm Logout?",
+  "settingsLogoutWarning": "You'll need to sign in again to use cloud features.",
+  "settingsNameUpdated": "Name updated",
+  "settingsPickFromGallery": "Choose from Gallery",
+  "settingsRemoveAvatar": "Remove Avatar",
+
+  "homeTodayOverview": "Today's Overview",
+  "homeHi": "Hi, {name} 👋",
+  "@homeHi": {
+    "placeholders": { "name": {"type": "String"} }
+  },
+  "homeRounds": "Rounds",
+  "homePractices": "Practice",
+  "homeTodayGoodRate": "Today's Good Rate",
+  "homeGoodTimes": "Good {count}",
+  "@homeGoodTimes": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "homeBadTimes": "Bad {count}",
+  "@homeBadTimes": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "homeTodayPosture": "Today's Posture",
+  "homeTopSpeed": "Peak Speed",
+  "homeSweetSpot": "Sweet Spot",
+  "homeCrispness": "Crispness",
+  "homeAnnouncements": "Announcements",
+  "homeRewardBalls": "Reward Balls",
+  "weekdayMon": "Mon",
+  "weekdayTue": "Tue",
+  "weekdayWed": "Wed",
+  "weekdayThu": "Thu",
+  "weekdayFri": "Fri",
+  "weekdaySat": "Sat",
+  "weekdaySun": "Sun",
+
+  "todayTitleToday": "Today's Summary",
+  "todayTitleHistory": "History Summary",
+  "todayLoadFailed": "Failed to load, pull down to refresh",
+  "todaySweetSpotHit": "Sweet Spot Hit",
+  "todayCrispness": "Sound Crispness",
+  "todayTopSpeed": "Peak Speed",
+  "todayNoRecord": "No practice records today",
+  "todayNoRecordDate": "No practice records on this day",
+  "todayGoRecord": "Go record a swing!",
+  "todayPostureToday": "Today's Posture Analysis",
+  "todayPosture": "Posture Analysis",
+
+  "annBoardTitle": "Announcements",
+  "annUnreadCount": "{count} unread",
+  "@annUnreadCount": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annAllAnnouncements": "All Announcements",
+  "annMarkAllRead": "Mark All Read",
+  "annRefresh": "Refresh",
+  "annLoadFailed": "Failed to load, pull down to retry",
+  "annMinutesAgo": "{count}m ago",
+  "@annMinutesAgo": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annHoursAgo": "{count}h ago",
+  "@annHoursAgo": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annDaysAgo": "{count}d ago",
+  "@annDaysAgo": {
+    "placeholders": { "count": {"type": "int"} }
+  },
+  "annDetailTitle": "Announcement Detail",
+  "annExpiresAt": "Valid until {date}",
+  "@annExpiresAt": {
+    "placeholders": { "date": {"type": "String"} }
+  },
+  "annEmpty": "No announcements",
+  "annEmptySubtitle": "New announcements will appear here",
+
+  "updateNotes": "What's New",
+  "updateForcedWarning": "This version is no longer supported. Please update to continue.",
+  "updateNow": "Update Now",
+  "updateRemindLater": "Remind Me Later",
+  "updateDontRemind": "Don't Remind",
+  "updateCannotOpenStore": "Cannot open store. Please update manually.",
+  "updateRequiredTitle": "Required Update",
+  "updateRequiredSubtitle": "Please update to continue using TekSwing",
+  "updateFoundTitle": "New Version Available",
+  "updateFoundSubtitle": "Update recommended for the best experience",
+  "updateCurrentVersion": "Current Version",
+  "updateLatestVersion": "Latest Version",
+
+  "upgradePageTitle": "Upgrade Your Plan",
+  "upgradePageSubtitle": "Unlock more swing analysis features and sharpen your game",
+  "upgradeFullComparison": "Full Feature Comparison",
+  "upgradeFeatureColumn": "Feature",
+  "upgradeSubscribePlan": "Upgrade to {plan}",
+  "@upgradeSubscribePlan": {
+    "placeholders": { "plan": {"type": "String"} }
+  },
+  "upgradeSelectPayment": "Select Payment Method",
+  "upgradeApplePayFailed": "Apple Pay configuration failed to load",
+  "upgradeGooglePayFailed": "Google Pay configuration failed to load",
+  "upgradePaymentFailed": "Payment verification failed, please try again",
+  "upgradeSuccessMsg": "Upgrade successful",
+  "upgradeAlreadyFree": "You are already on the free plan",
+
+  "learningTitle": "Swing Learning",
+  "learningMoreComing": "More courses coming soon",
+  "learningVideoComingSoon": "Demo video coming soon. Key points and markers available for reference.",
+  "learningKeyMarkers": "Key Markers"
 }

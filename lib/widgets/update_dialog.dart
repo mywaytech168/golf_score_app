@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_update_service.dart';
@@ -27,13 +28,19 @@ class _UpdateDialog extends StatelessWidget {
   final AppUpdateResult result;
   const _UpdateDialog({required this.result});
 
+  Future<void> _snooze(BuildContext context) async {
+    await AppUpdateService.snoozeVersion(result.latestVersion);
+    if (!context.mounted) return;
+    Navigator.of(context).pop(false);
+  }
+
   Future<void> _openStore(BuildContext context) async {
     if (result.updateUrl.isEmpty) return;
     final uri = Uri.parse(result.updateUrl);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('無法開啟商店頁面，請手動前往更新')),
+        SnackBar(content: Text(AppLocalizations.of(context).updateCannotOpenStore)),
       );
     }
   }
@@ -65,9 +72,9 @@ class _UpdateDialog extends StatelessWidget {
 
                     // 更新內容
                     if (result.releaseNotes.isNotEmpty) ...[
-                      const Text(
-                        '更新內容',
-                        style: TextStyle(
+                      Text(
+                        AppLocalizations.of(context).updateNotes,
+                        style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: Color(0xFF0A3D2E),
@@ -111,14 +118,14 @@ class _UpdateDialog extends StatelessWidget {
                           border: Border.all(color: Colors.red.shade200),
                         ),
                         child: Row(
-                          children: const [
-                            Icon(Icons.warning_amber_rounded,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded,
                                 color: Colors.redAccent, size: 18),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '此版本已停止支援，請更新後繼續使用',
-                                style: TextStyle(
+                                AppLocalizations.of(context).updateForcedWarning,
+                                style: const TextStyle(
                                     color: Colors.redAccent, fontSize: 12),
                               ),
                             ),
@@ -143,8 +150,8 @@ class _UpdateDialog extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: () => _openStore(context),
                       icon: const Icon(Icons.system_update_rounded, size: 18),
-                      label: const Text('立即更新',
-                          style: TextStyle(
+                      label: Text(AppLocalizations.of(context).updateNow,
+                          style: const TextStyle(
                               fontSize: 15, fontWeight: FontWeight.bold)),
                       style: FilledButton.styleFrom(
                         backgroundColor: kPrimaryGreen,
@@ -155,20 +162,35 @@ class _UpdateDialog extends StatelessWidget {
                     ),
                   ),
 
-                  // 稍後提醒（非強制才顯示）
+                  // 非強制才顯示「稍後提醒」與「不再提醒」
                   if (!result.isForced) ...[
                     const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () => Navigator.of(context).pop(false),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.grey,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.grey,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text(AppLocalizations.of(context).updateRemindLater,
+                                style: const TextStyle(fontSize: 13)),
+                          ),
                         ),
-                        child: const Text('稍後提醒',
-                            style: TextStyle(fontSize: 14)),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () => _snooze(context),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.grey.shade500,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text(AppLocalizations.of(context).updateDontRemind,
+                                style: const TextStyle(fontSize: 13)),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ],
@@ -218,7 +240,9 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                isForced ? '必要更新' : '發現新版本',
+                isForced
+                    ? AppLocalizations.of(context).updateRequiredTitle
+                    : AppLocalizations.of(context).updateFoundTitle,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 17,
@@ -226,7 +250,9 @@ class _Header extends StatelessWidget {
                 ),
               ),
               Text(
-                isForced ? '請更新後繼續使用 TekSwing' : '建議更新以獲得最佳體驗',
+                isForced
+                    ? AppLocalizations.of(context).updateRequiredSubtitle
+                    : AppLocalizations.of(context).updateFoundSubtitle,
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
@@ -252,7 +278,7 @@ class _VersionRow extends StatelessWidget {
       child: Row(
         children: [
           _VersionChip(
-            label: '目前版本',
+            label: AppLocalizations.of(context).updateCurrentVersion,
             version: result.currentVersion,
             color: Colors.grey.shade600,
           ),
@@ -262,7 +288,7 @@ class _VersionRow extends StatelessWidget {
                 size: 16, color: Colors.grey),
           ),
           _VersionChip(
-            label: '最新版本',
+            label: AppLocalizations.of(context).updateLatestVersion,
             version: result.latestVersion,
             color: kPrimaryGreen,
           ),

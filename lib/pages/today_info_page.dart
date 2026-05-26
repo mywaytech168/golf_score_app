@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../models/statistics_response.dart';
 import '../services/local_statistics_calculator.dart';
 import '../theme/app_theme.dart';
@@ -31,8 +32,9 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
   String _formatApi(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  String _formatDisplay(DateTime d) {
-    final weekdays = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'];
+  String _formatDisplay(BuildContext context, DateTime d) {
+    final l = AppLocalizations.of(context);
+    final weekdays = [l.weekdayMon, l.weekdayTue, l.weekdayWed, l.weekdayThu, l.weekdayFri, l.weekdaySat, l.weekdaySun];
     final wd = weekdays[d.weekday - 1];
     final ds = '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
     return '$wd  $ds';
@@ -84,8 +86,10 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
   }
 
   // ── 資料取值 ──────────────────────────────────────────────────
-  int get _practice => _stats?.totalCount ?? 0;
-  int get _good => _stats?.goodShot ?? 0;
+  int get _rounds    => _stats?.roundCount    ?? 0;
+  int get _practices => _stats?.practiceCount ?? 0;
+  int get _practice  => _stats?.totalCount    ?? 0;
+  int get _good      => _stats?.goodShot      ?? 0;
   int get _bad => _stats?.badShot ?? 0;
   double? get _speed => (_stats?.peakValue.maximum ?? 0) > 0 ? _stats!.peakValue.maximum : null;
   double? get _sweet => (_stats?.sweetSpotPercentage ?? 0) > 0 ? _stats!.sweetSpotPercentage : null;
@@ -102,7 +106,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
         children: [
           // ── 靜態 Header ─────────────────────────────────────
           _StaticHeader(
-            displayText: _formatDisplay(_selectedDate),
+            displayText: _formatDisplay(context, _selectedDate),
             isToday: isToday,
           ),
 
@@ -123,8 +127,8 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                 children: [
                   const Icon(Icons.error_outline, color: Colors.red, size: 16),
                   const SizedBox(width: 8),
-                  const Expanded(child: Text('載入失敗，請下拉重新整理', style: TextStyle(color: Colors.red, fontSize: 13))),
-                  TextButton(onPressed: _loadStats, child: const Text('重試')),
+                  Expanded(child: Text(AppLocalizations.of(context).todayLoadFailed, style: const TextStyle(color: Colors.red, fontSize: 13))),
+                  TextButton(onPressed: _loadStats, child: Text(AppLocalizations.of(context).commonRetry)),
                 ],
               ),
             ),
@@ -138,10 +142,11 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                 child: Column(
                   children: [
                     _SummaryBanner(
-                      practice: _practice,
-                      good: _good,
-                      bad: _bad,
-                      loading: _loading,
+                      rounds:    _rounds,
+                      practices: _practices,
+                      good:      _good,
+                      bad:       _bad,
+                      loading:   _loading,
                     ),
                     const SizedBox(height: kSpaceMD),
                     _MetricGrid(
@@ -150,17 +155,16 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                       crisp: _crisp,
                       loading: _loading,
                     ),
-                    const SizedBox(height: kSpaceMD),
-                    if (!_loading && _practice > 0)
-                      _GoodShotRateCard(good: _good, bad: _bad),
                     if (!_loading && (_stats?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
                       const SizedBox(height: kSpaceMD),
                       PostureBreakdownCard(
                         breakdown: _stats!.postureBreakdown,
-                        title: isToday ? '今日姿勢分析' : '姿勢分析',
+                        title: isToday
+                            ? AppLocalizations.of(context).todayPostureToday
+                            : AppLocalizations.of(context).todayPosture,
                       ),
                     ],
-                    if (!_loading && _practice == 0)
+                    if (!_loading && _practice == 0 && _rounds == 0)
                       _EmptyState(isToday: isToday),
                     const SizedBox(height: kSpaceXL),
                   ],
@@ -198,7 +202,9 @@ class _StaticHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                isToday ? '今日概況' : '歷史概況',
+                isToday
+                    ? AppLocalizations.of(context).todayTitleToday
+                    : AppLocalizations.of(context).todayTitleHistory,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 20,
@@ -311,14 +317,16 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: kSpaceMD),
           Text(
-            isToday ? '今天還沒有練習記錄' : '這天沒有練習記錄',
+            isToday
+                ? AppLocalizations.of(context).todayNoRecord
+                : AppLocalizations.of(context).todayNoRecordDate,
             style: const TextStyle(fontSize: 15, color: kTextSecondary),
           ),
           if (isToday) ...[
             const SizedBox(height: kSpaceXS),
-            const Text(
-              '去錄一支揮桿吧！',
-              style: TextStyle(fontSize: 13, color: kTextHint),
+            Text(
+              AppLocalizations.of(context).todayGoRecord,
+              style: const TextStyle(fontSize: 13, color: kTextHint),
             ),
           ],
         ],
@@ -330,13 +338,15 @@ class _EmptyState extends StatelessWidget {
 // ── 練習摘要橫幅 ─────────────────────────────────────────────────
 
 class _SummaryBanner extends StatelessWidget {
-  final int practice;
+  final int rounds;
+  final int practices;
   final int good;
   final int bad;
   final bool loading;
 
   const _SummaryBanner({
-    required this.practice,
+    required this.rounds,
+    required this.practices,
     required this.good,
     required this.bad,
     required this.loading,
@@ -349,36 +359,48 @@ class _SummaryBanner extends StatelessWidget {
       decoration: kCardDecoration(radius: kRadiusLG),
       child: loading
           ? const _SkeletonRow()
-          : Row(
-              children: [
-                Expanded(
-                  child: _BannerStat(
-                    label: '練習次數',
-                    value: practice.toString(),
-                    icon: Icons.sports_golf_rounded,
-                    color: kPrimaryGreen,
+          : Builder(builder: (ctx) {
+              final l = AppLocalizations.of(ctx);
+              return Row(
+                children: [
+                  Expanded(
+                    child: _BannerStat(
+                      label: l.homeRounds,
+                      value: rounds.toString(),
+                      icon: Icons.videocam_rounded,
+                      color: kPrimaryGreen,
+                    ),
                   ),
-                ),
-                _VertDivider(),
-                Expanded(
-                  child: _BannerStat(
-                    label: '好球',
-                    value: good.toString(),
-                    icon: Icons.thumb_up_rounded,
-                    color: kGoodColor,
+                  _VertDivider(),
+                  Expanded(
+                    child: _BannerStat(
+                      label: l.homePractices,
+                      value: practices.toString(),
+                      icon: Icons.sports_golf_rounded,
+                      color: kPrimaryGreen,
+                    ),
                   ),
-                ),
-                _VertDivider(),
-                Expanded(
-                  child: _BannerStat(
-                    label: '壞球',
-                    value: bad.toString(),
-                    icon: Icons.thumb_down_rounded,
-                    color: kBadColor,
+                  _VertDivider(),
+                  Expanded(
+                    child: _BannerStat(
+                      label: l.homeGoodShot,
+                      value: good.toString(),
+                      icon: Icons.thumb_up_rounded,
+                      color: kGoodColor,
+                    ),
                   ),
-                ),
-              ],
-            ),
+                  _VertDivider(),
+                  Expanded(
+                    child: _BannerStat(
+                      label: l.homeBadShot,
+                      value: bad.toString(),
+                      icon: Icons.thumb_down_rounded,
+                      color: kBadColor,
+                    ),
+                  ),
+                ],
+              );
+            }),
     );
   }
 }
@@ -448,9 +470,10 @@ class _MetricGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final items = [
       _MetricItem(
-        label: '最佳速度',
+        label: l.todayTopSpeed,
         value: speed != null ? speed!.toStringAsFixed(1) : '--',
         unit: speed != null ? 'MPH' : '',
         icon: Icons.speed_rounded,
@@ -458,7 +481,7 @@ class _MetricGrid extends StatelessWidget {
         progress: speed != null ? (speed! / 120).clamp(0.0, 1.0) : null,
       ),
       _MetricItem(
-        label: '甜蜜點命中',
+        label: l.todaySweetSpotHit,
         value: sweet != null ? sweet!.clamp(0, 100).toStringAsFixed(0) : '--',
         unit: sweet != null ? '%' : '',
         icon: Icons.adjust_rounded,
@@ -466,7 +489,7 @@ class _MetricGrid extends StatelessWidget {
         progress: sweet != null ? (sweet! / 100).clamp(0.0, 1.0) : null,
       ),
       _MetricItem(
-        label: '聲音清脆度',
+        label: l.todayCrispness,
         value: crisp != null ? crisp!.clamp(0, 100).toStringAsFixed(0) : '--',
         unit: crisp != null ? '/100' : '',
         icon: Icons.graphic_eq_rounded,
@@ -573,72 +596,6 @@ class _MetricCardWidget extends StatelessWidget {
                   ),
                 ),
               ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── 好球率卡片 ───────────────────────────────────────────────────
-
-class _GoodShotRateCard extends StatelessWidget {
-  final int good;
-  final int bad;
-  const _GoodShotRateCard({required this.good, required this.bad});
-
-  @override
-  Widget build(BuildContext context) {
-    final total = good + bad;
-    final rate = total > 0 ? good / total : 0.0;
-    final pct = (rate * 100).round();
-
-    return Container(
-      padding: const EdgeInsets.all(kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusMD),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.bar_chart_rounded, color: kPrimaryGreen, size: 18),
-              const SizedBox(width: kSpaceSM),
-              const Text(
-                '好球率',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: kTextPrimary,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '$pct%',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  color: kPrimaryGreen,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: kSpaceMD),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: rate,
-              backgroundColor: kBadColor.withValues(alpha: 0.15),
-              color: kGoodColor,
-              minHeight: 8,
-            ),
-          ),
-          const SizedBox(height: kSpaceSM),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _LegendDot(color: kGoodColor, label: '好球 $good 次'),
-              _LegendDot(color: kBadColor, label: '壞球 $bad 次'),
             ],
           ),
         ],

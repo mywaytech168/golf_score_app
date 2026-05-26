@@ -143,15 +143,14 @@ class AuthProvider with ChangeNotifier {
   /// 刷新令牌
   Future<bool> refreshToken() async {
     try {
-      final refreshToken = await _tokenStorage.getRefreshToken();
-      if (refreshToken == null) {
+      final success = await _tokenStorage.tryRefreshToken();
+      if (success) {
+        _accessToken = await _tokenStorage.getAccessToken();
+        notifyListeners();
+      } else {
         await signOut();
-        return false;
       }
-
-      // 在實際應用中，這裡應該調用後端 API 刷新令牌
-      // 此處簡化處理，假設刷新成功
-      return true;
+      return success;
     } catch (e) {
       _errorMessage = '令牌刷新失敗: $e';
       debugPrint(_errorMessage);

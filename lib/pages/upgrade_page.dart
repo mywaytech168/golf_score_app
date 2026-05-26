@@ -1,5 +1,7 @@
-import 'dart:convert';
+﻿import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:pay/pay.dart';
 
 import '../services/plan_service.dart';
@@ -116,8 +118,8 @@ class _UpgradePageState extends State<UpgradePage> {
       body: Column(
         children: [
           GreenPageHeader(
-            title: '升級您的方案',
-            subtitle: '解鎖更多揮桿分析功能，精進您的球技',
+            title: AppLocalizations.of(context).upgradePageTitle,
+            subtitle: AppLocalizations.of(context).upgradePageSubtitle,
           ),
           Expanded(
             child: SingleChildScrollView(
@@ -144,7 +146,7 @@ class _UpgradePageState extends State<UpgradePage> {
   void _onUpgrade(BuildContext context) {
     if (_selected == _Plan.free) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('您目前使用的已是免費方案')),
+        SnackBar(content: Text(AppLocalizations.of(context).upgradeAlreadyFree)),
       );
       return;
     }
@@ -265,7 +267,7 @@ class _SelectedPlanCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(10)),
-                  child: const Text('推薦', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                  child: Text(AppLocalizations.of(context).upgradeRecommended, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                 ),
               ],
               const Spacer(),
@@ -326,7 +328,7 @@ class _FeatureTable extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(left: 8, bottom: 10),
                 child: Text(
-                  '完整功能比較',
+                  AppLocalizations.of(context).upgradeFullComparison,
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey[800]),
                 ),
               ),
@@ -347,7 +349,7 @@ class _FeatureTable extends StatelessWidget {
                           width: leftW,
                           child: Column(
                             children: [
-                              _headerCell('功能', null),
+                              _headerCell(AppLocalizations.of(context).upgradeFeatureColumn, null),
                               ..._features.asMap().entries.map((e) =>
                                 _featureNameCell(e.value.name, e.key.isOdd),
                               ),
@@ -573,7 +575,9 @@ class _CtaButton extends StatelessWidget {
               Icon(isFree ? Icons.check_circle_outline : Icons.workspace_premium_rounded, size: 20),
               const SizedBox(width: 8),
               Text(
-                isFree ? '目前方案' : '升級 ${plan.label} 方案',
+                isFree
+                    ? AppLocalizations.of(context).upgradeCurrentPlan
+                    : AppLocalizations.of(context).upgradeSubscribePlan(plan.label),
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
             ],
@@ -597,14 +601,19 @@ class _PaySheet extends StatefulWidget {
 }
 
 class _PaySheetState extends State<_PaySheet> {
-  PaymentConfiguration? _googlePayConfig;
+  PaymentConfiguration? _payConfig;
   bool _configError = false;
+
+  bool get _isIOS => Platform.isIOS;
 
   @override
   void initState() {
     super.initState();
-    PaymentConfiguration.fromAsset('assets/pay/google_pay_config.json').then((cfg) {
-      if (mounted) setState(() => _googlePayConfig = cfg);
+    final asset = _isIOS
+        ? 'assets/pay/apple_pay_config.json'
+        : 'assets/pay/google_pay_config.json';
+    PaymentConfiguration.fromAsset(asset).then((cfg) {
+      if (mounted) setState(() => _payConfig = cfg);
     }).catchError((_) {
       if (mounted) setState(() => _configError = true);
     });
@@ -630,8 +639,6 @@ class _PaySheetState extends State<_PaySheet> {
     debugPrint('[GooglePay] result: $result');
     if (!mounted) return;
     Navigator.of(context).pop();
-
-    // 從 Google Pay 結果中取出 token（TEST 環境為 JSON 字串）
     final tokenData = result['paymentMethodData']?['tokenizationData'];
     final token = tokenData?['token'] as String? ?? jsonEncode(result);
     await _purchaseWithToken('google_pay', token);
@@ -645,6 +652,22 @@ class _PaySheetState extends State<_PaySheet> {
     );
   }
 
+  Future<void> _onApplePayResult(Map<String, dynamic> result) async {
+    debugPrint('[ApplePay] result: $result');
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    final token = jsonEncode(result);
+    await _purchaseWithToken('apple_pay', token);
+  }
+
+  void _onApplePayError(Object? error) {
+    debugPrint('[ApplePay] error: $error');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Apple Pay 發生錯誤：$error')),
+    );
+  }
+
   /// 送後端驗證並升級（真實付款路徑）
   Future<void> _purchaseWithToken(String store, String token) async {
     final userPlan = switch (widget.plan) {
@@ -655,23 +678,16 @@ class _PaySheetState extends State<_PaySheet> {
     final ok = await PlanService.purchasePlan(userPlan, store: store, purchaseToken: token);
     if (!mounted) return;
     if (ok) {
-      _showSuccess(store == 'google_pay' ? 'Google Pay' : store);
+      _showSuccess(switch (store) {
+        'google_pay' => 'Google Pay',
+        'apple_pay'  => 'Apple Pay',
+        _            => store,
+      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('付款驗證失敗，請稍後重試')),
+        SnackBar(content: Text(AppLocalizations.of(context).upgradePaymentFailed)),
       );
     }
-  }
-
-  /// Mock 付款路徑（僅 UI 展示用，不呼叫後端）
-  Future<void> _activatePlan(String method) async {
-    final userPlan = switch (widget.plan) {
-      _Plan.free  => UserPlan.free,
-      _Plan.pro   => UserPlan.pro,
-      _Plan.elite => UserPlan.elite,
-    };
-    await PlanService.setPlan(userPlan);
-    if (mounted) _showSuccess(method);
   }
 
   @override
@@ -691,7 +707,7 @@ class _PaySheetState extends State<_PaySheet> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('升級 ${widget.plan.label} 方案',
+                    Text(AppLocalizations.of(context).upgradeSubscribePlan(widget.plan.label),
                         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                     Text('${widget.plan.price}${widget.plan.period}',
                         style: TextStyle(fontSize: 13, color: widget.plan.primaryColor, fontWeight: FontWeight.w600)),
@@ -702,50 +718,43 @@ class _PaySheetState extends State<_PaySheet> {
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 8),
-            const Text('選擇付款方式', style: TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500)),
+            Text(AppLocalizations.of(context).upgradeSelectPayment, style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500)),
             const SizedBox(height: 12),
 
-            // ── Google Pay ──────────────────────────────────────
-            if (_googlePayConfig != null)
-              _GooglePayRow(
-                config: _googlePayConfig!,
-                paymentItems: _paymentItems,
-                onPaymentResult: _onGooglePayResult,
-                onError: _onGooglePayError,
+            if (_payConfig != null) ...[
+              if (_isIOS)
+                _ApplePayRow(
+                  config: _payConfig!,
+                  paymentItems: _paymentItems,
+                  onPaymentResult: _onApplePayResult,
+                  onError: _onApplePayError,
+                )
+              else
+                _GooglePayRow(
+                  config: _payConfig!,
+                  paymentItems: _paymentItems,
+                  onPaymentResult: _onGooglePayResult,
+                  onError: _onGooglePayError,
+                ),
+            ] else if (_configError)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  _isIOS
+                      ? AppLocalizations.of(context).upgradeApplePayFailed
+                      : AppLocalizations.of(context).upgradeGooglePayFailed,
+                  style: const TextStyle(color: Colors.red, fontSize: 13),
+                ),
               )
-            else if (_configError)
-              _payOptionMock(context, Icons.phone_android_rounded, 'Google Pay', const Color(0xFF4285F4))
             else
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
+                padding: EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
               ),
-
-            // ── 其他付款方式（Mock）──────────────────────────────
-            _payOptionMock(context, Icons.apple_rounded,       'Apple Pay', Colors.black87),
-            _payOptionMock(context, Icons.credit_card_rounded, '信用卡',    const Color(0xFF7B1FA2)),
-            _payOptionMock(context, Icons.chat_rounded,        'LINE Pay',  const Color(0xFF00B900)),
             const SizedBox(height: 4),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _payOptionMock(BuildContext context, IconData icon, String label, Color color) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Container(
-        width: 40, height: 40,
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-        child: Icon(icon, color: color, size: 22),
-      ),
-      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
-      trailing: const Icon(Icons.chevron_right_rounded, color: Colors.black38),
-      onTap: () async {
-        Navigator.of(context).pop();
-        await _activatePlan(label);
-      },
     );
   }
 
@@ -757,13 +766,70 @@ class _PaySheetState extends State<_PaySheet> {
         title: Row(children: [
           Icon(Icons.check_circle_rounded, color: widget.plan.primaryColor),
           const SizedBox(width: 8),
-          const Text('升級成功'),
+          Text(AppLocalizations.of(context).upgradeSuccessMsg),
         ]),
         content: Text('已透過 $method 升級為 ${widget.plan.label} 方案。\n感謝您的支持！'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('確定', style: TextStyle(color: widget.plan.primaryColor)),
+            child: Text(AppLocalizations.of(context).commonOk, style: TextStyle(color: widget.plan.primaryColor)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// Apple Pay 按鈕列
+// ════════════════════════════════════════════════════════════════
+
+class _ApplePayRow extends StatelessWidget {
+  final PaymentConfiguration config;
+  final List<PaymentItem> paymentItems;
+  final void Function(Map<String, dynamic>) onPaymentResult;
+  final void Function(Object?) onError;
+
+  const _ApplePayRow({
+    required this.config,
+    required this.paymentItems,
+    required this.onPaymentResult,
+    required this.onError,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.apple_rounded, color: Colors.black87, size: 24),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Text('Apple Pay', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
+          ),
+          SizedBox(
+            height: 44,
+            child: ApplePayButton(
+              paymentConfiguration: config,
+              paymentItems: paymentItems,
+              style: ApplePayButtonStyle.black,
+              type: ApplePayButtonType.buy,
+              cornerRadius: 10,
+              onPaymentResult: onPaymentResult,
+              onError: onError,
+              loadingIndicator: const SizedBox(
+                width: 80, height: 44,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+            ),
           ),
         ],
       ),

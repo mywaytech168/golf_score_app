@@ -66,6 +66,7 @@ builder.Services.AddSingleton<B2Service>();
 builder.Services.AddScoped<ShareService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<AppVersionService>();
+builder.Services.AddScoped<AnnouncementService>();
 builder.Services.AddSingleton<UploadServer.Services.ITokenBlacklistService, UploadServer.Services.TokenBlacklistService>();
 builder.Services.AddScoped<UploadServer.Services.IEmailService, UploadServer.Services.SmtpEmailService>();
 

@@ -169,6 +169,9 @@
       <div class="nav-item" :class="{active: tab==='version'}" @click="switchTab('version')">
         <span class="nav-icon">📱</span> 版本管理
       </div>
+      <div class="nav-item" :class="{active: tab==='announcements'}" @click="switchTab('announcements')">
+        <span class="nav-icon">📢</span> 公告管理
+      </div>
       <div class="sidebar-footer">
         <button class="btn btn-outline btn-sm" @click="logout">登出</button>
       </div>
@@ -442,6 +445,60 @@
         </template>
       </div>
 
+      <!-- ── ANNOUNCEMENTS ── -->
+      <div v-if="tab==='announcements'">
+        <div class="page-title">📢 公告管理</div>
+        <div class="toolbar">
+          <select v-model="ann.filterType" @change="loadAnnouncements()">
+            <option value="">全部類型</option>
+            <option value="info">info</option>
+            <option value="important">important</option>
+            <option value="event">event</option>
+            <option value="update">update</option>
+          </select>
+          <select v-model="ann.filterActive" @change="loadAnnouncements()">
+            <option value="">全部狀態</option>
+            <option value="true">啟用中</option>
+            <option value="false">已停用</option>
+          </select>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ annFiltered.length }} 筆</span>
+          <button class="btn btn-success btn-sm" @click="openAnnForm(null)">＋ 新增公告</button>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="ann.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>標題</th><th>類型</th><th>狀態</th><th>發布時間</th><th>到期時間</th><th style="width:130px">操作</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="a in annFiltered" :key="a.id">
+                <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="a.title">
+                  {{ a.title }}
+                </td>
+                <td><span class="badge" :class="annTypeBadge(a.type)">{{ a.type }}</span></td>
+                <td>
+                  <span class="badge" :class="a.isActive ? 'badge-green' : 'badge-gray'">
+                    {{ a.isActive ? '啟用' : '停用' }}
+                  </span>
+                </td>
+                <td style="white-space:nowrap;font-size:.82rem">{{ fmtDate(a.publishedAt) }}</td>
+                <td style="white-space:nowrap;font-size:.82rem">{{ a.expiresAt ? fmtDate(a.expiresAt) : '—' }}</td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-outline btn-sm" @click="openAnnForm(a)">編輯</button>
+                    <button class="btn btn-danger btn-sm" @click="deleteAnn(a.id)">刪除</button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!ann.loading && annFiltered.length===0">
+                <td colspan="6" style="text-align:center;color:var(--muted);padding:28px">尚無公告</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -513,13 +570,73 @@
     </div>
   </div>
 
+  <!-- ══ MODAL: 新增 / 編輯公告 ══ -->
+  <div class="modal-overlay" v-if="modal.annForm" @click.self="modal.annForm=false">
+    <div class="modal" style="width:560px">
+      <h2>{{ modal.annIsEdit ? '✏️ 編輯公告' : '📢 新增公告' }}</h2>
+
+      <div class="version-grid" style="margin-bottom:0">
+        <!-- 標題 -->
+        <div class="form-group span2">
+          <label>標題 <span style="color:var(--red)">*</span></label>
+          <input v-model="modal.annForm.title" placeholder="公告標題（最多 255 字）" maxlength="255" />
+        </div>
+        <!-- 內容 -->
+        <div class="form-group span2">
+          <label>內容 <span style="color:var(--red)">*</span></label>
+          <textarea v-model="modal.annForm.body" placeholder="公告內文…" style="min-height:120px"></textarea>
+        </div>
+        <!-- 類型 -->
+        <div class="form-group">
+          <label>類型</label>
+          <select v-model="modal.annForm.type">
+            <option value="info">info — 一般資訊</option>
+            <option value="important">important — 重要公告</option>
+            <option value="event">event — 活動</option>
+            <option value="update">update — 版本更新</option>
+          </select>
+        </div>
+        <!-- 啟用 -->
+        <div class="form-group" style="display:flex;align-items:flex-end">
+          <label class="toggle" style="cursor:pointer;user-select:none">
+            <input type="checkbox" v-model="modal.annForm.isActive" />
+            <span style="font-size:.9rem">啟用此公告</span>
+          </label>
+        </div>
+        <!-- 發布時間 -->
+        <div class="form-group">
+          <label>發布時間（留空 = 立即）</label>
+          <input type="datetime-local" v-model="modal.annForm.publishedAt" />
+        </div>
+        <!-- 到期時間 -->
+        <div class="form-group">
+          <label>到期時間（留空 = 永不過期）</label>
+          <input type="datetime-local" v-model="modal.annForm.expiresAt" />
+        </div>
+        <!-- 圖片 URL -->
+        <div class="form-group span2">
+          <label>圖片 URL（選填）</label>
+          <input v-model="modal.annForm.imageUrl" placeholder="https://…" />
+        </div>
+      </div>
+
+      <div class="err-msg" v-if="modal.annError" style="margin-top:12px">{{ modal.annError }}</div>
+      <div class="modal-actions" style="margin-top:20px">
+        <button class="btn btn-outline" @click="modal.annForm=false">取消</button>
+        <button class="btn btn-primary" @click="submitAnn" :disabled="modal.annLoading">
+          {{ modal.annLoading ? '儲存中...' : (modal.annIsEdit ? '儲存變更' : '建立公告') }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" v-if="toast.show">{{ toast.msg }}</div>
 
 </div>
 
 <script>
-const { createApp, reactive, ref, onMounted } = Vue;
+const { createApp, reactive, ref, computed, onMounted } = Vue;
 
 const BASE = '';  // same origin
 
@@ -535,6 +652,11 @@ createApp({
     const analyses  = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterStatus: '', filterUser: '' });
     const feedbacks = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterType: '' });
     const balls     = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterUser: '', filterReason: '' });
+    const ann = reactive({
+      data: [], loading: false,
+      filterType: '', filterActive: '',
+    });
+
     const version   = reactive({ loading: false, saving: { android: false, ios: false }, savedAt: {}, form: {
       android: { latestVersion:'', minRequiredVersion:'', forceUpdate:false, updateUrl:'', releaseDate:'', releaseNotesText:'' },
       ios:     { latestVersion:'', minRequiredVersion:'', forceUpdate:false, updateUrl:'', releaseDate:'', releaseNotesText:'' },
@@ -544,6 +666,9 @@ createApp({
       adjustBalls: false, adjustTarget: null, adjustDelta: 0, adjustError: '', adjustLoading: false,
       reply: false, replyTarget: null, replyText: '', replyError: '', replyLoading: false,
       feedbackDetail: false, detailTarget: null, imageUrl: null,
+      annForm: false, annIsEdit: false, annEditId: null,
+      annFormData() { return { title:'', body:'', type:'info', isActive:true, publishedAt:'', expiresAt:'', imageUrl:'' }; },
+      annError: '', annLoading: false,
     });
 
     const toast = reactive({ show: false, msg: '' });
@@ -556,6 +681,14 @@ createApp({
     async function api(path, opts = {}) {
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value}` };
       const res = await fetch(`${BASE}/api/admin${path}`, { ...opts, headers });
+      if (res.status === 401 || res.status === 403) { logout(); throw new Error('未授權'); }
+      return res;
+    }
+
+    // ── Announcements API helper (different base path) ──
+    async function annApi(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value}` };
+      const res = await fetch(`${BASE}/api/announcements${path}`, { ...opts, headers });
       if (res.status === 401 || res.status === 403) { logout(); throw new Error('未授權'); }
       return res;
     }
@@ -591,7 +724,8 @@ createApp({
       if (t === 'analyses')  loadAnalyses(1);
       if (t === 'feedbacks') loadFeedbacks(1);
       if (t === 'balls')     loadBalls(1);
-      if (t === 'version')   loadVersions();
+      if (t === 'version')       loadVersions();
+      if (t === 'announcements') loadAnnouncements();
     }
 
     // ── Users ──
@@ -797,25 +931,111 @@ createApp({
       } catch { modal.imageUrl = null; }
     }
 
+    // ── Announcements ──
+    async function loadAnnouncements() {
+      ann.loading = true;
+      try {
+        const res = await annApi('/admin');
+        const d   = await res.json();
+        ann.data = (d.data || []).map(a => ({
+          ...a,
+          isActive: a.isActive !== undefined ? a.isActive : true,
+        }));
+      } catch(e) { showToast('❌ 載入公告失敗'); }
+      finally { ann.loading = false; }
+    }
+
+    const annFiltered = computed(() => {
+      return ann.data.filter(a => {
+        if (ann.filterType   && a.type !== ann.filterType) return false;
+        if (ann.filterActive === 'true'  && !a.isActive)  return false;
+        if (ann.filterActive === 'false' &&  a.isActive)  return false;
+        return true;
+      });
+    });
+
+    function toLocalDT(isoStr) {
+      if (!isoStr) return '';
+      // datetime-local input needs "YYYY-MM-DDTHH:mm"
+      const d = new Date(isoStr);
+      const pad = n => String(n).padStart(2,'0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function openAnnForm(item) {
+      modal.annIsEdit = !!item;
+      modal.annEditId = item?.id ?? null;
+      modal.annError  = '';
+      modal.annForm   = {
+        title:       item?.title       ?? '',
+        body:        item?.body        ?? '',
+        type:        item?.type        ?? 'info',
+        isActive:    item?.isActive    ?? true,
+        publishedAt: toLocalDT(item?.publishedAt),
+        expiresAt:   toLocalDT(item?.expiresAt),
+        imageUrl:    item?.imageUrl    ?? '',
+      };
+    }
+
+    async function submitAnn() {
+      const f = modal.annForm;
+      if (!f.title?.trim()) { modal.annError = '標題不可為空'; return; }
+      if (!f.body?.trim())  { modal.annError = '內容不可為空'; return; }
+      modal.annLoading = true; modal.annError = '';
+      const payload = {
+        title:       f.title.trim(),
+        body:        f.body.trim(),
+        type:        f.type,
+        isActive:    f.isActive,
+        publishedAt: f.publishedAt || null,
+        expiresAt:   f.expiresAt   || null,
+        imageUrl:    f.imageUrl?.trim() || null,
+      };
+      try {
+        const res = modal.annIsEdit
+          ? await annApi(`/admin/${modal.annEditId}`, { method: 'PUT',  body: JSON.stringify(payload) })
+          : await annApi('/admin',                    { method: 'POST', body: JSON.stringify(payload) });
+        const d = await res.json();
+        if (!res.ok) { modal.annError = d.message || '操作失敗'; return; }
+        showToast(modal.annIsEdit ? '✅ 公告已更新' : '✅ 公告已建立');
+        modal.annForm = false;
+        await loadAnnouncements();
+      } catch(e) { modal.annError = '連線失敗：' + e.message; }
+      finally { modal.annLoading = false; }
+    }
+
+    async function deleteAnn(id) {
+      if (!confirm('確定要永久刪除此公告？')) return;
+      try {
+        const res = await annApi(`/admin/${id}`, { method: 'DELETE' });
+        if (!res.ok) { const d = await res.json(); showToast('❌ ' + (d.message||'刪除失敗')); return; }
+        showToast('🗑 公告已刪除');
+        await loadAnnouncements();
+      } catch(e) { showToast('❌ 刪除失敗：' + e.message); }
+    }
+
     // ── Badge helpers ──
     function planBadge(p)     { return p==='elite'?'badge-purple':p==='pro'?'badge-blue':'badge-gray'; }
     function statusBadge(s)   { return {completed:'badge-green',failed:'badge-red',processing:'badge-yellow',queued:'badge-blue',pending:'badge-gray'}[s]||'badge-gray'; }
     function severityBadge(s) { return {high:'badge-red',medium:'badge-yellow',low:'badge-green'}[s]||'badge-gray'; }
     function typeBadge(t)     { return {bug:'badge-red',feature:'badge-blue',other:'badge-gray'}[t]||'badge-gray'; }
     function reasonBadge(r)   { return {ad:'badge-yellow',feedback:'badge-blue',invite:'badge-purple',upload:'badge-green',analysis:'badge-red',manual:'badge-gray'}[r]||'badge-gray'; }
+    function annTypeBadge(t)  { return {info:'badge-blue',important:'badge-red',event:'badge-purple',update:'badge-green'}[t]||'badge-gray'; }
+    function fmtDate(s)       { if (!s) return '—'; const d = new Date(s); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
     onMounted(() => { if (token.value) switchTab('users'); });
 
     return {
       token, login, tab,
-      users, analyses, feedbacks, balls, version, modal, toast,
+      users, analyses, feedbacks, balls, version, ann, modal, toast,
       doLogin, logout, switchTab,
       loadUsers, loadAnalyses, loadFeedbacks, loadBalls, loadVersions, saveVersion,
       loadApkInfo, uploadApk, deleteApk,
       openAdjustBalls, submitAdjust,
       openReply, submitReply,
       viewFeedback, loadFeedbackImage,
-      planBadge, statusBadge, severityBadge, typeBadge, reasonBadge,
+      annFiltered, loadAnnouncements, openAnnForm, submitAnn, deleteAnn,
+      planBadge, statusBadge, severityBadge, typeBadge, reasonBadge, annTypeBadge, fmtDate,
     };
   }
 }).mount('#app');

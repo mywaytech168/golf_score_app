@@ -71,7 +71,9 @@ class LocalStatisticsCalculator {
     required String period,
     String? date,
   }) {
-    final totalCount = entries.length;
+    final totalCount    = entries.length;
+    final roundCount    = entries.where((e) => e.videoType == VideoType.original).length;
+    final practiceCount = entries.where((e) => e.videoType == VideoType.localClip).length;
 
     // 已分析的條目（goodShot 不為 null）
     final analyzed = entries.where((e) => e.goodShot != null).toList();
@@ -121,7 +123,9 @@ class LocalStatisticsCalculator {
       success: true,
       period: period,
       date: date,
-      totalCount: totalCount,
+      totalCount:    totalCount,
+      roundCount:    roundCount,
+      practiceCount: practiceCount,
       goodShot: goodCount,
       badShot: badCount,
       sweetSpotPercentage: sweetSpot,

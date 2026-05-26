@@ -134,9 +134,9 @@ class AdService {
       
       return rewarded;
     } else {
-      debugPrint('獎勵廣告還未準備好，允許用戶繼續（可能是測試環境）');
+      debugPrint('⚠️ [AdService] 獎勵廣告尚未就緒');
       loadRewardedAd();
-      return true; // 廣告未準備好時允許用戶繼續（這樣可以測試其他功能）
+      return kDebugMode; // debug 模式仍允許測試；production 需真正看完廣告
     }
   }
   

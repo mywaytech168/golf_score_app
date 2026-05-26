@@ -1011,6 +1011,618 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Select Language'**
   String get langSelectTitle;
+
+  /// No description provided for @settingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settingsTitle;
+
+  /// No description provided for @settingsSectionAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Account'**
+  String get settingsSectionAccount;
+
+  /// No description provided for @settingsChangeName.
+  ///
+  /// In en, this message translates to:
+  /// **'Change Name'**
+  String get settingsChangeName;
+
+  /// No description provided for @settingsChangeNameHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter display name'**
+  String get settingsChangeNameHint;
+
+  /// No description provided for @settingsChangePassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Change Password'**
+  String get settingsChangePassword;
+
+  /// No description provided for @settingsCurrentPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Current Password'**
+  String get settingsCurrentPassword;
+
+  /// No description provided for @settingsNewPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'New Password'**
+  String get settingsNewPassword;
+
+  /// No description provided for @settingsConfirmNewPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm New Password'**
+  String get settingsConfirmNewPassword;
+
+  /// No description provided for @settingsCurrentPasswordRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter current password'**
+  String get settingsCurrentPasswordRequired;
+
+  /// No description provided for @settingsConfirmChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm Change'**
+  String get settingsConfirmChange;
+
+  /// No description provided for @settingsPasswordChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Password changed'**
+  String get settingsPasswordChanged;
+
+  /// No description provided for @settingsGoogleLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Google Sign-In'**
+  String get settingsGoogleLogin;
+
+  /// No description provided for @settingsGoogleLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'Linked'**
+  String get settingsGoogleLinked;
+
+  /// No description provided for @settingsGoogleNotLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'Not linked. Tap to link Google account'**
+  String get settingsGoogleNotLinked;
+
+  /// No description provided for @settingsSectionAnalysis.
+  ///
+  /// In en, this message translates to:
+  /// **'Analysis Preferences'**
+  String get settingsSectionAnalysis;
+
+  /// No description provided for @settingsAnalysisQuality.
+  ///
+  /// In en, this message translates to:
+  /// **'Analysis Output Quality'**
+  String get settingsAnalysisQuality;
+
+  /// No description provided for @settingsQualityHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved as default for future analyses'**
+  String get settingsQualityHint;
+
+  /// No description provided for @settingsApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get settingsApply;
+
+  /// No description provided for @settingsQualityUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Output quality updated to \"{quality}\"'**
+  String settingsQualityUpdated(String quality);
+
+  /// No description provided for @settingsSectionSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription'**
+  String get settingsSectionSubscription;
+
+  /// No description provided for @settingsViewSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'View Subscription Plans'**
+  String get settingsViewSubscription;
+
+  /// No description provided for @settingsSectionGeneral.
+  ///
+  /// In en, this message translates to:
+  /// **'General'**
+  String get settingsSectionGeneral;
+
+  /// No description provided for @settingsLanguage.
+  ///
+  /// In en, this message translates to:
+  /// **'Language'**
+  String get settingsLanguage;
+
+  /// No description provided for @settingsCheckUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Check for Updates'**
+  String get settingsCheckUpdate;
+
+  /// No description provided for @settingsAlreadyLatest.
+  ///
+  /// In en, this message translates to:
+  /// **'Already on latest version v{version}'**
+  String settingsAlreadyLatest(String version);
+
+  /// No description provided for @settingsUpdateCheckFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Update check failed, please try again later'**
+  String get settingsUpdateCheckFailed;
+
+  /// No description provided for @settingsConfirmLogout.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm Logout?'**
+  String get settingsConfirmLogout;
+
+  /// No description provided for @settingsLogoutWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'ll need to sign in again to use cloud features.'**
+  String get settingsLogoutWarning;
+
+  /// No description provided for @settingsNameUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Name updated'**
+  String get settingsNameUpdated;
+
+  /// No description provided for @settingsPickFromGallery.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from Gallery'**
+  String get settingsPickFromGallery;
+
+  /// No description provided for @settingsRemoveAvatar.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove Avatar'**
+  String get settingsRemoveAvatar;
+
+  /// No description provided for @homeTodayOverview.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s Overview'**
+  String get homeTodayOverview;
+
+  /// No description provided for @homeHi.
+  ///
+  /// In en, this message translates to:
+  /// **'Hi, {name} 👋'**
+  String homeHi(String name);
+
+  /// No description provided for @homeRounds.
+  ///
+  /// In en, this message translates to:
+  /// **'Rounds'**
+  String get homeRounds;
+
+  /// No description provided for @homePractices.
+  ///
+  /// In en, this message translates to:
+  /// **'Practice'**
+  String get homePractices;
+
+  /// No description provided for @homeTodayGoodRate.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s Good Rate'**
+  String get homeTodayGoodRate;
+
+  /// No description provided for @homeGoodTimes.
+  ///
+  /// In en, this message translates to:
+  /// **'Good {count}'**
+  String homeGoodTimes(int count);
+
+  /// No description provided for @homeBadTimes.
+  ///
+  /// In en, this message translates to:
+  /// **'Bad {count}'**
+  String homeBadTimes(int count);
+
+  /// No description provided for @homeTodayPosture.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s Posture'**
+  String get homeTodayPosture;
+
+  /// No description provided for @homeTopSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Peak Speed'**
+  String get homeTopSpeed;
+
+  /// No description provided for @homeSweetSpot.
+  ///
+  /// In en, this message translates to:
+  /// **'Sweet Spot'**
+  String get homeSweetSpot;
+
+  /// No description provided for @homeCrispness.
+  ///
+  /// In en, this message translates to:
+  /// **'Crispness'**
+  String get homeCrispness;
+
+  /// No description provided for @homeAnnouncements.
+  ///
+  /// In en, this message translates to:
+  /// **'Announcements'**
+  String get homeAnnouncements;
+
+  /// No description provided for @homeRewardBalls.
+  ///
+  /// In en, this message translates to:
+  /// **'Reward Balls'**
+  String get homeRewardBalls;
+
+  /// No description provided for @weekdayMon.
+  ///
+  /// In en, this message translates to:
+  /// **'Mon'**
+  String get weekdayMon;
+
+  /// No description provided for @weekdayTue.
+  ///
+  /// In en, this message translates to:
+  /// **'Tue'**
+  String get weekdayTue;
+
+  /// No description provided for @weekdayWed.
+  ///
+  /// In en, this message translates to:
+  /// **'Wed'**
+  String get weekdayWed;
+
+  /// No description provided for @weekdayThu.
+  ///
+  /// In en, this message translates to:
+  /// **'Thu'**
+  String get weekdayThu;
+
+  /// No description provided for @weekdayFri.
+  ///
+  /// In en, this message translates to:
+  /// **'Fri'**
+  String get weekdayFri;
+
+  /// No description provided for @weekdaySat.
+  ///
+  /// In en, this message translates to:
+  /// **'Sat'**
+  String get weekdaySat;
+
+  /// No description provided for @weekdaySun.
+  ///
+  /// In en, this message translates to:
+  /// **'Sun'**
+  String get weekdaySun;
+
+  /// No description provided for @todayTitleToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s Summary'**
+  String get todayTitleToday;
+
+  /// No description provided for @todayTitleHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'History Summary'**
+  String get todayTitleHistory;
+
+  /// No description provided for @todayLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load, pull down to refresh'**
+  String get todayLoadFailed;
+
+  /// No description provided for @todaySweetSpotHit.
+  ///
+  /// In en, this message translates to:
+  /// **'Sweet Spot Hit'**
+  String get todaySweetSpotHit;
+
+  /// No description provided for @todayCrispness.
+  ///
+  /// In en, this message translates to:
+  /// **'Sound Crispness'**
+  String get todayCrispness;
+
+  /// No description provided for @todayTopSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Peak Speed'**
+  String get todayTopSpeed;
+
+  /// No description provided for @todayNoRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'No practice records today'**
+  String get todayNoRecord;
+
+  /// No description provided for @todayNoRecordDate.
+  ///
+  /// In en, this message translates to:
+  /// **'No practice records on this day'**
+  String get todayNoRecordDate;
+
+  /// No description provided for @todayGoRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'Go record a swing!'**
+  String get todayGoRecord;
+
+  /// No description provided for @todayPostureToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s Posture Analysis'**
+  String get todayPostureToday;
+
+  /// No description provided for @todayPosture.
+  ///
+  /// In en, this message translates to:
+  /// **'Posture Analysis'**
+  String get todayPosture;
+
+  /// No description provided for @annBoardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Announcements'**
+  String get annBoardTitle;
+
+  /// No description provided for @annUnreadCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} unread'**
+  String annUnreadCount(int count);
+
+  /// No description provided for @annAllAnnouncements.
+  ///
+  /// In en, this message translates to:
+  /// **'All Announcements'**
+  String get annAllAnnouncements;
+
+  /// No description provided for @annMarkAllRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark All Read'**
+  String get annMarkAllRead;
+
+  /// No description provided for @annRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get annRefresh;
+
+  /// No description provided for @annLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load, pull down to retry'**
+  String get annLoadFailed;
+
+  /// No description provided for @annMinutesAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{count}m ago'**
+  String annMinutesAgo(int count);
+
+  /// No description provided for @annHoursAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{count}h ago'**
+  String annHoursAgo(int count);
+
+  /// No description provided for @annDaysAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{count}d ago'**
+  String annDaysAgo(int count);
+
+  /// No description provided for @annDetailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Announcement Detail'**
+  String get annDetailTitle;
+
+  /// No description provided for @annExpiresAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Valid until {date}'**
+  String annExpiresAt(String date);
+
+  /// No description provided for @annEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No announcements'**
+  String get annEmpty;
+
+  /// No description provided for @annEmptySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New announcements will appear here'**
+  String get annEmptySubtitle;
+
+  /// No description provided for @updateNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'What\'s New'**
+  String get updateNotes;
+
+  /// No description provided for @updateForcedWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'This version is no longer supported. Please update to continue.'**
+  String get updateForcedWarning;
+
+  /// No description provided for @updateNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Update Now'**
+  String get updateNow;
+
+  /// No description provided for @updateRemindLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Remind Me Later'**
+  String get updateRemindLater;
+
+  /// No description provided for @updateDontRemind.
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t Remind'**
+  String get updateDontRemind;
+
+  /// No description provided for @updateCannotOpenStore.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot open store. Please update manually.'**
+  String get updateCannotOpenStore;
+
+  /// No description provided for @updateRequiredTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Required Update'**
+  String get updateRequiredTitle;
+
+  /// No description provided for @updateRequiredSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Please update to continue using TekSwing'**
+  String get updateRequiredSubtitle;
+
+  /// No description provided for @updateFoundTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New Version Available'**
+  String get updateFoundTitle;
+
+  /// No description provided for @updateFoundSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Update recommended for the best experience'**
+  String get updateFoundSubtitle;
+
+  /// No description provided for @updateCurrentVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Current Version'**
+  String get updateCurrentVersion;
+
+  /// No description provided for @updateLatestVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest Version'**
+  String get updateLatestVersion;
+
+  /// No description provided for @upgradePageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Upgrade Your Plan'**
+  String get upgradePageTitle;
+
+  /// No description provided for @upgradePageSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock more swing analysis features and sharpen your game'**
+  String get upgradePageSubtitle;
+
+  /// No description provided for @upgradeFullComparison.
+  ///
+  /// In en, this message translates to:
+  /// **'Full Feature Comparison'**
+  String get upgradeFullComparison;
+
+  /// No description provided for @upgradeFeatureColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'Feature'**
+  String get upgradeFeatureColumn;
+
+  /// No description provided for @upgradeSubscribePlan.
+  ///
+  /// In en, this message translates to:
+  /// **'Upgrade to {plan}'**
+  String upgradeSubscribePlan(String plan);
+
+  /// No description provided for @upgradeSelectPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'Select Payment Method'**
+  String get upgradeSelectPayment;
+
+  /// No description provided for @upgradeApplePayFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple Pay configuration failed to load'**
+  String get upgradeApplePayFailed;
+
+  /// No description provided for @upgradeGooglePayFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Google Pay configuration failed to load'**
+  String get upgradeGooglePayFailed;
+
+  /// No description provided for @upgradePaymentFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment verification failed, please try again'**
+  String get upgradePaymentFailed;
+
+  /// No description provided for @upgradeSuccessMsg.
+  ///
+  /// In en, this message translates to:
+  /// **'Upgrade successful'**
+  String get upgradeSuccessMsg;
+
+  /// No description provided for @upgradeAlreadyFree.
+  ///
+  /// In en, this message translates to:
+  /// **'You are already on the free plan'**
+  String get upgradeAlreadyFree;
+
+  /// No description provided for @learningTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Swing Learning'**
+  String get learningTitle;
+
+  /// No description provided for @learningMoreComing.
+  ///
+  /// In en, this message translates to:
+  /// **'More courses coming soon'**
+  String get learningMoreComing;
+
+  /// No description provided for @learningVideoComingSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Demo video coming soon. Key points and markers available for reference.'**
+  String get learningVideoComingSoon;
+
+  /// No description provided for @learningKeyMarkers.
+  ///
+  /// In en, this message translates to:
+  /// **'Key Markers'**
+  String get learningKeyMarkers;
 }
 
 class _AppLocalizationsDelegate
