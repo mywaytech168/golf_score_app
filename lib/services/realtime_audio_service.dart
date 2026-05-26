@@ -11,10 +11,18 @@ import 'audio_analyzer.dart';
 ///
 /// 錄影期間同步收集 PCM 樣本，停止後找到最強撞擊點，
 /// 截取 0.5 秒片段進行特徵提取與兩段式分類。
+///
+/// ⚠️ 記憶體限制：只保留最近 [_maxBufferSeconds] 秒的音訊，
+/// 避免長時間錄影時無限累積 PCM 數據導致 OOM。
 class RealtimeAudioService {
   final FlutterAudioCapture _capture = FlutterAudioCapture();
-  final List<double> _samples = [];
+
+  /// 環形緩衝區：使用 Float32List 節省一半記憶體（4 bytes vs double 8 bytes）
   static const int sampleRate = 44100;
+  static const int _maxBufferSeconds = 10; // 最多保留 10 秒 ≈ 441000 samples × 4 bytes ≈ 1.7MB
+  static const int _maxBufferSize = sampleRate * _maxBufferSeconds;
+
+  final List<double> _samples = [];
   bool _isActive = false;
 
   Future<void> start() async {
@@ -35,6 +43,10 @@ class RealtimeAudioService {
   void _onAudioData(Float32List samples) {
     for (final s in samples) {
       _samples.add(s.toDouble());
+    }
+    // 超出上限時，移除最舊的資料（保留最近 _maxBufferSeconds 秒）
+    if (_samples.length > _maxBufferSize) {
+      _samples.removeRange(0, _samples.length - _maxBufferSize);
     }
   }
 
