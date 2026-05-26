@@ -324,6 +324,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (idx != -1) {
       _entries[idx] = newEntry;
       setState(() {});
+      // filePath 若改變（clip.mp4 → final.mp4），必須先刪除舊 PRIMARY KEY，
+      // 否則 DB 會同時保留兩筆記錄，重啟後出現多一個切片。
+      if (oldEntry.filePath != newEntry.filePath) {
+        RecordingHistoryStorage.instance.deleteEntry(oldEntry.filePath);
+      }
       RecordingHistoryStorage.instance.upsertEntry(newEntry);
     }
   }

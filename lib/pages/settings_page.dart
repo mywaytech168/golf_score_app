@@ -269,25 +269,41 @@ class _SettingsPageState extends State<SettingsPage> {
   // ── 第三方登入（Google 綁定）─────────────────────────────────
   Future<void> _linkGoogle() async {
     try {
-      final googleSignIn = GoogleSignIn(scopes: ['email', 'openid']);
+      final googleSignIn = GoogleSignIn(
+        serverClientId: '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com',
+        scopes: const ['email', 'openid'],
+      );
       await googleSignIn.signOut();
       final account = await googleSignIn.signIn();
       if (account == null) return;
 
-      final auth     = await account.authentication;
-      final idToken  = auth.idToken;
+      final auth    = await account.authentication;
+      final idToken = auth.idToken;
       if (idToken == null) {
-        if (mounted) _showSnack(AppLocalizations.of(context).settingsGoogleNotLinked, isError: true);
+        if (mounted) _showSnack('無法取得 Google 憑證，請重試', isError: true);
         return;
       }
 
       if (!mounted) return;
       final res = await VideoServerClient.instance.linkGoogleAccount(idToken);
       if (!mounted) return;
+
+      // 無論成功或失敗都重新 fetch 伺服器狀態，確保 UI 與後端同步
+      final me = await VideoServerClient.instance.getMe();
+      if (mounted && me != null) {
+        setState(() => _googleLinked = me['googleLinked'] as bool? ?? _googleLinked);
+      }
+
+      if (!mounted) return;
       if (res['success'] == false) {
-        _showSnack(res['message']?.toString() ?? AppLocalizations.of(context).settingsGoogleLinked, isError: true);
+        final msg = res['message']?.toString() ?? '';
+        // 若伺服器回報已連結，視為成功刷新狀態
+        if (_googleLinked) {
+          _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
+        } else {
+          _showSnack(msg.isNotEmpty ? msg : 'Google 綁定失敗，請稍後再試', isError: true);
+        }
       } else {
-        setState(() => _googleLinked = true);
         _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
       }
     } catch (e) {
