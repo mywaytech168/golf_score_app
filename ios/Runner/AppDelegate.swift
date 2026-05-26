@@ -34,6 +34,9 @@ import UIKit
       registerSkeletonOverlayChannel(messenger: m)
       registerBallTrajectoryChannel(messenger: m)
 
+      // ── 影片轉檔（匯入時統一轉為標準 MP4）──────────────────
+      registerVideoTranscoderChannel(messenger: m)
+
       // ── Stub channels（iOS 尚未實作）────────────────────────
       setupStubChannel(name: "volume_button_channel", messenger: m)
     }
