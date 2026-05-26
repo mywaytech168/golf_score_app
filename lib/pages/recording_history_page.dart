@@ -1222,7 +1222,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 2. 讀取音訊：優先 audio.pcm（raw float32 LE），其次 audio.wav（WAV int16）
       progressNotifier.value = (0.35, '載入音訊中...');
       List<double> audioPcm = [];
-      const int sampleRate = 44100;
+      var sampleRate = 44100; // 預設值；讀到 WAV 時更新為 header 中的真實值
       bool audioHasSilence = false;
 
       final pcmAudioPath = p.join(sessionDir, 'audio.pcm');
@@ -1287,6 +1287,13 @@ class _HistoryTileState extends State<_HistoryTile> {
             debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 檔案過小');
             audioHasSilence = true;
           } else {
+            // 從 WAV header 讀取真實格式（不假設 44100Hz 或 mono）
+            final wavHd = bytes.buffer.asByteData();
+            final wavChannels   = wavHd.getUint16(22, Endian.little);
+            final wavSampleRate = wavHd.getUint32(24, Endian.little);
+            final wavBlockAlign = wavHd.getUint16(32, Endian.little);
+            sampleRate = wavSampleRate; // 更新外部變數，供 SwingImpactDetector 使用
+
             // 搜尋 "data" chunk（ASCII: 100 97 116 97）
             int dataStart = 44;
             for (int i = 36; i < bytes.length - 8; i++) {
@@ -1297,22 +1304,29 @@ class _HistoryTileState extends State<_HistoryTile> {
               }
             }
 
-            // 轉換 int16 LE → float32
+            // int16 LE → float32，多 channel 混為 mono
             final audioData = bytes.sublist(dataStart);
             double rmsSum = 0.0;
             double peakVal = 0.0;
 
-            for (int i = 0; i < audioData.length - 1; i += 2) {
-              final raw = audioData[i] | (audioData[i + 1] << 8);
-              final signed = (raw > 32767) ? raw - 65536 : raw;
-              final sample = signed / 32768.0;
+            for (int i = 0; i + wavBlockAlign <= audioData.length; i += wavBlockAlign) {
+              double frameVal = 0.0;
+              for (int ch = 0; ch < wavChannels; ch++) {
+                final offset = i + ch * 2;
+                if (offset + 1 >= audioData.length) break;
+                final raw = audioData[offset] | (audioData[offset + 1] << 8);
+                final signed = (raw > 32767) ? raw - 65536 : raw;
+                frameVal += signed / 32768.0;
+              }
+              final sample = frameVal / wavChannels;
               audioPcm.add(sample);
               rmsSum += sample * sample;
               final abs = sample.abs();
               if (abs > peakVal) peakVal = abs;
             }
 
-            debugPrint('[偵測擊球] ✅ WAV 讀取完成: ${audioPcm.length} 樣本 (dataStart=$dataStart)');
+            debugPrint('[偵測擊球] ✅ WAV 讀取完成: ${audioPcm.length} 幀 '
+                '(rate=$wavSampleRate ch=$wavChannels ba=$wavBlockAlign dataStart=$dataStart)');
 
             if (audioPcm.isNotEmpty) {
               final rms = math.sqrt(rmsSum / audioPcm.length);
@@ -1400,9 +1414,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         debugPrint('[偵測擊球] 🔧 診斷信息:');
         debugPrint('  - CSV 有效: ${csvLines.isNotEmpty}');
         debugPrint('  - PCM 樣本數: ${audioPcm.length}');
-        debugPrint('  - 期望樣本數 (30秒@44.1kHz): ${30 * 44100}');
-        debugPrint('  - 【無聲音】: $audioHasSilence');
-        debugPrint('  - 期望樣本數 (30秒@44.1kHz): ${30 * 44100}');
+        debugPrint('  - 期望樣本數 (30秒@$sampleRate Hz): ${30 * sampleRate}');
         debugPrint('  - 【無聲音】: $audioHasSilence');
         
         Navigator.pop(context);
@@ -1588,7 +1600,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       debugPrint('[完整分析] 開始音頻分析...');
       progressNotifier.value = (0.7, '音頻分析中...');
 
-      const int sampleRate = 44100;
+      var sampleRate = 44100; // 預設值；讀到 WAV header 時更新為真實值
       final wavFile = File(p.join(sessionDir, 'audio.wav'));
       debugPrint('[完整分析] WAV 檔案路徑: ${wavFile.path}');
       
@@ -1629,7 +1641,13 @@ class _HistoryTileState extends State<_HistoryTile> {
           if (bytes.isEmpty || bytes.length < 44) {
             debugPrint('[完整分析] ⚠️  WAV 檔案太小');
           } else {
-            // 🔧 解析 WAV 头
+            // 從 WAV header 讀取真實格式
+            final wavHd2 = bytes.buffer.asByteData();
+            final wavChannels2   = wavHd2.getUint16(22, Endian.little);
+            final wavSampleRate2 = wavHd2.getUint32(24, Endian.little);
+            final wavBlockAlign2 = wavHd2.getUint16(32, Endian.little);
+            sampleRate = wavSampleRate2;
+
             int dataStart = 44;
             for (int i = 36; i < bytes.length - 8; i++) {
               if (bytes[i] == 100 && bytes[i + 1] == 97 &&
@@ -1638,17 +1656,24 @@ class _HistoryTileState extends State<_HistoryTile> {
                 break;
               }
             }
-            
-            // 🔧 转换 int16 → float32
+
+            // int16 LE → float32，多 channel 混為 mono
             final audioDataBytes = bytes.sublist(dataStart);
             final pcmSamples = <double>[];
-            
-            for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
-              final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
-              final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
-              pcmSamples.add(signedInt16 / 32768.0);
+
+            for (int i = 0; i + wavBlockAlign2 <= audioDataBytes.length; i += wavBlockAlign2) {
+              double frameVal = 0.0;
+              for (int ch = 0; ch < wavChannels2; ch++) {
+                final offset = i + ch * 2;
+                if (offset + 1 >= audioDataBytes.length) break;
+                final raw = audioDataBytes[offset] | (audioDataBytes[offset + 1] << 8);
+                final signed = (raw > 32767) ? raw - 65536 : raw;
+                frameVal += signed / 32768.0;
+              }
+              pcmSamples.add(frameVal / wavChannels2);
             }
-            
+
+            debugPrint('[完整分析] WAV 格式: rate=$wavSampleRate2 ch=$wavChannels2 ba=$wavBlockAlign2');
             debugPrint('[完整分析] PCM 樣本數: ${pcmSamples.length}');
 
             if (pcmSamples.isNotEmpty) {
