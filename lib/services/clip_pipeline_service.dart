@@ -127,19 +127,45 @@ class ClipPipelineService {
     // clip 實際從 key frame 開始，可能略早於 hit.startSec，用 actualStartSec 對齊 CSV
     final clipActualStartSec = trimResult.actualStartSec;
 
-    // 縮圖定位到擊球瞬間
+    // 縮圖定位到擊球瞬間，使用多策略 fallback 處理 HEVC/MOV 相容性
     String? thumbPath;
-    try {
-      final hitInClipMs = ((hit.hitSec - clipActualStartSec) * 1000).round().clamp(0, 999999);
-      thumbPath = await vt.VideoThumbnail.thumbnailFile(
-        video: trimmed,
-        thumbnailPath: p.join(sessionDir, 'thumbnail.jpg'),
-        imageFormat: vt.ImageFormat.JPEG,
-        timeMs: hitInClipMs,
-        quality: 75,
-      );
-    } catch (e) {
-      debugPrint('[Pipeline] hit ${hit.hitIndex} → 縮圖生成失敗: $e');
+    final thumbOutPath = p.join(sessionDir, 'thumbnail.jpg');
+    final hitInClipMs = ((hit.hitSec - clipActualStartSec) * 1000).round().clamp(0, 999999);
+    final timeCandidates = {hitInClipMs, 0, 1000}.toList();
+    for (final timeMs in timeCandidates) {
+      try {
+        final path = await vt.VideoThumbnail.thumbnailFile(
+          video: trimmed,
+          thumbnailPath: thumbOutPath,
+          imageFormat: vt.ImageFormat.JPEG,
+          maxHeight: 256,
+          timeMs: timeMs,
+          quality: 75,
+        );
+        if (path != null && path.isNotEmpty) {
+          thumbPath = path;
+          break;
+        }
+      } catch (e) {
+        debugPrint('[Pipeline] hit ${hit.hitIndex} → 縮圖 ${timeMs}ms 失敗: $e');
+      }
+    }
+    if (thumbPath == null) {
+      try {
+        final bytes = await vt.VideoThumbnail.thumbnailData(
+          video: trimmed,
+          imageFormat: vt.ImageFormat.JPEG,
+          maxHeight: 256,
+          timeMs: 0,
+          quality: 75,
+        );
+        if (bytes != null && bytes.isNotEmpty) {
+          await File(thumbOutPath).writeAsBytes(bytes);
+          thumbPath = thumbOutPath;
+        }
+      } catch (e) {
+        debugPrint('[Pipeline] hit ${hit.hitIndex} → thumbnailData 失敗: $e');
+      }
     }
 
     // 從原始 CSV 擷取此球的骨架資料，存入 clip session 目錄

@@ -365,18 +365,41 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<String?> _generateThumbnail(String videoPath) async {
+    final sessionDir = File(videoPath).parent.path;
+    final outPath = p.join(sessionDir, 'thumbnail.jpg');
+
+    for (final timeMs in [0, 1000, 3000]) {
+      try {
+        final path = await vt.VideoThumbnail.thumbnailFile(
+          video: videoPath,
+          thumbnailPath: outPath,
+          imageFormat: vt.ImageFormat.JPEG,
+          maxHeight: 256,
+          timeMs: timeMs,
+          quality: 75,
+        );
+        if (path != null && path.isNotEmpty) return path;
+      } catch (e) {
+        debugPrint('[RecordScreen] thumbnail ${timeMs}ms error: $e');
+      }
+    }
+
     try {
-      final sessionDir = File(videoPath).parent.path;
-      return await vt.VideoThumbnail.thumbnailFile(
+      final bytes = await vt.VideoThumbnail.thumbnailData(
         video: videoPath,
-        thumbnailPath: sessionDir,
         imageFormat: vt.ImageFormat.JPEG,
+        maxHeight: 256,
+        timeMs: 0,
         quality: 75,
       );
+      if (bytes != null && bytes.isNotEmpty) {
+        await File(outPath).writeAsBytes(bytes);
+        return outPath;
+      }
     } catch (e) {
-      debugPrint('[RecordScreen] thumbnail error: $e');
-      return null;
+      debugPrint('[RecordScreen] thumbnailData error: $e');
     }
+    return null;
   }
 
   // ─── 姿勢偵測 ─────────────────────────────────────────────────────────────

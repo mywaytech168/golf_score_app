@@ -523,7 +523,7 @@ class VideoAnalysisService {
         return true; // 無檔案 = 無聲音
       }
 
-      final wavBytes = await wavFile.readAsBytes();
+      Uint8List? wavBytes = await wavFile.readAsBytes();
       debugPrint('[VideoAnalysis] 🔊 檢測音訊: ${wavBytes.length} bytes');
 
       if (wavBytes.length < 44) {
@@ -541,25 +541,28 @@ class VideoAnalysisService {
         }
       }
 
-      final audioDataBytes = wavBytes.sublist(dataStart);
-      if (audioDataBytes.isEmpty) {
+      if (dataStart >= wavBytes.length) {
         debugPrint('[VideoAnalysis] ⚠️ 【無聲音】WAV data 為空');
         return true;
       }
 
-      // 分析音訊幅度：計算 RMS 和峰值
+      // 分析音訊幅度：計算 RMS 和峰值（直接索引，不建立 sublist 副本）
       double rmsSum = 0.0;
       double peakVal = 0.0;
       int sampleCount = 0;
+      final wavLen = wavBytes.length;
 
-      for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
-        final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
+      for (int i = dataStart; i + 1 < wavLen; i += 2) {
+        final int16 = wavBytes[i] | (wavBytes[i + 1] << 8);
         final signedInt16 = (int16 > 32767) ? int16 - 65536 : int16;
         final normalized = signedInt16 / 32768.0;
         rmsSum += normalized * normalized;
         if (normalized.abs() > peakVal) peakVal = normalized.abs();
         sampleCount++;
       }
+
+      // 釋放 WAV 原始資料
+      wavBytes = null;
 
       final rms = math.sqrt(rmsSum / sampleCount);
       debugPrint('[VideoAnalysis] 🔊 音訊分析: RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}, Samples=$sampleCount');

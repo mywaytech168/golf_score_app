@@ -94,20 +94,55 @@ class ExternalVideoImporter {
     return maxRound + 1;
   }
 
-  /// 生成視頻封面（與 RecordScreen 的方式相同）
+  /// 生成視頻封面
+  ///
+  /// Android HEVC-in-MOV 支援差，採多策略 fallback：
+  ///   1. thumbnailFile at 0ms with maxHeight:256
+  ///   2. thumbnailFile at 1000ms with maxHeight:256
+  ///   3. thumbnailData at 0ms → 手動寫檔
   Future<String?> _generateThumbnail(String videoPath) async {
+    final sessionDir = File(videoPath).parent.path;
+    final outPath = p.join(sessionDir, 'thumbnail.jpg');
+
+    for (final timeMs in [0, 1000, 3000]) {
+      try {
+        final path = await vt.VideoThumbnail.thumbnailFile(
+          video: videoPath,
+          thumbnailPath: outPath,
+          imageFormat: vt.ImageFormat.JPEG,
+          maxHeight: 256,
+          timeMs: timeMs,
+          quality: 75,
+        );
+        if (path != null && path.isNotEmpty) {
+          debugPrint('[Importer] ✅ 縮圖 (${timeMs}ms): $path');
+          return path;
+        }
+      } catch (e) {
+        debugPrint('[Importer] ⚠️ thumbnailFile ${timeMs}ms 失敗: $e');
+      }
+    }
+
+    // 最後手段：thumbnailData → 手動寫檔
     try {
-      final sessionDir = File(videoPath).parent.path;
-      return await vt.VideoThumbnail.thumbnailFile(
+      final bytes = await vt.VideoThumbnail.thumbnailData(
         video: videoPath,
-        thumbnailPath: sessionDir,
         imageFormat: vt.ImageFormat.JPEG,
+        maxHeight: 256,
+        timeMs: 0,
         quality: 75,
       );
+      if (bytes != null && bytes.isNotEmpty) {
+        await File(outPath).writeAsBytes(bytes);
+        debugPrint('[Importer] ✅ 縮圖 (thumbnailData fallback): $outPath');
+        return outPath;
+      }
     } catch (e) {
-      debugPrint('[Importer] ⚠️ 生成封面失敗: $e');
-      return null;
+      debugPrint('[Importer] ⚠️ thumbnailData 失敗: $e');
     }
+
+    debugPrint('[Importer] ❌ 所有縮圖策略失敗: $videoPath');
+    return null;
   }
 
   /// 解析影片長度，至少回傳 1 秒避免 UI 顯示為 0

@@ -168,6 +168,8 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   void dispose() {
     _posSub?.cancel();
     _stopSync();
+    _playerA.stop();
+    _playerB.stop();
     _playerA.dispose();
     _playerB.dispose();
     super.dispose();

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -90,27 +91,32 @@ class AudioExtractionService {
       // 直接复制 WAV 文件
       await wavFile.copy(outputWavPath);
       
-      // 计算样本数
-      final wavBytes = await File(outputWavPath).readAsBytes();
-      if (wavBytes.length < 44) {
-        debugPrint('$_tag ❌ WAV 文件太小: ${wavBytes.length} 字节');
+      // 只讀 header（最多 100 bytes）計算樣本數，避免讀取整個 WAV 檔
+      final fileSize = await File(outputWavPath).length();
+      if (fileSize < 44) {
+        debugPrint('$_tag ❌ WAV 文件太小: $fileSize 字节');
         return 0;
       }
 
-      // 查找 data chunk 计算样本数
+      final raf = await File(outputWavPath).open();
       int dataSize = 0;
-      for (int i = 36; i < wavBytes.length - 8; i++) {
-        if (wavBytes[i] == 100 && wavBytes[i + 1] == 97 &&
-            wavBytes[i + 2] == 116 && wavBytes[i + 3] == 97) {
-          dataSize = wavBytes[i + 4] | (wavBytes[i + 5] << 8) |
-              (wavBytes[i + 6] << 16) | (wavBytes[i + 7] << 24);
-          break;
+      try {
+        final headerBytes = await raf.read(math.min(100, fileSize));
+        for (int i = 36; i < headerBytes.length - 8; i++) {
+          if (headerBytes[i] == 100 && headerBytes[i + 1] == 97 &&
+              headerBytes[i + 2] == 116 && headerBytes[i + 3] == 97) {
+            dataSize = headerBytes[i + 4] | (headerBytes[i + 5] << 8) |
+                (headerBytes[i + 6] << 16) | (headerBytes[i + 7] << 24);
+            break;
+          }
         }
+      } finally {
+        await raf.close();
       }
 
       final sampleCount = dataSize ~/ 2;  // 16-bit PCM: 每个样本 2 字节
 
-      debugPrint('$_tag ✅ WAV 保存成功: $outputWavPath (${wavBytes.length} 字节, $sampleCount 样本)');
+      debugPrint('$_tag ✅ WAV 保存成功: $outputWavPath ($fileSize 字节, $sampleCount 样本)');
 
       // 清理临时 WAV 文件
       try {

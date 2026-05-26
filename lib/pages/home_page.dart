@@ -1,5 +1,7 @@
 ﻿import 'dart:async';
 import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
@@ -132,11 +134,48 @@ class _HomePageState extends State<HomePage> {
       final missing = thumbnailPath == null ||
           thumbnailPath.isEmpty ||
           !(await File(thumbnailPath).exists());
-      if (missing) thumbnailPath = null;
+      if (missing) {
+        // 縮圖遺失時嘗試從影片重新生成（處理舊有 HEVC/MOV 影片）
+        final regen = await _tryRegenThumbnail(entry.filePath);
+        thumbnailPath = regen;
+      }
       if (thumbnailPath != entry.thumbnailPath) hasChanges = true;
       updated.add(entry.copyWith(thumbnailPath: thumbnailPath));
     }
     return hasChanges ? updated : null;
+  }
+
+  /// 嘗試重新生成縮圖，支援 HEVC/MOV fallback。失敗回傳 null。
+  static Future<String?> _tryRegenThumbnail(String videoPath) async {
+    if (!await File(videoPath).exists()) return null;
+    final outPath = p.join(File(videoPath).parent.path, 'thumbnail.jpg');
+    for (final timeMs in [0, 1000, 3000]) {
+      try {
+        final path = await vt.VideoThumbnail.thumbnailFile(
+          video: videoPath,
+          thumbnailPath: outPath,
+          imageFormat: vt.ImageFormat.JPEG,
+          maxHeight: 256,
+          timeMs: timeMs,
+          quality: 75,
+        );
+        if (path != null && path.isNotEmpty) return path;
+      } catch (_) {}
+    }
+    try {
+      final bytes = await vt.VideoThumbnail.thumbnailData(
+        video: videoPath,
+        imageFormat: vt.ImageFormat.JPEG,
+        maxHeight: 256,
+        timeMs: 0,
+        quality: 75,
+      );
+      if (bytes != null && bytes.isNotEmpty) {
+        await File(outPath).writeAsBytes(bytes);
+        return outPath;
+      }
+    } catch (_) {}
+    return null;
   }
 
   // ── Build ────────────────────────────────────────────────────

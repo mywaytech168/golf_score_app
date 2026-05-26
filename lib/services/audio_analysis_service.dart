@@ -366,14 +366,15 @@ class _WavData {
   final List<double> samples;
 }
 
-// Simple WAV reader (supports 16-bit PCM little-endian mono/stereo)
+// Simple WAV reader (supports 16-bit PCM little-endian mono/stereo).
+// Uses Uint8List (1 byte/element) instead of List<int> (8 bytes/element on 64-bit)
+// to avoid ~8x memory amplification for large WAV files.
 Future<_WavData> _readWav(String path) async {
-    final File f = File(path);
-    final List<int> bytes = await f.readAsBytes();
-    if (bytes.length < 44) return _WavData(0, <double>[]);
-    // little-endian helper
-    int u32(int offset) => bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
-    int u16(int offset) => bytes[offset] | (bytes[offset + 1] << 8);
+    final Uint8List raw = await File(path).readAsBytes();
+    if (raw.length < 44) return _WavData(0, <double>[]);
+    // little-endian helpers
+    int u32(int offset) => raw[offset] | (raw[offset + 1] << 8) | (raw[offset + 2] << 16) | (raw[offset + 3] << 24);
+    int u16(int offset) => raw[offset] | (raw[offset + 1] << 8);
     final int fmtChunkOffset = 12;
     final int numChannels = u16(fmtChunkOffset + 10);
     final int sampleRate = u32(fmtChunkOffset + 12);
@@ -381,18 +382,18 @@ Future<_WavData> _readWav(String path) async {
 
     // find data chunk
     int idx = 12;
-    while (idx + 8 < bytes.length) {
-      final String chunkId = String.fromCharCodes(bytes.sublist(idx, idx + 4));
+    while (idx + 8 < raw.length) {
+      final String chunkId = String.fromCharCodes(raw.sublist(idx, idx + 4));
       final int chunkSize = u32(idx + 4);
       if (chunkId == 'data') {
         final int dataStart = idx + 8;
-        final int dataEnd = math.min(bytes.length, dataStart + chunkSize);
+        final int dataEnd = math.min(raw.length, dataStart + chunkSize);
         final List<double> samples = <double>[];
         if (bitsPerSample == 16) {
           for (int i = dataStart; i + 1 < dataEnd; i += 2 * numChannels) {
             // read first channel only
-            final int lo = bytes[i];
-            final int hi = bytes[i + 1];
+            final int lo = raw[i];
+            final int hi = raw[i + 1];
             int val = (hi << 8) | lo;
             if (val & 0x8000 != 0) val = val - 0x10000;
             samples.add(val / 32768.0);

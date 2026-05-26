@@ -1492,6 +1492,33 @@ class _HistoryTileState extends State<_HistoryTile> {
   Future<void> _runCombinedAnalysis() async {
     if (_isAnalyzing) return;
 
+    // ── iOS 長影片記憶體警告（> 60 秒）──────────────────────────────
+    if (Platform.isIOS && widget.entry.durationSeconds > 60 && mounted) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('影片較長'),
+          content: Text(
+            '此影片長度為 ${widget.entry.durationSeconds} 秒。\n\n'
+            '建議先在相機 App 裁切至 30 秒內再匯入分析，\n'
+            '以避免 iOS 記憶體不足導致 App 閃退。\n\n'
+            '確定繼續分析整支影片？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('繼續分析'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
     // ── 品質選擇對話框（僅短影片需要編碼，長影片直接跳過）────────────
     ExportQuality selectedQuality = ExportQuality.standard;
     if (!_isLongVideo && mounted) {
@@ -1635,11 +1662,12 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (wavExists) {
         debugPrint('[完整分析] ✅ WAV 檔案存在');
         try {
-          final bytes = await wavFile.readAsBytes();
+          Uint8List? bytes = await wavFile.readAsBytes();
           debugPrint('[完整分析] WAV 字節數: ${bytes.length}');
-          
+
           if (bytes.isEmpty || bytes.length < 44) {
             debugPrint('[完整分析] ⚠️  WAV 檔案太小');
+            bytes = null;
           } else {
             // 從 WAV header 讀取真實格式
             final wavHd2 = bytes.buffer.asByteData();
@@ -1658,20 +1686,24 @@ class _HistoryTileState extends State<_HistoryTile> {
             }
 
             // int16 LE → float32，多 channel 混為 mono
-            final audioDataBytes = bytes.sublist(dataStart);
+            // 直接從 bytes[dataStart] 讀取，避免 sublist() 複製整份 WAV 資料
+            final audioDataLen = bytes.length - dataStart;
             final pcmSamples = <double>[];
 
-            for (int i = 0; i + wavBlockAlign2 <= audioDataBytes.length; i += wavBlockAlign2) {
+            for (int i = 0; i + wavBlockAlign2 <= audioDataLen; i += wavBlockAlign2) {
               double frameVal = 0.0;
               for (int ch = 0; ch < wavChannels2; ch++) {
-                final offset = i + ch * 2;
-                if (offset + 1 >= audioDataBytes.length) break;
-                final raw = audioDataBytes[offset] | (audioDataBytes[offset + 1] << 8);
+                final offset = dataStart + i + ch * 2;
+                if (offset + 1 >= bytes.length) break;
+                final raw = bytes[offset] | (bytes[offset + 1] << 8);
                 final signed = (raw > 32767) ? raw - 65536 : raw;
                 frameVal += signed / 32768.0;
               }
               pcmSamples.add(frameVal / wavChannels2);
             }
+
+            // 立即釋放 WAV 原始資料，pcmSamples 獨立存活
+            bytes = null;
 
             debugPrint('[完整分析] WAV 格式: rate=$wavSampleRate2 ch=$wavChannels2 ba=$wavBlockAlign2');
             debugPrint('[完整分析] PCM 樣本數: ${pcmSamples.length}');
