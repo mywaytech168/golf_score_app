@@ -1,7 +1,6 @@
 import AVFoundation
 import Flutter
 import UIKit
-import WatchConnectivity
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -17,7 +16,6 @@ import WatchConnectivity
       // ── 已實作的 channel ─────────────────────────────────────
       setupKeepScreenChannel(messenger: m)
       setupAudioExtractorChannel(messenger: m)
-      setupWatchChannel(messenger: m)
 
       // ── 分析進度 EventChannel ────────────────────────────────
       FlutterEventChannel(
@@ -208,81 +206,6 @@ private extension AppDelegate {
       try? handle.seek(toOffset: 0)
       handle.write(header)
       try? handle.close()
-    }
-  }
-}
-
-// MARK: - Watch connectivity
-
-@available(iOS 15.0, *)
-class WatchStreamHandler: NSObject, FlutterStreamHandler, WCSessionDelegate {
-  var sink: FlutterEventSink?
-  let session: WCSession
-
-  override init() {
-    if WCSession.isSupported() {
-      session = WCSession.default
-    } else {
-      fatalError("WCSession not supported")
-    }
-    super.init()
-    session.delegate = self
-    session.activate()
-  }
-
-  func sendCommandToWatch(command: String) {
-    guard session.isReachable else { return }
-    session.sendMessage(["command": command], replyHandler: nil) { error in
-      print("Send command error: \(error.localizedDescription)")
-    }
-  }
-
-  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-    sink = events
-    return nil
-  }
-
-  func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    sink = nil
-    return nil
-  }
-
-  func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
-  func sessionDidBecomeInactive(_ session: WCSession) {}
-  func sessionDidDeactivate(_ session: WCSession) { session.activate() }
-
-  func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-    DispatchQueue.main.async { [weak self] in
-      self?.sink?(message)
-    }
-  }
-}
-
-private extension AppDelegate {
-  func setupWatchChannel(messenger: FlutterBinaryMessenger) {
-    let eventChannel  = FlutterEventChannel(name: "watch_imu_stream",   binaryMessenger: messenger)
-    let methodChannel = FlutterMethodChannel(name: "watch_imu_control", binaryMessenger: messenger)
-
-    if #available(iOS 15.0, *) {
-      let handler = WatchStreamHandler()
-      eventChannel.setStreamHandler(handler)
-
-      methodChannel.setMethodCallHandler { call, result in
-        switch call.method {
-        case "startIMU":
-          handler.sendCommandToWatch(command: "start")
-          result(true)
-        case "stopIMU":
-          handler.sendCommandToWatch(command: "stop")
-          result(true)
-        case "isWatchReachable":
-          result(handler.session.isReachable)
-        case "isWatchAppInstalled":
-          result(handler.session.isWatchAppInstalled)
-        default:
-          result(FlutterMethodNotImplemented)
-        }
-      }
     }
   }
 }
