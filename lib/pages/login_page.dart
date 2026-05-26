@@ -192,7 +192,6 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final googleSignIn = GoogleSignIn(
-        clientId: '446697241300-2bba3v5gkc2679drmgeek0k6u20n5fks.apps.googleusercontent.com',
         scopes: const ['email', 'profile'],
       );
       await googleSignIn.signOut();

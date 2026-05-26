@@ -10,6 +10,7 @@ import '../models/export_quality.dart';
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import 'analysis_progress_service.dart';
+import 'ball_detection_prefs.dart';
 import 'ball_tracker.dart';
 import 'ball_trajectory_service.dart';
 import 'skeleton_overlay_service.dart';
@@ -331,8 +332,13 @@ class ClipPipelineService {
       progressSvc.progress.addListener(_listenBlobs);
       final trajOut = p.join(sessionDir, 'final.mp4');
 
-      final extraction =
-          await BallTrajectoryService.extractBlobs(inputPath: clipPath);
+      // 讀取球偵測模式（原版 or TFLite）
+      final ballMode = await BallDetectionPrefs.getMode();
+      debugPrint('[Pipeline.analyze] 球偵測模式: ${ballMode.label}');
+
+      final extraction = ballMode == BallDetectionMode.tflite
+          ? await BallTrajectoryService.extractBlobsTflite(inputPath: clipPath)
+          : await BallTrajectoryService.extractBlobs(inputPath: clipPath);
       progressSvc.progress.removeListener(_listenBlobs);
 
       if (extraction == null) {
