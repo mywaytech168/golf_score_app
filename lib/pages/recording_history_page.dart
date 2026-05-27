@@ -21,6 +21,7 @@ import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
 import '../services/ad_service.dart';
+import '../services/plan_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../widgets/hits_summary_widget.dart';
 import '../widgets/green_page_header.dart';
@@ -1224,137 +1225,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
       }
 
-      // 2. 讀取音訊：優先 audio.pcm（raw float32 LE），其次 audio.wav（WAV int16）
-      progressNotifier.value = (0.35, '載入音訊中...');
-      List<double> audioPcm = [];
-      var sampleRate = 44100; // 預設值；讀到 WAV 時更新為 header 中的真實值
-      bool audioHasSilence = false;
-
-      final pcmAudioPath = p.join(sessionDir, 'audio.pcm');
-      final wavAudioPath = p.join(sessionDir, 'audio.wav');
-      final pcmFile = File(pcmAudioPath);
-      final wavFile = File(wavAudioPath);
-
-      final pcmExists = await pcmFile.exists();
-      final wavExists = await wavFile.exists();
-
-      debugPrint('[偵測擊球] 📂 CSV 路徑: $csvPath');
-      debugPrint('[偵測擊球] 📂 CSV 存在: ${await File(csvPath).exists()}');
-      debugPrint('[偵測擊球] 📂 PCM 路徑: $pcmAudioPath, 存在: $pcmExists');
-      debugPrint('[偵測擊球] 📂 WAV 路徑: $wavAudioPath, 存在: $wavExists');
-
-      if (pcmExists) {
-        // ── 原始錄製：audio.pcm（raw float32 LE）────────────────────────
-        final bytes = await pcmFile.readAsBytes();
-        debugPrint('[偵測擊球] 🔊 PCM 大小: ${bytes.length} bytes');
-
-        if (bytes.length >= 4) {
-          final byteData = bytes.buffer.asByteData();
-          final sampleCount = bytes.length ~/ 4;
-          double rmsSum = 0.0;
-          double peakVal = 0.0;
-
-          for (int i = 0; i < sampleCount; i++) {
-            final sample = byteData.getFloat32(i * 4, Endian.little);
-            if (sample.isFinite) {
-              audioPcm.add(sample);
-              rmsSum += sample * sample;
-              final abs = sample.abs();
-              if (abs > peakVal) peakVal = abs;
-            }
-          }
-
-          debugPrint('[偵測擊球] ✅ PCM 讀取完成: ${audioPcm.length} 樣本');
-
-          if (audioPcm.isNotEmpty) {
-            final rms = math.sqrt(rmsSum / audioPcm.length);
-            debugPrint('[偵測擊球] 📊 PCM RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
-            if (rms < 0.001 && peakVal < 0.01) {
-              debugPrint('[偵測擊球] ⚠️ 【無聲音】RMS 及 Peak 均偏低');
-              audioHasSilence = true;
-            }
-          } else {
-            debugPrint('[偵測擊球] ⚠️ 【無聲音】無有效浮點樣本');
-            audioHasSilence = true;
-          }
-        } else {
-          debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 檔案過小 (${bytes.length} bytes)');
-          audioHasSilence = true;
-        }
-      } else if (wavExists) {
-        // ── 切片 session：audio.wav（WAV header + int16 PCM）───────────
-        debugPrint('[偵測擊球] 🔊 讀取 WAV 檔案...');
-        try {
-          final bytes = await wavFile.readAsBytes();
-          debugPrint('[偵測擊球] 🔊 WAV 大小: ${bytes.length} bytes');
-
-          if (bytes.length < 44) {
-            debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 檔案過小');
-            audioHasSilence = true;
-          } else {
-            // 從 WAV header 讀取真實格式（不假設 44100Hz 或 mono）
-            final wavHd = bytes.buffer.asByteData();
-            final wavChannels   = wavHd.getUint16(22, Endian.little);
-            final wavSampleRate = wavHd.getUint32(24, Endian.little);
-            final wavBlockAlign = wavHd.getUint16(32, Endian.little);
-            sampleRate = wavSampleRate; // 更新外部變數，供 SwingImpactDetector 使用
-
-            // 搜尋 "data" chunk（ASCII: 100 97 116 97）
-            int dataStart = 44;
-            for (int i = 36; i < bytes.length - 8; i++) {
-              if (bytes[i] == 100 && bytes[i + 1] == 97 &&
-                  bytes[i + 2] == 116 && bytes[i + 3] == 97) {
-                dataStart = i + 8; // 跳過 "data" + 4-byte size
-                break;
-              }
-            }
-
-            // int16 LE → float32，多 channel 混為 mono
-            final audioData = bytes.sublist(dataStart);
-            double rmsSum = 0.0;
-            double peakVal = 0.0;
-
-            for (int i = 0; i + wavBlockAlign <= audioData.length; i += wavBlockAlign) {
-              double frameVal = 0.0;
-              for (int ch = 0; ch < wavChannels; ch++) {
-                final offset = i + ch * 2;
-                if (offset + 1 >= audioData.length) break;
-                final raw = audioData[offset] | (audioData[offset + 1] << 8);
-                final signed = (raw > 32767) ? raw - 65536 : raw;
-                frameVal += signed / 32768.0;
-              }
-              final sample = frameVal / wavChannels;
-              audioPcm.add(sample);
-              rmsSum += sample * sample;
-              final abs = sample.abs();
-              if (abs > peakVal) peakVal = abs;
-            }
-
-            debugPrint('[偵測擊球] ✅ WAV 讀取完成: ${audioPcm.length} 幀 '
-                '(rate=$wavSampleRate ch=$wavChannels ba=$wavBlockAlign dataStart=$dataStart)');
-
-            if (audioPcm.isNotEmpty) {
-              final rms = math.sqrt(rmsSum / audioPcm.length);
-              debugPrint('[偵測擊球] 📊 WAV RMS=${rms.toStringAsFixed(4)}, Peak=${peakVal.toStringAsFixed(4)}');
-              if (rms < 0.001 && peakVal < 0.01) {
-                debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV RMS 及 Peak 均偏低');
-                audioHasSilence = true;
-              }
-            } else {
-              debugPrint('[偵測擊球] ⚠️ 【無聲音】WAV 無有效樣本');
-              audioHasSilence = true;
-            }
-          }
-        } catch (e) {
-          debugPrint('[偵測擊球] ❌ WAV 讀取失敗: $e');
-          audioHasSilence = true;
-        }
-      } else {
-        debugPrint('[偵測擊球] ⚠️ 【無聲音】PCM 及 WAV 均不存在');
-        audioHasSilence = true;
-      }
-
-      // 3. 讀取 CSV 檢查骨架數據
+      // 2. 讀取 CSV 檢查骨架數據
       debugPrint('[偵測擊球] 📋 讀取 CSV 文件...');
       List<String> csvLines = [];
       try {
@@ -1379,13 +1250,11 @@ class _HistoryTileState extends State<_HistoryTile> {
         debugPrint('[偵測擊球] ❌ CSV 讀取失敗: $e');
       }
       
-      // 4. 偵測擊球
+      // 3. 偵測擊球
       debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
       progressNotifier.value = (0.5, '偵測擊球中...');
       final hits = await SwingImpactDetector.detect(
         csvPath: csvPath,
-        audioPcm: audioPcm,
-        audioSampleRate: sampleRate,
       );
       debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
 
@@ -1394,14 +1263,12 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 📊 統計擊球峰值
       if (hits.isNotEmpty) {
         final avgSpeed = hits.fold<double>(0, (s, h) => s + h.speedValue) / hits.length;
-        final avgAudio = hits.fold<double>(0, (s, h) => s + h.audioValue) / hits.length;
         final hitFrames = hits.map((h) => h.hitFrame).toList();
-        
+
         debugPrint(
           '[HitDetection] 📊 統計:\n'
           '  偵測擊球數: ${hits.length}\n'
           '  平均速度值: ${avgSpeed.toStringAsFixed(3)}\n'
-          '  平均音訊值: ${avgAudio.toStringAsFixed(3)}\n'
           '  擊球幀位置: $hitFrames'
         );
 
@@ -1418,9 +1285,6 @@ class _HistoryTileState extends State<_HistoryTile> {
         // 額外診斷
         debugPrint('[偵測擊球] 🔧 診斷信息:');
         debugPrint('  - CSV 有效: ${csvLines.isNotEmpty}');
-        debugPrint('  - PCM 樣本數: ${audioPcm.length}');
-        debugPrint('  - 期望樣本數 (30秒@$sampleRate Hz): ${30 * sampleRate}');
-        debugPrint('  - 【無聲音】: $audioHasSilence');
         
         Navigator.pop(context);
         setState(() => _isDetecting = false);
@@ -1462,11 +1326,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
-      // 若偵測到無聲音，同步更新來源 entry 的 audioTags
-      if (audioHasSilence) {
-        final updatedSource = widget.entry.copyWith(audioTags: ['no_audio']);
-        widget.onEntryUpdated?.call(widget.entry, updatedSource);
-      }
+
 
       widget.onClipsGenerated?.call(
         widget.entry,
@@ -1756,6 +1616,13 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       widget.onEntryUpdated?.call(widget.entry, updatedEntry);
 
+      // 保底：確保 filePath 改變時舊條目一定從 DB 刪除，防止 callback 找不到條目
+      // 而留下雙筆（clip.mp4 + final.mp4）的 bug
+      if (widget.entry.filePath != updatedEntry.filePath) {
+        unawaited(RecordingHistoryStorage.instance.deleteEntry(widget.entry.filePath));
+      }
+      unawaited(RecordingHistoryStorage.instance.upsertEntry(updatedEntry));
+
       // 顯示完成訊息
       final audioMsg = audioResult != null
           ? '\n🎵 音頻：${audioResult.feedbackLabel}'
@@ -1785,8 +1652,36 @@ class _HistoryTileState extends State<_HistoryTile> {
   Future<void> _runAiAnalysis() async {
     if (_isSubmittingAi) return;
 
-    // ── 確認對話框（今日不再提醒）────────────────────────────────────
-    if (mounted) {
+    // ── 球數配額檢查（已分析過不消耗球數，跳過）─────────────────────
+    if (!widget.entry.hasAiCoachAnalysis) {
+      if (!mounted) return;
+      final planStatus = await PlanService.getPlanStatus();
+      if (!mounted) return;
+      if (!planStatus.plan.isUnlimited && planStatus.remaining <= 0) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            icon: const Icon(Icons.sports_golf_rounded,
+                color: Color(0xFF7C3AED), size: 32),
+            title: const Text('今日球數已用完'),
+            content: Text(
+              '今日已使用 ${planStatus.todayUsed} 次，已達上限 ${planStatus.totalLimit} 次。\n\n'
+              '明天可繼續使用，或升級方案取得更多次數。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
+    // ── 確認對話框（已分析過 / 今日不再提醒 → 跳過）─────────────────
+    if (mounted && !widget.entry.hasAiCoachAnalysis) {
       final skipToday = await _SkipHelper.shouldSkip('ai_analysis');
       if (!skipToday) {
         if (!mounted) return;
@@ -1833,6 +1728,8 @@ class _HistoryTileState extends State<_HistoryTile> {
           widget.onEntryUpdated?.call(widget.entry, updated);
           RecordingHistoryStorage.instance.upsertEntry(updated);
           StatisticsService().loadAllStatistics();
+          // 分析完成後刷新首頁球數顯示
+          unawaited(PlanService.getPlanStatus());
         },
       );
 
@@ -2076,16 +1973,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                             if (widget.entry.videoType == VideoType.original &&
                                 widget.entry.isClipped)
                               _badge('已切片', const Color(0xFFFF9800)),
-                            if (widget.entry.goodShot != null)
-                              _badge(
-                                widget.entry.goodShot == true ? '好球' : '壞球',
-                                widget.entry.goodShot == true
-                                    ? const Color(0xFF4CAF50)
-                                    : const Color(0xFFF44336),
-                              ),
-                            if (widget.entry.audioLabel != null)
-                              _badge(widget.entry.audioLabel!,
-                                  const Color(0xFFFF6F00)),
                             if (widget.entry.audioTags
                                     ?.contains('no_audio') ==
                                 true)
@@ -2100,11 +1987,33 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 SwingPosture.zhName(widget.entry.swingPostureLabel!),
                                 SwingPosture.color(widget.entry.swingPostureLabel!),
                               ),
+                            // ── 速度 / 甜蜜點 / 清脆度 ──────────
+                            if (widget.entry.bestSpeedValue != null &&
+                                widget.entry.bestSpeedValue! > 0)
+                              _badgeWithIcon(
+                                widget.entry.bestSpeedValue!.toStringAsFixed(1),
+                                const Color(0xFF1565C0),
+                                Icons.speed_rounded,
+                              ),
+                            if (widget.entry.goodShot != null)
+                              _badgeWithIcon(
+                                widget.entry.goodShot == true ? '甜蜜點 ✓' : '未命中',
+                                widget.entry.goodShot == true
+                                    ? const Color(0xFF4CAF50)
+                                    : const Color(0xFFF44336),
+                                widget.entry.goodShot == true
+                                    ? Icons.sports_golf_rounded
+                                    : Icons.close_rounded,
+                              ),
                             if (widget.entry.audioCrispness != null)
-                              _badge(
+                              _badgeWithIcon(
                                 '清脆 ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
                                 const Color(0xFFFF6F00),
+                                Icons.graphic_eq_rounded,
                               ),
+                            if (widget.entry.audioLabel != null)
+                              _badge(widget.entry.audioLabel!,
+                                  const Color(0xFFFF6F00)),
                           ],
                         ),
                       ],
@@ -2611,6 +2520,12 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       }
       widget.onEntryUpdated?.call(clip, updatedEntry);
 
+      // 保底：確保 filePath 改變時舊條目一定從 DB 刪除，防止雙筆 bug
+      if (clip.filePath != updatedEntry.filePath) {
+        unawaited(RecordingHistoryStorage.instance.deleteEntry(clip.filePath));
+      }
+      unawaited(RecordingHistoryStorage.instance.upsertEntry(updatedEntry));
+
       final audioMsg = audioResult != null ? '\n🎵 音頻：${audioResult.feedbackLabel}' : '';
       messenger.showSnackBar(SnackBar(
         content: Text('完整分析完成 ✅$audioMsg'),
@@ -2642,7 +2557,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => VideoPlayerPage(videoPath: widget.clip.filePath),
+        builder: (_) => VideoPlayerPage(
+          videoPath: widget.clip.filePath,
+          entry: widget.clip, // 傳入 entry 以顯示圖表與 AI 分析面板
+        ),
       ),
     );
   }
@@ -2650,8 +2568,36 @@ class _ClipSubCardState extends State<_ClipSubCard> {
   Future<void> _runAiAnalysis() async {
     if (_isSubmittingAi) return;
 
-    // ── 確認對話框（今日不再提醒）────────────────────────────────────
-    if (mounted) {
+    // ── 球數配額檢查（已分析過不消耗球數，跳過）─────────────────────
+    if (!widget.clip.hasAiCoachAnalysis) {
+      if (!mounted) return;
+      final planStatus = await PlanService.getPlanStatus();
+      if (!mounted) return;
+      if (!planStatus.plan.isUnlimited && planStatus.remaining <= 0) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            icon: const Icon(Icons.sports_golf_rounded,
+                color: Color(0xFF7C3AED), size: 32),
+            title: const Text('今日球數已用完'),
+            content: Text(
+              '今日已使用 ${planStatus.todayUsed} 次，已達上限 ${planStatus.totalLimit} 次。\n\n'
+              '明天可繼續使用，或升級方案取得更多次數。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
+    // ── 確認對話框（已分析過 / 今日不再提醒 → 跳過）─────────────────
+    if (mounted && !widget.clip.hasAiCoachAnalysis) {
       final skipToday = await _SkipHelper.shouldSkip('ai_analysis');
       if (!skipToday) {
         if (!mounted) return;
@@ -2696,6 +2642,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
           widget.onEntryUpdated?.call(widget.clip, updated);
           RecordingHistoryStorage.instance.upsertEntry(updated);
           StatisticsService().loadAllStatistics();
+          // 分析完成後刷新首頁球數顯示
+          unawaited(PlanService.getPlanStatus());
         },
       );
 
@@ -2827,13 +2775,6 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                 spacing: 4,
                                 runSpacing: 3,
                                 children: [
-                                  if (clip.goodShot != null)
-                                    _smallBadge(
-                                      clip.goodShot == true ? '好球' : '壞球',
-                                      clip.goodShot == true
-                                          ? const Color(0xFF4CAF50)
-                                          : const Color(0xFFF44336),
-                                    ),
                                   if (clip.isAnalyzed)
                                     _smallBadge('已分析', const Color(0xFF1E8E5A)),
                                   if (clip.hasAiCoachAnalysis)
@@ -2845,10 +2786,29 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     ),
                                   if (clip.audioTags?.contains('no_audio') == true)
                                     _smallBadge('無聲音', const Color(0xFF9E9E9E)),
+                                  // ── 速度 / 甜蜜點 / 清脆度 ──────────
+                                  if (clip.bestSpeedValue != null &&
+                                      clip.bestSpeedValue! > 0)
+                                    _smallBadgeWithIcon(
+                                      clip.bestSpeedValue!.toStringAsFixed(1),
+                                      const Color(0xFF1565C0),
+                                      Icons.speed_rounded,
+                                    ),
+                                  if (clip.goodShot != null)
+                                    _smallBadgeWithIcon(
+                                      clip.goodShot == true ? '甜蜜點 ✓' : '未命中',
+                                      clip.goodShot == true
+                                          ? const Color(0xFF4CAF50)
+                                          : const Color(0xFFF44336),
+                                      clip.goodShot == true
+                                          ? Icons.sports_golf_rounded
+                                          : Icons.close_rounded,
+                                    ),
                                   if (clip.audioCrispness != null)
-                                    _smallBadge(
+                                    _smallBadgeWithIcon(
                                       '清脆 ${clip.audioCrispness!.toStringAsFixed(1)}',
                                       const Color(0xFFFF6F00),
+                                      Icons.graphic_eq_rounded,
                                     ),
                                   if (clip.audioLabel != null)
                                     _smallBadge(
@@ -2979,6 +2939,23 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         child: Text(label,
             style: TextStyle(
                 fontSize: 9, color: color, fontWeight: FontWeight.w600)),
+      );
+
+  Widget _smallBadgeWithIcon(String label, Color color, IconData icon) =>
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withValues(alpha: 0.45)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 9, color: color),
+          const SizedBox(width: 2),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 9, color: color, fontWeight: FontWeight.w600)),
+        ]),
       );
 
   Widget _clipBtn({

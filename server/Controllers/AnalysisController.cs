@@ -106,6 +106,13 @@ namespace UploadServer.Controllers
                 catch { result = analysis.ResultJson; }
             }
 
+            object? onnxResult = null;
+            if (!string.IsNullOrEmpty(analysis.OnnxResultJson))
+            {
+                try { onnxResult = JsonSerializer.Deserialize<JsonElement>(analysis.OnnxResultJson); }
+                catch { /* ONNX JSON 損毀時忽略 */ }
+            }
+
             return Ok(new AnalysisStatusResponse
             {
                 AnalysisId = analysis.Id,
@@ -113,6 +120,7 @@ namespace UploadServer.Controllers
                 Summary    = analysis.Summary,
                 Severity   = analysis.Severity,
                 Result     = result,
+                OnnxResult = onnxResult,
             });
         }
 

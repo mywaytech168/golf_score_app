@@ -10,6 +10,7 @@ import '../models/export_quality.dart';
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import 'analysis_progress_service.dart';
+import 'audio_export_service.dart';
 import 'ball_detection_prefs.dart';
 import 'ball_tracker.dart';
 import 'ball_trajectory_service.dart';
@@ -187,6 +188,18 @@ class ClipPipelineService {
       endSec: hit.endSec,
     );
 
+    // 自動音頻分析：計算甜蜜點（goodShot）和清脆度（audioCrispness）
+    final hitSecInClip = hit.hitSec - clipActualStartSec;
+    final audioAnalysis = await _analyzeClipAudio(
+      wavPath: dstAudioPath,
+      sessionDir: sessionDir,
+      hitSecInClip: hitSecInClip,
+    );
+    debugPrint('[Pipeline] hit ${hit.hitIndex} → 音頻分析: '
+        'goodShot=${audioAnalysis?.goodShot}, '
+        'crispness=${audioAnalysis?.crispness?.toStringAsFixed(3)}, '
+        'label=${audioAnalysis?.audioLabel}');
+
     debugPrint('[Pipeline] hit ${hit.hitIndex} → ✅ 裁切完成：$trimmed');
 
     final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
@@ -203,8 +216,89 @@ class ClipPipelineService {
         hitSecond: hit.hitSec - clipActualStartSec,
         startSecond: clipActualStartSec,
         endSecond: hit.endSec,
+        // 將此球的速度峰值存入切片，供統計使用
+        bestSpeedValue: hit.speedValue > 0 ? hit.speedValue : null,
+        // 自動音頻分析結果
+        audioCrispness: audioAnalysis?.crispness,
+        goodShot: audioAnalysis?.goodShot,
+        audioLabel: audioAnalysis?.audioLabel,
       ),
     );
+  }
+
+  /// 從 WAV 檔案讀取 PCM，呼叫 AudioExportService 分析甜蜜點與清脆度。
+  ///
+  /// [wavPath]       — 已切分完成的 audio.wav
+  /// [sessionDir]    — clip 的 session 目錄（AudioAnalysisConfig 需要）
+  /// [hitSecInClip]  — 擊球時刻相對於 clip 起點的秒數（用作 targetHitTime）
+  static Future<({double? crispness, bool? goodShot, String? audioLabel})?>
+      _analyzeClipAudio({
+    required String wavPath,
+    required String sessionDir,
+    required double hitSecInClip,
+  }) async {
+    try {
+      final file = File(wavPath);
+      if (!await file.exists()) return null;
+
+      Uint8List? bytes = await file.readAsBytes();
+      if (bytes.length < 44) return null;
+
+      final bd = bytes.buffer.asByteData();
+      final channels   = bd.getUint16(22, Endian.little);
+      final sampleRate = bd.getUint32(24, Endian.little);
+      final blockAlign = bd.getUint16(32, Endian.little);
+
+      // 搜尋 "data" chunk（ASCII: d=100 a=97 t=116 a=97）
+      int dataStart = 44;
+      for (int i = 36; i < bytes.length - 8; i++) {
+        if (bytes[i] == 100 && bytes[i + 1] == 97 &&
+            bytes[i + 2] == 116 && bytes[i + 3] == 97) {
+          dataStart = i + 8;
+          break;
+        }
+      }
+
+      final audioLen = bytes.length - dataStart;
+      if (audioLen <= 0 || blockAlign <= 0) return null;
+
+      // 解碼 int16 LE → float64，多聲道取平均
+      final pcm = <double>[];
+      for (int i = 0; i + blockAlign <= audioLen; i += blockAlign) {
+        double v = 0;
+        for (int ch = 0; ch < channels; ch++) {
+          final offset = dataStart + i + ch * 2;
+          if (offset + 1 >= bytes.length) break;
+          final raw = bytes[offset] | (bytes[offset + 1] << 8);
+          final signed = raw > 32767 ? raw - 65536 : raw;
+          v += signed / 32768.0;
+        }
+        pcm.add(v / channels);
+      }
+      bytes = null; // 提早釋放，避免同時佔用兩份大記憶體
+
+      if (pcm.isEmpty) return null;
+
+      final result = await AudioExportService.analyzeFromPcm(
+        pcmSamples: pcm,
+        sessionDir: sessionDir,
+        sampleRate: sampleRate,
+        targetHitTime: hitSecInClip.clamp(0.0, 300.0),
+        onProgress: null,
+      );
+      if (result == null) return null;
+
+      return (
+        crispness: result.features.isNotEmpty
+            ? result.features.first.sharpnessHfxLoud
+            : null,
+        goodShot: result.predictedClass == 'pro' || result.predictedClass == 'good',
+        audioLabel: result.feedbackLabel,
+      );
+    } catch (e) {
+      debugPrint('[Pipeline._analyzeClipAudio] ❌ $e');
+      return null;
+    }
   }
 
   /// 從原始 CSV 擷取 [startSec, endSec] 範圍的骨架幀，重新以 0 為起點編號寫出。

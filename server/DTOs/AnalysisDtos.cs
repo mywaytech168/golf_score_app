@@ -34,5 +34,7 @@ namespace UploadServer.DTOs
         public string? Severity { get; set; }
         /// <summary>status=completed 時填入完整教練回應 JSON</summary>
         public object? Result { get; set; }
+        /// <summary>ONNX 推論原始結果（GolfSwingAnalysisResponse）；無 CSV 或推論失敗時為 null</summary>
+        public object? OnnxResult { get; set; }
     }
 }

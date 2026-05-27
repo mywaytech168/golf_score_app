@@ -36,6 +36,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   late final TabController _tabController;
   bool _initialized = false;
 
+  /// 是否為從長影片裁切的短片（切片才顯示圖表與 AI 分析）
+  bool get _isLocalClip =>
+      widget.entry?.videoType == VideoType.localClip;
+
   // Charts panel state
   bool _chartsExpanded = false;
   int _chartTabIndex = 0;
@@ -381,7 +385,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               const Spacer(),
               Text(_fmt(duration),
                   style: const TextStyle(color: Colors.white54, fontSize: 12)),
-              if (widget.entry != null) ...[
+              // 圖表 + AI 分析圖示：僅限切片（localClip），長影片不顯示
+              if (_isLocalClip) ...[
                 const SizedBox(width: 8),
                 GestureDetector(
                   onTap: _toggleCharts,
@@ -419,7 +424,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // ── 圖表面板 ─────────────────────────────────────────────────
 
   Widget _buildChartsPanel() {
-    if (widget.entry == null) return const SizedBox.shrink();
+    if (!_isLocalClip) return const SizedBox.shrink();
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,
@@ -524,7 +529,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // ── AI 分析面板 ──────────────────────────────────────────────
 
   Widget _buildAiPanel() {
-    if (widget.entry == null) return const SizedBox.shrink();
+    if (!_isLocalClip) return const SizedBox.shrink();
     return AnimatedSize(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,

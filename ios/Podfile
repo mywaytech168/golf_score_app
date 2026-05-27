@@ -33,6 +33,9 @@ target 'Runner' do
   # Pin GTMSessionFetcher to 3.x — GoogleSignIn ~> 8.0 and MLKitVision both require < 4.0
   pod 'GTMSessionFetcher', '~> 3.4'
 
+  # TFLite Swift API — YOLOv8n 高爾夫球偵測（iOS 側推論）
+  pod 'TensorFlowLiteSwift', '~> 2.14.0'
+
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   target 'RunnerTests' do
     inherit! :search_paths

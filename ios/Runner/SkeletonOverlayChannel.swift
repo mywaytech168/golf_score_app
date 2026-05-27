@@ -176,9 +176,10 @@ private func renderSkeletonOverlay(
       }
 
       // Draw skeleton onto destination (still locked)
-      let ptsSec      = CMTimeGetSeconds(pts)
-      let csvFrameIdx = Int((( startSec + ptsSec) * 1000.0 / 33.0).rounded())
-      if let lms = getSmoothedLandmarks(frameData: frameData, target: csvFrameIdx, keys: sortedKeys),
+      let ptsSec   = CMTimeGetSeconds(pts)
+      // 以毫秒整數查 CSV（key 已改為 time_ms），與影片 fps 無關
+      let csvTimeMs = Int(((startSec + ptsSec) * 1000.0).rounded())
+      if let lms = getSmoothedLandmarks(frameData: frameData, target: csvTimeMs, keys: sortedKeys),
          let ctx = makeCGContext(base: dstBase, w: displayW, h: displayH, bpr: dstBPR) {
         // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y axis
         ctx.translateBy(x: 0, y: CGFloat(displayH))
@@ -220,6 +221,8 @@ private func renderSkeletonOverlay(
 
 // MARK: - CSV parsing
 
+/// Key 採用 time_sec × 1000 四捨五入得到的毫秒整數，
+/// 與影片 fps 完全解耦（30fps / 60fps / 120fps 均正確對齊）。
 private func parseCsv(csvPath: String) -> [Int: [LandmarkPoint?]] {
   guard let content = try? String(contentsOfFile: csvPath, encoding: .utf8) else { return [:] }
   var result: [Int: [LandmarkPoint?]] = [:]
@@ -227,8 +230,10 @@ private func parseCsv(csvPath: String) -> [Int: [LandmarkPoint?]] {
   for line in content.components(separatedBy: "\n") {
     if skipHeader { skipHeader = false; continue }
     let cols = line.components(separatedBy: ",")
-    guard cols.count >= 201,
-          let frameIdx = Int(cols[0].trimmingCharacters(in: .whitespaces)) else { continue }
+    guard cols.count >= 201 else { continue }
+    // col[1] = time_sec；以毫秒整數作 key，與 fps 解耦
+    guard let timeSec = Double(cols[1].trimmingCharacters(in: .whitespaces)) else { continue }
+    let timeMs = Int((timeSec * 1000.0).rounded())
     var lms = [LandmarkPoint?](repeating: nil, count: 33)
     for i in 0..<33 {
       let b = 3 + i * 6
@@ -240,7 +245,7 @@ private func parseCsv(csvPath: String) -> [Int: [LandmarkPoint?]] {
             xNorm > 0, yNorm > 0 else { continue }
       lms[i] = LandmarkPoint(xPx: xPx, yPx: yPx, xNorm: xNorm, yNorm: yNorm, visibility: vis)
     }
-    result[frameIdx] = lms
+    result[timeMs] = lms
   }
   return result
 }

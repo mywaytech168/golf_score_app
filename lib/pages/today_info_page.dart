@@ -148,25 +148,22 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                       bad:       _bad,
                       loading:   _loading,
                     ),
-                    const SizedBox(height: kSpaceMD),
                     _MetricGrid(
                       speed: _speed,
                       sweet: _sweet,
                       crisp: _crisp,
                       loading: _loading,
                     ),
-                    if (!_loading && (_stats?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
+                    if (!_loading) ...[
                       const SizedBox(height: kSpaceMD),
                       PostureBreakdownCard(
-                        breakdown: _stats!.postureBreakdown,
+                        breakdown: _stats?.postureBreakdown ?? {},
                         title: isToday
                             ? AppLocalizations.of(context).todayPostureToday
                             : AppLocalizations.of(context).todayPosture,
                       ),
                     ],
-                    if (!_loading && _practice == 0 && _rounds == 0)
-                      _EmptyState(isToday: isToday),
-                    const SizedBox(height: kSpaceXL),
+                    const SizedBox(height: kSpaceMD),
                   ],
                 ),
               ),
@@ -292,43 +289,6 @@ class _DatePickerRow extends StatelessWidget {
             iconSize: 28,
             splashRadius: 20,
           ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── 空狀態 ──────────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  final bool isToday;
-  const _EmptyState({required this.isToday});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: kSpaceXL),
-      child: Column(
-        children: [
-          Icon(
-            isToday ? Icons.sports_golf_rounded : Icons.event_busy_rounded,
-            size: 56,
-            color: kTextHint,
-          ),
-          const SizedBox(height: kSpaceMD),
-          Text(
-            isToday
-                ? AppLocalizations.of(context).todayNoRecord
-                : AppLocalizations.of(context).todayNoRecordDate,
-            style: const TextStyle(fontSize: 15, color: kTextSecondary),
-          ),
-          if (isToday) ...[
-            const SizedBox(height: kSpaceXS),
-            Text(
-              AppLocalizations.of(context).todayGoRecord,
-              style: const TextStyle(fontSize: 13, color: kTextHint),
-            ),
-          ],
         ],
       ),
     );

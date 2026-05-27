@@ -500,22 +500,19 @@ class MainActivity: FlutterActivity() {
                 when (call.method) {
                     "analyzePoseVideo" -> {
                         val videoPath = call.argument<String>("videoPath")
-                        // Flutter MethodChannel 傳 Dart int 為 Java Long，不能直接用 call.argument<Int>()
-                        val targetFps = (call.argument<Any>("targetFps") as? Number)?.toInt() ?: 30
                         val maxWidth  = (call.argument<Any>("maxWidth")  as? Number)?.toInt() ?: 720
                         val outputCsvPath = call.argument<String>("outputCsvPath")
-                        Log.i(logTag, "[PoseAnalyzer] targetFps=$targetFps maxWidth=$maxWidth")
-                        
+                        Log.i(logTag, "[PoseAnalyzer] maxWidth=$maxWidth (fps 由影片元數據自主決定)")
+
                         if (videoPath.isNullOrBlank() || outputCsvPath.isNullOrBlank()) {
                             result.error("invalid_args", "缺少 videoPath 或 outputCsvPath", null)
                             return@setMethodCallHandler
                         }
-                        
+
                         frameExtractorExecutor.execute {
                             try {
                                 val csvPath = analyzeVideoNatively(
                                     videoPath,
-                                    targetFps,
                                     maxWidth,
                                     outputCsvPath
                                 )
@@ -697,14 +694,16 @@ class MainActivity: FlutterActivity() {
     
     // ✅ 原生全影片分析：一個 MediaCodec 實例 + ML Kit + 直接寫 CSV
     // 比舊方案（每幀開一個 MediaMetadataRetriever + JNI 傳 1.3MB）快 3-5x
+    // fallback fps：只在無法從影片格式讀到 KEY_FRAME_RATE 時使用
+    private val FALLBACK_FPS = 30
+
     private fun analyzeVideoNatively(
         videoPath: String,
-        targetFps: Int,
         maxWidth: Int,
         outputCsvPath: String
     ): String? {
         // 🎬 記錄輸入參數
-        Log.i(logTag, "[PoseAnalyzer] 🎬 開始分析: targetFps=$targetFps maxWidth=$maxWidth videoPath=$videoPath")
+        Log.i(logTag, "[PoseAnalyzer] 🎬 開始分析: maxWidth=$maxWidth videoPath=$videoPath")
         
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -735,11 +734,11 @@ class MainActivity: FlutterActivity() {
             val codedH = videoFormat.getInteger(MediaFormat.KEY_HEIGHT)
             val mime   = videoFormat.getString(MediaFormat.KEY_MIME) ?: ""
 
-            // 🎬 讀取視頻的實際 fps metadata（重要：不能只依賴 targetFps 參數！）
+            // 採樣率 = 影片實際 fps（KEY_FRAME_RATE），讀不到時 fallback 為 FALLBACK_FPS=30
             val actualVideoFps = runCatching {
                 videoFormat.getInteger(MediaFormat.KEY_FRAME_RATE)
-            }.getOrElse { targetFps }
-            Log.i(logTag, "[PoseAnalyzer] 🎬 fps metadata: targetFps=$targetFps, actualVideoFps=$actualVideoFps from format")
+            }.getOrElse { FALLBACK_FPS }
+            Log.i(logTag, "[PoseAnalyzer] 🎬 actualVideoFps=$actualVideoFps (fallback=$FALLBACK_FPS)")
 
             // display 尺寸（旋轉修正後的正確寬高）
             val displayW = if (rotation == 90 || rotation == 270) codedH else codedW
@@ -791,7 +790,7 @@ class MainActivity: FlutterActivity() {
             var lastLandmarks: List<com.google.mlkit.vision.pose.PoseLandmark>? = null
             var mlKitFailures = 0
 
-            // 🎬 使用實際視頻 fps 計算採樣間隔，而不是硬編碼的 targetFps
+            // 採樣間隔 = 影片實際 fps
             val frameIntervalUs = 1_000_000L / actualVideoFps
             var nextSampleUs   = 0L
             var inputEOS  = false

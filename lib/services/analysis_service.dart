@@ -30,6 +30,63 @@ class AnalysisRequestResult {
       );
 }
 
+/// 模型推論結果（後端 Worker 執行，前端顯示原始分數）
+class OnnxResult {
+  /// 各錯誤類型的機率分數（0.0–1.0），按分數降冪排序
+  final Map<String, double> scores;
+  /// 確認的錯誤列表（confidence >= 0.75）
+  final List<String> officialErrors;
+  /// 需複審列表（0.75–0.85，official 但信心不足）
+  final List<String> reviewErrors;
+  /// 可疑錯誤列表（0.60–0.75，未列入 official）
+  final List<String> suspectErrors;
+  /// 各 label 的信心帶：high_confidence | acceptable_review | suspect_not_official | low_ignore
+  final Map<String, String> bands;
+
+  const OnnxResult({
+    required this.scores,
+    required this.officialErrors,
+    required this.reviewErrors,
+    required this.suspectErrors,
+    required this.bands,
+  });
+
+  /// 完美揮桿：無任何 official / suspect 錯誤，全部分數都在 low_ignore 帶
+  bool get isPerfect =>
+      officialErrors.isEmpty &&
+      suspectErrors.isEmpty &&
+      bands.values.every((b) => b == 'low_ignore');
+
+  factory OnnxResult.fromJson(Map<String, dynamic> j) {
+    // 後端 key 為 PascalCase（OfficialErrors / Scores / Bands …）
+    // 同時相容 snake_case（official_errors / scores / bands）以防日後調整
+    Map<String, double> parseScores() {
+      final raw = j['Scores'] ?? j['scores'];
+      return (raw as Map<String, dynamic>? ?? {})
+          .map((k, v) => MapEntry(k, (v as num).toDouble()));
+    }
+
+    List<String> parseList(String pascal, String snake) {
+      final raw = j[pascal] ?? j[snake];
+      return (raw as List<dynamic>? ?? []).cast<String>();
+    }
+
+    Map<String, String> parseBands() {
+      final raw = j['Bands'] ?? j['bands'];
+      return (raw as Map<String, dynamic>? ?? {})
+          .map((k, v) => MapEntry(k, v as String));
+    }
+
+    return OnnxResult(
+      scores:        parseScores(),
+      officialErrors: parseList('OfficialErrors', 'official_errors'),
+      reviewErrors:   parseList('ReviewErrors',   'review_errors'),
+      suspectErrors:  parseList('SuspectErrors',  'suspect_errors'),
+      bands:          parseBands(),
+    );
+  }
+}
+
 class CoachPrimaryError {
   final String errorType;
   final String zhName;
@@ -46,13 +103,16 @@ class CoachPrimaryError {
   /// Good class：後端 error_type 為空字串時表示完美揮桿
   bool get isPerfect => errorType.isEmpty;
 
-  factory CoachPrimaryError.fromJson(Map<String, dynamic> j) =>
-      CoachPrimaryError(
-        errorType: j['error_type'] as String? ?? '',
-        zhName:    j['zh_name']    as String? ?? '',
-        severity:  j['severity']   as String? ?? 'medium',
-        evidence:  (j['evidence']  as List<dynamic>? ?? []).cast<String>(),
-      );
+  factory CoachPrimaryError.fromJson(Map<String, dynamic> j) {
+    final errorType = j['error_type'] as String? ?? '';
+    return CoachPrimaryError(
+      errorType: errorType,
+      zhName:    j['zh_name']  as String? ?? '',
+      // Good class（errorType 為空）→ severity 預設 'low'；其餘預設 'medium'
+      severity:  j['severity'] as String? ?? (errorType.isEmpty ? 'low' : 'medium'),
+      evidence:  (j['evidence'] as List<dynamic>? ?? []).cast<String>(),
+    );
+  }
 }
 
 class PracticeSuggestion {
@@ -91,8 +151,10 @@ class CoachResult {
 
   factory CoachResult.fromJson(Map<String, dynamic> j) => CoachResult(
     summary:      j['summary']         as String? ?? '',
-    primaryError: CoachPrimaryError.fromJson(
-        (j['primary_error'] as Map<String, dynamic>?) ?? {}),
+    // primary_error 為 null → Good class（完美揮桿），直接給完美預設值
+    primaryError: j['primary_error'] != null
+        ? CoachPrimaryError.fromJson(j['primary_error'] as Map<String, dynamic>)
+        : CoachPrimaryError(errorType: '', zhName: '', severity: 'low', evidence: []),
     coachFeedback: (j['coach_feedback'] as List<dynamic>? ?? []).cast<String>(),
     practiceSuggestions: (j['practice_suggestions'] as List<dynamic>? ?? [])
         .map((e) => PracticeSuggestion.fromJson(e as Map<String, dynamic>))
@@ -109,6 +171,8 @@ class AnalysisStatus {
   final String? summary;
   final String? severity;
   final CoachResult? result;
+  /// ONNX 原始推論分數（後端 Worker 產生，供進階顯示）
+  final OnnxResult? onnxResult;
 
   AnalysisStatus({
     required this.analysisId,
@@ -117,6 +181,7 @@ class AnalysisStatus {
     this.summary,
     this.severity,
     this.result,
+    this.onnxResult,
   });
 
   bool get isCompleted => status == 'completed';
@@ -137,6 +202,21 @@ class AnalysisStatus {
         debugPrint('⚠️ 解析 CoachResult 失敗: $e');
       }
     }
+
+    OnnxResult? onnxResult;
+    // 後端可能用 PascalCase（OnnxResult）或 camelCase（onnxResult）
+    final rawOnnx = j['OnnxResult'] ?? j['onnxResult'];
+    if (rawOnnx != null) {
+      try {
+        final Map<String, dynamic> onnxMap = rawOnnx is String
+            ? jsonDecode(rawOnnx) as Map<String, dynamic>
+            : rawOnnx as Map<String, dynamic>;
+        onnxResult = OnnxResult.fromJson(onnxMap);
+      } catch (e) {
+        debugPrint('⚠️ 解析 OnnxResult 失敗: $e');
+      }
+    }
+
     return AnalysisStatus(
       analysisId: j['analysisId'] as String? ?? '',
       videoId:    j['videoId']    as String?,
@@ -144,6 +224,7 @@ class AnalysisStatus {
       summary:    j['summary']    as String?,
       severity:   j['severity']   as String?,
       result:     result,
+      onnxResult: onnxResult,
     );
   }
 }

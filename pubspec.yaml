@@ -44,7 +44,6 @@ dependencies:
   media_kit: ^1.1.11
   media_kit_video: ^1.2.4
   media_kit_libs_video: ^1.0.5
-  tflite_flutter: ^0.11.0
   image: ^4.2.0
   video_thumbnail: ^0.5.3
   path: ^1.9.0
@@ -90,7 +89,6 @@ dev_dependencies:
 # following page: https://dart.dev/tools/pub/pubspec
 
 dependency_overrides:
-  tflite_flutter: 0.11.0
   rxdart: ^0.28.0
   file_picker_macos:
     path: flutter_ignore_plugin/file_picker_macos

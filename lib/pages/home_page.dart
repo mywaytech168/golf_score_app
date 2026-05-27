@@ -221,10 +221,10 @@ class _HomePageState extends State<HomePage> {
                             ),
                             const SizedBox(height: kSpaceMD),
                             _KeyMetricsRow(stats: today, loading: isLoading),
-                            if (!isLoading && (today?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
+                            if (!isLoading) ...[
                               const SizedBox(height: kSpaceMD),
                               PostureBreakdownCard(
-                                breakdown: today!.postureBreakdown,
+                                breakdown: today?.postureBreakdown ?? {},
                                 title: AppLocalizations.of(context).homeTodayPosture,
                               ),
                             ],

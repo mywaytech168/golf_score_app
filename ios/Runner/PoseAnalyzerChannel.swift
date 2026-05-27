@@ -34,14 +34,12 @@ func registerPoseAnalyzerChannel(messenger: FlutterBinaryMessenger) {
       result(FlutterError(code: "invalid_args", message: "缺少 videoPath 或 outputCsvPath", details: nil))
       return
     }
-    let targetFps = (args["targetFps"] as? NSNumber)?.intValue ?? 30
     let maxWidth  = (args["maxWidth"]  as? NSNumber)?.intValue ?? 720
 
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let csvPath = try analyzeVideoNatively(
           videoPath: videoPath,
-          targetFps: targetFps,
           maxWidth: maxWidth,
           outputCsvPath: outputCsvPath
         )
@@ -59,9 +57,11 @@ func registerPoseAnalyzerChannel(messenger: FlutterBinaryMessenger) {
 
 // MARK: - Core analysis
 
+// fallback fps：只在無法從影片元數據讀到 nominalFrameRate 時使用
+private let kFallbackFps: Double = 30.0
+
 private func analyzeVideoNatively(
   videoPath: String,
-  targetFps: Int,
   maxWidth: Int,
   outputCsvPath: String
 ) throws -> String {
@@ -73,10 +73,12 @@ private func analyzeVideoNatively(
   }
 
   // --- 取得視頻參數 ---
-  let naturalSize = videoTrack.naturalSize
-  let transform   = videoTrack.preferredTransform
-  let actualFps   = Double(videoTrack.nominalFrameRate > 0 ? videoTrack.nominalFrameRate : Float(targetFps))
-  let durationSec = CMTimeGetSeconds(asset.duration)
+  let naturalSize  = videoTrack.naturalSize
+  let transform    = videoTrack.preferredTransform
+  // 採樣率 = 影片實際 fps（nominalFrameRate）
+  // 60fps 影片以 60fps 取骨架，30fps 影片以 30fps 取骨架，無需 Dart 側指定
+  let actualFps    = Double(videoTrack.nominalFrameRate > 0 ? videoTrack.nominalFrameRate : Float(kFallbackFps))
+  let durationSec  = CMTimeGetSeconds(asset.duration)
 
   // 套用 preferredTransform 計算 display 尺寸
   let displaySize = naturalSize.applying(transform)

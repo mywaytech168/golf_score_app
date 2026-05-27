@@ -33,7 +33,7 @@ func registerBallTrajectoryChannel(messenger: FlutterBinaryMessenger) {
 
     case "extractBlobs", "extractBlobsWithConfig":
       guard let args      = call.arguments as? [String: Any],
-            let videoPath = args["videoPath"] as? String else {
+            let videoPath = (args["inputPath"] ?? args["videoPath"]) as? String else {
         result(FlutterMethodNotImplemented); return
       }
       var cfg = BlobConfig()
@@ -73,6 +73,30 @@ func registerBallTrajectoryChannel(messenger: FlutterBinaryMessenger) {
         } catch {
           DispatchQueue.main.async {
             result(FlutterError(code: "render_failed", message: error.localizedDescription, details: nil))
+          }
+        }
+      }
+
+    case "extractBlobsYolo":
+      guard let args      = call.arguments as? [String: Any],
+            let videoPath = args["inputPath"] as? String else {
+        result(FlutterMethodNotImplemented); return
+      }
+      BallYoloDetector.shared.tryLoad()
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let out: [String: Any]
+          if BallYoloDetector.shared.isLoaded {
+            out = try btExtractBlobsYolo(videoPath: videoPath)
+          } else {
+            // YOLO 未能載入時回退到傳統 blob 偵測
+            print("[BallTrajectory] ⚠️ YOLO 未載入，回退到 blob 偵測")
+            out = try btExtractBlobs(videoPath: videoPath, config: BlobConfig())
+          }
+          DispatchQueue.main.async { result(out) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "extract_failed", message: error.localizedDescription, details: nil))
           }
         }
       }
@@ -140,6 +164,86 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
 
   AnalysisProgressSink.shared.send(
     op: "extractBlobs", progress: 1.0, label: "球體偵測完成",
+    current: frameIdx, total: frameIdx)
+
+  return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]
+}
+
+// MARK: - YOLO blob extraction
+
+private func btExtractBlobsYolo(videoPath: String) throws -> [String: Any] {
+  let asset = AVURLAsset(url: URL(fileURLWithPath: videoPath))
+  guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+    throw NSError(domain: "BallTrajectory", code: -1,
+                  userInfo: [NSLocalizedDescriptionKey: "找不到視頻軌道"])
+  }
+
+  let composition = AVVideoComposition(propertiesOf: asset)
+  let displayW    = Int(composition.renderSize.width)
+  let displayH    = Int(composition.renderSize.height)
+  let fps         = Double(max(1, videoTrack.nominalFrameRate))
+  let totalFrames = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
+
+  let reader = try AVAssetReader(asset: asset)
+  let readerOut = AVAssetReaderVideoCompositionOutput(
+    videoTracks: asset.tracks(withMediaType: .video),
+    videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+  )
+  readerOut.videoComposition = composition
+  readerOut.alwaysCopiesSampleData = false
+  reader.add(readerOut)
+  guard reader.startReading() else {
+    throw reader.error ?? NSError(domain: "BallTrajectory", code: -2,
+                                  userInfo: [NSLocalizedDescriptionKey: "reader 啟動失敗"])
+  }
+
+  var frames: [[String: Any]] = []
+  var frameIdx: Int = 0
+
+  while reader.status == .reading {
+    guard let sample: CMSampleBuffer = readerOut.copyNextSampleBuffer() else { break }
+
+    let entry: [String: Any]? = autoreleasepool {
+      guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { return nil }
+      let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+      let ptsUs = Int64(CMTimeGetSeconds(pts) * 1_000_000)
+
+      CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
+      defer { CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly) }
+
+      guard let base = CVPixelBufferGetBaseAddress(pixBuf) else { return nil }
+      let bpr = CVPixelBufferGetBytesPerRow(pixBuf)
+      let rgba = base.assumingMemoryBound(to: UInt8.self)
+
+      let detections = BallYoloDetector.shared.detect(
+        bgraBase: rgba, bytesPerRow: bpr, frameW: displayW, frameH: displayH)
+
+      let blobs: [[String: Any]] = detections.map { d in
+        [
+          "cx":       d.cx,
+          "cy":       d.cy,
+          "area":     max(1, d.bboxW * d.bboxH),
+          "circ":     1.0,
+          "diffMean": Double(d.conf) * 50.0,
+        ]
+      }
+      return ["ptsUs": ptsUs, "blobs": blobs]
+    }
+
+    if let entry = entry {
+      frames.append(entry)
+      frameIdx += 1
+      if frameIdx % 10 == 0 {
+        let prog: Double = min(0.95, Double(frameIdx) / Double(totalFrames))
+        AnalysisProgressSink.shared.send(
+          op: "extractBlobs", progress: prog,
+          label: "YOLO偵測中 \(Int(prog * 100))%", current: frameIdx, total: totalFrames)
+      }
+    }
+  }
+
+  AnalysisProgressSink.shared.send(
+    op: "extractBlobs", progress: 1.0, label: "YOLO偵測完成",
     current: frameIdx, total: frameIdx)
 
   return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]

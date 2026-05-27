@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
 import '../theme/app_theme.dart';
 
@@ -144,7 +145,12 @@ class _AiCoachPageState extends State<AiCoachPage> {
           // 分析完成時回呼一次，傳出 errorType 供上層寫入 swingPostureLabel
           if (status.isCompleted && !_resultReported) {
             _resultReported = true;
-            final errorType = status.result?.primaryError.errorType ?? '';
+            final rawType = status.result?.primaryError.errorType ?? '';
+            // 正規化：只接受已知 label；Gemini 有時回中文或混合字串，一律 fallback 到 ''
+            final errorType = SwingPosture.allLabels.contains(rawType) ? rawType : '';
+            if (rawType != errorType) {
+              debugPrint('[AiCoach] errorType 正規化: "$rawType" → "$errorType"');
+            }
             widget.onAnalysisComplete?.call(errorType);
           }
         }
@@ -193,7 +199,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
       );
     }
 
-    return _ResultView(result: status.result!);
+    return _ResultView(status: status);
   }
 }
 
@@ -260,17 +266,22 @@ class _ErrorView extends StatelessWidget {
 // ── Result 主畫面 ─────────────────────────────────────────────
 
 class _ResultView extends StatelessWidget {
-  final CoachResult result;
-  const _ResultView({required this.result});
+  final AnalysisStatus status;
+  const _ResultView({required this.status});
 
   @override
   Widget build(BuildContext context) {
+    final result = status.result!;
     return ListView(
       padding: const EdgeInsets.all(kSpaceMD),
       children: [
         _SummaryCard(result: result),
         const SizedBox(height: kSpaceMD),
         _FeedbackCard(feedbacks: result.coachFeedback),
+        if (status.onnxResult != null) ...[
+          const SizedBox(height: kSpaceMD),
+          _OnnxScoreCard(onnx: status.onnxResult!),
+        ],
         const SizedBox(height: kSpaceMD),
         _PracticeCard(suggestions: result.practiceSuggestions),
         const SizedBox(height: kSpaceMD),
@@ -303,6 +314,10 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final err      = result.primaryError;
     final sevColor = _severityColor(err.severity);
+    // primary_error 為 null（完美）時，zhName 為空 → fallback 到「完美姿勢」
+    final displayName = err.zhName.isNotEmpty
+        ? err.zhName
+        : SwingPosture.zhName(err.errorType); // '' → '完美姿勢'
 
     return _Card(
       child: Column(
@@ -319,7 +334,7 @@ class _SummaryCard extends StatelessWidget {
                     border: Border.all(color: sevColor.withAlpha(80)),
                   ),
                   child: Text(
-                    err.zhName,
+                    displayName,
                     style: TextStyle(color: sevColor, fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                 ),
@@ -475,6 +490,144 @@ class _NextGoalCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── ONNX 分數卡片 ─────────────────────────────────────────────
+
+class _OnnxScoreCard extends StatelessWidget {
+  final OnnxResult onnx;
+  const _OnnxScoreCard({required this.onnx});
+
+  Color _barColor(String label) {
+    if (onnx.officialErrors.contains(label)) return kBadColor;
+    if (onnx.suspectErrors.contains(label))  return kCrispColor;
+    return kTextHint;
+  }
+
+  String _bandLabel(String band) => switch (band) {
+    'high_confidence'      => '高信心',
+    'acceptable_review'    => '可接受',
+    'suspect_not_official' => '可疑',
+    _                      => '忽略',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    // 依照 SwingPosture.errorLabels 固定順序顯示（完美不顯示，只顯示 5 種錯誤）
+    final orderedLabels = SwingPosture.errorLabels;
+
+    return _Card(
+      title: '模型推論分數',
+      icon: Icons.bar_chart_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── 完美揮桿提示橫幅 ────────────────────────────────────
+          if (onnx.isPerfect) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              margin: const EdgeInsets.only(bottom: kSpaceMD),
+              decoration: BoxDecoration(
+                color: kGoodColor.withAlpha(20),
+                borderRadius: BorderRadius.circular(kRadiusSM),
+                border: Border.all(color: kGoodColor.withAlpha(80)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.star_rounded, color: kGoodColor, size: 18),
+                  const SizedBox(width: kSpaceXS),
+                  const Text(
+                    '完美揮桿 — 所有錯誤分數均低於門檻',
+                    style: TextStyle(fontSize: 13, color: kGoodColor, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          ...orderedLabels.map((label) {
+            final score    = onnx.scores[label] ?? 0.0;
+            final band     = onnx.bands[label]  ?? 'low_ignore';
+            final barColor = _barColor(label);
+            final isOfficial = onnx.officialErrors.contains(label);
+            final isSuspect  = onnx.suspectErrors.contains(label);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: kSpaceMD),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          SwingPosture.zhName(label),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: (isOfficial || isSuspect)
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: (isOfficial || isSuspect) ? barColor : kTextSecondary,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${(score * 100).toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: barColor,
+                        ),
+                      ),
+                      const SizedBox(width: kSpaceXS),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: barColor.withAlpha(isOfficial ? 30 : 15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _bandLabel(band),
+                          style: TextStyle(fontSize: 10, color: barColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: score.clamp(0.0, 1.0),
+                      minHeight: 6,
+                      backgroundColor: barColor.withAlpha(20),
+                      valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          // 門檻說明
+          const Divider(height: kSpaceMD),
+          DefaultTextStyle(
+            style: const TextStyle(fontSize: 10, color: kTextHint),
+            child: Row(
+              children: [
+                _dot(kBadColor),    const Text(' 確認錯誤 ≥75%   '),
+                _dot(kCrispColor),  const Text(' 可疑 60–75%   '),
+                _dot(kTextHint),    const Text(' 忽略 <60%'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(Color c) => Container(
+    width: 8, height: 8,
+    decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+  );
 }
 
 // ── 通用卡片容器 ──────────────────────────────────────────────

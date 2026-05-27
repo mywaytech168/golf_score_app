@@ -16,7 +16,7 @@ import '../models/swing_hit.dart';
 // │  舊算法 (v3_fast)            →  新算法 (speed_y_low)                   │
 // ├─────────────────────────────────────────────────────────────────────────┤
 // │  findPeaks(speed)             →  speedPassageCenters（通道取最大值）    │
-// │  findPeaks(audio) + 交集      →  音頻僅標註，不影響偵測                 │
+// │  findPeaks(audio) + 交集      →  音頻不參與偵測（已移除）               │
 // │  片段中心 = avg(speed,audio)  →  片段中心 = Y-LOW（手腕最低點）         │
 // │  無去重                       →  5 秒窗口保留 TOP 最高的桿              │
 // │  threshold = max(92%,0.8)     →  max(minH, 92%, mean+0.6σ, 0.55×p90)  │
@@ -24,14 +24,13 @@ import '../models/swing_hit.dart';
 //
 // 流程：
 //   1. CSV 解析右手腕速度 + 平滑 Y 座標（含實際 FPS）
-//   2. PCM → 每幀 RMS 音量（僅用於 audioValue 標註）
-//   3. 速度去噪（中值 → 移動平均 → 基線扣除）
-//   4. 自適應門檻：max(minH, 92nd%, mean+0.6σ, 0.55×p90)
-//   5. 速度通道偵測 → FAST 幀（速度持續超門檻的區段中心）
-//   6. 每個 FAST → 搜尋最近 Y-LOW（手腕最低點 ≈ 撞球）
-//   7. 每個 Y-LOW → 搜尋 TOP（後擺頂點，Y 最小）
-//   8. 近距離去重（5 秒窗口保留 TOP 最高的桿）
-//   9. 以 Y-LOW 為中心截取 5 秒片段
+//   2. 速度去噪（中值 → 移動平均 → 基線扣除）
+//   3. 自適應門檻：max(minH, 92nd%, mean+0.6σ, 0.55×p90)
+//   4. 速度通道偵測 → FAST 幀（速度持續超門檻的區段中心）
+//   5. 每個 FAST → 搜尋最近 Y-LOW（手腕最低點 ≈ 撞球）
+//   6. 每個 Y-LOW → 搜尋 TOP（後擺頂點，Y 最小）
+//   7. 近距離去重（5 秒窗口保留 TOP 最高的桿）
+//   8. 以 Y-LOW 為中心截取 5 秒片段
 // ──────────────────────────────────────────────────────────────────────────────
 
 class SwingImpactDetector {
@@ -48,11 +47,6 @@ class SwingImpactDetector {
   static const double _speedBaselineSec = 4.0;
   static const double _speedHeightPct   = 92.0;
   static const double _speedMinHeight   = 0.8;
-
-  // ── 音頻訊號去噪參數（僅用於 audioValue 標註）───────────────────────────
-  static const double _audioMedianSec   = 0.30;
-  static const double _audioSmoothSec   = 0.30;
-  static const double _audioBaselineSec = 5.0;
 
   // ── speed_y_low 算法參數 ─────────────────────────────────────────────────
   static const double _nearHitWindowSec    = 5.0;   // 近距離去重窗口
@@ -85,13 +79,9 @@ class SwingImpactDetector {
   /// 主入口：在 isolate 中執行，不阻塞 UI
   static Future<List<SwingHit>> detect({
     required String csvPath,
-    required List<double> audioPcm,
-    required int audioSampleRate,
   }) async {
     final args = _DetectArgs(
       csvPath: csvPath,
-      audioPcm: audioPcm,
-      audioSampleRate: audioSampleRate,
     );
     try {
       return await Isolate.run(() => _detectIsolate(args));
@@ -128,15 +118,8 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
   final speedMk = _toOddFrames(SwingImpactDetector._speedMedianSec,   fps);
   final speedSw = _toOddFrames(SwingImpactDetector._speedSmoothSec,   fps);
   final speedBk = _toOddFrames(SwingImpactDetector._speedBaselineSec, fps);
-  final audioMk = _toOddFrames(SwingImpactDetector._audioMedianSec,   fps);
-  final audioSw = _toOddFrames(SwingImpactDetector._audioSmoothSec,   fps);
-  final audioBk = _toOddFrames(SwingImpactDetector._audioBaselineSec, fps);
 
-  // 3. 音頻去噪（僅用於 audioValue 標註）
-  final audioRaw = _pcmToFrameAmplitude(args.audioPcm, args.audioSampleRate, fps, n);
-  final audioDn  = _denoiseSignal(audioRaw, audioMk, audioSw, audioBk);
-
-  // 4. 速度去噪
+  // 3. 速度去噪
   final speedDn = _denoiseSignal(speedRaw, speedMk, speedSw, speedBk);
   final speedValid = speedDn
       .where((v) => !v.isNaN && v.isFinite)
@@ -147,7 +130,7 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
     return [];
   }
 
-  // 5. 自適應門檻：max(minH, 92nd%, mean+0.6σ, 0.55×p90)
+  // 4. 自適應門檻：max(minH, 92nd%, mean+0.6σ, 0.55×p90)
   final p90  = _percentile(speedValid, 90.0);
   final mean = speedValid.fold(0.0, (a, b) => a + b) / speedValid.length;
   final std  = math.sqrt(
@@ -162,35 +145,31 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
   debugPrint('[SwingDetect] ⚡ 速度門檻=${thr.toStringAsFixed(3)}'
       ' (p90=${p90.toStringAsFixed(3)}, mean=${mean.toStringAsFixed(3)}, std=${std.toStringAsFixed(3)})');
 
-  // 6. 速度通道偵測 → FAST 幀（超門檻區段的速度最大幀）
+  // 5. 速度通道偵測 → FAST 幀（超門檻區段的速度最大幀）
   final mergeGap    = math.max(1, (SwingImpactDetector._passageMergeGapSec * fps).round());
   final minFastFrame = math.max(0, (0.3 * fps).round()); // 忽略前 0.3 秒
   final fastCenters = _speedPassageCenters(speedDn, thr, minFastFrame, mergeGap);
   debugPrint('[SwingDetect] 📍 速度通道: ${fastCenters.length} 個 FAST 幀');
 
-  // 7. 每個 FAST → Y-LOW → TOP
+  // 6. 每個 FAST → Y-LOW → TOP
   final candidates = <_HitCandidate>[];
   for (final fast in fastCenters) {
     final yLow = _nearestYLowFrame(ySmooth, fast, fps);
     final top  = _topFrame(ySmooth, yLow, fast, fps);
-    final audioVal = (yLow < audioDn.length && !audioDn[yLow].isNaN)
-        ? audioDn[yLow]
-        : 0.0;
     candidates.add(_HitCandidate(
       fastFrame:  fast,
       yLowFrame:  yLow,
       topFrame:   top,
       speedValue: speedDn[fast].isNaN ? 0.0 : speedDn[fast],
-      audioValue: audioVal,
     ));
     debugPrint('[SwingDetect]   FAST=$fast → Y-LOW=$yLow, TOP=$top');
   }
 
-  // 8. 近距離去重：5 秒窗口內保留 TOP 最高（Y 最小）的桿
+  // 7. 近距離去重：5 秒窗口內保留 TOP 最高（Y 最小）的桿
   final deduped = _filterNearbyHitsKeepHighestTop(candidates, ySmooth, fps);
   debugPrint('[SwingDetect] ✅ 去重後: ${deduped.length} 個擊球');
 
-  // 9. 建立 SwingHit（以 Y-LOW 為中心截取片段）
+  // 8. 建立 SwingHit（以 Y-LOW 為中心截取片段）
   final totalDurationSec = n / fps;
   final hits = <SwingHit>[];
   for (int i = 0; i < deduped.length; i++) {
@@ -207,7 +186,7 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
       startSec:   startSec,
       endSec:     endSec,
       speedValue: c.speedValue,
-      audioValue: c.audioValue,
+      audioValue: 0.0,
       fastFrame:  c.fastFrame,
       topFrame:   c.topFrame,
     ));
@@ -472,39 +451,6 @@ double _toDouble(dynamic v) {
   return double.tryParse(v.toString()) ?? double.nan;
 }
 
-// ── 音頻振幅 ─────────────────────────────────────────────────────────────────
-
-List<double> _pcmToFrameAmplitude(
-    List<double> pcm, int sampleRate, double fps, int numFrames) {
-  if (pcm.isEmpty || numFrames <= 0) return List.filled(numFrames, 0.0);
-
-  final csvDurationSec  = numFrames / fps;
-  final expectedSamples = (csvDurationSec * sampleRate).round();
-  final effectivePcm    = pcm.length > expectedSamples
-      ? pcm.sublist(0, expectedSamples)
-      : pcm;
-
-  final samplesPerFrame = sampleRate / fps;
-  final result = List<double>.filled(numFrames, 0.0);
-  for (int f = 0; f < numFrames; f++) {
-    final start = (f * samplesPerFrame).round();
-    final end   = math.min(((f + 1) * samplesPerFrame).round(), effectivePcm.length);
-    if (start >= end || start >= effectivePcm.length) continue;
-    double sumSq = 0.0;
-    for (int i = start; i < end; i++) {
-      sumSq += effectivePcm[i] * effectivePcm[i];
-    }
-    result[f] = math.sqrt(sumSq / (end - start));
-  }
-
-  // 全局正規化至 [0, 1]
-  final mx = result.reduce(math.max);
-  if (mx > 1e-8) {
-    for (int i = 0; i < result.length; i++) { result[i] /= mx; }
-  }
-  return result;
-}
-
 // ── 訊號處理 ─────────────────────────────────────────────────────────────────
 
 List<double> _interpNan(List<double> x) {
@@ -610,13 +556,11 @@ class _HitCandidate {
   final int yLowFrame;
   final int topFrame;
   final double speedValue;
-  final double audioValue;
   const _HitCandidate({
     required this.fastFrame,
     required this.yLowFrame,
     required this.topFrame,
     required this.speedValue,
-    required this.audioValue,
   });
 }
 
@@ -624,11 +568,7 @@ class _HitCandidate {
 
 class _DetectArgs {
   final String csvPath;
-  final List<double> audioPcm;
-  final int audioSampleRate;
   const _DetectArgs({
     required this.csvPath,
-    required this.audioPcm,
-    required this.audioSampleRate,
   });
 }

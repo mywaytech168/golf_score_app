@@ -30,8 +30,8 @@ class SkeletonOverlayRenderer(private val context: Context) {
     companion object {
         private const val TAG = "SkeletonOverlay"
 
-        /** 骨架分析取樣間隔（毫秒），對應 VideoAnalysisService 的 _frameIntervalMs = 33 */
-        private const val ANALYSIS_INTERVAL_MS = 33.0
+        // 注意：骨架 CSV 現在以 time_ms 為 key（fps 無關），
+        // 渲染時直接用 origTimeSec * 1000 查找，無需固定採樣間隔常數。
 
         val CONNECTIONS = listOf(
             // 臉部
@@ -243,10 +243,10 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 try {
                     val pts = decBufInfo.presentationTimeUs
 
-                    // ── 計算對應的 CSV 幀索引 ────────────────────
+                    // ── 計算對應的 CSV 時間 key（毫秒整數，與 fps 無關）────────
                     val clipTimeSec = pts / 1_000_000.0
                     val origTimeSec = startSec + clipTimeSec
-                    val csvFrameIdx = (origTimeSec * 1000.0 / ANALYSIS_INTERVAL_MS).roundToInt()
+                    val csvTimeMs   = (origTimeSec * 1000.0).roundToInt()
 
                     // ── 1. YUV → NV12 直接轉換 + downscale to encW×encH（~7x 加速）──
                     yuvToNv12WithRotation(image, videoW, videoH, rotation, displayW, displayH, encW, encH, nv12Buf)
@@ -254,7 +254,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
 
                     // ── 2. 骨架疊加（透明 overlay → composite 進 NV12）──
                     overlayBmp.eraseColor(android.graphics.Color.TRANSPARENT)
-                    getSmoothedLandmarks(frameData, csvFrameIdx, sortedFrameKeys)?.let { landmarks ->
+                    getSmoothedLandmarks(frameData, csvTimeMs, sortedFrameKeys)?.let { landmarks ->
                         drawSkeleton(overlayCanvas, landmarks, poseW, poseH, encW, encH, skeletonRadius)
                     }
                     compositeSkeleton(overlayBmp, overlayPixels, encW, encH, nv12Buf)
@@ -482,6 +482,10 @@ class SkeletonOverlayRenderer(private val context: Context) {
     // CSV 解析
     // ────────────────────────────────────────────────────────────
 
+    /**
+     * 解析 CSV，key 採用 time_sec × 1000 四捨五入的毫秒整數，
+     * 與影片 fps 完全解耦（30fps / 60fps / 120fps 均可正確對齊）。
+     */
     private fun parseCsv(csvPath: String): Map<Int, Array<LandmarkPoint?>> {
         val file = File(csvPath)
         if (!file.exists()) { Log.w(TAG, "CSV 不存在: $csvPath"); return emptyMap() }
@@ -493,8 +497,10 @@ class SkeletonOverlayRenderer(private val context: Context) {
             while (line != null) {
                 val cols = line.split(",")
                 if (cols.size >= 201) {
-                    val frameIdx = cols[0].trim().toIntOrNull()
-                    if (frameIdx != null) {
+                    // col[1] = time_sec；以毫秒整數作 key，與 fps 解耦
+                    val timeSec = cols[1].trim().toDoubleOrNull()
+                    if (timeSec != null) {
+                        val timeMs = (timeSec * 1000.0).roundToInt()
                         val landmarks = arrayOfNulls<LandmarkPoint>(33)
                         for (i in 0 until 33) {
                             val base  = 3 + i * 6
@@ -509,7 +515,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
                                 landmarks[i] = LandmarkPoint(xPx, yPx, xNorm, yNorm, vis)
                             }
                         }
-                        result[frameIdx] = landmarks
+                        result[timeMs] = landmarks
                     }
                 }
                 line = reader.readLine()

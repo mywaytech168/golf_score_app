@@ -149,10 +149,35 @@ class RecordingHistoryStorage {
     try {
       final db   = await _openDb();
       final rows = await db.query(_table, orderBy: 'recordedAt DESC');
-      return rows.map(_fromRow).toList();
+      final entries = rows.map(_fromRow).toList();
+      // 清理孤兒 clip.mp4：若同一 session 目錄下已有 skeleton.mp4 或 final.mp4
+      // 代表分析已完成但舊 clip.mp4 條目未被刪除（歷史 bug 殘留），自動移除
+      await _purgeOrphanClips(db, entries);
+      return (await db.query(_table, orderBy: 'recordedAt DESC')).map(_fromRow).toList();
     } catch (e) {
       debugPrint('❌ [RecordingHistoryStorage] loadHistory 失敗: $e');
       return [];
+    }
+  }
+
+  /// 清理孤兒 clip.mp4 條目（分析後 clip.mp4 未被刪除的殘留）
+  Future<void> _purgeOrphanClips(Database db, List<RecordingHistoryEntry> entries) async {
+    // 取得所有已分析（isAnalyzed=1）且 filePath 非 clip.mp4 的 session 目錄
+    final analyzedDirs = entries
+        .where((e) => e.isAnalyzed && !e.filePath.endsWith('clip.mp4'))
+        .map((e) => p.dirname(e.filePath))
+        .toSet();
+
+    // 找出同一目錄下還殘留的 clip.mp4 孤兒條目
+    final orphans = entries.where((e) =>
+        e.filePath.endsWith('clip.mp4') &&
+        analyzedDirs.contains(p.dirname(e.filePath)));
+
+    if (orphans.isEmpty) return;
+
+    for (final o in orphans) {
+      await db.delete(_table, where: 'filePath = ?', whereArgs: [o.filePath]);
+      debugPrint('🧹 [RecordingHistoryStorage] 清理孤兒條目：${o.filePath}');
     }
   }
 

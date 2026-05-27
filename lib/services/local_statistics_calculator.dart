@@ -86,6 +86,30 @@ class LocalStatisticsCalculator {
         ? (goodCount / analyzedTotal) * 100.0
         : 0.0;
 
+    // 揮桿速度峰值（bestSpeedValue，來自擊球偵測）
+    // 優先使用 localClip 條目（每球一條，避免與 original 重複計算）
+    // 若無 clip 資料則回退至全部條目（相容舊資料）
+    final clipSpeedValues = entries
+        .where((e) => e.videoType == VideoType.localClip)
+        .map((e) => e.bestSpeedValue)
+        .whereType<double>()
+        .where((v) => v > 0)
+        .toList();
+    final speedValues = clipSpeedValues.isNotEmpty
+        ? clipSpeedValues
+        : entries
+            .map((e) => e.bestSpeedValue)
+            .whereType<double>()
+            .where((v) => v > 0)
+            .toList();
+
+    final speedAvg = speedValues.isNotEmpty
+        ? speedValues.reduce((a, b) => a + b) / speedValues.length
+        : 0.0;
+    final speedMax = speedValues.isNotEmpty
+        ? speedValues.reduce((a, b) => a > b ? a : b)
+        : 0.0;
+
     // 聲音清脆度（僅含有數值的條目）
     final crispValues = entries
         .map((e) => e.audioCrispness)
@@ -99,9 +123,12 @@ class LocalStatisticsCalculator {
         ? crispValues.reduce((a, b) => a < b ? a : b)
         : 0.0;
 
-    // 姿勢分佈統計（只含已做 AI Coach 分析的條目）
+    // 姿勢分佈統計：只取 localClip（切片）的 swingPostureLabel
+    // 原因：AI Coach 骨架分析以切片為單位；若同時統計 original，
+    //       同一次揮桿（original + clip 均做過 AI Coach）會被計算兩次。
     final postureBreakdown = <String, int>{};
     for (final e in entries) {
+      if (e.videoType != VideoType.localClip) continue; // 只統計切片
       final label = e.swingPostureLabel;
       if (label == null) continue;
       postureBreakdown[label] = (postureBreakdown[label] ?? 0) + 1;
@@ -115,6 +142,7 @@ class LocalStatisticsCalculator {
     debugPrint(
       '$_tag → total=$totalCount good=$goodCount bad=$badCount '
       'sweet=${sweetSpot.toStringAsFixed(1)}% '
+      'speedAvg=${speedAvg.toStringAsFixed(2)} speedMax=${speedMax.toStringAsFixed(2)} '
       'crispAvg=${crispAvg.toStringAsFixed(1)} crispMin=${crispMin.toStringAsFixed(1)} '
       'posture=$postureBreakdown',
     );
@@ -129,8 +157,7 @@ class LocalStatisticsCalculator {
       goodShot: goodCount,
       badShot: badCount,
       sweetSpotPercentage: sweetSpot,
-      // 揮桿速度目前未存入本地，保留 0 待後續擴充
-      peakValue: PeakValueStats(average: 0, maximum: 0),
+      peakValue: PeakValueStats(average: speedAvg, maximum: speedMax),
       audioCrispness: AudioCrispnessStats(average: crispAvg, minimum: crispMin),
       postureBreakdown: postureBreakdown,
     );

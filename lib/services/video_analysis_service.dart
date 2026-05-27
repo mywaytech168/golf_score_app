@@ -17,7 +17,8 @@ class VideoAnalysisService {
   static const _audioChannel = MethodChannel('audio_extractor_channel');
   static const _poseAnalyzerChannel = MethodChannel('com.example.golf_score_app/pose_analyzer');
   static const _frameExtractorChannel = MethodChannel('com.example.golf_score_app/frame_extractor');
-  static const _frameIntervalMs = 33; // ~30fps（與 SkeletonOverlayRenderer.ANALYSIS_INTERVAL_MS 一致）
+  // 採樣率由原生端自主從影片元數據讀取（nominalFrameRate / KEY_FRAME_RATE），
+  // Dart 側不再指定 targetFps，避免硬編 30fps 誤導實際採樣行為。
 
   Future<VideoAnalysisResult> analyze({
     required String videoPath,
@@ -116,12 +117,13 @@ class VideoAnalysisService {
         {
           'videoPath': videoPath,
           'outputCsvPath': csvPath,
-          'targetFps': 1000 ~/ _frameIntervalMs, // 30fps
+          // targetFps 不傳：原生端自主從影片 nominalFrameRate/KEY_FRAME_RATE 讀取，
+          // 確保 60fps 影片以 60fps 採樣、30fps 影片以 30fps 採樣。
           'maxWidth': 720,
         },
       );
       if (result == null || result['status'] != 'completed') {
-        throw Exception('Kotlin 骨架分析失敗: $result');
+        throw Exception('骨架分析失敗: $result');
       }
     } finally {
       progressSvc.progress.removeListener(_listenPose);
@@ -139,7 +141,7 @@ class VideoAnalysisService {
   }) async {
     final writer = PoseCsvWriter(csvPath);
     final totalMs = durationSeconds * 1000;
-    final totalSteps = (totalMs / _frameIntervalMs).ceil().clamp(1, 99999);
+    final totalSteps = (totalMs / 33).ceil().clamp(1, 99999);
     const double imgW = 720, imgH = 1280;
     const batchSize = 4;
 
@@ -153,11 +155,11 @@ class VideoAnalysisService {
 
     // 步驟 1️⃣: 收集所有幀時間戳
     final frameTimestamps = <int>[];
-    for (var ms = 0; ms < totalMs; ms += _frameIntervalMs) {
+    for (var ms = 0; ms < totalMs; ms += 33) {
       frameTimestamps.add(ms);
     }
 
-    debugPrint('[VideoAnalysis] 配置: ${frameTimestamps.length} 幀, ${_frameIntervalMs}ms 間隔, $batchSize 幀/批次');
+    debugPrint('[VideoAnalysis] 配置: ${frameTimestamps.length} 幀, ${33}ms 間隔, $batchSize 幀/批次');
 
     for (int batchStart = 0; batchStart < frameTimestamps.length; batchStart += batchSize) {
       final batchEnd = (batchStart + batchSize).clamp(0, frameTimestamps.length);
