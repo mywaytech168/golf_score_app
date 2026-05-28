@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:fl_chart/fl_chart.dart';
@@ -52,6 +53,20 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   bool _aiLoading = false;
   bool _aiSubmitting = false;
 
+  // 揮桿 8 階段關鍵禎
+  // key = phase key (e.g. 'address'), value = seconds in clip
+  Map<String, double>? _phases;
+  static const _phaseOrder = [
+    ('address',       '準備'),
+    ('takeaway',      '起桿'),
+    ('backswing',     '上桿'),
+    ('top',           '頂點'),
+    ('downswing',     '下桿'),
+    ('impact',        '擊球'),
+    ('followthrough', '送桿'),
+    ('finish',        '收桿'),
+  ];
+
   static const _tabs = [
     (icon: Icons.videocam,  label: '原始',  type: 'original'),
     (icon: Icons.person,    label: '骨架',  type: 'skeleton'),
@@ -93,6 +108,28 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           ? '${p.dirname(widget.videoPath)}${p.separator}swing.mp4'
           : widget.videoPath;
       _initController(originalPath, isOriginal: true);
+    }
+
+    // 讀取揮桿 8 階段時間點
+    if (widget.entry?.videoType == VideoType.localClip) {
+      _loadPhases();
+    }
+  }
+
+  Future<void> _loadPhases() async {
+    final phasesFile = File(p.join(p.dirname(widget.videoPath), 'phases.json'));
+    if (!phasesFile.existsSync()) return;
+    try {
+      final raw = jsonDecode(await phasesFile.readAsString());
+      if (raw is Map) {
+        if (mounted) {
+          setState(() {
+            _phases = raw.map((k, v) => MapEntry(k as String, (v as num).toDouble()));
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('[VideoPlayer] phases.json 讀取失敗: $e');
     }
   }
 
@@ -259,6 +296,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             _buildTopBar(context),
             Expanded(child: _buildVideo()),
             if (_initialized) _buildControls(),
+            if (_initialized && _phases != null) _buildPhaseStrip(),
             _buildChartsPanel(),
             _buildAiPanel(),
           ],
@@ -417,6 +455,84 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  // ── 揮桿 8 階段關鍵禎橫列 ────────────────────────────────────
+
+  Widget _buildPhaseStrip() {
+    final phases = _phases!;
+    final ctrl   = _controller;
+    final posSec = ctrl != null && ctrl.value.isInitialized
+        ? ctrl.value.position.inMilliseconds / 1000.0
+        : 0.0;
+
+    // 計算當前播放位置對應的階段（高亮）
+    String? currentPhase;
+    for (int i = _phaseOrder.length - 1; i >= 0; i--) {
+      final key = _phaseOrder[i].$1;
+      final t   = phases[key];
+      if (t != null && posSec >= t - 0.05) {
+        currentPhase = key;
+        break;
+      }
+    }
+
+    return Container(
+      color: const Color(0xFF0A0A0A),
+      height: 72,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        itemCount: _phaseOrder.length,
+        itemBuilder: (context, index) {
+          final (key, label) = _phaseOrder[index];
+          final sec      = phases[key];
+          final isActive = currentPhase == key;
+
+          return GestureDetector(
+            onTap: sec != null && ctrl != null
+                ? () => ctrl.seekTo(Duration(milliseconds: (sec * 1000).round()))
+                : null,
+            child: Container(
+              width: 58,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? kPrimaryGreen.withValues(alpha: 0.18)
+                    : const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isActive ? kPrimaryGreen : Colors.white12,
+                  width: isActive ? 1.5 : 1,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    sec != null ? '${sec.toStringAsFixed(1)}s' : '--',
+                    style: TextStyle(
+                      color: isActive ? kPrimaryGreen : Colors.white60,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: isActive ? Colors.white : Colors.white38,
+                      fontSize: 9,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

@@ -1,5 +1,4 @@
 ﻿import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
@@ -9,123 +8,86 @@ import 'audio_analyzer.dart';
 class AudioAnalysisService {
   const AudioAnalysisService();
 
-  // ------------------- MODEL CONFIG (Python 同步版) -------------------
-  static const Map<String, double> _featureWeights = <String, double>{
-    'rms_dbfs': 2.0,
-    'spectral_centroid': 1.0,
-    'sharpness_hfxloud': 2.0,
-    'highband_amp': 1.0,
-    'peak_dbfs': 1.0,
+  // ------------------- 規則式分類配置 (與 Python classify_golf_audio_score_demo.py 同步) ---
+  // 5 個音訊特徵的好球區間 [low, high]
+  static const Map<String, List<double>> ruleIntervals = {
+    'rms_dbfs':          [-30.0, -24.0],   // dBFS；好球主體在 -30 ~ -24
+    'spectral_centroid': [3800.0, 4350.0], // Hz；好球約落在 3.8k ~ 4.35k
+    'sharpness_hfxloud': [2.0, 3.0],       // 尖銳度 × 音量
+    'highband_amp':      [11.0, 32.0],     // (2k~3k + 3k~4k) 平均幅度
+    'peak_dbfs':         [-10.0, -4.0],    // dBFS 峰值
+  };
+  // Keep private alias for internal use
+  static const Map<String, List<double>> _ruleIntervals = ruleIntervals;
+
+  /// 各特徵的中文顯示名稱
+  static const Map<String, String> featureLabels = {
+    'rms_dbfs':          '音量',
+    'spectral_centroid': '頻率',
+    'sharpness_hfxloud': '清脆',
+    'highband_amp':      '高頻',
+    'peak_dbfs':         '峰值',
   };
 
-  static const double _stage1NonbadRelax = 1.5;
-  static const bool _stage2UseThreshold = true;
-  static const double _stage2ProZ2Thresh = 10.0;
-  static const double _epsilon = 1e-12;
+  /// 格式化特徵值為簡短可讀字串（供 UI badge 顯示）
+  /// 例如：formatFeatureValue('spectral_centroid', 4100) → '4.1k'
+  static String formatFeatureValue(String key, double v) {
+    if (key == 'spectral_centroid') {
+      return '${(v / 1000).toStringAsFixed(1)}k';
+    }
+    // 整數顯示 0 小數，小數值顯示 1 位
+    if (v.abs() >= 100) return v.toStringAsFixed(0);
+    return v.toStringAsFixed(1);
+  }
+
+  /// 通過 >= goodBadThreshold 項特徵即視為命中（好球）
+  static const int goodBadThreshold = 3;
+  // Keep private alias for internal use
+  static const int _goodBadThreshold = goodBadThreshold;
+
   // Approximate Python's PEAK_REL_STRENGTH; used for simple peak counting on waveform envelope.
   static const double _peakRelStrength = 1.0;
-  
+  static const double _epsilon = 1e-12;
+
   // ------------------- 無聲音檢測閾值 -------------------
   static const double _silenceRmsThreshold = 0.01;    // RMS 閾值
   static const double _silencePeakThreshold = 0.05;   // 峰值閾值
 
-  static Map<String, dynamic>? _modelStats;
-
-  static Future<void> _loadModelStats() async {
-    if (_modelStats != null) return;
-    final String jsonString = await rootBundle.loadString('assets/audio/audio_class_stats.json');
-    _modelStats = json.decode(jsonString) as Map<String, dynamic>;
-  }
-
-  static Map<String, double> _castStats(Map<String, dynamic> src) {
-    return src.map((k, v) => MapEntry(k, (v as num).toDouble()));
-  }
-
+  /// 規則式評分：對 5 個特徵逐一判斷是否落在好球區間（與 Python 同步）
+  /// 通過 >= 3 項 → 'good'（命中）；否則 → 'bad'（未命中）
   static Future<_AudioScore?> scoreSummary(Map<String, dynamic> summary) async {
-    await _loadModelStats();
-    if (_modelStats == null) return null;
-
-    // --- Extract target features ---
+    // 提取特徵值
     final Map<String, double> x = {};
-    for (final feature in _featureWeights.keys) {
-      final v = _extractFeatureValue(feature, summary);
-      if (v != null && v.isFinite) x[feature] = v;
+    for (final feat in _ruleIntervals.keys) {
+      final v = _extractFeatureValue(feat, summary);
+      if (v != null && v.isFinite) x[feat] = v;
     }
     if (x.isEmpty) return null;
 
-    // --- Load model means & std ---
-    final muPro = _castStats(_modelStats!['mu']['pro']);
-    final sdPro = _castStats(_modelStats!['sd']['pro']);
-    final muGood = _castStats(_modelStats!['mu']['good']);
-    final sdGood = _castStats(_modelStats!['sd']['good']);
-    final muBad = _castStats(_modelStats!['mu']['bad']);
-    final sdBad = _castStats(_modelStats!['sd']['bad']);
-    final muNonbad = _castStats(_modelStats!['mu']['nonbad']);
-    final rawSdNonbad = _castStats(_modelStats!['sd']['nonbad']);
-
-    // Relax nonbad sd
-    final Map<String, double> sdNonbadRelax = {
-      for (final e in rawSdNonbad.entries) e.key: e.value * _stage1NonbadRelax
-    };
-
-    // --- STAGE 1: bad vs nonbad ---
-    final double dBad = _computeWeightedDistance(x, muBad, sdBad);
-    final double dNonbadR = _computeWeightedDistance(x, muNonbad, sdNonbadRelax);
-
-    String finalClass;
-    double? dPro, dGood, z2Pro;
-
-    if (dNonbadR < dBad) {
-      // --- STAGE 2: good vs pro ---
-      dPro = _computeWeightedDistance(x, muPro, sdPro);
-      dGood = _computeWeightedDistance(x, muGood, sdGood);
-      z2Pro = dPro;
-
-      if (_stage2UseThreshold) {
-        finalClass = (z2Pro <= _stage2ProZ2Thresh) ? 'pro' : 'good';
-      } else {
-        finalClass = (dPro < dGood) ? 'pro' : 'good';
-      }
-    } else {
-      finalClass = 'bad';
+    // 逐特徵判斷是否通過區間
+    final passes = <String, bool>{};
+    for (final entry in _ruleIntervals.entries) {
+      final feat = entry.key;
+      final low  = entry.value[0];
+      final high = entry.value[1];
+      final val  = x[feat];
+      passes[feat] = val != null && val >= low && val <= high;
     }
 
+    final int passCount    = passes.values.where((p) => p).length;
+    final bool isGood      = passCount >= _goodBadThreshold;
+    final String predicted = isGood ? 'good' : 'bad';
+
+    debugPrint('🎵 [AudioScore] passCount=$passCount/5 → $predicted | passes=$passes');
+
     return _AudioScore(
-      predictedClass: finalClass,
-      feedbackLabel: _classFeedbackLabels[finalClass] ?? finalClass.toUpperCase(),
+      predictedClass: predicted,
+      feedbackLabel: isGood ? '命中 $passCount/5' : '未命中 $passCount/5',
       featureValues: x,
-      distances: {
-        'd_bad': dBad,
-        'd_nonbad_relaxed': dNonbadR,
-        if (dPro != null) 'd_pro': dPro,
-        if (dGood != null) 'd_good': dGood,
-        if (z2Pro != null) 'z2_pro': z2Pro,
-      },
+      distances: {},
+      passCount: passCount,
+      passes: passes,
     );
-  }
-
-  static const Map<String, String> _classFeedbackLabels = {
-    'pro': 'Pro',
-    'good': 'Sweet',
-    'bad': 'Keep going!',
-    'no_audio': '無聲音',
-  };
-
-  // --- Weighted z² distance ----
-  static double _computeWeightedDistance(Map<String, double> x, Map<String, double> mu, Map<String, double> sd) {
-    double sum = 0.0;
-    bool used = false;
-    _featureWeights.forEach((feat, w) {
-      final xv = x[feat];
-      final mv = mu[feat];
-      final sv = sd[feat];
-      if (xv == null || mv == null || sv == null) return;
-      final s = (sv.abs() < _epsilon) ? _epsilon : sv;
-      final z = (xv - mv) / s;
-      sum += w * z * z;
-      used = true;
-    });
-    return used ? sum : double.infinity;
   }
 
   static double? _extractFeatureValue(String key, Map<String, dynamic> summary) {
@@ -352,12 +314,16 @@ class _AudioScore {
     required this.feedbackLabel,
     required this.featureValues,
     required this.distances,
+    required this.passCount,
+    required this.passes,
   });
 
   final String predictedClass;
   final String feedbackLabel;
   final Map<String, double> featureValues;
   final Map<String, double> distances;
+  final int passCount;
+  final Map<String, bool> passes;
 }
 
 class _WavData {

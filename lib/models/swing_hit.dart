@@ -13,6 +13,16 @@ class SwingHit {
   final int fastFrame;  // 速度峰值幀 (FAST)
   final int topFrame;   // 後擺頂點幀 (TOP)
 
+  // ── 揮桿 8 階段關鍵禎（秒數，相對於原始影片）────────────────────
+  final double addressSec;       // ① 準備姿勢（最靜止的設定位置）
+  final double takeawaySec;      // ② 起桿（速度開始上升）
+  final double backswingSec;     // ③ 上桿中段（takeaway 到頂點的中間）
+  final double backswingTopSec;  // ④ 頂點（上桿最高點 = topFrame / fps）
+  final double downswingSec;     // ⑤ 下桿中段（頂點到擊球的中間）
+  // ⑥ 擊球 = hitSec（已有）
+  final double followThroughSec; // ⑦ 送桿
+  final double finishSec;        // ⑧ 收桿（速度歸零後的靜止位置）
+
   const SwingHit({
     required this.hitIndex,
     required this.hitFrame,
@@ -23,6 +33,13 @@ class SwingHit {
     required this.audioValue,
     this.fastFrame = 0,
     this.topFrame = 0,
+    this.addressSec = 0.0,
+    this.takeawaySec = 0.0,
+    this.backswingSec = 0.0,
+    this.backswingTopSec = 0.0,
+    this.downswingSec = 0.0,
+    this.followThroughSec = 0.0,
+    this.finishSec = 0.0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -35,6 +52,13 @@ class SwingHit {
         'audioValue': audioValue,
         'fastFrame': fastFrame,
         'topFrame': topFrame,
+        'addressSec': addressSec,
+        'takeawaySec': takeawaySec,
+        'backswingSec': backswingSec,
+        'backswingTopSec': backswingTopSec,
+        'downswingSec': downswingSec,
+        'followThroughSec': followThroughSec,
+        'finishSec': finishSec,
       };
 
   factory SwingHit.fromJson(Map<String, dynamic> j) => SwingHit(
@@ -47,6 +71,13 @@ class SwingHit {
         audioValue: (j['audioValue'] as num).toDouble(),
         fastFrame: (j['fastFrame'] as num?)?.toInt() ?? (j['hitFrame'] as num).toInt(),
         topFrame: (j['topFrame'] as num?)?.toInt() ?? 0,
+        addressSec:       (j['addressSec']       as num?)?.toDouble() ?? 0.0,
+        takeawaySec:      (j['takeawaySec']      as num?)?.toDouble() ?? 0.0,
+        backswingSec:     (j['backswingSec']      as num?)?.toDouble() ?? 0.0,
+        backswingTopSec:  (j['backswingTopSec']  as num?)?.toDouble() ?? 0.0,
+        downswingSec:     (j['downswingSec']      as num?)?.toDouble() ?? 0.0,
+        followThroughSec: (j['followThroughSec'] as num?)?.toDouble() ?? 0.0,
+        finishSec:        (j['finishSec']         as num?)?.toDouble() ?? 0.0,
       );
 
   Duration get startDuration => Duration(milliseconds: (startSec * 1000).round());

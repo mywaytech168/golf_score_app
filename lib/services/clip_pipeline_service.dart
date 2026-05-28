@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -200,6 +201,13 @@ class ClipPipelineService {
         'crispness=${audioAnalysis?.crispness?.toStringAsFixed(3)}, '
         'label=${audioAnalysis?.audioLabel}');
 
+    // 儲存 8 階段時間點（phases.json），供影片播放器關鍵禎跳轉使用
+    await _savePhasesJson(
+      sessionDir: sessionDir,
+      hit: hit,
+      clipActualStartSec: clipActualStartSec,
+    );
+
     debugPrint('[Pipeline] hit ${hit.hitIndex} → ✅ 裁切完成：$trimmed');
 
     final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
@@ -222,8 +230,50 @@ class ClipPipelineService {
         audioCrispness: audioAnalysis?.crispness,
         goodShot: audioAnalysis?.goodShot,
         audioLabel: audioAnalysis?.audioLabel,
+        audioPassCount: audioAnalysis?.passCount,
+        audioPasses: audioAnalysis?.passes,
+        audioFeatureValues: audioAnalysis?.featureValues,
       ),
     );
+  }
+
+  /// 公開入口：供 UI 頁面對已存在的 clip 補存 phases.json。
+  ///
+  /// [hit] 的時間欄位（addressSec 等）應為相對於 clip 起點的秒數（clipActualStartSec=0）。
+  static Future<void> savePhasesJson({
+    required String sessionDir,
+    required SwingHit hit,
+    double clipActualStartSec = 0.0,
+  }) =>
+      _savePhasesJson(
+        sessionDir: sessionDir,
+        hit: hit,
+        clipActualStartSec: clipActualStartSec,
+      );
+
+  /// 儲存 8 階段時間點到 phases.json（clip 相對秒數），供影片播放器快速讀取。
+  static Future<void> _savePhasesJson({
+    required String sessionDir,
+    required SwingHit hit,
+    required double clipActualStartSec,
+  }) async {
+    double clip(double srcSec) => (srcSec - clipActualStartSec).clamp(0.0, 3600.0);
+    final map = {
+      'address':       clip(hit.addressSec),
+      'takeaway':      clip(hit.takeawaySec),
+      'backswing':     clip(hit.backswingSec),
+      'top':           clip(hit.backswingTopSec),
+      'downswing':     clip(hit.downswingSec),
+      'impact':        clip(hit.hitSec),
+      'followthrough': clip(hit.followThroughSec),
+      'finish':        clip(hit.finishSec),
+    };
+    try {
+      await File(p.join(sessionDir, 'phases.json'))
+          .writeAsString(jsonEncode(map));
+    } catch (e) {
+      debugPrint('[Pipeline] phases.json 儲存失敗: $e');
+    }
   }
 
   /// 從 WAV 檔案讀取 PCM，呼叫 AudioExportService 分析甜蜜點與清脆度。
@@ -231,7 +281,7 @@ class ClipPipelineService {
   /// [wavPath]       — 已切分完成的 audio.wav
   /// [sessionDir]    — clip 的 session 目錄（AudioAnalysisConfig 需要）
   /// [hitSecInClip]  — 擊球時刻相對於 clip 起點的秒數（用作 targetHitTime）
-  static Future<({double? crispness, bool? goodShot, String? audioLabel})?>
+  static Future<({double? crispness, bool? goodShot, String? audioLabel, int? passCount, Map<String, bool>? passes, Map<String, double>? featureValues})?>
       _analyzeClipAudio({
     required String wavPath,
     required String sessionDir,
@@ -292,8 +342,11 @@ class ClipPipelineService {
         crispness: result.features.isNotEmpty
             ? result.features.first.sharpnessHfxLoud
             : null,
-        goodShot: result.predictedClass == 'pro' || result.predictedClass == 'good',
+        goodShot: result.predictedClass == 'good',
         audioLabel: result.feedbackLabel,
+        passCount: result.passCount,
+        passes: result.passes.isNotEmpty ? Map<String, bool>.from(result.passes) : null,
+        featureValues: result.featureValues.isNotEmpty ? Map<String, double>.from(result.featureValues) : null,
       );
     } catch (e) {
       debugPrint('[Pipeline._analyzeClipAudio] ❌ $e');
@@ -457,7 +510,7 @@ class ClipPipelineService {
       debugPrint('[Pipeline.analyze] 球偵測模式: ${ballMode.label}');
 
       final extraction = ballMode == BallDetectionMode.tflite
-          ? await BallTrajectoryService.extractBlobsTflite(inputPath: clipPath)
+          ? await BallTrajectoryService.extractBlobsTflite(inputPath: clipPath, hitSec: hitSec)
           : await BallTrajectoryService.extractBlobs(inputPath: clipPath);
       progressSvc.progress.removeListener(_listenBlobs);
 

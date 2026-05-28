@@ -20,7 +20,9 @@ import '../services/video_analysis_pipeline_service.dart';
 import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
+import '../services/audio_analysis_service.dart';
 import '../services/ad_service.dart';
+import '../services/analysis_service.dart';
 import '../services/plan_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../widgets/hits_summary_widget.dart';
@@ -42,8 +44,6 @@ enum _SortBy {
   date,
   /// 按最佳速度（峰值）排序（最高優先）
   peakValue,
-  /// 按聲音清脆度排序（最高優先）
-  audioCrispness,
   /// 按片段時間排序（切片在原始影片中的開始秒數，由小到大）
   clipTime;
 
@@ -54,8 +54,6 @@ enum _SortBy {
         return '時間';
       case _SortBy.peakValue:
         return '最佳速度';
-      case _SortBy.audioCrispness:
-        return '聲音清脆度';
       case _SortBy.clipTime:
         return '片段時間';
     }
@@ -648,22 +646,6 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
         });
         break;
       
-      case _SortBy.audioCrispness:
-        // 按聲音清脆度排序（最高優先）
-        sorted.sort((a, b) {
-          final crispnessA = a.audioCrispness ?? -1;
-          final crispnessB = b.audioCrispness ?? -1;
-          
-          // 如果都沒有數據，則按時間排序
-          if (crispnessA == -1 && crispnessB == -1) {
-            return b.sortTime.compareTo(a.sortTime);
-          }
-          
-          // 較高的排前面
-          return crispnessB.compareTo(crispnessA);
-        });
-        break;
-
       case _SortBy.clipTime:
         // 按片段內播放位置排序（startSecond 小的前者先）
         sorted.sort((a, b) {
@@ -1428,8 +1410,10 @@ class _HistoryTileState extends State<_HistoryTile> {
     );
 
     try {
-      final clipPath = widget.entry.filePath;
-      final sessionDir = p.dirname(clipPath);
+      final clipPath     = widget.entry.filePath;
+      final sessionDir   = p.dirname(clipPath);
+      final csvPath      = p.join(sessionDir, 'pose_landmarks.csv');
+      final hasCsv       = File(csvPath).existsSync();
       final durationSeconds = widget.entry.durationSeconds;
 
       // 檢查時長有效性
@@ -1609,8 +1593,11 @@ class _HistoryTileState extends State<_HistoryTile> {
           audioCrispness: audioResult.features.isNotEmpty
               ? audioResult.features.first.sharpnessHfxLoud
               : null,
-          goodShot: audioResult.predictedClass == 'pro' || audioResult.predictedClass == 'good',
+          goodShot: audioResult.predictedClass == 'good',
           audioLabel: audioResult.feedbackLabel,
+          audioPassCount: audioResult.passCount,
+          audioPasses: audioResult.passes.isNotEmpty ? audioResult.passes : null,
+          audioFeatureValues: audioResult.featureValues.isNotEmpty ? audioResult.featureValues : null,
         );
       }
 
@@ -1622,6 +1609,24 @@ class _HistoryTileState extends State<_HistoryTile> {
         unawaited(RecordingHistoryStorage.instance.deleteEntry(widget.entry.filePath));
       }
       unawaited(RecordingHistoryStorage.instance.upsertEntry(updatedEntry));
+
+      // 背景錯誤姿勢分析（posture_only）：上傳骨架 CSV，Worker 執行 ONNX，
+      // 完成後（idle 狀態）自動將 swingPostureLabel 寫入 entry。
+      if (hasCsv) {
+        final videoId       = p.basename(sessionDir);
+        final entrySnapshot = updatedEntry;
+        _triggerPostureAnalysisInBackground(
+          videoId:  videoId,
+          clipPath: entrySnapshot.filePath,
+          csvPath:  csvPath,
+          onPostureResult: (postureLabel) {
+            if (!mounted) return;
+            final withPosture = entrySnapshot.copyWith(swingPostureLabel: postureLabel);
+            widget.onEntryUpdated?.call(entrySnapshot, withPosture);
+            RecordingHistoryStorage.instance.upsertEntry(withPosture);
+          },
+        );
+      }
 
       // 顯示完成訊息
       final audioMsg = audioResult != null
@@ -1646,6 +1651,50 @@ class _HistoryTileState extends State<_HistoryTile> {
     } finally {
       progressNotifier.dispose();
     }
+  }
+
+  /// 背景錯誤姿勢分析：提交 posture_only 分析，輪詢直到 idle，回傳最佳錯誤類型。
+  /// 不阻塞 UI，失敗時靜默忽略。
+  void _triggerPostureAnalysisInBackground({
+    required String videoId,
+    required String clipPath,
+    required String csvPath,
+    required void Function(String? postureLabel) onPostureResult,
+  }) {
+    unawaited(() async {
+      try {
+        final svc = AnalysisService.instance;
+        final analysisId = await svc.submitForAnalysis(
+          videoId:  videoId,
+          clipPath: clipPath,
+          csvPath:  csvPath,
+          mode:     'posture_only',
+        );
+        debugPrint('[PostureAnalysis] 已提交: $analysisId');
+
+        // 輪詢，最多 90 秒（每 6 秒一次）
+        for (int i = 0; i < 15; i++) {
+          await Future<void>.delayed(const Duration(seconds: 6));
+          final status = await svc.getStatus(analysisId);
+          debugPrint('[PostureAnalysis] 狀態: ${status.status}');
+
+          if (status.isIdle) {
+            final topError = status.onnxResult?.officialErrors.firstOrNull
+                          ?? status.onnxResult?.suspectErrors.firstOrNull;
+            debugPrint('[PostureAnalysis] 完成，topError=$topError');
+            onPostureResult(topError ?? '');
+            return;
+          }
+          if (status.isFailed) {
+            debugPrint('[PostureAnalysis] 失敗，略過');
+            return;
+          }
+        }
+        debugPrint('[PostureAnalysis] 逾時，略過');
+      } catch (e) {
+        debugPrint('[PostureAnalysis] 例外: $e');
+      }
+    }());
   }
 
   /// 提交影片到 AI 教練後端，並跳轉至結果頁面
@@ -1987,7 +2036,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 SwingPosture.zhName(widget.entry.swingPostureLabel!),
                                 SwingPosture.color(widget.entry.swingPostureLabel!),
                               ),
-                            // ── 速度 / 甜蜜點 / 清脆度 ──────────
+                            // ── 速度 ──────────
                             if (widget.entry.bestSpeedValue != null &&
                                 widget.entry.bestSpeedValue! > 0)
                               _badgeWithIcon(
@@ -1995,9 +2044,25 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 const Color(0xFF1565C0),
                                 Icons.speed_rounded,
                               ),
+                            // ── 5 個音訊特徵 TAG（綠=通過，紅=未通過）──
+                            if (widget.entry.audioPasses != null)
+                              for (final feat in AudioAnalysisService.featureLabels.entries)
+                                _badge(
+                                  () {
+                                    final v = widget.entry.audioFeatureValues?[feat.key];
+                                    final valStr = v != null
+                                        ? ' ${AudioAnalysisService.formatFeatureValue(feat.key, v)}'
+                                        : '';
+                                    return '${feat.value}$valStr';
+                                  }(),
+                                  widget.entry.audioPasses![feat.key] == true
+                                      ? const Color(0xFF4CAF50)
+                                      : const Color(0xFFF44336),
+                                ),
+                            // ── GOOD TAG ──────────────────────────────
                             if (widget.entry.goodShot != null)
                               _badgeWithIcon(
-                                widget.entry.goodShot == true ? '甜蜜點 ✓' : '未命中',
+                                'GOOD',
                                 widget.entry.goodShot == true
                                     ? const Color(0xFF4CAF50)
                                     : const Color(0xFFF44336),
@@ -2005,15 +2070,8 @@ class _HistoryTileState extends State<_HistoryTile> {
                                     ? Icons.sports_golf_rounded
                                     : Icons.close_rounded,
                               ),
-                            if (widget.entry.audioCrispness != null)
-                              _badgeWithIcon(
-                                '清脆 ${widget.entry.audioCrispness!.toStringAsFixed(1)}',
-                                const Color(0xFFFF6F00),
-                                Icons.graphic_eq_rounded,
-                              ),
-                            if (widget.entry.audioLabel != null)
-                              _badge(widget.entry.audioLabel!,
-                                  const Color(0xFFFF6F00)),
+                            if (widget.entry.goodShot == true)
+                              _badge('甜蜜點命中', const Color(0xFF4CAF50)),
                           ],
                         ),
                       ],
@@ -2476,6 +2534,11 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         try {
           final bytes = await wavFile.readAsBytes();
           if (bytes.length >= 44) {
+            // 從 WAV header 讀取真實格式，不硬塞 44100
+            final wavHd = bytes.buffer.asByteData();
+            final wavChannels   = wavHd.getUint16(22, Endian.little);
+            final wavSampleRate = wavHd.getUint32(24, Endian.little);
+            final wavBlockAlign = wavHd.getUint16(32, Endian.little);
             int dataStart = 44;
             for (int i = 36; i < bytes.length - 8; i++) {
               if (bytes[i] == 100 && bytes[i+1] == 97 && bytes[i+2] == 116 && bytes[i+3] == 97) {
@@ -2483,18 +2546,26 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                 break;
               }
             }
-            final audioDataBytes = bytes.sublist(dataStart);
+            // 使用 blockAlign 正確步進，支援多聲道平均為 mono
+            final audioDataLen = bytes.length - dataStart;
             final pcmSamples = <double>[];
-            for (int i = 0; i < audioDataBytes.length - 1; i += 2) {
-              final int16 = audioDataBytes[i] | (audioDataBytes[i + 1] << 8);
-              final s16 = (int16 > 32767) ? int16 - 65536 : int16;
-              pcmSamples.add(s16 / 32768.0);
+            final stride = wavBlockAlign > 0 ? wavBlockAlign : 2;
+            for (int i = 0; i + stride <= audioDataLen; i += stride) {
+              double frameVal = 0.0;
+              for (int ch = 0; ch < wavChannels; ch++) {
+                final offset = dataStart + i + ch * 2;
+                if (offset + 1 >= bytes.length) break;
+                final raw = bytes[offset] | (bytes[offset + 1] << 8);
+                final signed = (raw > 32767) ? raw - 65536 : raw;
+                frameVal += signed / 32768.0;
+              }
+              pcmSamples.add(frameVal / wavChannels);
             }
             if (pcmSamples.isNotEmpty) {
               audioResult = await AudioExportService.analyzeFromPcm(
                 pcmSamples: pcmSamples,
                 sessionDir: sessionDir,
-                sampleRate: 44100,
+                sampleRate: wavSampleRate,  // 使用 WAV header 的真實採樣率
                 onProgress: (progress) {
                   progressNotifier.value = (0.8 + progress.progress * 0.2, progress.message);
                 },
@@ -2514,8 +2585,11 @@ class _ClipSubCardState extends State<_ClipSubCard> {
           audioCrispness: audioResult.features.isNotEmpty
               ? audioResult.features.first.sharpnessHfxLoud
               : null,
-          goodShot: audioResult.predictedClass == 'pro' || audioResult.predictedClass == 'good',
+          goodShot: audioResult.predictedClass == 'good',
           audioLabel: audioResult.feedbackLabel,
+          audioPassCount: audioResult.passCount,
+          audioPasses: audioResult.passes.isNotEmpty ? audioResult.passes : null,
+          audioFeatureValues: audioResult.featureValues.isNotEmpty ? audioResult.featureValues : null,
         );
       }
       widget.onEntryUpdated?.call(clip, updatedEntry);
@@ -2786,7 +2860,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     ),
                                   if (clip.audioTags?.contains('no_audio') == true)
                                     _smallBadge('無聲音', const Color(0xFF9E9E9E)),
-                                  // ── 速度 / 甜蜜點 / 清脆度 ──────────
+                                  // ── 速度 ──────────
                                   if (clip.bestSpeedValue != null &&
                                       clip.bestSpeedValue! > 0)
                                     _smallBadgeWithIcon(
@@ -2794,9 +2868,25 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                       const Color(0xFF1565C0),
                                       Icons.speed_rounded,
                                     ),
+                                  // ── 5 個音訊特徵 TAG（綠=通過，紅=未通過）──
+                                  if (clip.audioPasses != null)
+                                    for (final feat in AudioAnalysisService.featureLabels.entries)
+                                      _smallBadge(
+                                        () {
+                                          final v = clip.audioFeatureValues?[feat.key];
+                                          final valStr = v != null
+                                              ? ' ${AudioAnalysisService.formatFeatureValue(feat.key, v)}'
+                                              : '';
+                                          return '${feat.value}$valStr';
+                                        }(),
+                                        clip.audioPasses![feat.key] == true
+                                            ? const Color(0xFF4CAF50)
+                                            : const Color(0xFFF44336),
+                                      ),
+                                  // ── GOOD TAG ──────────────────────────────
                                   if (clip.goodShot != null)
                                     _smallBadgeWithIcon(
-                                      clip.goodShot == true ? '甜蜜點 ✓' : '未命中',
+                                      'GOOD',
                                       clip.goodShot == true
                                           ? const Color(0xFF4CAF50)
                                           : const Color(0xFFF44336),
@@ -2804,15 +2894,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                           ? Icons.sports_golf_rounded
                                           : Icons.close_rounded,
                                     ),
-                                  if (clip.audioCrispness != null)
-                                    _smallBadgeWithIcon(
-                                      '清脆 ${clip.audioCrispness!.toStringAsFixed(1)}',
-                                      const Color(0xFFFF6F00),
-                                      Icons.graphic_eq_rounded,
-                                    ),
-                                  if (clip.audioLabel != null)
-                                    _smallBadge(
-                                        clip.audioLabel!, const Color(0xFFFF6F00)),
+                                  if (clip.goodShot == true)
+                                    _smallBadge('甜蜜點命中', const Color(0xFF4CAF50)),
                                 ],
                               ),
                             ],

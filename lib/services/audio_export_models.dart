@@ -47,20 +47,24 @@ class AudioClassResult {
   final String feedbackLabel;
   final Map<String, double> distances;
   final Map<String, double> featureValues;
+  final int passCount;
+  final Map<String, bool> passes;
 
   const AudioClassResult({
     required this.predictedClass,
     required this.feedbackLabel,
     required this.distances,
     required this.featureValues,
+    this.passCount = 0,
+    this.passes = const {},
   });
 
-  bool get isGood => predictedClass == 'good' || predictedClass == 'pro';
-  bool get isPro => predictedClass == 'pro';
+  bool get isGood => passCount >= 3;
+  bool get isPro => false;
 
   @override
   String toString() =>
-      'AudioClassResult($predictedClass: "$feedbackLabel")';
+      'AudioClassResult($predictedClass: "$feedbackLabel" $passCount/5)';
 }
 
 /// 统一的音频分析配置（对标 MediaPoseConfig）
@@ -117,6 +121,9 @@ class AudioAnalysisResult {
   final String txtPath;
   final List<AudioFeatureFrame> features;
   final DateTime timestamp;
+  final int passCount;
+  final Map<String, bool> passes;
+  final Map<String, double> featureValues;
 
   AudioAnalysisResult({
     required this.predictedClass,
@@ -125,6 +132,9 @@ class AudioAnalysisResult {
     required this.txtPath,
     required this.features,
     DateTime? timestamp,
+    this.passCount = 0,
+    this.passes = const {},
+    this.featureValues = const {},
   }) : timestamp = timestamp ?? DateTime.now();
 
   bool get isValid => features.isNotEmpty;

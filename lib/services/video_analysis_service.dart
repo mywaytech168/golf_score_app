@@ -68,7 +68,7 @@ class VideoAnalysisService {
       debugPrint(
         '[VideoAnalysis] 📊 完成統計:\n'
         '  骨架: $validFrames/$totalFrames 幀有效\n'
-        '  音訊: ${hasAudio ? "✅ 已提取" : "❌ 無音訊"}${hasSilence ? " ⚠️ 無聲音" : ""}\n'
+        '  音訊: ${hasAudio ? "✅ 已提取" : "ℹ️ 無音訊，略過音訊分析"}${hasSilence ? " ⚠️ 無聲音" : ""}\n'
         '  總時間: ${overallSw.elapsedMilliseconds}ms\n'
         '  吞吐率: $fps fps'
       );
@@ -375,7 +375,8 @@ class VideoAnalysisService {
     }
   }
 
-  /// 提取音訊並保存為 WAV
+  /// 提取音訊並保存為 WAV。
+  /// 影片無音訊軌時回傳 false（不拋例外）。
   Future<bool> _extractAudio({
     required String videoPath,
     required String audioPath,
@@ -384,6 +385,12 @@ class VideoAnalysisService {
       'videoPath': videoPath,
     });
     if (result == null) return false;
+
+    // 無音訊軌 — native 回傳 no_audio:true，屬正常情況，非錯誤
+    if (result['no_audio'] == true) {
+      debugPrint('[VideoAnalysis] ℹ️ 影片無音訊軌，略過音訊提取');
+      return false;
+    }
 
     final wavPath = result['path'] as String?;
     if (wavPath == null) return false;

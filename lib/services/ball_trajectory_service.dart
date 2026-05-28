@@ -104,20 +104,31 @@ class BallTrajectoryService {
   /// 失敗回傳 null。
   static Future<FrameExtractionResult?> extractBlobsTflite({
     required String inputPath,
+    double? hitSec,
   }) async {
-    debugPrint('[BallTraj] TFLite 模式：呼叫 Kotlin YOLOv8 偵測器');
+    debugPrint('[BallTraj] ▶ TFLite 模式啟動：呼叫 Kotlin YOLOv8 偵測器 hitSec=${hitSec?.toStringAsFixed(2) ?? 'null'}');
     try {
       final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
         'extractBlobsYolo',
-        {'inputPath': inputPath},
+        {
+          'inputPath': inputPath,
+          if (hitSec != null) 'hitSec': hitSec,
+        },
       );
-      if (raw == null) return null;
+      if (raw == null) {
+        debugPrint('[BallTraj] ❌ TFLite: Kotlin 回傳 null（模型未載入），fallback 至原版');
+        return extractBlobs(inputPath: inputPath);
+      }
       final result = FrameExtractionResult._fromMap(raw);
       final totalDets = result.frames.fold<int>(0, (s, f) => s + f.blobs.length);
-      debugPrint('[BallTraj] YOLOv8 完成：${result.frames.length} 幀，$totalDets 偵測');
+      final framesWithHits = result.frames.where((f) => f.blobs.isNotEmpty).length;
+      debugPrint('[BallTraj] ✅ TFLite YOLOv8 完成：${result.frames.length} 幀，'
+          '$totalDets 偵測，$framesWithHits 幀有球 '
+          '(${result.frames.isEmpty ? 0 : (framesWithHits * 100 ~/ result.frames.length)}%)');
       return result;
     } on PlatformException catch (e) {
-      debugPrint('[BallTraj] YOLOv8 失敗（${e.code}）：${e.message}，fallback 至原版');
+      debugPrint('[BallTraj] ⚠ TFLite 失敗 → FALLBACK 至原版 BFS');
+      debugPrint('[BallTraj]   code=${e.code}  msg=${e.message}');
       return extractBlobs(inputPath: inputPath);
     }
   }

@@ -45,11 +45,13 @@ class MainActivity: FlutterActivity() {
     private val FRAME_EXTRACTOR_CHANNEL = "com.example.golf_score_app/frame_extractor"
     private val POSE_ANALYZER_CHANNEL = "com.example.golf_score_app/pose_analyzer"
     private val PROGRESS_CHANNEL = "com.example.golf_score_app/analysis_progress"
+    private val TRANSCODER_CHANNEL = "com.example.golf_score_app/video_transcoder"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
     private val ballTrajExecutor = Executors.newSingleThreadExecutor()
     private val frameExtractorExecutor = Executors.newSingleThreadExecutor()
+    private val transcoderExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
 
     // EventChannel sink：背景執行緒透過 sendProgress() 推送進度到 Dart
@@ -188,13 +190,18 @@ class MainActivity: FlutterActivity() {
                         try {
                             val extraction = extractAudioToWav(videoPath)
                             runOnUiThread {
-                                result.success(
-                                    mapOf(
-                                        "path" to extraction.path,
-                                        "sampleRate" to extraction.sampleRate,
-                                        "channels" to extraction.channelCount
+                                if (extraction == null) {
+                                    // 無音訊軌 — 正常情況，以 no_audio=true 通知 Dart 端略過音訊分析
+                                    result.success(mapOf("no_audio" to true, "path" to null))
+                                } else {
+                                    result.success(
+                                        mapOf(
+                                            "path" to extraction.path,
+                                            "sampleRate" to extraction.sampleRate,
+                                            "channels" to extraction.channelCount
+                                        )
                                     )
-                                )
+                                }
                             }
                         } catch (error: Exception) {
                             Log.e(logTag, "音訊抽取失敗: ${error.message}", error)
@@ -254,6 +261,29 @@ class MainActivity: FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRIMMER_CHANNEL)
             .setMethodCallHandler { call, result ->
                 videoTrimmer.handle(call, result)
+            }
+        // ── 影片轉碼（匯入時統一轉為標準 H.264 MP4）─────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TRANSCODER_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "transcodeToMp4") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val srcPath = call.argument<String>("srcPath")
+                val dstPath = call.argument<String>("dstPath")
+                if (srcPath.isNullOrBlank() || dstPath.isNullOrBlank()) {
+                    result.error("invalid_args", "缺少 srcPath / dstPath", null)
+                    return@setMethodCallHandler
+                }
+                transcoderExecutor.execute {
+                    try {
+                        val outPath = VideoTranscoder().process(srcPath, dstPath)
+                        runOnUiThread { result.success(outPath) }
+                    } catch (e: Exception) {
+                        Log.e(logTag, "轉碼失敗: ${e.message}", e)
+                        runOnUiThread { result.error("transcode_failed", e.message, null) }
+                    }
+                }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SKELETON_OVERLAY_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -352,9 +382,11 @@ class MainActivity: FlutterActivity() {
                             result.error("invalid_args", "缺少 inputPath", null)
                             return@setMethodCallHandler
                         }
+                        // hitSec：由 Dart 傳入擊球時間（秒），用於 post-impact ROI 擴張與低信心閾值
+                        val hitSec = call.argument<Double>("hitSec")
                         ballTrajExecutor.execute {
                             try {
-                                val data = ballYoloExtractor.extract(inputPath, onProgress = ::sendProgress)
+                                val data = ballYoloExtractor.extract(inputPath, hitSec = hitSec, onProgress = ::sendProgress)
                                 runOnUiThread {
                                     if (data != null) result.success(data)
                                     else result.error("yolo_failed", "YOLOv8 偵測失敗（模型未載入或解碼錯誤）", null)
@@ -490,10 +522,58 @@ class MainActivity: FlutterActivity() {
                             }
                         }
                     }
+                    // ── 精確關鍵禎 JPEG 提取（使用 OPTION_CLOSEST 解碼任意幀）──
+                    "extractFrameJpeg" -> {
+                        val videoPath  = call.argument<String>("videoPath")
+                        val timeMs     = (call.argument<Int>("timeMs") ?: 0).toLong()
+                        val outputPath = call.argument<String>("outputPath")
+                        val quality    = call.argument<Int>("quality") ?: 80
+                        val maxWidth   = call.argument<Int>("maxWidth") ?: 720
+
+                        if (videoPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 videoPath 或 outputPath", null)
+                            return@setMethodCallHandler
+                        }
+
+                        frameExtractorExecutor.execute {
+                            try {
+                                val retriever = MediaMetadataRetriever()
+                                retriever.setDataSource(videoPath)
+                                // OPTION_CLOSEST 解碼最近的任意幀（非僅 sync 幀），適合揮桿精確定位
+                                val timeUs = timeMs * 1000L
+                                val raw = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                                retriever.release()
+
+                                if (raw == null) {
+                                    runOnUiThread { result.error("frame_error", "無法提取幀 at ${timeMs}ms", null) }
+                                    return@execute
+                                }
+
+                                val bitmap = if (maxWidth > 0 && raw.width > maxWidth) {
+                                    val scale = maxWidth.toFloat() / raw.width
+                                    val h = (raw.height * scale).toInt().coerceAtLeast(1)
+                                    val scaled = Bitmap.createScaledBitmap(raw, maxWidth, h, true)
+                                    raw.recycle()
+                                    scaled
+                                } else raw
+
+                                FileOutputStream(outputPath).use { fos ->
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, quality, fos)
+                                }
+                                bitmap.recycle()
+                                Log.i(logTag, "[extractFrameJpeg] ✅ ${timeMs}ms → $outputPath")
+                                runOnUiThread { result.success(outputPath) }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "[extractFrameJpeg] ❌ ${e.message}", e)
+                                runOnUiThread { result.error("frame_error", e.message, null) }
+                            }
+                        }
+                    }
+
                     else -> result.notImplemented()
                 }
             }
-        
+
         // ✅ 完整 Kotlin 原生方案：一次完成全部視頻分析
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, POSE_ANALYZER_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -556,6 +636,7 @@ class MainActivity: FlutterActivity() {
         skeletonExecutor.shutdown()
         ballTrajExecutor.shutdown()
         frameExtractorExecutor.shutdown()
+        transcoderExecutor.shutdown()
     }
 
     private data class AudioExtractionResult(
@@ -564,8 +645,9 @@ class MainActivity: FlutterActivity() {
         val channelCount: Int
     )
 
+    /** 從影片提取音訊並轉存為 WAV。若影片無音訊軌則回傳 null（不拋例外）。 */
     @Throws(IOException::class)
-    private fun extractAudioToWav(videoPath: String): AudioExtractionResult {
+    private fun extractAudioToWav(videoPath: String): AudioExtractionResult? {
         val extractor = MediaExtractor()
         extractor.setDataSource(videoPath)
 
@@ -583,7 +665,8 @@ class MainActivity: FlutterActivity() {
 
         if (audioTrackIndex < 0 || format == null) {
             extractor.release()
-            throw IllegalStateException("No audio track found in video.")
+            Log.i(logTag, "影片無音訊軌，略過音訊提取：$videoPath")
+            return null  // ← 正常情況，不拋例外
         }
 
         extractor.selectTrack(audioTrackIndex)

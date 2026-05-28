@@ -87,6 +87,15 @@ class RecordingHistoryEntry {
   /// 例如：['no_audio']、['no_valid_hits']、['pro']
   final List<String>? audioTags;
 
+  /// 5 項音訊特徵通過數（0~5）；≥ 3 表示命中
+  final int? audioPassCount;
+
+  /// 各特徵是否通過閾值：key = 特徵名稱，value = 是否通過
+  final Map<String, bool>? audioPasses;
+
+  /// 各特徵實際值：key = 特徵名稱，value = 實際數值（用於圖表顯示）
+  final Map<String, double>? audioFeatureValues;
+
   /// 分享碼（16 碼）；null 表示從未分享過
   final String? shareCode;
 
@@ -134,6 +143,9 @@ class RecordingHistoryEntry {
     this.audioLabel,
     this.sourceVideoPath,
     this.audioTags,
+    this.audioPassCount,
+    this.audioPasses,
+    this.audioFeatureValues,
     this.shareCode,
     this.shareExpiresAt,
     this.sharerName,
@@ -175,6 +187,9 @@ class RecordingHistoryEntry {
     String? audioLabel,
     String? sourceVideoPath,
     List<String>? audioTags,
+    int? audioPassCount,
+    Map<String, bool>? audioPasses,
+    Map<String, double>? audioFeatureValues,
     String? shareCode,
     DateTime? shareExpiresAt,
     DateTime? createdAt,
@@ -204,6 +219,9 @@ class RecordingHistoryEntry {
       audioLabel: audioLabel ?? this.audioLabel,
       sourceVideoPath: sourceVideoPath ?? this.sourceVideoPath,
       audioTags: audioTags ?? this.audioTags,
+      audioPassCount: audioPassCount ?? this.audioPassCount,
+      audioPasses: audioPasses ?? this.audioPasses,
+      audioFeatureValues: audioFeatureValues ?? this.audioFeatureValues,
       shareCode: shareCode ?? this.shareCode,
       shareExpiresAt: shareExpiresAt ?? this.shareExpiresAt,
       sharerName: sharerName ?? this.sharerName,
@@ -250,6 +268,9 @@ class RecordingHistoryEntry {
       'audioLabel': audioLabel,
       'sourceVideoPath': sourceVideoPath,
       'audioTags': audioTags,
+      'audioPassCount': audioPassCount,
+      'audioPasses': audioPasses,
+      'audioFeatureValues': audioFeatureValues,
       'shareCode': shareCode,
       'shareExpiresAt': shareExpiresAt?.toUtc().toIso8601String(),
       'createdAt': createdAt?.toIso8601String(),
@@ -304,6 +325,11 @@ class RecordingHistoryEntry {
       audioLabel: (json['audioLabel'] as String?),
       sourceVideoPath: (json['sourceVideoPath'] as String?),
       audioTags: audioTags,
+      audioPassCount: (json['audioPassCount'] as int?),
+      audioPasses: (json['audioPasses'] as Map?)?.map(
+          (k, v) => MapEntry(k as String, (v as bool?) ?? false)),
+      audioFeatureValues: (json['audioFeatureValues'] as Map?)?.map(
+          (k, v) => MapEntry(k as String, (v as num).toDouble())),
       shareCode: json['shareCode'] as String?,
       shareExpiresAt: json['shareExpiresAt'] != null
           ? DateTime.tryParse(json['shareExpiresAt'] as String)

@@ -49,10 +49,13 @@ class ExternalVideoImporter {
       await Directory(sessionDir).create(recursive: true);
 
       // 複製/轉檔影片
-      // iOS：重新編碼為標準 MP4（H.264 + AAC + faststart），確保相容性
-      // 其他平台：直接複製
+      // iOS / Android：重新編碼為標準 MP4（H.264 + AAC + faststart），確保相容性
+      //   - iOS：AVAssetExportSession → 原生 H.264
+      //   - Android：VideoTranscoder Surface pipeline → H.264，bitrate ≤ 12 Mbps
+      //     若來源已是標準 H.264（bitrate < 20 Mbps），直接複製（快速路徑）
+      // 其他平台（Desktop）：直接複製
       final videoPath = p.join(sessionDir, 'swing.mp4');
-      if (Platform.isIOS) {
+      if (Platform.isIOS || Platform.isAndroid) {
         onProgress?.call(0.0, '轉檔中...');
         const _channel = MethodChannel('com.example.golf_score_app/video_transcoder');
         final transcoded = await _channel.invokeMethod<String>(
@@ -60,7 +63,7 @@ class ExternalVideoImporter {
           {'srcPath': sourcePath, 'dstPath': videoPath},
         );
         if (transcoded == null) {
-          throw Exception('iOS 轉檔未回傳路徑');
+          throw Exception('transcodeToMp4 未回傳路徑');
         }
       } else {
         onProgress?.call(0.0, '複製影片中...');

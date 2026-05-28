@@ -13,6 +13,22 @@ namespace UploadServer.DTOs
 
         /// <summary>客戶端是否會一併上傳 pose_landmarks.csv；true 時回傳 CsvUploadUrl</summary>
         public bool HasCsv { get; set; } = false;
+
+        /// <summary>
+        /// 分析模式：
+        ///   "posture_only" = 只跑 ONNX，完成後 Status → "idle"（不呼叫 Gemini）；
+        ///   "full"         = ONNX + Gemini（預設）
+        /// </summary>
+        public string Mode { get; set; } = "full";
+
+        /// <summary>Gemini 提示詞版本："v1"（預設）| "v2" | "v3"</summary>
+        public string PromptVersion { get; set; } = "v1";
+    }
+
+    public class AnalysisUpgradeDto
+    {
+        /// <summary>升級時可選擇新的提示詞版本；null = 沿用原始版本</summary>
+        public string? PromptVersion { get; set; }
     }
 
     public class AnalysisRequestResponse
@@ -30,11 +46,26 @@ namespace UploadServer.DTOs
         /// <summary>客戶端傳入的 session 識別符（如 "1779413178538_hit_1"）</summary>
         public string? VideoId { get; set; }
         public string Status { get; set; }
+
+        /// <summary>"posture_only" | "full"</summary>
+        public string? Mode { get; set; }
+
+        /// <summary>"v1" | "v2" | "v3"</summary>
+        public string? PromptVersion { get; set; }
+
         public string? Summary { get; set; }
         public string? Severity { get; set; }
+
         /// <summary>status=completed 時填入完整教練回應 JSON</summary>
         public object? Result { get; set; }
-        /// <summary>ONNX 推論原始結果（GolfSwingAnalysisResponse）；無 CSV 或推論失敗時為 null</summary>
+
+        /// <summary>ONNX 推論原始結果；status=idle 或 completed 且有 CSV 時填入</summary>
         public object? OnnxResult { get; set; }
+
+        /// <summary>Gemini 輸入 token 數</summary>
+        public int? InputTokens { get; set; }
+
+        /// <summary>Gemini 輸出 token 數</summary>
+        public int? OutputTokens { get; set; }
     }
 }

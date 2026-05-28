@@ -179,6 +179,15 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
       hitSec: hitSec,
       totalDurationSec: totalDurationSec,
     );
+
+    // 8 階段關鍵禎偵測
+    final addrFrame  = _addressFrame(speedDn, c.topFrame, fps);
+    final tkwFrame   = _takeawayFrame(speedDn, addrFrame, c.topFrame);
+    final bswFrame   = _backswingFrame(tkwFrame, c.topFrame);
+    final downFrame  = _downswingFrame(c.topFrame, c.yLowFrame);
+    final ftFrame    = _followThroughFrame(ySmooth, c.yLowFrame, fps, n);
+    final finFrame   = _finishFrame(speedDn, ftFrame, fps, n);
+
     hits.add(SwingHit(
       hitIndex:   i + 1,
       hitFrame:   c.yLowFrame,
@@ -189,6 +198,13 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
       audioValue: 0.0,
       fastFrame:  c.fastFrame,
       topFrame:   c.topFrame,
+      addressSec:        addrFrame / fps,
+      takeawaySec:       tkwFrame  / fps,
+      backswingSec:      bswFrame  / fps,
+      backswingTopSec:   c.topFrame / fps,
+      downswingSec:      downFrame / fps,
+      followThroughSec:  ftFrame / fps,
+      finishSec:         finFrame / fps,
     ));
     debugPrint('[SwingDetect] 🏌️ Hit ${i+1}: '
         'yLow=${c.yLowFrame} (${hitSec.toStringAsFixed(2)}s), '
@@ -547,6 +563,91 @@ double _percentile(List<double> sorted, double pct) {
   if (sorted.isEmpty) return 0.0;
   final idx = (pct / 100.0 * (sorted.length - 1)).round().clamp(0, sorted.length - 1);
   return sorted[idx];
+}
+
+// ── 4 階段關鍵禎偵測 ─────────────────────────────────────────────────────────
+
+/// 準備動作禎：topFrame 前 0.5–3.0 秒窗口中，速度最小（最靜止）的禎。
+int _addressFrame(List<double> speed, int topFrame, double fps) {
+  final n    = speed.length;
+  final lo   = math.max(0, topFrame - (3.0 * fps).round());
+  final hi   = math.max(lo + 1, topFrame - (0.5 * fps).round());
+  if (lo >= hi || hi > n) return math.max(0, topFrame - (1.5 * fps).round()).clamp(0, n - 1);
+
+  int best = lo;
+  for (int i = lo + 1; i < hi; i++) {
+    if (!speed[i].isNaN && (speed[best].isNaN || speed[i] < speed[best])) best = i;
+  }
+  return best;
+}
+
+/// 下桿中段禎：topFrame 與 hitFrame 中間，Y 座標接近兩者均值的禎。
+int _downswingFrame(int topFrame, int hitFrame) {
+  if (hitFrame <= topFrame) return topFrame;
+  return (topFrame + hitFrame) ~/ 2;
+}
+
+/// 送桿禎：hitFrame 後 0.3–2.0 秒窗口中，Y 局部最小值（手腕最高點）。
+int _followThroughFrame(List<double> y, int hitFrame, double fps, int n) {
+  final lo = math.min(n - 1, hitFrame + (0.3 * fps).round());
+  final hi = math.min(n,     hitFrame + (2.0 * fps).round());
+  if (lo >= hi) return math.min(n - 1, hitFrame + (fps * 0.7).round());
+
+  // 尋找局部最小值（Y 最小 = 手腕最高 = 送桿頂點）
+  for (int i = lo + 1; i < hi - 1; i++) {
+    if (!y[i].isNaN && !y[i - 1].isNaN && !y[i + 1].isNaN &&
+        y[i] <= y[i - 1] && y[i] < y[i + 1]) {
+      return i;
+    }
+  }
+  // 後備：窗口內 Y 最小的禎
+  int best = lo;
+  for (int i = lo + 1; i < hi; i++) {
+    if (!y[i].isNaN && (y[best].isNaN || y[i] < y[best])) best = i;
+  }
+  return best;
+}
+
+// ── 新增：起桿 / 上桿中段 / 收桿 ──────────────────────────────────────────────
+
+/// ② 起桿禎：addressFrame 之後到 topFrame 之前，速度首次超過低門檻。
+/// 低門檻 = max(0.3 px/frame, 20% of top speed near FAST frame)。
+int _takeawayFrame(List<double> speed, int addressFrame, int topFrame) {
+  if (topFrame <= addressFrame + 2) return addressFrame;
+  // 低速門檻：0.4 px/frame 代表手開始移動
+  const lowThr = 0.4;
+  for (int i = addressFrame + 1; i < topFrame; i++) {
+    if (!speed[i].isNaN && speed[i] >= lowThr) return i;
+  }
+  // 後備：address 到 top 之間 1/4 處
+  return addressFrame + (topFrame - addressFrame) ~/ 4;
+}
+
+/// ③ 上桿中段禎：takeaway 到 top 的中間點。
+int _backswingFrame(int takeawayFrame, int topFrame) {
+  if (topFrame <= takeawayFrame) return takeawayFrame;
+  return (takeawayFrame + topFrame) ~/ 2;
+}
+
+/// ⑧ 收桿禎：followThroughFrame 之後，速度持續低於門檻（身體靜止）。
+int _finishFrame(List<double> speed, int followThroughFrame, double fps, int n) {
+  final lo = math.min(n - 1, followThroughFrame + (0.2 * fps).round());
+  final hi = math.min(n,     followThroughFrame + (2.5 * fps).round());
+  if (lo >= hi) return math.min(n - 1, lo);
+
+  // 尋找速度持續低於 0.5 px/frame 的起點（連續至少 3 幀）
+  const lowThr = 0.5;
+  const minStableFrames = 3;
+  for (int i = lo; i < hi - minStableFrames; i++) {
+    if (speed[i].isNaN || speed[i] >= lowThr) continue;
+    bool stable = true;
+    for (int j = i + 1; j < i + minStableFrames && j < hi; j++) {
+      if (!speed[j].isNaN && speed[j] >= lowThr) { stable = false; break; }
+    }
+    if (stable) return i;
+  }
+  // 後備：窗口結尾
+  return math.min(n - 1, hi - 1);
 }
 
 // ── 內部候選結構 ─────────────────────────────────────────────────────────────

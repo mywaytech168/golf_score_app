@@ -167,27 +167,42 @@ class CoachResult {
 class AnalysisStatus {
   final String analysisId;
   final String? videoId;
-  final String status; // pending | queued | processing | completed | failed
+  final String status; // pending | queued | processing | idle | completed | failed
+  /// "posture_only" | "full"
+  final String? mode;
+  /// "v1" | "v2" | "v3"
+  final String? promptVersion;
   final String? summary;
   final String? severity;
   final CoachResult? result;
   /// ONNX 原始推論分數（後端 Worker 產生，供進階顯示）
   final OnnxResult? onnxResult;
+  /// Gemini 輸入 token 數
+  final int? inputTokens;
+  /// Gemini 輸出 token 數
+  final int? outputTokens;
 
   AnalysisStatus({
     required this.analysisId,
     this.videoId,
     required this.status,
+    this.mode,
+    this.promptVersion,
     this.summary,
     this.severity,
     this.result,
     this.onnxResult,
+    this.inputTokens,
+    this.outputTokens,
   });
 
-  bool get isCompleted => status == 'completed';
-  bool get isFailed    => status == 'failed';
-  bool get isDone      => isCompleted || isFailed;
-  bool get isActive    => !isDone; // pending / queued / processing
+  bool get isCompleted       => status == 'completed';
+  bool get isFailed          => status == 'failed';
+  /// idle = ONNX 完成，尚未呼叫 Gemini
+  bool get isIdle            => status == 'idle';
+  bool get isDone            => isCompleted || isFailed || isIdle;
+  bool get isActive          => !isDone; // pending / queued / processing
+  bool get hasPostureResult  => onnxResult != null;
 
   factory AnalysisStatus.fromJson(Map<String, dynamic> j) {
     CoachResult? result;
@@ -218,13 +233,17 @@ class AnalysisStatus {
     }
 
     return AnalysisStatus(
-      analysisId: j['analysisId'] as String? ?? '',
-      videoId:    j['videoId']    as String?,
-      status:     j['status']     as String? ?? 'unknown',
-      summary:    j['summary']    as String?,
-      severity:   j['severity']   as String?,
-      result:     result,
-      onnxResult: onnxResult,
+      analysisId:    j['analysisId']    as String? ?? '',
+      videoId:       j['videoId']       as String?,
+      status:        j['status']        as String? ?? 'unknown',
+      mode:          j['mode']          as String?,
+      promptVersion: j['promptVersion'] as String?,
+      summary:       j['summary']       as String?,
+      severity:      j['severity']      as String?,
+      result:        result,
+      onnxResult:    onnxResult,
+      inputTokens:   j['inputTokens']   as int?,
+      outputTokens:  j['outputTokens']  as int?,
     );
   }
 }
@@ -272,16 +291,23 @@ class AnalysisService {
   // ── 步驟 1 ────────────────────────────────────────────────────
 
   /// 向 Server 建立分析任務，回傳 B2 presigned 上傳 URL。
-  /// [hasCsv]=true 時同時回傳 [csvUploadUrl]，供後端 Worker 執行 ONNX 推論。
+  ///
+  /// - [hasCsv]=true 時同時回傳 [csvUploadUrl]，供後端 Worker 執行 ONNX 推論。
+  /// - [mode]："posture_only"（只跑 ONNX → idle）或 "full"（ONNX + Gemini）。
+  /// - [promptVersion]："v1" | "v2" | "v3"（僅 mode="full" 有效）。
   Future<AnalysisRequestResult> requestAnalysis({
     required String videoId,
     bool hasCsv = false,
+    String mode = 'full',
+    String promptVersion = 'v1',
   }) async {
     final resp = await _dio.post(
       '/api/analysis/request',
       data: {
-        'videoId': videoId,
-        'hasCsv':  hasCsv,
+        'videoId':       videoId,
+        'hasCsv':        hasCsv,
+        'mode':          mode,
+        'promptVersion': promptVersion,
       },
       options: Options(headers: await _authHeaders()),
     );
@@ -365,18 +391,25 @@ class AnalysisService {
 
   /// 一次完成步驟 1～3，回傳 analysisId 供輪詢。
   ///
-  /// - [csvPath]：若提供且檔案存在，一併上傳骨架 CSV。
-  ///   Worker 收到後在後端自動執行 ONNX，結果存入 DB，
-  ///   不需使用者在客戶端中繼。
+  /// - [csvPath]：若提供且檔案存在，一併上傳骨架 CSV（Worker 在後端執行 ONNX）。
+  /// - [mode]："posture_only" 或 "full"（預設）。
+  /// - [promptVersion]："v1" | "v2" | "v3"（預設 "v1"）。
   Future<String> submitForAnalysis({
     required String videoId,
     required String clipPath,
     String? csvPath,
+    String mode = 'full',
+    String promptVersion = 'v1',
     void Function(int sent, int total)? onUploadProgress,
   }) async {
     final hasCsv = csvPath != null && File(csvPath).existsSync();
 
-    final req = await requestAnalysis(videoId: videoId, hasCsv: hasCsv);
+    final req = await requestAnalysis(
+      videoId:       videoId,
+      hasCsv:        hasCsv,
+      mode:          mode,
+      promptVersion: promptVersion,
+    );
 
     await uploadClip(
       clipUploadUrl: req.clipUploadUrl,
@@ -395,6 +428,25 @@ class AnalysisService {
     return req.analysisId;
   }
 
+  // ── 升級 ──────────────────────────────────────────────────────
+
+  /// 將 idle 記錄升級為完整 Gemini 分析（posture_only → full）。
+  ///
+  /// 可選擇性指定新的 [promptVersion]；不指定則沿用原始版本。
+  Future<void> upgradeAnalysis(
+    String analysisId, {
+    String? promptVersion,
+  }) async {
+    await _dio.post(
+      '/api/analysis/$analysisId/upgrade',
+      data: {
+        if (promptVersion != null) 'promptVersion': promptVersion,
+      },
+      options: Options(headers: await _authHeaders()),
+    );
+    debugPrint('✅ 升級分析: $analysisId → full (promptVersion=$promptVersion)');
+  }
+
   // ── 查詢 ──────────────────────────────────────────────────────
 
   /// 查詢某影片的所有分析記錄（最多 10 筆，最新在前）
@@ -409,13 +461,15 @@ class AnalysisService {
         .toList();
   }
 
-  /// 取得最新一筆可用分析（completed 優先，其次進行中，最後 failed）
+  /// 取得最新一筆可用分析（completed 優先，其次 idle，其次進行中，最後 failed）
   Future<AnalysisStatus?> getLatestAnalysisForVideo(String videoId) async {
     try {
       final list = await getVideoAnalyses(videoId);
       if (list.isEmpty) return null;
       final completed = list.where((a) => a.isCompleted).toList();
       if (completed.isNotEmpty) return completed.first;
+      final idle = list.where((a) => a.isIdle).toList();
+      if (idle.isNotEmpty) return idle.first;
       final active = list.where((a) => a.isActive).toList();
       if (active.isNotEmpty) return active.first;
       return list.first; // failed

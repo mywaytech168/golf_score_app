@@ -36,6 +36,21 @@ namespace UploadServer.Models
         /// <summary>low | medium | high</summary>
         public string? Severity { get; set; }
 
+        /// <summary>
+        /// "posture_only" = 只跑 ONNX，完成後 Status → "idle"；
+        /// "full"         = ONNX + Gemini，完成後 Status → "completed"
+        /// </summary>
+        public string Mode { get; set; } = "full";
+
+        /// <summary>Gemini 提示詞版本："v1" | "v2" | "v3"</summary>
+        public string PromptVersion { get; set; } = "v1";
+
+        /// <summary>Gemini 輸入 token 數（usageMetadata.promptTokenCount）</summary>
+        public int? InputTokens { get; set; }
+
+        /// <summary>Gemini 輸出 token 數（usageMetadata.candidatesTokenCount）</summary>
+        public int? OutputTokens { get; set; }
+
         public int RetryCount { get; set; } = 0;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
