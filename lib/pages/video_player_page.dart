@@ -7,7 +7,9 @@ import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
+import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
+import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/audio_waveform_strip.dart';
@@ -45,8 +47,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   // Charts panel state
   bool _chartsExpanded = false;
-  int _chartTabIndex = 0;    // 0=姿勢 1=音頻特徵
-  int _poseSubTabIndex = 0;  // 0=手腕Y 1=速度（在姿勢 tab 下）
+  int _chartTabIndex = 0;  // 0=聲音峰值 1=手腕Y 2=速度 3=姿勢 4=音頻特徵
   ChartDataSet? _chartData;
   bool _chartsLoading = false;
 
@@ -85,13 +86,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       _isLongVideo ? [_allTabs.first] : _allTabs;
 
   static const _chartTabs = [
-    (label: '姿勢',     color: Color(0xFF1565C0)),
-    (label: '音頻特徵', color: Color(0xFFE53935)),
-  ];
-
-  static const _poseSubTabs = [
-    (label: '手腕 Y', color: Color(0xFF1565C0)),
-    (label: '速度',   color: Color(0xFF1E8E5A)),
+    (label: '聲音峰值', color: Color(0xFFE53935)),
+    (label: '手腕 Y',   color: Color(0xFF1565C0)),
+    (label: '速度',      color: Color(0xFF1E8E5A)),
+    (label: '姿勢',     color: Color(0xFF7C3AED)),
+    (label: '音頻特徵', color: Color(0xFF7B1FA2)),
   ];
 
   String get _sessionDir => '${p.dirname(widget.videoPath)}${p.separator}';
@@ -715,7 +714,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,
-      height: _chartsExpanded ? 244 : 0,
+      height: _chartsExpanded ? 260 : 0,
       color: const Color(0xFF121212),
       child: ClipRect(child: _buildChartContent()),
     );
@@ -735,51 +734,46 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       );
     }
 
-    // ── 決定目前顯示的資料 ──────────────────────────────────
-    final List<ChartPoint> activePoints;
-    final Color activeColor;
-    final bool invertY;
-    final String Function(double) yLabel;
-    final String emptyLabel;
+    // ── 前 3 個 tab：時序折線圖資料 ────────────────────────
+    List<ChartPoint>? activePoints;
+    Color activeColor = _chartTabs[_chartTabIndex].color;
+    bool invertY = false;
+    String Function(double)? yLabel;
+    String emptyLabel = '無資料';
 
     if (_chartTabIndex == 0) {
-      // 姿勢 tab：依子 tab 切換
-      if (_poseSubTabIndex == 0) {
-        activePoints = data.wristY;
-        activeColor  = _poseSubTabs[0].color;
-        invertY      = true;
-        yLabel       = (v) => '${v.toStringAsFixed(0)}px';
-        emptyLabel   = '手腕 Y 無資料';
-      } else {
-        activePoints = data.wristSpeed;
-        activeColor  = _poseSubTabs[1].color;
-        invertY      = false;
-        yLabel       = (v) => v.toStringAsFixed(0);
-        emptyLabel   = '速度 無資料';
-      }
-    } else {
-      // 音頻特徵 tab
       activePoints = data.audioRms;
-      activeColor  = _chartTabs[1].color;
       invertY      = false;
       yLabel       = (v) => '${v.toStringAsFixed(0)}dB';
-      emptyLabel   = '音頻特徵 無資料';
+      emptyLabel   = '聲音峰值 無資料';
+    } else if (_chartTabIndex == 1) {
+      activePoints = data.wristY;
+      invertY      = true;
+      yLabel       = (v) => '${v.toStringAsFixed(0)}px';
+      emptyLabel   = '手腕 Y 無資料';
+    } else if (_chartTabIndex == 2) {
+      activePoints = data.wristSpeed;
+      invertY      = false;
+      yLabel       = (v) => v.toStringAsFixed(0);
+      emptyLabel   = '速度 無資料';
     }
 
     return Column(
       children: [
-        // ── 主 Tab 列（姿勢 / 音頻特徵）──────────────────────
+        // ── Tab 列（5 個）────────────────────────────────────
         Container(
           height: 36,
           color: const Color(0xFF1A1A1A),
-          child: Row(
-            children: List.generate(_chartTabs.length, (i) {
-              final t = _chartTabs[i];
-              final selected = i == _chartTabIndex;
-              return Expanded(
-                child: GestureDetector(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(_chartTabs.length, (i) {
+                final t = _chartTabs[i];
+                final selected = i == _chartTabIndex;
+                return GestureDetector(
                   onTap: () => setState(() => _chartTabIndex = i),
                   child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       border: Border(
@@ -799,73 +793,167 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       ),
                     ),
                   ),
-                ),
-              );
-            }),
-          ),
-        ),
-        // ── 姿勢子 Tab（手腕 Y / 速度）──────────────────────
-        if (_chartTabIndex == 0)
-          Container(
-            height: 28,
-            color: const Color(0xFF161616),
-            alignment: Alignment.centerLeft,
-            child: Row(
-              children: List.generate(_poseSubTabs.length, (i) {
-                final sub = _poseSubTabs[i];
-                final selected = i == _poseSubTabIndex;
-                return Padding(
-                  padding: EdgeInsets.only(left: i == 0 ? 8 : 6),
-                  child: GestureDetector(
-                    onTap: () => setState(() => _poseSubTabIndex = i),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? sub.color.withValues(alpha: 0.18)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: selected ? sub.color : Colors.white12,
-                          width: 1,
-                        ),
-                      ),
-                      child: Text(
-                        sub.label,
-                        style: TextStyle(
-                          color: selected ? sub.color : Colors.white38,
-                          fontSize: 10,
-                          fontWeight:
-                              selected ? FontWeight.w700 : FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  ),
                 );
               }),
             ),
           ),
-        // ── 圖表區 ──────────────────────────────────────────
+        ),
+        // ── 內容區 ──────────────────────────────────────────
         Expanded(
-          child: activePoints.isEmpty
-              ? Center(
-                  child: Text(emptyLabel,
-                      style: const TextStyle(
-                          color: Colors.white24, fontSize: 12)),
-                )
-              : Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 6, 12, 6),
-                  child: _PlayerChart(
-                    key: ValueKey('$_chartTabIndex-$_poseSubTabIndex'),
-                    points: activePoints,
-                    color: activeColor,
-                    invertY: invertY,
-                    hitSecond: widget.entry?.hitSecond,
-                    yLabel: yLabel,
-                  ),
-                ),
+          child: _chartTabIndex <= 2
+              // 折線圖（聲音峰值 / 手腕 Y / 速度）
+              ? (activePoints!.isEmpty
+                  ? Center(
+                      child: Text(emptyLabel,
+                          style: const TextStyle(color: Colors.white24, fontSize: 12)),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 6, 12, 6),
+                      child: _PlayerChart(
+                        key: ValueKey(_chartTabIndex),
+                        points: activePoints,
+                        color: activeColor,
+                        invertY: invertY,
+                        hitSecond: widget.entry?.hitSecond,
+                        yLabel: yLabel!,
+                      ),
+                    ))
+              // 靜態分析顯示（姿勢 / 音頻特徵）
+              : _chartTabIndex == 3
+                  ? _buildPostureContent()
+                  : _buildAudioFeaturesContent(),
         ),
       ],
+    );
+  }
+
+  // ── 姿勢 Tab 靜態顯示 ────────────────────────────────────────
+
+  Widget _buildPostureContent() {
+    final label = widget.entry?.swingPostureLabel;
+    if (label == null) {
+      return const Center(
+        child: Text('尚無姿勢分析，請先完成分析',
+            style: TextStyle(color: Colors.white38, fontSize: 12)),
+      );
+    }
+    final zhName   = SwingPosture.zhName(label);
+    final isGood   = label.isEmpty;
+    final color    = isGood ? const Color(0xFF1E8E5A) : const Color(0xFF7C3AED);
+    final icon     = SwingPosture.icon(label);
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 36),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.5)),
+            ),
+            child: Text(
+              zhName,
+              style: TextStyle(
+                  color: color, fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 音頻特徵 Tab 靜態顯示 ─────────────────────────────────────
+
+  Widget _buildAudioFeaturesContent() {
+    final entry         = widget.entry;
+    final featureValues = entry?.audioFeatureValues;
+    if (featureValues == null || featureValues.isEmpty) {
+      return const Center(
+        child: Text('尚無音頻特徵，請先完成分析',
+            style: TextStyle(color: Colors.white38, fontSize: 12)),
+      );
+    }
+    final passes    = entry?.audioPasses ?? {};
+    final passCount = passes.values.where((v) => v).length;
+    final isGood    = entry?.goodShot ?? false;
+    const goodColor = Color(0xFF1E8E5A);
+    const badColor  = Color(0xFFE05252);
+    final scoreColor = isGood ? goodColor : badColor;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── 通過數 + 標籤 ───────────────────────────────────
+          Row(
+            children: [
+              Text(
+                '$passCount / 5 項通過',
+                style: TextStyle(
+                    color: scoreColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700),
+              ),
+              if (entry?.audioLabel?.isNotEmpty ?? false) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: scoreColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    entry!.audioLabel!,
+                    style: TextStyle(
+                        color: scoreColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          // ── 每個特徵行 ─────────────────────────────────────
+          for (final feat in AudioAnalysisService.featureLabels.entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    (passes[feat.key] ?? false)
+                        ? Icons.check_circle_outline
+                        : Icons.cancel_outlined,
+                    color: (passes[feat.key] ?? false) ? goodColor : badColor,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(feat.value,
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12)),
+                  const Spacer(),
+                  if (featureValues[feat.key] != null)
+                    Text(
+                      AudioAnalysisService.formatFeatureValue(
+                          feat.key, featureValues[feat.key]!),
+                      style: TextStyle(
+                        color: (passes[feat.key] ?? false)
+                            ? goodColor
+                            : Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
