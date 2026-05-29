@@ -122,7 +122,16 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
   let displayH    = Int(composition.renderSize.height)
   let fps         = Double(max(1, videoTrack.nominalFrameRate))
   let totalFrames = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
-  let pixCount    = displayW * displayH
+
+  // ── 降採樣 2x：處理解析度降為 1/4，速度提升 ~4x ─────────────
+  let procW    = max(1, displayW / 2)
+  let procH    = max(1, displayH / 2)
+  let pixCount = procW * procH
+
+  // 面積門檻對應縮放（半解析度下面積縮 4 倍）
+  var scaledCfg = config
+  scaledCfg.areaLo = max(1, config.areaLo / 4)
+  scaledCfg.areaHi = max(2, config.areaHi / 4)
 
   let reader = try AVAssetReader(asset: asset)
   let readerOut = AVAssetReaderVideoCompositionOutput(
@@ -146,8 +155,8 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
 
     if let result: BtFrameResult = autoreleasepool(invoking: {
       btProcessFrame(
-        sample: sample, config: config,
-        pixCount: pixCount, displayW: displayW, displayH: displayH,
+        sample: sample, config: scaledCfg,
+        pixCount: pixCount, procW: procW, procH: procH,
         prevY: prevY)
     }) {
       frames.append(result.entry)
@@ -167,6 +176,7 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
     op: "extractBlobs", progress: 1.0, label: "球體偵測完成",
     current: frameIdx, total: frameIdx)
 
+  // 回傳原始 displayW/H 供 Dart 端座標系對齊
   return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]
 }
 
@@ -320,59 +330,67 @@ private struct BtFrameResult {
 }
 
 private func btProcessFrame(
-  sample: CMSampleBuffer,
-  config: BlobConfig,
-  pixCount: Int,
-  displayW: Int,
-  displayH: Int,
-  prevY: [UInt8]?
+  sample:   CMSampleBuffer,
+  config:   BlobConfig,
+  pixCount: Int,       // = procW * procH（降採樣後）
+  procW:    Int,       // = displayW / 2
+  procH:    Int,       // = displayH / 2
+  prevY:    [UInt8]?
 ) -> BtFrameResult? {
   guard let pixBuf: CVPixelBuffer = CMSampleBufferGetImageBuffer(sample) else { return nil }
-  let pts: CMTime = CMSampleBufferGetPresentationTimeStamp(sample)
-  let ptsSec: Double = CMTimeGetSeconds(pts)
-  let ptsUs: Int64 = Int64(ptsSec * 1_000_000)
+  let pts:   CMTime  = CMSampleBufferGetPresentationTimeStamp(sample)
+  let ptsUs: Int64   = Int64(CMTimeGetSeconds(pts) * 1_000_000)
 
   CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
   let base = CVPixelBufferGetBaseAddress(pixBuf)!
   let bpr: Int = CVPixelBufferGetBytesPerRow(pixBuf)
   let rgba = base.assumingMemoryBound(to: UInt8.self)
 
+  // ── Luma 轉換（降採樣 2x：每隔一個像素取樣）──────────────────
+  // 快速 luma：(77R + 150G + 29B) >> 8 ≈ 0.301R + 0.586G + 0.113B
+  // 比 /1000 快（位移代替除法），誤差 < 0.5
   var currY = [UInt8](repeating: 0, count: pixCount)
-  for j in 0..<displayH {
-    let rowOff: Int = j * bpr
-    let yOff: Int   = j * displayW
-    for i in 0..<displayW {
-      let o: Int = rowOff + i * 4
-      let b = Int(rgba[o]), g = Int(rgba[o + 1]), r = Int(rgba[o + 2])
-      let luma: Int = (299 * r + 587 * g + 114 * b) / 1000
-      currY[yOff + i] = UInt8(min(255, luma))
+  for j in 0..<procH {
+    let srcJ   = j &* 2
+    let rowOff = srcJ &* bpr
+    let yOff   = j &* procW
+    for i in 0..<procW {
+      let o = rowOff &+ (i &* 2) &* 4
+      let b = Int(rgba[o])
+      let g = Int(rgba[o &+ 1])
+      let r = Int(rgba[o &+ 2])
+      currY[yOff &+ i] = UInt8((77 &* r &+ 150 &* g &+ 29 &* b) >> 8)
     }
   }
   CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly)
 
   var frameBlobs: [[String: Any]] = []
   if let prev: [UInt8] = prevY {
-    // Frame diff: raw intensity + binary mask
+    // ── Frame diff：UInt8 直接運算，省掉 Int 轉換 ─────────────
     var rawDiff = [UInt8](repeating: 0, count: pixCount)
     var binMask = [UInt8](repeating: 0, count: pixCount)
+    let thresh  = UInt8(clamping: config.diffThresh)
     for i in 0..<pixCount {
-      let d: Int = abs(Int(currY[i]) - Int(prev[i]))
-      rawDiff[i] = UInt8(min(255, d))
-      binMask[i] = d >= config.diffThresh ? 1 : 0
+      let a = currY[i], b = prev[i]
+      let d = a > b ? a &- b : b &- a   // abs diff，無 overflow
+      rawDiff[i] = d
+      binMask[i] = d >= thresh ? 1 : 0
     }
 
-    // Morphological opening (erode → dilate)
-    let opened: [UInt8] = btMorphOpen(mask: binMask, w: displayW, h: displayH, k: config.morphK)
+    // ── 形態學開運算（分離式 1D：H→V × 2，O(2k) vs 原本 O(k²)）
+    let opened: [UInt8] = btMorphOpen(mask: binMask, w: procW, h: procH, k: config.morphK)
 
-    // BFS 4-connected blob detection
+    // ── BFS blob 偵測 ─────────────────────────────────────────
     let blobs: [BlobResult] = btBfsBlobs(
-      mask: opened, rawDiff: rawDiff, w: displayW, h: displayH,
+      mask: opened, rawDiff: rawDiff, w: procW, h: procH,
       areaLo: config.areaLo, areaHi: config.areaHi, circMin: config.circMin)
 
     for b in blobs {
+      // 座標還原到 display-space（×2）
       let blobEntry: [String: Any] = [
-        "cx": b.cx, "cy": b.cy,
-        "area": b.area, "circ": b.circ, "diffMean": b.diffMean,
+        "cx": b.cx * 2, "cy": b.cy * 2,
+        "area": b.area * 4,              // 面積縮放還原
+        "circ": b.circ, "diffMean": b.diffMean,
       ]
       frameBlobs.append(blobEntry)
     }
@@ -387,38 +405,82 @@ private func btMorphOpen(mask: [UInt8], w: Int, h: Int, k: Int) -> [UInt8] {
   btMorphDilate(mask: btMorphErode(mask: mask, w: w, h: h, k: k), w: w, h: h, k: k)
 }
 
+// 分離式 Erode：先水平再垂直，O(2k) per pixel 取代原本 O(k²)
+// 對矩形結構元素（k×k 全 1）結果完全等價
 private func btMorphErode(mask: [UInt8], w: Int, h: Int, k: Int) -> [UInt8] {
+  guard k > 1 else { return mask }
   let half = k / 2
+
+  // Pass 1：水平 erosion
+  var temp = [UInt8](repeating: 0, count: w * h)
+  for j in 0..<h {
+    let base = j * w
+    for i in 0..<w {
+      let lo = i >= half ? i - half : 0
+      let hi = i + half < w ? i + half : w - 1
+      var keep: UInt8 = 1
+      var di = lo
+      while di <= hi {
+        if mask[base + di] == 0 { keep = 0; break }
+        di &+= 1
+      }
+      temp[base + i] = keep
+    }
+  }
+
+  // Pass 2：垂直 erosion
   var out = [UInt8](repeating: 0, count: w * h)
   for j in 0..<h {
+    let lo = j >= half ? j - half : 0
+    let hi = j + half < h ? j + half : h - 1
     for i in 0..<w {
-      var keep = true
-      outer: for dy in -half...half {
-        for dx in -half...half {
-          let ni = i + dx, nj = j + dy
-          if ni < 0 || ni >= w || nj < 0 || nj >= h || mask[nj * w + ni] == 0 {
-            keep = false; break outer
-          }
-        }
+      var keep: UInt8 = 1
+      var dj = lo
+      while dj <= hi {
+        if temp[dj * w + i] == 0 { keep = 0; break }
+        dj &+= 1
       }
-      out[j * w + i] = keep ? 1 : 0
+      out[j * w + i] = keep
     }
   }
   return out
 }
 
+// 分離式 Dilate：先水平再垂直
 private func btMorphDilate(mask: [UInt8], w: Int, h: Int, k: Int) -> [UInt8] {
+  guard k > 1 else { return mask }
   let half = k / 2
+
+  // Pass 1：水平 dilation
+  var temp = [UInt8](repeating: 0, count: w * h)
+  for j in 0..<h {
+    let base = j * w
+    for i in 0..<w {
+      let lo = i >= half ? i - half : 0
+      let hi = i + half < w ? i + half : w - 1
+      var any: UInt8 = 0
+      var di = lo
+      while di <= hi {
+        if mask[base + di] != 0 { any = 1; break }
+        di &+= 1
+      }
+      temp[base + i] = any
+    }
+  }
+
+  // Pass 2：垂直 dilation
   var out = [UInt8](repeating: 0, count: w * h)
   for j in 0..<h {
+    let lo = j >= half ? j - half : 0
+    let hi = j + half < h ? j + half : h - 1
     for i in 0..<w {
-      guard mask[j * w + i] != 0 else { continue }
-      for dy in -half...half {
-        for dx in -half...half {
-          let ni = i + dx, nj = j + dy
-          if ni >= 0 && ni < w && nj >= 0 && nj < h { out[nj * w + ni] = 1 }
-        }
+      var any: UInt8 = 0
+      var dj = lo
+      while dj <= hi {
+        if temp[dj * w + i] != 0 { any = 1; break }
+        dj &+= 1
       }
+      out[j * w + i] = any
     }
   }
   return out

@@ -58,7 +58,7 @@ final class BallYoloDetector {
         guard let modelPath = Bundle.main.path(
             forResource: "golfballyolov8n_int8",
             ofType: "tflite",
-            inDirectory: "flutter_assets/models"
+            inDirectory: "flutter_assets/assets/models"
         ) else {
             print("[BallYoloDetector] ❌ 模型 asset 未找到")
             return false
