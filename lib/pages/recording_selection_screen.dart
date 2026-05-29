@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import '../recording/record_screen.dart';
+import '../recording/shot_record_screen.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import 'share_import_page.dart';
@@ -39,10 +40,22 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   final ExternalVideoImporter _videoImporter = const ExternalVideoImporter();
   bool _isImporting = false; // 控制導入過程中的 UI 狀態
 
+  /// Shot Mode：即時揮桿自動切片
+  void _startShotMode() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ShotRecordScreen(
+          onEntryAdded: (_) => widget.onVideoImported?.call(),
+        ),
+      ),
+    );
+  }
+
   /// 選項 1: 開始錄製
   void _startRecording() {
     debugPrint('[RecordingSelection] 使用者選擇開始錄製');
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -377,6 +390,15 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
             child: Column(
               children: [
                 _buildCard(
+                  icon: Icons.flash_on_rounded,
+                  title: '即時揮桿模式',
+                  subtitle: '揮桿自動偵測並切片，無需錄長影片',
+                  color: const Color(0xFF1E8E5A),
+                  onTap: _startShotMode,
+                  badge: '新功能',
+                ),
+                const SizedBox(height: 16),
+                _buildCard(
                   icon: Icons.videocam_rounded,
                   title: '開始錄製',
                   subtitle: '即時拍攝並進行揮桿分析',
@@ -446,6 +468,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
+    String? badge,
   }) {
     return Material(
       color: Colors.white,
@@ -480,9 +503,27 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                        ),
+                        if (badge != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              badge,
+                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(

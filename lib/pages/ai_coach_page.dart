@@ -14,8 +14,11 @@ class AiCoachPage extends StatefulWidget {
   /// 供「重新分析」按鈕使用
   final String? videoId;
   final String? csvPath;
-  /// 分析完成後回呼，傳入 errorType（'' = 完美，其餘為錯誤類型）
-  final void Function(String errorType)? onAnalysisComplete;
+  /// 分析完成後回呼
+  /// - [geminiErrorType]：Gemini 分析的姿勢錯誤類型（'' = 完美）
+  /// - [onnxErrorType]：ONNX 模型的姿勢錯誤類型（null = 無結果）
+  /// - [analysisId]：本次分析 ID
+  final void Function(String geminiErrorType, String? onnxErrorType, String analysisId)? onAnalysisComplete;
 
   const AiCoachPage({
     super.key,
@@ -36,40 +39,85 @@ class AiCoachPage extends StatefulWidget {
     required String videoId,
     required String clipPath,
     String? csvPath,
+    /// V3 時傳入 audio.wav 的完整路徑（存在才上傳）
+    String? audioPath,
     bool forceReanalyze = false,
-    void Function(String errorType)? onAnalysisComplete,
+    String promptVersion = 'v1',
+    Map<String, double>? phaseTimestamps,
+    /// V2：覆蓋 server FPS 設定（null = 使用 server 預設）
+    int? v2Fps,
+    /// V2："MEDIA_RESOLUTION_HIGH" | "MEDIA_RESOLUTION_MEDIUM"（null = 使用 server 預設）
+    String? v2Resolution,
+    String? audioAnalysisJson,
+    void Function(String geminiErrorType, String? onnxErrorType, String analysisId)? onAnalysisComplete,
   }) async {
-    // ── 快取判斷：若已有分析且不強制重新，直接導向 ──────────
+    // ── Cache Check ──────────────────────────────────────────
+    // 已有 full 分析 → 直接開啟（避免重複上傳 / 消耗配額）
+    // 已有 posture_only(idle) → 升級為 full（沿用 ONNX 結果，只補 Gemini）
     if (!forceReanalyze) {
       try {
         final existing =
             await AnalysisService.instance.getLatestAnalysisForVideo(videoId);
         if (existing != null && !existing.isFailed) {
-          debugPrint('[AiCoach] 已有分析 ${existing.analysisId} '
-              '(${existing.status})，直接開啟');
-          if (context.mounted) {
-            Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => AiCoachPage(
-                analysisId:          existing.analysisId,
-                clipPath:            clipPath,
-                videoId:             videoId,
-                csvPath:             csvPath,
-                onAnalysisComplete:  onAnalysisComplete,
-              ),
-            ));
+          final isPostureOnly = existing.mode == 'posture_only';
+
+          if (isPostureOnly && existing.isIdle && promptVersion != 'v3') {
+            // posture_only 完成 → 升級至 full，沿用已有 ONNX 結果
+            // V3 不走此路徑：posture_only 當初沒有 keyframes/audio，upgrade 後 Worker 會崩潰
+            debugPrint('[AiCoach] posture_only(idle) ${existing.analysisId} → 升級為 full');
+            await AnalysisService.instance.upgradeAnalysis(
+              existing.analysisId,
+              promptVersion: promptVersion,
+            );
+            if (context.mounted) {
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => AiCoachPage(
+                  analysisId:         existing.analysisId,
+                  clipPath:           clipPath,
+                  videoId:            videoId,
+                  csvPath:            csvPath,
+                  onAnalysisComplete: onAnalysisComplete,
+                ),
+              ));
+            }
+            return;
           }
-          return;
+
+          if (!isPostureOnly) {
+            // full 分析已存在（completed / idle / active）→ 直接開啟
+            debugPrint('[AiCoach] 已有 full 分析 ${existing.analysisId} '
+                '(${existing.status})，直接開啟');
+            if (context.mounted) {
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => AiCoachPage(
+                  analysisId:         existing.analysisId,
+                  clipPath:           clipPath,
+                  videoId:            videoId,
+                  csvPath:            csvPath,
+                  onAnalysisComplete: onAnalysisComplete,
+                ),
+              ));
+            }
+            return;
+          }
         }
       } catch (e) {
         debugPrint('[AiCoach] 快取查詢失敗（略過）: $e');
       }
     }
 
-    // 使用者只需上傳 clip + CSV；ONNX 推論在後端 Worker 自動執行
+    // 提交新的 full 分析
     final analysisId = await AnalysisService.instance.submitForAnalysis(
-      videoId:  videoId,
-      clipPath: clipPath,
-      csvPath:  csvPath,  // 有值時一併上傳，Worker 自行推論並存入 DB
+      videoId:           videoId,
+      clipPath:          clipPath,
+      csvPath:           csvPath,
+      audioPath:         audioPath,
+      mode:              'full',
+      promptVersion:     promptVersion,
+      phaseTimestamps:   phaseTimestamps,
+      v2Fps:             v2Fps,
+      v2Resolution:      v2Resolution,
+      audioAnalysisJson: audioAnalysisJson,
     );
     if (context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(
@@ -95,6 +143,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
   Timer? _timer;
   String? _error;
   bool _resultReported = false;
+  bool _isUpgrading = false;
 
   @override
   void initState() {
@@ -111,6 +160,23 @@ class _AiCoachPageState extends State<AiCoachPage> {
   void _startPolling() {
     _poll(); // 立即查一次
     _timer = Timer.periodic(_pollInterval, (_) => _poll());
+  }
+
+  Future<void> _upgrade() async {
+    if (_isUpgrading) return;
+    setState(() => _isUpgrading = true);
+    try {
+      await AnalysisService.instance.upgradeAnalysis(widget.analysisId);
+      // 重啟輪詢等待 Gemini 完成
+      _startPolling();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isUpgrading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('升級失敗: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Future<void> _reanalyze() async {
@@ -145,13 +211,19 @@ class _AiCoachPageState extends State<AiCoachPage> {
           // 分析完成時回呼一次，傳出 errorType 供上層寫入 swingPostureLabel
           if (status.isCompleted && !_resultReported) {
             _resultReported = true;
-            final rawType = status.result?.primaryError.errorType ?? '';
-            // 正規化：只接受已知 label；Gemini 有時回中文或混合字串，一律 fallback 到 ''
-            final errorType = SwingPosture.allLabels.contains(rawType) ? rawType : '';
-            if (rawType != errorType) {
-              debugPrint('[AiCoach] errorType 正規化: "$rawType" → "$errorType"');
+            // Gemini 結果
+            final rawGemini = status.result?.primaryError.errorType ?? '';
+            final geminiType = SwingPosture.allLabels.contains(rawGemini) ? rawGemini : '';
+            if (rawGemini != geminiType) {
+              debugPrint('[AiCoach] Gemini errorType 正規化: "$rawGemini" → "$geminiType"');
             }
-            widget.onAnalysisComplete?.call(errorType);
+            // ONNX 結果：優先取 officialErrors，次取 suspectErrors
+            final rawOnnx = status.onnxResult?.officialErrors.firstOrNull
+                ?? status.onnxResult?.suspectErrors.firstOrNull;
+            final onnxType = rawOnnx != null && SwingPosture.allLabels.contains(rawOnnx)
+                ? rawOnnx
+                : null;
+            widget.onAnalysisComplete?.call(geminiType, onnxType, widget.analysisId);
           }
         }
       }
@@ -199,6 +271,14 @@ class _AiCoachPageState extends State<AiCoachPage> {
       );
     }
 
+    if (status.isIdle) {
+      return _IdleView(
+        status: status,
+        isUpgrading: _isUpgrading,
+        onUpgrade: _upgrade,
+      );
+    }
+
     return _ResultView(status: status);
   }
 }
@@ -213,6 +293,7 @@ class _LoadingView extends StatelessWidget {
     'pending'    => '準備中...',
     'queued'     => '等待分析佇列...',
     'processing' => 'AI 教練正在分析影片...',
+    'idle'       => '等待 AI 教練分析...',
     _            => '連接中...',
   };
 
@@ -263,6 +344,87 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
+// ── Idle 狀態（ONNX 完成，等待 Gemini）────────────────────────
+
+class _IdleView extends StatelessWidget {
+  final AnalysisStatus status;
+  final bool isUpgrading;
+  final VoidCallback onUpgrade;
+
+  const _IdleView({
+    required this.status,
+    required this.isUpgrading,
+    required this.onUpgrade,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(kSpaceMD),
+      children: [
+        // ── 狀態橫幅 ────────────────────────────────────────────
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: kPrimaryGreen.withAlpha(20),
+            borderRadius: BorderRadius.circular(kRadiusMD),
+            border: Border.all(color: kPrimaryGreen.withAlpha(80)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: kPrimaryGreen, size: 20),
+              const SizedBox(width: kSpaceSM),
+              const Expanded(
+                child: Text(
+                  '已完成錯誤姿勢分析',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: kPrimaryGreen,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: kSpaceMD),
+
+        const SizedBox(height: kSpaceLG),
+        // ── 升級按鈕 ────────────────────────────────────────────
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: isUpgrading ? null : onUpgrade,
+            icon: isUpgrading
+                ? const SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.smart_toy_outlined),
+            label: Text(isUpgrading ? '送出中...' : '開始 AI 教練分析'),
+            style: FilledButton.styleFrom(
+              backgroundColor: kPrimaryDark,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+        const SizedBox(height: kSpaceSM),
+        const Text(
+          '* AI 教練將依據姿勢分析結果，提供詳細教練評語與訓練建議',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 11, color: kTextHint),
+        ),
+        const SizedBox(height: kSpaceLG),
+      ],
+    );
+  }
+}
+
 // ── Result 主畫面 ─────────────────────────────────────────────
 
 class _ResultView extends StatelessWidget {
@@ -276,12 +438,12 @@ class _ResultView extends StatelessWidget {
       padding: const EdgeInsets.all(kSpaceMD),
       children: [
         _SummaryCard(result: result),
+        if (result.impactQuality != null) ...[
+          const SizedBox(height: kSpaceMD),
+          _ImpactQualityCard(iq: result.impactQuality!),
+        ],
         const SizedBox(height: kSpaceMD),
         _FeedbackCard(feedbacks: result.coachFeedback),
-        if (status.onnxResult != null) ...[
-          const SizedBox(height: kSpaceMD),
-          _OnnxScoreCard(onnx: status.onnxResult!),
-        ],
         const SizedBox(height: kSpaceMD),
         _PracticeCard(suggestions: result.practiceSuggestions),
         const SizedBox(height: kSpaceMD),
@@ -369,6 +531,113 @@ class _SummaryCard extends StatelessWidget {
                 ],
               ),
             )),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── 擊球品質（音訊甜蜜點）卡片 ────────────────────────────────
+
+class _ImpactQualityCard extends StatelessWidget {
+  final ImpactQuality iq;
+  const _ImpactQualityCard({required this.iq});
+
+  Color get _levelColor => switch (iq.qualityLevel) {
+    'premium_sweet_spot' => const Color(0xFF7C3AED),
+    'sweet_spot'         => kGoodColor,
+    'near_sweet_spot'    => kCrispColor,
+    'fair'               => const Color(0xFFEAB308),
+    _                    => kBadColor,
+  };
+
+  String get _levelLabel => switch (iq.qualityLevel) {
+    'premium_sweet_spot' => '高品質甜蜜點',
+    'sweet_spot'         => '甜蜜點',
+    'near_sweet_spot'    => '接近甜蜜點',
+    'fair'               => '普通',
+    _                    => '擊球偏虛',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 標題列
+          Row(
+            children: [
+              Icon(Icons.graphic_eq_rounded, color: _levelColor, size: 20),
+              const SizedBox(width: 8),
+              const Text('擊球品質（音訊）',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kTextPrimary)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _levelColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _levelColor.withValues(alpha: 0.55)),
+                ),
+                child: Text(
+                  _levelLabel,
+                  style: TextStyle(color: _levelColor, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // 進度條 + 分數
+          Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    for (int i = 0; i < iq.totalFeatures; i++) ...[
+                      Expanded(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 400),
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: i < iq.passCount ? _levelColor : const Color(0xFFE0E4EA),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                      if (i < iq.totalFeatures - 1) const SizedBox(width: 5),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '${iq.passCount}/${iq.totalFeatures}',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _levelColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${iq.passCount} / ${iq.totalFeatures} 項特徵符合甜蜜點範圍',
+            style: const TextStyle(color: kTextSecondary, fontSize: 11),
+          ),
+          // AI 音頻反饋
+          if (iq.audioFeedback.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+              decoration: BoxDecoration(
+                color: _levelColor.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(8),
+                border: Border(left: BorderSide(color: _levelColor, width: 3)),
+              ),
+              child: Text(
+                iq.audioFeedback,
+                style: const TextStyle(color: kTextPrimary, fontSize: 13, height: 1.55),
+              ),
+            ),
           ],
         ],
       ),
@@ -490,144 +759,6 @@ class _NextGoalCard extends StatelessWidget {
       ),
     );
   }
-}
-
-// ── ONNX 分數卡片 ─────────────────────────────────────────────
-
-class _OnnxScoreCard extends StatelessWidget {
-  final OnnxResult onnx;
-  const _OnnxScoreCard({required this.onnx});
-
-  Color _barColor(String label) {
-    if (onnx.officialErrors.contains(label)) return kBadColor;
-    if (onnx.suspectErrors.contains(label))  return kCrispColor;
-    return kTextHint;
-  }
-
-  String _bandLabel(String band) => switch (band) {
-    'high_confidence'      => '高信心',
-    'acceptable_review'    => '可接受',
-    'suspect_not_official' => '可疑',
-    _                      => '忽略',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    // 依照 SwingPosture.errorLabels 固定順序顯示（完美不顯示，只顯示 5 種錯誤）
-    final orderedLabels = SwingPosture.errorLabels;
-
-    return _Card(
-      title: '模型推論分數',
-      icon: Icons.bar_chart_rounded,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── 完美揮桿提示橫幅 ────────────────────────────────────
-          if (onnx.isPerfect) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              margin: const EdgeInsets.only(bottom: kSpaceMD),
-              decoration: BoxDecoration(
-                color: kGoodColor.withAlpha(20),
-                borderRadius: BorderRadius.circular(kRadiusSM),
-                border: Border.all(color: kGoodColor.withAlpha(80)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.star_rounded, color: kGoodColor, size: 18),
-                  const SizedBox(width: kSpaceXS),
-                  const Text(
-                    '完美揮桿 — 所有錯誤分數均低於門檻',
-                    style: TextStyle(fontSize: 13, color: kGoodColor, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          ...orderedLabels.map((label) {
-            final score    = onnx.scores[label] ?? 0.0;
-            final band     = onnx.bands[label]  ?? 'low_ignore';
-            final barColor = _barColor(label);
-            final isOfficial = onnx.officialErrors.contains(label);
-            final isSuspect  = onnx.suspectErrors.contains(label);
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: kSpaceMD),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          SwingPosture.zhName(label),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: (isOfficial || isSuspect)
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            color: (isOfficial || isSuspect) ? barColor : kTextSecondary,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${(score * 100).toStringAsFixed(1)}%',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: barColor,
-                        ),
-                      ),
-                      const SizedBox(width: kSpaceXS),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: barColor.withAlpha(isOfficial ? 30 : 15),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          _bandLabel(band),
-                          style: TextStyle(fontSize: 10, color: barColor),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value: score.clamp(0.0, 1.0),
-                      minHeight: 6,
-                      backgroundColor: barColor.withAlpha(20),
-                      valueColor: AlwaysStoppedAnimation<Color>(barColor),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-          // 門檻說明
-          const Divider(height: kSpaceMD),
-          DefaultTextStyle(
-            style: const TextStyle(fontSize: 10, color: kTextHint),
-            child: Row(
-              children: [
-                _dot(kBadColor),    const Text(' 確認錯誤 ≥75%   '),
-                _dot(kCrispColor),  const Text(' 可疑 60–75%   '),
-                _dot(kTextHint),    const Text(' 忽略 <60%'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _dot(Color c) => Container(
-    width: 8, height: 8,
-    decoration: BoxDecoration(color: c, shape: BoxShape.circle),
-  );
 }
 
 // ── 通用卡片容器 ──────────────────────────────────────────────

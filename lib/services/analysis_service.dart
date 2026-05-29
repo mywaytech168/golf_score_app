@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import 'auth_token_storage.dart';
+import 'v3_analysis_service.dart';
 
 const _baseUrl = 'https://tekswing.api.atk.tw';
 
@@ -15,18 +16,22 @@ class AnalysisRequestResult {
   final String clipUploadUrl;
   /// HasCsv=true 時才有值；Worker 用此 CSV 執行 ONNX 推論
   final String? csvUploadUrl;
+  /// HasAudio=true 時才有值；V3 用此 URL 上傳 audio.wav
+  final String? audioUploadUrl;
 
   AnalysisRequestResult({
     required this.analysisId,
     required this.clipUploadUrl,
     this.csvUploadUrl,
+    this.audioUploadUrl,
   });
 
   factory AnalysisRequestResult.fromJson(Map<String, dynamic> j) =>
       AnalysisRequestResult(
-        analysisId:    j['analysisId']    as String,
-        clipUploadUrl: j['clipUploadUrl'] as String,
-        csvUploadUrl:  j['csvUploadUrl']  as String?,
+        analysisId:     j['analysisId']     as String,
+        clipUploadUrl:  j['clipUploadUrl']  as String,
+        csvUploadUrl:   j['csvUploadUrl']   as String?,
+        audioUploadUrl: j['audioUploadUrl'] as String?,
       );
 }
 
@@ -134,9 +139,43 @@ class PracticeSuggestion {
       );
 }
 
+class ImpactQuality {
+  final bool audioSweetSpot;
+  final int passCount;
+  final int totalFeatures;
+  /// poor | fair | near_sweet_spot | sweet_spot | premium_sweet_spot
+  final String qualityLevel;
+  final String audioFeedback;
+
+  ImpactQuality({
+    required this.audioSweetSpot,
+    required this.passCount,
+    required this.totalFeatures,
+    required this.qualityLevel,
+    required this.audioFeedback,
+  });
+
+  factory ImpactQuality.fromJson(Map<String, dynamic> j) => ImpactQuality(
+    audioSweetSpot: j['audio_sweet_spot'] as bool? ?? false,
+    passCount:      j['pass_count']       as int?  ?? 0,
+    totalFeatures:  j['total_features']   as int?  ?? 5,
+    qualityLevel:   j['quality_level']    as String? ?? 'poor',
+    audioFeedback:  j['audio_feedback']   as String? ?? '',
+  );
+
+  static ImpactQuality unavailable() => ImpactQuality(
+    audioSweetSpot: false,
+    passCount: 0,
+    totalFeatures: 5,
+    qualityLevel: 'poor',
+    audioFeedback: '無音訊分析資料',
+  );
+}
+
 class CoachResult {
   final String summary;
   final CoachPrimaryError primaryError;
+  final ImpactQuality? impactQuality;
   final List<String> coachFeedback;
   final List<PracticeSuggestion> practiceSuggestions;
   final String nextTrainingGoal;
@@ -144,6 +183,7 @@ class CoachResult {
   CoachResult({
     required this.summary,
     required this.primaryError,
+    this.impactQuality,
     required this.coachFeedback,
     required this.practiceSuggestions,
     required this.nextTrainingGoal,
@@ -155,6 +195,9 @@ class CoachResult {
     primaryError: j['primary_error'] != null
         ? CoachPrimaryError.fromJson(j['primary_error'] as Map<String, dynamic>)
         : CoachPrimaryError(errorType: '', zhName: '', severity: 'low', evidence: []),
+    impactQuality: j['impact_quality'] != null
+        ? ImpactQuality.fromJson(j['impact_quality'] as Map<String, dynamic>)
+        : null,
     coachFeedback: (j['coach_feedback'] as List<dynamic>? ?? []).cast<String>(),
     practiceSuggestions: (j['practice_suggestions'] as List<dynamic>? ?? [])
         .map((e) => PracticeSuggestion.fromJson(e as Map<String, dynamic>))
@@ -293,21 +336,35 @@ class AnalysisService {
   /// 向 Server 建立分析任務，回傳 B2 presigned 上傳 URL。
   ///
   /// - [hasCsv]=true 時同時回傳 [csvUploadUrl]，供後端 Worker 執行 ONNX 推論。
+  /// - [hasAudio]=true 時同時回傳 [audioUploadUrl]（V3 用）。
+  /// - [keyframes]：V3 時傳入 base64 JPEG 字串陣列（嵌入 request body）。
   /// - [mode]："posture_only"（只跑 ONNX → idle）或 "full"（ONNX + Gemini）。
   /// - [promptVersion]："v1" | "v2" | "v3"（僅 mode="full" 有效）。
   Future<AnalysisRequestResult> requestAnalysis({
     required String videoId,
     bool hasCsv = false,
+    bool hasAudio = false,
     String mode = 'full',
     String promptVersion = 'v1',
+    Map<String, double>? phaseTimestamps,
+    List<String>? keyframes,
+    String? audioAnalysisJson,
+    int? v2Fps,
+    String? v2Resolution,
   }) async {
     final resp = await _dio.post(
       '/api/analysis/request',
       data: {
         'videoId':       videoId,
         'hasCsv':        hasCsv,
+        'hasAudio':      hasAudio,
         'mode':          mode,
         'promptVersion': promptVersion,
+        if (phaseTimestamps != null)   'phaseTimestamps':  phaseTimestamps,
+        if (keyframes != null)         'keyframes':        keyframes,
+        if (audioAnalysisJson != null) 'audioAnalysisJson': audioAnalysisJson,
+        if (v2Fps != null)             'v2Fps':            v2Fps,
+        if (v2Resolution != null)      'v2Resolution':     v2Resolution,
       },
       options: Options(headers: await _authHeaders()),
     );
@@ -365,6 +422,31 @@ class AnalysisService {
     debugPrint('✅ CSV 上傳完成: ${bytes.length ~/ 1024}KB');
   }
 
+  // ── 步驟 2c ───────────────────────────────────────────────────
+
+  /// 直傳 audio.wav 到 B2（Presigned PUT）—— V3 專用
+  Future<void> uploadAudio({
+    required String audioUploadUrl,
+    required String audioPath,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    final bytes = await File(audioPath).readAsBytes();
+    await _dio.put(
+      audioUploadUrl,
+      data: bytes,
+      options: Options(
+        headers: {
+          'Content-Type':   'audio/wav',
+          'Content-Length': bytes.length.toString(),
+        },
+        sendTimeout:    const Duration(minutes: 3),
+        receiveTimeout: const Duration(minutes: 3),
+      ),
+      onSendProgress: onProgress,
+    );
+    debugPrint('✅ Audio 上傳完成: ${bytes.length ~/ 1024}KB');
+  }
+
   // ── 步驟 3 ────────────────────────────────────────────────────
 
   /// 通知 Server clip（與 CSV）已上傳完畢，觸發 Worker 開始分析。
@@ -392,23 +474,52 @@ class AnalysisService {
   /// 一次完成步驟 1～3，回傳 analysisId 供輪詢。
   ///
   /// - [csvPath]：若提供且檔案存在，一併上傳骨架 CSV（Worker 在後端執行 ONNX）。
+  /// - [audioPath]：V3 時傳入 audio.wav 路徑（若存在則上傳到 B2）。
   /// - [mode]："posture_only" 或 "full"（預設）。
   /// - [promptVersion]："v1" | "v2" | "v3"（預設 "v1"）。
+  /// - V3 時自動抽取關鍵禎並嵌入 request body。
   Future<String> submitForAnalysis({
     required String videoId,
     required String clipPath,
     String? csvPath,
+    String? audioPath,
     String mode = 'full',
     String promptVersion = 'v1',
+    Map<String, double>? phaseTimestamps,
+    String? audioAnalysisJson,
+    int? v2Fps,
+    String? v2Resolution,
     void Function(int sent, int total)? onUploadProgress,
   }) async {
-    final hasCsv = csvPath != null && File(csvPath).existsSync();
+    final hasCsv   = csvPath   != null && File(csvPath).existsSync();
+    final hasAudio = audioPath != null && File(audioPath).existsSync()
+        && promptVersion == 'v3';
+
+    // V3：事先抽取關鍵禎（base64 JPEG），嵌入 request body
+    List<String>? keyframes;
+    if (promptVersion == 'v3' && phaseTimestamps != null && phaseTimestamps.isNotEmpty) {
+      try {
+        keyframes = await V3AnalysisService.instance.extractKeyframes(
+          clipPath:        clipPath,
+          phaseTimestamps: phaseTimestamps,
+        );
+        debugPrint('✅ V3 關鍵禎抽取完成: ${keyframes.length} 幀');
+      } catch (e) {
+        debugPrint('⚠️ V3 關鍵禎抽取失敗（略過）: $e');
+      }
+    }
 
     final req = await requestAnalysis(
-      videoId:       videoId,
-      hasCsv:        hasCsv,
-      mode:          mode,
-      promptVersion: promptVersion,
+      videoId:           videoId,
+      hasCsv:            hasCsv,
+      hasAudio:          hasAudio,
+      mode:              mode,
+      promptVersion:     promptVersion,
+      phaseTimestamps:   phaseTimestamps,
+      keyframes:         keyframes,
+      audioAnalysisJson: audioAnalysisJson,
+      v2Fps:             v2Fps,
+      v2Resolution:      v2Resolution,
     );
 
     await uploadClip(
@@ -421,6 +532,13 @@ class AnalysisService {
       await uploadCsv(
         csvUploadUrl: req.csvUploadUrl!,
         csvPath:      csvPath,
+      );
+    }
+
+    if (hasAudio && req.audioUploadUrl != null) {
+      await uploadAudio(
+        audioUploadUrl: req.audioUploadUrl!,
+        audioPath:      audioPath,
       );
     }
 

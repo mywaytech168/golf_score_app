@@ -10,6 +10,7 @@ import '../models/recording_history_entry.dart';
 import '../services/analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/audio_waveform_strip.dart';
 import 'ai_coach_page.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
@@ -32,18 +33,20 @@ class VideoPlayerPage extends StatefulWidget {
 }
 
 class _VideoPlayerPageState extends State<VideoPlayerPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   VideoPlayerController? _controller;
   late final TabController _tabController;
   bool _initialized = false;
 
-  /// 是否為從長影片裁切的短片（切片才顯示圖表與 AI 分析）
-  bool get _isLocalClip =>
-      widget.entry?.videoType == VideoType.localClip;
+  /// 是否為長影片（原始錄製 > 5 秒），長影片無骨架/分析 Tab 及 AI，但可顯示圖表
+  bool get _isLongVideo =>
+      widget.entry?.videoType == VideoType.original &&
+      (widget.entry?.durationSeconds ?? 0) > 5;
 
   // Charts panel state
   bool _chartsExpanded = false;
-  int _chartTabIndex = 0;
+  int _chartTabIndex = 0;    // 0=姿勢 1=音頻特徵
+  int _poseSubTabIndex = 0;  // 0=手腕Y 1=速度（在姿勢 tab 下）
   ChartDataSet? _chartData;
   bool _chartsLoading = false;
 
@@ -56,6 +59,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 揮桿 8 階段關鍵禎
   // key = phase key (e.g. 'address'), value = seconds in clip
   Map<String, double>? _phases;
+
+  // 甜蜜點特效動畫（僅分析 Tab）
+  late final AnimationController _impactAnim;
+  bool _impactTriggered = false;
   static const _phaseOrder = [
     ('address',       '準備'),
     ('takeaway',      '起桿'),
@@ -67,16 +74,24 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     ('finish',        '收桿'),
   ];
 
-  static const _tabs = [
+  static const _allTabs = [
     (icon: Icons.videocam,  label: '原始',  type: 'original'),
     (icon: Icons.person,    label: '骨架',  type: 'skeleton'),
     (icon: Icons.analytics, label: '分析',  type: 'analyzed'),
   ];
 
+  /// 長影片只顯示「原始」tab
+  List<({IconData icon, String label, String type})> get _activeTabs =>
+      _isLongVideo ? [_allTabs.first] : _allTabs;
+
   static const _chartTabs = [
-    (label: '聲音峰值', color: Color(0xFFE53935)),
-    (label: '手腕 Y',   color: Color(0xFF1565C0)),
-    (label: '速度',      color: Color(0xFF1E8E5A)),
+    (label: '姿勢',     color: Color(0xFF1565C0)),
+    (label: '音頻特徵', color: Color(0xFFE53935)),
+  ];
+
+  static const _poseSubTabs = [
+    (label: '手腕 Y', color: Color(0xFF1565C0)),
+    (label: '速度',   color: Color(0xFF1E8E5A)),
   ];
 
   String get _sessionDir => '${p.dirname(widget.videoPath)}${p.separator}';
@@ -85,17 +100,25 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   void initState() {
     super.initState();
 
-    // 有分析結果 → 預設分析 Tab(2)；否則 → 原始 Tab(0)
+    // 有分析結果 → 預設分析 Tab(2)；長影片或否則 → 原始 Tab(0)
     final hasAnalysis = widget.entry?.isAnalyzed ?? false;
-    final initialTab  = hasAnalysis ? 2 : 0;
+    final initialTab  = (!_isLongVideo && hasAnalysis) ? 2 : 0;
 
-    _tabController = TabController(length: _tabs.length, vsync: this, initialIndex: initialTab)
-      ..addListener(() {
+    _impactAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+
+    _tabController = TabController(
+      length: _activeTabs.length,
+      vsync: this,
+      initialIndex: initialTab,
+    )..addListener(() {
         if (!_tabController.indexIsChanging) return;
-        switch (_tabController.index) {
-          case 0: _viewOriginal();
-          case 1: _viewSkeleton();
-          case 2: _viewAnalyzed();
+        switch (_activeTabs[_tabController.index].type) {
+          case 'original': _viewOriginal();
+          case 'skeleton': _viewSkeleton();
+          case 'analyzed': _viewAnalyzed();
         }
       });
 
@@ -110,9 +133,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       _initController(originalPath, isOriginal: true);
     }
 
-    // 讀取揮桿 8 階段時間點
+    // 讀取揮桿 8 階段時間點；並預載圖表資料（供波形使用）
     if (widget.entry?.videoType == VideoType.localClip) {
       _loadPhases();
+      _loadCharts();
     }
   }
 
@@ -167,7 +191,28 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   }
 
   void _onUpdate() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    _checkImpactTrigger();
+    setState(() {});
+  }
+
+  void _checkImpactTrigger() {
+    if (_tabController.index != 2) return;
+    final hitSec = widget.entry?.hitSecond;
+    if (hitSec == null || widget.entry?.goodShot == null) return;
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+
+    final posSec = ctrl.value.position.inMilliseconds / 1000.0;
+    final inWindow = posSec >= hitSec && posSec < hitSec + 1.6;
+
+    if (inWindow && !_impactTriggered) {
+      _impactTriggered = true;
+      _impactAnim.forward(from: 0);
+    } else if (posSec < hitSec - 0.3 && _impactTriggered) {
+      _impactTriggered = false;
+      _impactAnim.reset();
+    }
   }
 
   void _switchTo(String path) => _initController(path);
@@ -246,6 +291,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   @override
   void dispose() {
+    _impactAnim.dispose();
     _tabController.dispose();
     _controller?.removeListener(_onUpdate);
     _controller?.dispose();
@@ -296,6 +342,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             _buildTopBar(context),
             Expanded(child: _buildVideo()),
             if (_initialized) _buildControls(),
+            if (_initialized && !_isLongVideo) _buildWaveformStrip(),
             if (_initialized && _phases != null) _buildPhaseStrip(),
             _buildChartsPanel(),
             _buildAiPanel(),
@@ -324,7 +371,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               unselectedLabelColor: Colors.white54,
               labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               unselectedLabelStyle: const TextStyle(fontSize: 13),
-              tabs: _tabs.map((t) => Tab(
+              tabs: _activeTabs.map((t) => Tab(
                 height: 40,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -354,10 +401,47 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     if (ctrl == null || !_initialized) {
       return const Center(child: CircularProgressIndicator(color: Colors.white54));
     }
+
+    final isAnalysis = _tabController.index == 2;
+    final entry = widget.entry;
+    final showEffects = isAnalysis && entry?.hitSecond != null && entry?.goodShot != null;
+
     return Center(
       child: AspectRatio(
         aspectRatio: 9 / 16,
-        child: VideoPlayer(ctrl),
+        child: Stack(
+          children: [
+            VideoPlayer(ctrl),
+            if (showEffects) ...[
+              // 擊球光圈
+              Positioned.fill(
+                child: AnimatedBuilder(
+                  animation: _impactAnim,
+                  builder: (_, __) => CustomPaint(
+                    painter: _SweetSpotRingPainter(
+                      progress: _impactAnim.value,
+                      goodShot: entry!.goodShot,
+                      passCount: entry.audioPassCount ?? 0,
+                    ),
+                  ),
+                ),
+              ),
+              // Sweet Spot 徽章（右上角）
+              Positioned(
+                right: 10,
+                top: 10,
+                child: AnimatedBuilder(
+                  animation: _impactAnim,
+                  builder: (_, __) => _SweetSpotBadge(
+                    progress: _impactAnim.value,
+                    goodShot: entry!.goodShot,
+                    passCount: entry.audioPassCount ?? 0,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -393,6 +477,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               onChanged: (v) => ctrl.seekTo(duration * v),
             ),
           ),
+          // Impact 時間標記（僅分析 Tab 且有 hitSecond）
+          if (_tabController.index == 2 && widget.entry?.hitSecond != null)
+            _buildImpactTimelineMarker(ctrl, duration),
           Row(
             children: [
               Text(_fmt(position),
@@ -423,8 +510,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               const Spacer(),
               Text(_fmt(duration),
                   style: const TextStyle(color: Colors.white54, fontSize: 12)),
-              // 圖表 + AI 分析圖示：僅限切片（localClip），長影片不顯示
-              if (_isLocalClip) ...[
+              // 圖表圖示：所有影片都顯示；AI 圖示不顯示在長影片上
+              ...[
                 const SizedBox(width: 8),
                 GestureDetector(
                   onTap: _toggleCharts,
@@ -440,17 +527,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _toggleAi,
-                  child: Icon(
-                    Icons.psychology_rounded,
-                    color: _aiExpanded
-                        ? const Color(0xFF7C3AED)
-                        : Colors.white54,
-                    size: 24,
+                if (!_isLongVideo) ...[
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _toggleAi,
+                    child: Icon(
+                      Icons.psychology_rounded,
+                      color: _aiExpanded
+                          ? const Color(0xFF7C3AED)
+                          : Colors.white54,
+                      size: 24,
+                    ),
                   ),
-                ),
+                ],
               ],
             ],
           ),
@@ -459,7 +548,69 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     );
   }
 
-  // ── 揮桿 8 階段關鍵禎橫列 ────────────────────────────────────
+  // ── 時間軸 Impact Marker ─────────────────────────────────────
+
+  Widget _buildImpactTimelineMarker(VideoPlayerController ctrl, Duration duration) {
+    final hitSec = widget.entry!.hitSecond!;
+    final durSec = duration.inMilliseconds / 1000.0;
+    if (durSec <= 0) return const SizedBox.shrink();
+
+    final frac = (hitSec / durSec).clamp(0.0, 1.0);
+    final goodShot = widget.entry?.goodShot;
+    final markerColor = goodShot == true
+        ? const Color(0xFFFFD700)
+        : goodShot == false
+            ? const Color(0xFF9E9E9E)
+            : const Color(0xFFFF6F00);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTapDown: (details) {
+        ctrl.seekTo(Duration(milliseconds: (hitSec * 1000).round()));
+      },
+      child: LayoutBuilder(
+        builder: (ctx, constraints) {
+          const hPad = 20.0; // approximate Slider horizontal track padding
+          final x = hPad + frac * (constraints.maxWidth - hPad * 2);
+          return SizedBox(
+            height: 10,
+            child: CustomPaint(
+              painter: _ImpactTimelinePainter(x: x, color: markerColor),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── 聲音波形橫條 ──────────────────────────────────────────────
+
+  Widget _buildWaveformStrip() {
+    final ctrl = _controller;
+    final rms  = _chartData?.audioRms;
+    if (ctrl == null || !ctrl.value.isInitialized || rms == null || rms.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final entry      = widget.entry;
+    final totalSec   = ctrl.value.duration.inMilliseconds / 1000.0;
+    final currentSec = ctrl.value.position.inMilliseconds / 1000.0;
+    final features   = entry?.audioFeatureValues;
+
+    return AudioWaveformStrip(
+      rmsPoints:        rms,
+      totalSeconds:     totalSec,
+      hitSecond:        entry?.hitSecond,
+      currentSecond:    currentSec,
+      spectralCentroid: features?['spectral_centroid'],
+      peakDbfs:         features?['peak_dbfs'],
+      onSeek: (sec) => ctrl.seekTo(
+        Duration(milliseconds: (sec * 1000).round()),
+      ),
+    );
+  }
+
+  // ── 揮桿 8 階段關鍵禎橫列 ─────────────────────────────────────
 
   Widget _buildPhaseStrip() {
     final phases = _phases!;
@@ -491,6 +642,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           final sec      = phases[key];
           final isActive = currentPhase == key;
 
+          // Impact chip 在分析 Tab 且有甜蜜點結果時顯示特殊顏色
+          final isImpactMark = key == 'impact'
+              && _tabController.index == 2
+              && widget.entry?.goodShot != null;
+          final impactColor = isImpactMark
+              ? (widget.entry!.goodShot!
+                  ? const Color(0xFFFFD700)
+                  : const Color(0xFF9E9E9E))
+              : null;
+
+          final chipBg = impactColor != null
+              ? impactColor.withValues(alpha: 0.14)
+              : isActive ? kPrimaryGreen.withValues(alpha: 0.18) : const Color(0xFF1A1A1A);
+          final chipBorderColor = impactColor != null
+              ? impactColor.withValues(alpha: 0.75)
+              : isActive ? kPrimaryGreen : Colors.white12;
+          final chipBorderWidth = (impactColor != null || isActive) ? 1.5 : 1.0;
+          final secColor = impactColor ?? (isActive ? kPrimaryGreen : Colors.white60);
+          final labelColor = impactColor ?? (isActive ? Colors.white : Colors.white38);
+
           return GestureDetector(
             onTap: sec != null && ctrl != null
                 ? () => ctrl.seekTo(Duration(milliseconds: (sec * 1000).round()))
@@ -499,33 +670,34 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               width: 58,
               margin: const EdgeInsets.only(right: 6),
               decoration: BoxDecoration(
-                color: isActive
-                    ? kPrimaryGreen.withValues(alpha: 0.18)
-                    : const Color(0xFF1A1A1A),
+                color: chipBg,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: isActive ? kPrimaryGreen : Colors.white12,
-                  width: isActive ? 1.5 : 1,
-                ),
+                border: Border.all(color: chipBorderColor, width: chipBorderWidth),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  if (isImpactMark)
+                    Icon(
+                      widget.entry!.goodShot! ? Icons.star_rounded : Icons.radio_button_unchecked_rounded,
+                      color: impactColor,
+                      size: 10,
+                    ),
                   Text(
                     sec != null ? '${sec.toStringAsFixed(1)}s' : '--',
                     style: TextStyle(
-                      color: isActive ? kPrimaryGreen : Colors.white60,
-                      fontSize: 12,
+                      color: secColor,
+                      fontSize: isImpactMark ? 11 : 12,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Text(
                     label,
                     style: TextStyle(
-                      color: isActive ? Colors.white : Colors.white38,
+                      color: labelColor,
                       fontSize: 9,
-                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                      fontWeight: (isActive || isImpactMark) ? FontWeight.w700 : FontWeight.w400,
                     ),
                   ),
                 ],
@@ -540,7 +712,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // ── 圖表面板 ─────────────────────────────────────────────────
 
   Widget _buildChartsPanel() {
-    if (!_isLocalClip) return const SizedBox.shrink();
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,
@@ -564,22 +735,40 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       );
     }
 
-    final activePoints = switch (_chartTabIndex) {
-      0 => data.audioRms,
-      1 => data.wristY,
-      _ => data.wristSpeed,
-    };
-    final tab = _chartTabs[_chartTabIndex];
-    final invertY = _chartTabIndex == 1;
-    final yLabel = _chartTabIndex == 0
-        ? (double v) => '${v.toStringAsFixed(0)}dB'
-        : _chartTabIndex == 1
-            ? (double v) => '${v.toStringAsFixed(0)}px'
-            : (double v) => v.toStringAsFixed(0);
+    // ── 決定目前顯示的資料 ──────────────────────────────────
+    final List<ChartPoint> activePoints;
+    final Color activeColor;
+    final bool invertY;
+    final String Function(double) yLabel;
+    final String emptyLabel;
+
+    if (_chartTabIndex == 0) {
+      // 姿勢 tab：依子 tab 切換
+      if (_poseSubTabIndex == 0) {
+        activePoints = data.wristY;
+        activeColor  = _poseSubTabs[0].color;
+        invertY      = true;
+        yLabel       = (v) => '${v.toStringAsFixed(0)}px';
+        emptyLabel   = '手腕 Y 無資料';
+      } else {
+        activePoints = data.wristSpeed;
+        activeColor  = _poseSubTabs[1].color;
+        invertY      = false;
+        yLabel       = (v) => v.toStringAsFixed(0);
+        emptyLabel   = '速度 無資料';
+      }
+    } else {
+      // 音頻特徵 tab
+      activePoints = data.audioRms;
+      activeColor  = _chartTabs[1].color;
+      invertY      = false;
+      yLabel       = (v) => '${v.toStringAsFixed(0)}dB';
+      emptyLabel   = '音頻特徵 無資料';
+    }
 
     return Column(
       children: [
-        // Tab 列
+        // ── 主 Tab 列（姿勢 / 音頻特徵）──────────────────────
         Container(
           height: 36,
           color: const Color(0xFF1A1A1A),
@@ -615,22 +804,63 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             }),
           ),
         ),
-        // 圖表
+        // ── 姿勢子 Tab（手腕 Y / 速度）──────────────────────
+        if (_chartTabIndex == 0)
+          Container(
+            height: 28,
+            color: const Color(0xFF161616),
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: List.generate(_poseSubTabs.length, (i) {
+                final sub = _poseSubTabs[i];
+                final selected = i == _poseSubTabIndex;
+                return Padding(
+                  padding: EdgeInsets.only(left: i == 0 ? 8 : 6),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _poseSubTabIndex = i),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? sub.color.withValues(alpha: 0.18)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selected ? sub.color : Colors.white12,
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        sub.label,
+                        style: TextStyle(
+                          color: selected ? sub.color : Colors.white38,
+                          fontSize: 10,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        // ── 圖表區 ──────────────────────────────────────────
         Expanded(
           child: activePoints.isEmpty
               ? Center(
-                  child: Text('${tab.label} 無資料',
+                  child: Text(emptyLabel,
                       style: const TextStyle(
                           color: Colors.white24, fontSize: 12)),
                 )
               : Padding(
                   padding: const EdgeInsets.fromLTRB(4, 6, 12, 6),
                   child: _PlayerChart(
-                    key: ValueKey(_chartTabIndex),
+                    key: ValueKey('$_chartTabIndex-$_poseSubTabIndex'),
                     points: activePoints,
-                    color: tab.color,
+                    color: activeColor,
                     invertY: invertY,
-                    hitSecond: widget.entry!.hitSecond,
+                    hitSecond: widget.entry?.hitSecond,
                     yLabel: yLabel,
                   ),
                 ),
@@ -645,7 +875,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // ── AI 分析面板 ──────────────────────────────────────────────
 
   Widget _buildAiPanel() {
-    if (!_isLocalClip) return const SizedBox.shrink();
+    if (_isLongVideo) return const SizedBox.shrink();
     return AnimatedSize(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,
@@ -1265,4 +1495,174 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
       ),
     );
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 甜蜜點擊球光圈 Painter
+// ════════════════════════════════════════════════════════════════
+
+class _SweetSpotRingPainter extends CustomPainter {
+  final double progress; // 0 → 1
+  final bool? goodShot;
+  final int passCount;
+
+  const _SweetSpotRingPainter({
+    required this.progress,
+    required this.goodShot,
+    required this.passCount,
+  });
+
+  Color get _baseColor {
+    if (goodShot == true && passCount >= 4) return const Color(0xFFFFD700);
+    if (goodShot == true) return const Color(0xFF90CAF9);
+    return const Color(0xFF9E9E9E);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (goodShot == null || progress <= 0) return;
+
+    final color  = _baseColor;
+    final center = Offset(size.width / 2, size.height * 0.60);
+
+    for (int i = 0; i < 3; i++) {
+      final delay = i * 0.18;
+      final t = ((progress - delay) / 0.65).clamp(0.0, 1.0);
+      if (t <= 0) continue;
+
+      final eased  = Curves.easeOut.transform(t);
+      final radius = 18.0 + eased * 65.0;
+      final opacity = (1.0 - eased).clamp(0.0, 1.0) * 0.85;
+
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..color = color.withValues(alpha: opacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5 + (1.0 - eased) * 2.0,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SweetSpotRingPainter old) =>
+      old.progress != progress || old.goodShot != goodShot || old.passCount != passCount;
+}
+
+// ════════════════════════════════════════════════════════════════
+// 甜蜜點徽章 Widget
+// ════════════════════════════════════════════════════════════════
+
+class _SweetSpotBadge extends StatelessWidget {
+  final double progress;
+  final bool? goodShot;
+  final int passCount;
+
+  const _SweetSpotBadge({
+    required this.progress,
+    required this.goodShot,
+    required this.passCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (goodShot == null || progress <= 0) return const SizedBox.shrink();
+
+    final opacity = progress < 0.12
+        ? progress / 0.12
+        : progress > 0.65
+            ? ((1.0 - progress) / 0.35).clamp(0.0, 1.0)
+            : 1.0;
+    final slideY = (1.0 - (progress / 0.15).clamp(0.0, 1.0)) * 10.0;
+
+    final Color color;
+    final String title;
+    final IconData icon;
+    if (goodShot! && passCount >= 4) {
+      color = const Color(0xFFFFD700);
+      title = '甜蜜點命中';
+      icon  = Icons.star_rounded;
+    } else if (goodShot!) {
+      color = const Color(0xFF90CAF9);
+      title = '甜蜜點';
+      icon  = Icons.check_circle_rounded;
+    } else {
+      color = const Color(0xFF9E9E9E);
+      title = '偏虛球';
+      icon  = Icons.radio_button_unchecked_rounded;
+    }
+
+    return Opacity(
+      opacity: opacity.clamp(0.0, 1.0),
+      child: Transform.translate(
+        offset: Offset(0, -slideY),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withValues(alpha: 0.75)),
+            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 8)],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 13),
+              const SizedBox(width: 5),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title,
+                      style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+                  Text('$passCount/5 特徵符合',
+                      style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 9)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 時間軸 Impact 標記 Painter
+// ════════════════════════════════════════════════════════════════
+
+class _ImpactTimelinePainter extends CustomPainter {
+  final double x;
+  final Color color;
+
+  const _ImpactTimelinePainter({required this.x, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 向上的三角形標記
+    final path = Path()
+      ..moveTo(x, 0)
+      ..lineTo(x - 4, size.height)
+      ..lineTo(x + 4, size.height)
+      ..close();
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color.withValues(alpha: 0.35)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.fill,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ImpactTimelinePainter old) =>
+      old.x != x || old.color != color;
 }

@@ -7,9 +7,12 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/recording_history_entry.dart';
+import '../models/swing_posture.dart';
+import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../services/clip_pipeline_service.dart';
+import '../services/recording_history_storage.dart';
 import '../services/swing_impact_detector.dart';
 import '../theme/app_theme.dart';
 
@@ -28,10 +31,77 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
   bool _loading = true;
   String? _error;
 
+  String? _postureAnalysisId;
+  bool _isAutoAnalyzing = false;
+
   @override
   void initState() {
     super.initState();
+    _postureAnalysisId = widget.entry.postureAnalysisId;
     _loadData();
+    if (_postureAnalysisId == null && widget.entry.isAnalyzed) {
+      _startAutoPostureAnalysis();
+    }
+  }
+
+  Future<void> _startAutoPostureAnalysis() async {
+    final sessionDir = p.dirname(widget.entry.filePath);
+    final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
+    if (!File(csvPath).existsSync()) return;
+
+    if (mounted) setState(() => _isAutoAnalyzing = true);
+    try {
+      final svc     = AnalysisService.instance;
+      final videoId = p.basename(sessionDir);
+
+      // 先查後端是否已有分析，避免每次進圖表頁都重複送出
+      String analysisId;
+      final existing = await svc.getLatestAnalysisForVideo(videoId);
+      if (existing != null && !existing.isFailed) {
+        analysisId = existing.analysisId;
+        // 已完成（idle = posture_only done，completed = full done）→ 直接存入並返回
+        if (existing.isIdle || existing.isCompleted) {
+          final updated = widget.entry.copyWith(postureAnalysisId: analysisId);
+          await RecordingHistoryStorage.instance.upsertEntry(updated);
+          if (mounted) {
+            setState(() {
+              _postureAnalysisId = analysisId;
+              _isAutoAnalyzing   = false;
+            });
+          }
+          return;
+        }
+        // 仍在處理中 → 等它完成即可，不新送
+      } else {
+        // 完全沒有或上次失敗 → 才送出新的 posture_only
+        analysisId = await svc.submitForAnalysis(
+          videoId:  videoId,
+          clipPath: widget.entry.filePath,
+          csvPath:  csvPath,
+          mode:     'posture_only',
+        );
+      }
+
+      // 輪詢直到完成（最多 90 秒）
+      for (int i = 0; i < 15; i++) {
+        await Future<void>.delayed(const Duration(seconds: 6));
+        if (!mounted) return;
+        final status = await svc.getStatus(analysisId);
+        if (status.isIdle || status.isFailed) {
+          if (!mounted) return;
+          if (status.isIdle) {
+            final updated = widget.entry.copyWith(postureAnalysisId: analysisId);
+            await RecordingHistoryStorage.instance.upsertEntry(updated);
+          }
+          setState(() {
+            _postureAnalysisId = status.isIdle ? analysisId : null;
+            _isAutoAnalyzing   = false;
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isAutoAnalyzing = false);
   }
 
   Future<void> _loadData() async {
@@ -90,7 +160,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
                     ? _ErrorView(message: _error!)
                     : _data == null || _data!.isEmpty
                         ? const _NoDataView()
-                        : _ChartsBody(data: _data!, hitSecond: widget.entry.hitSecond, entry: widget.entry),
+                        : _ChartsBody(data: _data!, hitSecond: widget.entry.hitSecond, entry: widget.entry, postureAnalysisId: _postureAnalysisId, isAutoAnalyzing: _isAutoAnalyzing),
           ),
         ],
       ),
@@ -115,8 +185,6 @@ class _MetaHeader extends StatelessWidget {
     final durStr = dur >= 60
         ? '${dur ~/ 60}m ${dur % 60}s'
         : '${dur}s';
-
-    final label = entry.audioLabel;
 
     return Container(
       color: kPrimaryGreen,
@@ -149,34 +217,8 @@ class _MetaHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (entry.audioPasses != null)
-            _FeatureChipsPanel(
-              passes: entry.audioPasses!,
-              featureValues: entry.audioFeatureValues,
-              goodShot: entry.goodShot,
-            ),
         ],
       ),
-    );
-  }
-}
-
-class _LabelChip extends StatelessWidget {
-  final String label;
-  const _LabelChip({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    Color bg;
-    switch (label.toLowerCase()) {
-      case 'pro':    bg = const Color(0xFFFFD700); break;
-      case 'sweet':  bg = const Color(0xFF4CAF50); break;
-      default:       bg = Colors.white24;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
-      child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
     );
   }
 }
@@ -189,8 +231,10 @@ class _ChartsBody extends StatelessWidget {
   final ChartDataSet data;
   final double? hitSecond;
   final RecordingHistoryEntry entry;
+  final String? postureAnalysisId;
+  final bool isAutoAnalyzing;
 
-  const _ChartsBody({required this.data, this.hitSecond, required this.entry});
+  const _ChartsBody({required this.data, this.hitSecond, required this.entry, this.postureAnalysisId, this.isAutoAnalyzing = false});
 
   @override
   Widget build(BuildContext context) {
@@ -199,6 +243,11 @@ class _ChartsBody extends StatelessWidget {
       children: [
         _SwingPhasesCard(entry: entry),
         const SizedBox(height: 16),
+        if (postureAnalysisId != null)
+          _OnnxPostureCard(analysisId: postureAnalysisId!)
+        else if (isAutoAnalyzing)
+          _AutoAnalyzingPostureCard(),
+        if (postureAnalysisId != null || isAutoAnalyzing) const SizedBox(height: 16),
         if (data.audioRms.isNotEmpty)
           _ChartCard(
             title: '聲音峰值',
@@ -598,85 +647,6 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════
-// 5 個特徵迷你標籤面板（顯示在 _MetaHeader 右側）
-// ════════════════════════════════════════════════════════════════
-
-class _FeatureChipsPanel extends StatelessWidget {
-  final Map<String, bool> passes;
-  final Map<String, double>? featureValues;
-  final bool? goodShot;
-
-  const _FeatureChipsPanel({required this.passes, this.featureValues, this.goodShot});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Wrap(
-          spacing: 4,
-          runSpacing: 3,
-          alignment: WrapAlignment.end,
-          children: [
-            for (final feat in AudioAnalysisService.featureLabels.entries)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: passes[feat.key] == true
-                      ? const Color(0xFF4CAF50)
-                      : const Color(0xFFF44336),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  () {
-                    final v = featureValues?[feat.key];
-                    final valStr = v != null
-                        ? ' ${AudioAnalysisService.formatFeatureValue(feat.key, v)}'
-                        : '';
-                    return '${feat.value}$valStr';
-                  }(),
-                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600),
-                ),
-              ),
-          ],
-        ),
-        if (goodShot != null) ...[
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: goodShot == true ? const Color(0xFF4CAF50) : const Color(0xFFF44336),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  goodShot == true ? 'GOOD ✓' : 'GOOD ✗',
-                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-                ),
-              ),
-              if (goodShot == true) ...[
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF8F00),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text('甜蜜點命中',
-                      style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}
 
 // ════════════════════════════════════════════════════════════════
 // 音頻特徵分析卡片（5大特徵水平量規）
@@ -707,7 +677,22 @@ class _AudioFeaturesCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final featureValues = entry.audioFeatureValues!;
-    final passes = entry.audioPasses ?? {};
+    final passes    = entry.audioPasses ?? {};
+    final passCount = passes.values.where((v) => v).length;
+    final isGood    = passCount >= AudioAnalysisService.goodBadThreshold;
+    final goodShot  = entry.goodShot;
+    final label     = entry.audioLabel;
+
+    // 品質等級對應色彩
+    final Color qualityColor;
+    final String qualityText;
+    if (goodShot == true) {
+      qualityColor = kPrimaryGreen;
+      qualityText  = label?.isNotEmpty == true ? label! : '甜蜜點';
+    } else {
+      qualityColor = const Color(0xFFE05252);
+      qualityText  = label?.isNotEmpty == true ? label! : '擊球偏虛';
+    }
 
     return Card(
       elevation: 2,
@@ -717,29 +702,68 @@ class _AudioFeaturesCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 標題
+            // 標題列
             Row(
               children: [
                 const Icon(Icons.equalizer_rounded, color: Color(0xFF7B1FA2), size: 18),
                 const SizedBox(width: 8),
                 const Text('音頻特徵分析',
-                    style: TextStyle(
-                      color: Color(0xFF7B1FA2),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    )),
+                    style: TextStyle(color: Color(0xFF7B1FA2), fontSize: 15, fontWeight: FontWeight.w700)),
                 const Spacer(),
+                if (goodShot != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: qualityColor.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: qualityColor.withValues(alpha: 0.5)),
+                    ),
+                    child: Text(
+                      qualityText,
+                      style: TextStyle(color: qualityColor, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // 整體通過數進度條
+            Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      for (int i = 0; i < 5; i++) ...[
+                        Expanded(
+                          child: Container(
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: i < passCount
+                                  ? (isGood ? kPrimaryGreen : const Color(0xFFE05252))
+                                  : const Color(0xFFE0E4EA),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                        ),
+                        if (i < 4) const SizedBox(width: 4),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
                 Text(
-                  '${passes.values.where((v) => v).length}/5 通過',
+                  '$passCount/5',
                   style: TextStyle(
-                    color: (passes.values.where((v) => v).length >= 3)
-                        ? const Color(0xFF4CAF50)
-                        : const Color(0xFFF44336),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isGood ? kPrimaryGreen : const Color(0xFFE05252),
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '$passCount / 5 項特徵符合甜蜜點範圍',
+              style: const TextStyle(color: Color(0xFF6F7B86), fontSize: 11),
             ),
             const SizedBox(height: 14),
             // 每個特徵一行
@@ -881,6 +905,159 @@ class _AudioFeatureGaugeRow extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 自動提交 posture_only 時的等待卡片
+// ════════════════════════════════════════════════════════════════
+
+class _AutoAnalyzingPostureCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: const Padding(
+        padding: EdgeInsets.all(20),
+        child: Row(
+          children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF7C3AED))),
+            SizedBox(width: 12),
+            Text('姿勢分析上傳中，請稍候…', style: TextStyle(fontSize: 13, color: Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// ONNX 錯誤姿勢分析圖表（從後端 posture_only 分析結果讀取）
+// ════════════════════════════════════════════════════════════════
+
+class _OnnxPostureCard extends StatefulWidget {
+  final String analysisId;
+  const _OnnxPostureCard({required this.analysisId});
+
+  @override
+  State<_OnnxPostureCard> createState() => _OnnxPostureCardState();
+}
+
+class _OnnxPostureCardState extends State<_OnnxPostureCard> {
+  OnnxResult? _result;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final status = await AnalysisService.instance.getStatus(widget.analysisId);
+      if (mounted) {
+        setState(() {
+          _result  = status.onnxResult;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error   = e.toString();
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.sports_golf_rounded, color: Color(0xFF7C3AED), size: 20),
+              const SizedBox(width: 8),
+              const Text('ONNX 姿勢分析',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            ]),
+            const SizedBox(height: 12),
+            if (_loading)
+              const Center(child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: CircularProgressIndicator(),
+              ))
+            else if (_error != null)
+              Center(child: Text('載入失敗: $_error',
+                  style: const TextStyle(color: Colors.red, fontSize: 12)))
+            else if (_result == null)
+              const Center(child: Text('尚無 ONNX 結果',
+                  style: TextStyle(color: Colors.grey)))
+            else
+              ..._buildBars(_result!),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildBars(OnnxResult result) {
+    final scores = result.scores;
+    if (scores.isEmpty) return [const Text('無分數資料')];
+
+    final sorted = scores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return sorted.map((e) {
+      final label     = SwingPosture.zhName(e.key);
+      final score     = e.value.clamp(0.0, 1.0);
+      final isOfficial = result.officialErrors.contains(e.key);
+      final isSuspect  = result.suspectErrors.contains(e.key);
+      final color = isOfficial
+          ? const Color(0xFFEF4444)
+          : isSuspect
+              ? const Color(0xFFF97316)
+              : const Color(0xFF22C55E);
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 13)),
+                Text('${(score * 100).toStringAsFixed(0)}%',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: color)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: score,
+                minHeight: 8,
+                backgroundColor: Colors.grey.shade200,
+                valueColor: AlwaysStoppedAnimation(color),
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
   }
 }
 

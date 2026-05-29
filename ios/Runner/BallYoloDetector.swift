@@ -19,14 +19,19 @@ final class BallYoloDetector {
     private init() {}
 
     // ── 常數 ──────────────────────────────────────────────────
-    static let inputSize    = 640
-    private static let confThreshold: Float = 0.30
-    private static let nmsIoU:        Float = 0.45
+    static let inputSize            = 640
+    static let confThreshold: Float  = 0.25          // 預設門櫛（對應 Android CONF_THRESHOLD）
+    private static let nmsIoU: Float = 0.45
+    private static let tileEdgeMargin: Float = 24    // tile 邊緣排除（對應 TILE_EDGE_MARGIN）
 
     // ── 狀態 ──────────────────────────────────────────────────
     private let lock            = NSLock()
     private var interpreter:    Interpreter?
     private var loadAttempted   = false
+    // 輸入 tensor 型態
+    private var inIsFloat       = false
+    private var inZeroPoint:    Int   = -128
+    // 輸出 tensor 量化參數
     private var outIsFloat      = true
     private var outScale:       Float = 1.0
     private var outZeroPoint:   Int   = 0
@@ -65,6 +70,14 @@ final class BallYoloDetector {
             let interp = try Interpreter(modelPath: modelPath, options: opts)
             try interp.allocateTensors()
 
+            // 讀取輸入 tensor 型態（FLOAT32 or INT8）
+            let inTensor = try interp.input(at: 0)
+            inIsFloat = (inTensor.dataType == .float32)
+            if !inIsFloat, let qp = inTensor.quantizationParameters {
+                inZeroPoint = qp.zeroPoint
+            }
+            print("[BallYoloDetector] input: \(inIsFloat ? \"FLOAT32\" : \"INT8\") zp=\(inZeroPoint)")
+
             // 讀取輸出量化參數
             let outTensor = try interp.output(at: 0)
             outIsFloat = (outTensor.dataType == .float32)
@@ -74,7 +87,7 @@ final class BallYoloDetector {
             }
             interpreter = interp
             let shape = outTensor.shape.dimensions
-            print("[BallYoloDetector] ✅ 模型載入成功  output=\(shape)  float=\(outIsFloat)")
+            print("[BallYoloDetector] \u2705 \u6a21\u578b\u8f09\u5165\u6210\u529f  output=\(shape)  outFloat=\(outIsFloat)")
             return true
         } catch {
             print("[BallYoloDetector] ❌ 模型載入失敗: \(error)")
@@ -92,43 +105,91 @@ final class BallYoloDetector {
     ///   - frameW:    display-space 影像寬度
     ///   - frameH:    display-space 影像高度
     /// - Returns:     偵測結果（座標在 display-space）
+    /// 對 [roiCenterX, roiCenterY] 附近裁切 640×640 patch 並執行推論。
+    /// 對應 Android BallYoloDetector.detect()。
     func detect(
-        bgraBase:   UnsafePointer<UInt8>,
-        bytesPerRow: Int,
-        frameW:     Int,
-        frameH:     Int
+        bgraBase:      UnsafePointer<UInt8>,
+        bytesPerRow:   Int,
+        frameW:        Int,
+        frameH:        Int,
+        roiCenterX:    Int   = -1,
+        roiCenterY:    Int   = -1,
+        confThreshold: Float = BallYoloDetector.confThreshold
     ) -> [Detection] {
         guard let interp = interpreter else { return [] }
         let S = BallYoloDetector.inputSize
 
-        // 1. 建立 [1, S, S, 3] INT8 輸入
-        //    BGRA → 灰階亮度，再量化：luma-128 → [-128, 127]
-        var inputBytes = [Int8](repeating: -128, count: S * S * 3)
-        let scaleX = Float(frameW) / Float(S)
-        let scaleY = Float(frameH) / Float(S)
+        // ── 計算 tile 左上角（640×640 crop，以 ROI 中心為中心）────
+        let halfSize = S / 2
+        let roiX = roiCenterX >= 0 ? roiCenterX : frameW / 2
+        let roiY = roiCenterY >= 0 ? roiCenterY : frameH / 2
 
-        for y in 0 ..< S {
-            let srcY   = min(Int(Float(y) * scaleY), frameH - 1)
-            let rowOff = srcY * bytesPerRow
-            for x in 0 ..< S {
-                let srcX = min(Int(Float(x) * scaleX), frameW - 1)
-                let off  = rowOff + srcX * 4          // BGRA: B=off, G=off+1, R=off+2
-                let b    = Int(bgraBase[off])
-                let g    = Int(bgraBase[off + 1])
-                let r    = Int(bgraBase[off + 2])
-                let luma = (299 * r + 587 * g + 114 * b) / 1000  // BT.601, 0-255
-                let q    = Int8(clamping: luma - 128)             // → [-128, 127]
-                let idx  = (y * S + x) * 3
-                inputBytes[idx] = q; inputBytes[idx+1] = q; inputBytes[idx+2] = q
-            }
+        let tileLeft: Int
+        let tileTop:  Int
+        let tileW:    Int
+        let tileH:    Int
+
+        if frameW < S || frameH < S {
+            tileLeft = 0; tileTop = 0
+            tileW = frameW; tileH = frameH
+        } else {
+            tileLeft = max(0, min(roiX - halfSize, frameW - S))
+            tileTop  = max(0, min(roiY - halfSize, frameH - S))
+            tileW = S; tileH = S
         }
 
-        // 2. 推論
+        let scaleX = Float(tileW) / Float(S)
+        let scaleY = Float(tileH) / Float(S)
+
+        // ── 填入 [1, 640, 640, 3] input ──────────────────────────
         do {
-            let inputData = Data(bytes: inputBytes, count: inputBytes.count)
-            try interp.copy(inputData, toInputAt: 0)
+            if inIsFloat {
+                // FLOAT32：BGRA → RGB pixel/255
+                var inputData = Data(count: S * S * 3 * 4)
+                inputData.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) in
+                    guard let base = ptr.baseAddress?.assumingMemoryBound(to: Float.self) else { return }
+                    for y in 0 ..< S {
+                        let srcY   = min(tileTop  + Int(Float(y) * scaleY), frameH - 1)
+                        let rowOff = srcY * bytesPerRow
+                        for x in 0 ..< S {
+                            let srcX  = min(tileLeft + Int(Float(x) * scaleX), frameW - 1)
+                            let off   = rowOff + srcX * 4  // BGRA
+                            let b     = Float(bgraBase[off])     / 255.0
+                            let g     = Float(bgraBase[off + 1]) / 255.0
+                            let r     = Float(bgraBase[off + 2]) / 255.0
+                            let idx   = (y * S + x) * 3
+                            base[idx] = r; base[idx + 1] = g; base[idx + 2] = b
+                        }
+                    }
+                }
+                try interp.copy(inputData, toInputAt: 0)
+            } else {
+                // INT8：亮度量化 (luma + zeroPoint) → [-128, 127]
+                var inputBytes = [Int8](repeating: Int8(clamping: inZeroPoint), count: S * S * 3)
+                for y in 0 ..< S {
+                    let srcY   = min(tileTop  + Int(Float(y) * scaleY), frameH - 1)
+                    let rowOff = srcY * bytesPerRow
+                    for x in 0 ..< S {
+                        let srcX = min(tileLeft + Int(Float(x) * scaleX), frameW - 1)
+                        let off  = rowOff + srcX * 4  // BGRA
+                        let b    = Int(bgraBase[off])
+                        let g    = Int(bgraBase[off + 1])
+                        let r    = Int(bgraBase[off + 2])
+                        let luma = (299 * r + 587 * g + 114 * b) / 1000
+                        let q    = Int8(clamping: luma + inZeroPoint)
+                        let idx  = (y * S + x) * 3
+                        inputBytes[idx] = q; inputBytes[idx + 1] = q; inputBytes[idx + 2] = q
+                    }
+                }
+                try interp.copy(Data(bytes: inputBytes, count: inputBytes.count), toInputAt: 0)
+            }
+
             try interp.invoke()
-            return parseOutput(try interp.output(at: 0), frameW: frameW, frameH: frameH)
+            return parseOutput(
+                try interp.output(at: 0),
+                tileLeft: tileLeft, tileTop: tileTop,
+                scaleX: scaleX, scaleY: scaleY,
+                confThreshold: confThreshold)
         } catch {
             print("[BallYoloDetector] 推理失敗: \(error)")
             return []
@@ -137,39 +198,64 @@ final class BallYoloDetector {
 
     // MARK: - 解析輸出 [1, 5, 8400]
 
-    private func parseOutput(_ tensor: Tensor, frameW: Int, frameH: Int) -> [Detection] {
-        let S = BallYoloDetector.inputSize
-        let n = 8400   // anchors
-        let bytes = tensor.data
+    private func parseOutput(
+        _ tensor:      Tensor,
+        tileLeft:      Int,
+        tileTop:       Int,
+        scaleX:        Float,
+        scaleY:        Float,
+        confThreshold: Float
+    ) -> [Detection] {
+        let S      = BallYoloDetector.inputSize
+        let MARGIN = BallYoloDetector.tileEdgeMargin
+        let n      = 8400
+        let bytes  = tensor.data
 
-        // 取得第 ch 通道第 anchor 個 anchor 的值
         func getVal(ch: Int, anchor: Int) -> Float {
             if outIsFloat {
                 return bytes.withUnsafeBytes {
                     $0.load(fromByteOffset: (ch * n + anchor) * 4, as: Float.self)
                 }
             } else {
-                // INT8 輸出：反量化
                 let raw: UInt8 = bytes.withUnsafeBytes { $0[ch * n + anchor] }
                 return Float(Int(raw) - outZeroPoint) * outScale
             }
         }
 
-        // 過濾置信度
+        // 偵測座標格式（normalized [0,1] 或 pixel [0,640]），對應 Android coordScale 邏輯
+        var maxConf: Float = 0
+        var maxCx:   Float = 0
+        for i in 0 ..< n {
+            let c = getVal(ch: 4, anchor: i)
+            if c > maxConf { maxConf = c; maxCx = getVal(ch: 0, anchor: i) }
+        }
+        let coordScale: Float = (maxConf > 0.05 && maxCx < 2.0) ? Float(S) : 1.0
+
+        // 篩選 + tile 邊緣排除 + 座標轉回 frame 空間
         var raw: [(cx: Float, cy: Float, w: Float, h: Float, conf: Float)] = []
         for i in 0 ..< n {
             let conf = getVal(ch: 4, anchor: i)
-            guard conf >= BallYoloDetector.confThreshold else { continue }
+            guard conf >= confThreshold else { continue }
+
+            let cx_tile = getVal(ch: 0, anchor: i) * coordScale
+            let cy_tile = getVal(ch: 1, anchor: i) * coordScale
+            let w_tile  = getVal(ch: 2, anchor: i) * coordScale
+            let h_tile  = getVal(ch: 3, anchor: i) * coordScale
+
+            if cx_tile < MARGIN || cy_tile < MARGIN ||
+               cx_tile > Float(S) - MARGIN || cy_tile > Float(S) - MARGIN {
+                continue
+            }
+
             raw.append((
-                cx:   getVal(ch: 0, anchor: i) / Float(S) * Float(frameW),
-                cy:   getVal(ch: 1, anchor: i) / Float(S) * Float(frameH),
-                w:    getVal(ch: 2, anchor: i) / Float(S) * Float(frameW),
-                h:    getVal(ch: 3, anchor: i) / Float(S) * Float(frameH),
+                cx:   Float(tileLeft) + cx_tile * scaleX,
+                cy:   Float(tileTop)  + cy_tile * scaleY,
+                w:    w_tile * scaleX,
+                h:    h_tile * scaleY,
                 conf: conf
             ))
         }
 
-        // NMS 後轉型
         return nms(raw).map { d in
             Detection(
                 cx:    Int(d.cx),

@@ -39,32 +39,44 @@ namespace UploadServer.Controllers
         {
             var analysis = new AiCoachAnalysis
             {
-                UserId        = UserId,
-                VideoId       = req.VideoId,
-                ErrorTypeHint = req.ErrorTypeHint,
-                Mode          = req.Mode,
-                PromptVersion = req.PromptVersion,
-                Status        = "pending",
+                UserId               = UserId,
+                VideoId              = req.VideoId,
+                ErrorTypeHint        = req.ErrorTypeHint,
+                Mode                 = req.Mode,
+                PromptVersion        = req.PromptVersion,
+                Status               = "pending",
+                PhaseTimestampsJson  = req.PhaseTimestamps != null
+                    ? System.Text.Json.JsonSerializer.Serialize(req.PhaseTimestamps)
+                    : null,
+                AudioAnalysisJson    = req.AudioAnalysisJson,
+                V2Fps                = req.V2Fps,
+                V2Resolution         = req.V2Resolution,
             };
             analysis.ClipB2Path = B2Service.AiCoachClipKey(analysis.Id);
             if (req.HasCsv)
-                analysis.CsvB2Path = B2Service.AiCoachCsvKey(analysis.Id);
+                analysis.CsvB2Path   = B2Service.AiCoachCsvKey(analysis.Id);
+            if (req.HasAudio)
+                analysis.AudioB2Path = B2Service.AiCoachAudioKey(analysis.Id);
+            if (req.Keyframes?.Count > 0)
+                analysis.KeyframesJson = System.Text.Json.JsonSerializer.Serialize(req.Keyframes);
 
             _db.AiCoachAnalyses.Add(analysis);
             await _db.SaveChangesAsync();
 
-            var clipUploadUrl = _b2.GenerateClipUploadUrl(analysis.Id);
-            var csvUploadUrl  = req.HasCsv ? _b2.GenerateCsvUploadUrl(analysis.Id) : null;
+            var clipUploadUrl  = _b2.GenerateClipUploadUrl(analysis.Id);
+            var csvUploadUrl   = req.HasCsv   ? _b2.GenerateCsvUploadUrl(analysis.Id)   : null;
+            var audioUploadUrl = req.HasAudio ? _b2.GenerateAudioUploadUrl(analysis.Id) : null;
 
             _logger.LogInformation(
-                "建立 AI Coach 分析請求: {Id} Mode={Mode} HasCsv={HasCsv}",
-                analysis.Id, analysis.Mode, req.HasCsv);
+                "建立 AI Coach 分析請求: {Id} Mode={Mode} HasCsv={HasCsv} HasAudio={HasAudio} Keyframes={KF}",
+                analysis.Id, analysis.Mode, req.HasCsv, req.HasAudio, req.Keyframes?.Count ?? 0);
 
             return Ok(new AnalysisRequestResponse
             {
                 AnalysisId    = analysis.Id,
                 ClipUploadUrl = clipUploadUrl,
                 CsvUploadUrl  = csvUploadUrl,
+                AudioUploadUrl = audioUploadUrl,
             });
         }
 

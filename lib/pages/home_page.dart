@@ -17,6 +17,8 @@ import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 import '../services/plan_service.dart';
 import '../services/announcement_service.dart';
+import '../services/audio_analysis_service.dart';
+import '../widgets/audio_feature_pass_row.dart';
 import '../widgets/green_page_header.dart';
 import '../widgets/posture_breakdown_card.dart';
 import 'announcement_page.dart';
@@ -42,6 +44,7 @@ class _HomePageState extends State<HomePage> {
   );
 
   int _unreadAnnouncements = 0;
+  Map<String, double>? _featurePassRates;
 
   @override
   void initState() {
@@ -99,12 +102,45 @@ class _HomePageState extends State<HomePage> {
     try {
       await _statisticsService.loadAllStatistics();
       await _loadPlanStatus(); // 統計刷新後同步用量
+      final rates = await _computeFeaturePassRates();
+      if (mounted) setState(() => _featurePassRates = rates);
     } on UnauthorizedException {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/login');
       }
     } catch (e) {
       debugPrint('⚠️ 初始化統計服務失敗: $e');
+    }
+  }
+
+  Future<Map<String, double>?> _computeFeaturePassRates() async {
+    try {
+      final all = await RecordingHistoryStorage.instance.loadHistory();
+      final now = DateTime.now();
+      final filtered = all.where((e) {
+        if (e.audioPasses == null) return false;
+        final t = e.recordedAt;
+        return t.year == now.year && t.month == now.month && t.day == now.day;
+      }).toList();
+      if (filtered.isEmpty) return null;
+      final totals = <String, int>{};
+      final passes = <String, int>{};
+      for (final entry in filtered) {
+        final ap = entry.audioPasses!;
+        for (final key in AudioAnalysisService.featureLabels.keys) {
+          totals[key] = (totals[key] ?? 0) + 1;
+          if (ap[key] == true) passes[key] = (passes[key] ?? 0) + 1;
+        }
+      }
+      if (totals.isEmpty) return null;
+      return {
+        for (final key in AudioAnalysisService.featureLabels.keys)
+          if (totals.containsKey(key))
+            key: (passes[key] ?? 0) / totals[key]!,
+      };
+    } catch (e) {
+      debugPrint('⚠️ [HomePage] feature pass rates 失敗: $e');
+      return null;
     }
   }
 
@@ -221,6 +257,10 @@ class _HomePageState extends State<HomePage> {
                             ),
                             const SizedBox(height: kSpaceMD),
                             _KeyMetricsRow(stats: today, loading: isLoading),
+                            if (!isLoading) ...[
+                              const SizedBox(height: kSpaceSM),
+                              AudioFeaturePassRow(passRates: _featurePassRates),
+                            ],
                             if (!isLoading) ...[
                               const SizedBox(height: kSpaceMD),
                               PostureBreakdownCard(
@@ -527,9 +567,6 @@ class _KeyMetricsRow extends StatelessWidget {
     final sweet = (stats?.sweetSpotPercentage ?? 0) > 0
         ? stats!.sweetSpotPercentage
         : null;
-    final crisp = (stats?.audioCrispness.average ?? 0) > 0
-        ? stats!.audioCrispness.average
-        : null;
 
     final l = AppLocalizations.of(context);
     return Row(
@@ -554,18 +591,6 @@ class _KeyMetricsRow extends StatelessWidget {
                 : '--',
             icon: Icons.adjust_rounded,
             color: kSweetColor,
-            loading: loading,
-          ),
-        ),
-        const SizedBox(width: kSpaceSM),
-        Expanded(
-          child: _MetricMini(
-            label: l.homeCrispness,
-            value: crisp != null
-                ? crisp.toStringAsFixed(0)
-                : '--',
-            icon: Icons.graphic_eq_rounded,
-            color: kCrispColor,
             loading: loading,
           ),
         ),
@@ -617,8 +642,7 @@ class _MetricMini extends StatelessWidget {
                 ),
               ],
             )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          : Row(
               children: [
                 Container(
                   width: 28,
@@ -629,20 +653,28 @@ class _MetricMini extends StatelessWidget {
                   ),
                   child: Icon(icon, color: color, size: 15),
                 ),
-                const SizedBox(height: kSpaceSM),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: value == '--' ? kTextHint : color,
+                const SizedBox(width: kSpaceSM),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: value == '--' ? kTextHint : color,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(label,
+                          style: const TextStyle(
+                              fontSize: 10, color: kTextSecondary),
+                          overflow: TextOverflow.ellipsis),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 11, color: kTextSecondary),
-                    overflow: TextOverflow.ellipsis),
               ],
             ),
     );

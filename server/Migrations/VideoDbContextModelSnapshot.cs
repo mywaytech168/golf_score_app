@@ -52,8 +52,54 @@ namespace UploadServer.Migrations
                         .HasColumnType("varchar(64)")
                         .HasColumnName("error_type_hint");
 
+                    b.Property<int?>("InputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasDefaultValue("full");
+
                     b.Property<string>("OnnxResultJson")
                         .HasColumnType("longtext");
+
+                    b.Property<int?>("OutputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AudioAnalysisJson")
+                        .HasColumnType("LONGTEXT")
+                        .HasColumnName("audio_analysis_json");
+
+                    b.Property<string>("AudioB2Path")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)")
+                        .HasColumnName("audio_b2_path");
+
+                    b.Property<int?>("V2Fps")
+                        .HasColumnType("int")
+                        .HasColumnName("v2_fps");
+
+                    b.Property<string>("V2Resolution")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("v2_resolution");
+
+                    b.Property<string>("KeyframesJson")
+                        .HasColumnType("LONGTEXT")
+                        .HasColumnName("keyframes_json");
+
+                    b.Property<string>("PhaseTimestampsJson")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("phase_timestamps_json");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("varchar(8)")
+                        .HasDefaultValue("v1");
 
                     b.Property<string>("ResultJson")
                         .HasColumnType("LONGTEXT")

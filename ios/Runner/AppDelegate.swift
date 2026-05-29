@@ -98,6 +98,11 @@ private extension AppDelegate {
                 result(FlutterError(code: "extract_failed", message: "未知的錯誤", details: nil))
               }
             }
+          } catch let err as NSError where err.domain == "AudioExtractor" && err.code == -10 {
+            // 影片無音訊軌：回傳 no_audio:true（對應 Android 的 {no_audio: true, path: null}）
+            DispatchQueue.main.async {
+              result(["no_audio": true, "path": NSNull()])
+            }
           } catch {
             DispatchQueue.main.async {
               result(FlutterError(code: "extract_failed", message: error.localizedDescription, details: nil))
@@ -111,7 +116,8 @@ private extension AppDelegate {
     let url   = URL(fileURLWithPath: videoPath)
     let asset = AVURLAsset(url: url)
     guard let track = asset.tracks(withMediaType: .audio).first else {
-      throw NSError(domain: "AudioExtractor", code: -1,
+      // code -10 = 無音訊軌，呼叫端回傳 no_audio:true 而非錯誤
+      throw NSError(domain: "AudioExtractor", code: -10,
                     userInfo: [NSLocalizedDescriptionKey: "影片中找不到音訊軌道"])
     }
 

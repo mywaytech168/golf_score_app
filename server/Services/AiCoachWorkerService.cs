@@ -84,16 +84,27 @@ namespace UploadServer.Services
 
             try
             {
-                // --- 1. 下載 clip ---
-                var clipUrl   = _b2.GenerateClipDownloadUrl(analysis.ClipB2Path!);
-                var clipBytes = await DownloadBytesAsync(clipUrl, ct);
-                _logger.LogInformation("Clip 下載完成: {KB}KB", clipBytes.Length / 1024);
+                // --- 1. 下載 clip（V3 且已有 ONNX 結果時可省略）---
+                // V3 Gemini 只用 keyframes + audio，不用 clipBytes；但 V1/V2 仍需
+                bool isV3 = analysis.PromptVersion == "v3";
+                bool onnxAlreadyDone = !string.IsNullOrEmpty(analysis.OnnxResultJson);
+                bool needClip = !isV3 || !onnxAlreadyDone; // V3 upgrade 路徑也不需 clip
+
+                byte[] clipBytes = [];
+                if (needClip)
+                {
+                    var clipUrl = _b2.GenerateClipDownloadUrl(analysis.ClipB2Path!);
+                    clipBytes   = await DownloadBytesAsync(clipUrl, ct);
+                    _logger.LogInformation("Clip 下載完成: {KB}KB", clipBytes.Length / 1024);
+                }
+                else
+                {
+                    _logger.LogInformation("V3：跳過 clip 下載（Gemini 使用關鍵幀圖片）");
+                }
 
                 // --- 2. ONNX 推論（僅在尚未有結果時執行）---
                 // upgrade 路徑：OnnxResultJson 已填入 → 直接跳過，解析既有結果取 effectiveHint
                 string? effectiveHint = analysis.ErrorTypeHint;
-
-                bool onnxAlreadyDone = !string.IsNullOrEmpty(analysis.OnnxResultJson);
 
                 if (onnxAlreadyDone)
                 {
@@ -116,10 +127,48 @@ namespace UploadServer.Services
                 else
                 {
                     // full 模式（含 upgrade）：呼叫 Gemini
+                    Dictionary<string, double>? phaseTimestamps = null;
+                    if (!string.IsNullOrEmpty(analysis.PhaseTimestampsJson))
+                    {
+                        try { phaseTimestamps = JsonSerializer.Deserialize<Dictionary<string, double>>(analysis.PhaseTimestampsJson); }
+                        catch { /* JSON 損毀時忽略 */ }
+                    }
+
+                    // v3：解析關鍵禎 + 下載 audio
+                    string[]? keyframesBase64 = null;
+                    byte[]? audioWavBytes = null;
+                    if (analysis.PromptVersion == "v3")
+                    {
+                        if (!string.IsNullOrEmpty(analysis.KeyframesJson))
+                        {
+                            try { keyframesBase64 = JsonSerializer.Deserialize<string[]>(analysis.KeyframesJson); }
+                            catch { /* JSON 損毀時忽略 */ }
+                        }
+                        if (!string.IsNullOrEmpty(analysis.AudioB2Path))
+                        {
+                            try
+                            {
+                                var audioUrl = _b2.GenerateDownloadUrlForKey(analysis.AudioB2Path);
+                                audioWavBytes = await DownloadBytesAsync(audioUrl, ct);
+                                _logger.LogInformation("V3 audio 下載完成: {KB}KB", audioWavBytes.Length / 1024);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "V3 audio 下載失敗（略過）");
+                            }
+                        }
+                    }
+
                     var result = await _gemini.AnalyzeAsync(
                         clipBytes,
                         effectiveHint,
                         analysis.PromptVersion,
+                        phaseTimestamps:  phaseTimestamps,
+                        audioAnalysisJson: analysis.AudioAnalysisJson,
+                        keyframesBase64:  keyframesBase64,
+                        audioWavBytes:    audioWavBytes,
+                        v2Fps:            analysis.V2Fps,
+                        v2Resolution:     analysis.V2Resolution,
                         ct: ct);
 
                     analysis.Status       = "completed";
@@ -129,6 +178,8 @@ namespace UploadServer.Services
                     analysis.InputTokens  = result.InputTokens;
                     analysis.OutputTokens = result.OutputTokens;
                     analysis.CompletedAt  = DateTime.UtcNow;
+                    if (result.ResolvedV2Fps        != null) analysis.V2Fps        = result.ResolvedV2Fps;
+                    if (result.ResolvedV2Resolution != null) analysis.V2Resolution = result.ResolvedV2Resolution;
 
                     _logger.LogInformation(
                         "AI Coach 分析完成: {Id} tokens={In}/{Out}",

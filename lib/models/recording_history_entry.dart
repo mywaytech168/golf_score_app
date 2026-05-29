@@ -119,10 +119,23 @@ class RecordingHistoryEntry {
   /// 錄製時的影片尺寸名稱；固定為 'wide'（16:9）
   final String? recordedAspectRatio;
 
-  /// 揮桿姿勢分類 label（來自 AI Coach ONNX 推論）
+  /// 揮桿姿勢分類 label（來自後端 ONNX 骨架模型推論）
   /// '' = 完美(Good)；其餘對應 SwingPosture 5 種錯誤常數
   /// null = 尚未分析
   final String? swingPostureLabel;
+
+  /// 揮桿姿勢分類 label（來自 Gemini AI Coach 分析）
+  /// '' = 完美(Good)；其餘對應 SwingPosture 5 種錯誤常數
+  /// null = 尚未有 Gemini 分析結果
+  final String? geminiPostureLabel;
+
+  /// posture_only 後端分析記錄 ID（ai_coach_analyses.id）
+  /// null = 尚未觸發或尚未完成
+  final String? postureAnalysisId;
+
+  /// 最後一次 AI Coach 分析使用的 Gemini prompt 版本："v1" | "v2" | "v3"
+  /// null = 尚未分析或舊資料（版本不明）
+  final String? aiPromptVersion;
 
   const RecordingHistoryEntry({
     required this.filePath,
@@ -154,6 +167,9 @@ class RecordingHistoryEntry {
     this.bestSpeedValue,
     this.recordedAspectRatio,
     this.swingPostureLabel,
+    this.geminiPostureLabel,
+    this.postureAnalysisId,
+    this.aiPromptVersion,
   });
 
   /// 是否已上傳（明確標記 或 AI Coach 分析過）
@@ -199,6 +215,9 @@ class RecordingHistoryEntry {
     double? bestSpeedValue,
     String? recordedAspectRatio,
     String? swingPostureLabel,
+    String? geminiPostureLabel,
+    String? postureAnalysisId,
+    String? aiPromptVersion,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -230,6 +249,9 @@ class RecordingHistoryEntry {
       bestSpeedValue: bestSpeedValue ?? this.bestSpeedValue,
       recordedAspectRatio: recordedAspectRatio ?? this.recordedAspectRatio,
       swingPostureLabel: swingPostureLabel ?? this.swingPostureLabel,
+      geminiPostureLabel: geminiPostureLabel ?? this.geminiPostureLabel,
+      postureAnalysisId: postureAnalysisId ?? this.postureAnalysisId,
+      aiPromptVersion: aiPromptVersion ?? this.aiPromptVersion,
     );
   }
 
@@ -279,7 +301,10 @@ class RecordingHistoryEntry {
       'isUploaded': isUploaded,
       'bestSpeedValue': bestSpeedValue,
       'recordedAspectRatio': recordedAspectRatio,
-      'swingPostureLabel': swingPostureLabel,
+      'swingPostureLabel':   swingPostureLabel,
+      'geminiPostureLabel':  geminiPostureLabel,
+      'postureAnalysisId':   postureAnalysisId,
+      'aiPromptVersion':     aiPromptVersion,
     };
   }
 
@@ -343,6 +368,9 @@ class RecordingHistoryEntry {
       bestSpeedValue:     (json['bestSpeedValue']     as num?)?.toDouble(),
       recordedAspectRatio: json['recordedAspectRatio'] as String?,
       swingPostureLabel:   json['swingPostureLabel']   as String?,
+      geminiPostureLabel:  json['geminiPostureLabel']  as String?,
+      postureAnalysisId:   json['postureAnalysisId']   as String?,
+      aiPromptVersion:     json['aiPromptVersion']     as String?,
     );
   }
 }

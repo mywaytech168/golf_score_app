@@ -57,6 +57,24 @@ namespace UploadServer.Models
 
         public DateTime? CompletedAt { get; set; }
 
+        /// <summary>v3 時傳入的揮桿 8 階段秒數 JSON（{"address":0.5,...}）；null = 未提供</summary>
+        public string? PhaseTimestampsJson { get; set; }
+
+        /// <summary>Flutter 客戶端音訊分析結果 JSON（含 pass_count / passes / features）；null = 無音訊分析</summary>
+        public string? AudioAnalysisJson { get; set; }
+
+        /// <summary>v3：8 個關鍵禎 base64 JPEG 陣列的 JSON（["data...", ...]）；null = 未提供</summary>
+        public string? KeyframesJson { get; set; }
+
+        /// <summary>v3：audio.wav 在 B2 的路徑；null = 未上傳音訊</summary>
+        public string? AudioB2Path { get; set; }
+
+        /// <summary>v2 每秒取樣幀數；null = 使用 server 預設值</summary>
+        public int? V2Fps { get; set; }
+
+        /// <summary>v2 影片解析度："MEDIA_RESOLUTION_HIGH" | "MEDIA_RESOLUTION_MEDIUM"；null = 使用 server 預設值</summary>
+        public string? V2Resolution { get; set; }
+
         // Navigation
         public User User { get; set; }
     }

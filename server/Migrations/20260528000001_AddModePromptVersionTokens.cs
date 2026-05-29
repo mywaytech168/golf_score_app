@@ -1,10 +1,14 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using UploadServer.Data;
 
 #nullable disable
 
 namespace UploadServer.Migrations
 {
-    /// <inheritdoc />
+    [DbContext(typeof(VideoDbContext))]
+    [Migration("20260528000001_AddModePromptVersionTokens")]
     public partial class AddModePromptVersionTokens : Migration
     {
         /// <inheritdoc />

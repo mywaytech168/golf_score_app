@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -57,6 +58,102 @@ enum _SortBy {
       case _SortBy.clipTime:
         return '片段時間';
     }
+  }
+}
+
+/// 從 RecordingHistoryEntry 已有的音訊分析欄位，組裝成後端所需的 audioAnalysisJson。
+/// 若無音訊資料，回傳 null（後端將標記 available=false）。
+String? _buildAudioAnalysisJson(RecordingHistoryEntry entry) {
+  final passCount = entry.audioPassCount;
+  if (passCount == null) return null;
+
+  final passes    = entry.audioPasses ?? {};
+  final features  = entry.audioFeatureValues ?? {};
+  final sweetSpot = passCount >= AudioAnalysisService.goodBadThreshold;
+
+  return jsonEncode({
+    'available':      true,
+    'pass_count':     passCount,
+    'total_features': 5,
+    'sweet_spot':     sweetSpot,
+    'passes':         passes,
+    'features':       features,
+  });
+}
+
+/// 讀取 sessionDir/audio.wav（不存在則從 clipPath 萃取），解析 PCM 並回傳音訊分析結果。
+/// [targetHitTime] 為擊球時刻相對 clip 起點的秒數，傳入可提升分析精度。
+/// 失敗或無音訊時回傳 null，內部捕捉例外不向外拋。
+Future<AudioAnalysisResult?> _analyzeWavFile({
+  required String sessionDir,
+  required String clipPath,
+  required void Function(double progress, String message) onProgress,
+  double? targetHitTime,
+}) async {
+  final wavFile = File(p.join(sessionDir, 'audio.wav'));
+  var wavExists = await wavFile.exists();
+
+  if (!wavExists) {
+    onProgress(0.72, '提取音頻中...');
+    final samplesExtracted = await AudioExtractionService.extractAudioFromVideo(
+      videoPath: clipPath,
+      outputWavPath: wavFile.path,
+      onProgress: (progress, message) {
+        onProgress(0.72 + progress * 0.08, message);
+      },
+    );
+    if (samplesExtracted > 0) wavExists = await wavFile.exists();
+  }
+
+  if (!wavExists) return null;
+
+  try {
+    final bytes = await wavFile.readAsBytes();
+    if (bytes.length < 44) return null;
+
+    final wavHd        = bytes.buffer.asByteData();
+    final wavChannels  = wavHd.getUint16(22, Endian.little);
+    final wavSampleRate = wavHd.getUint32(24, Endian.little);
+    final wavBlockAlign = wavHd.getUint16(32, Endian.little);
+
+    // 掃描 'data' chunk，跳過可能的中繼 chunks
+    int dataStart = 44;
+    for (int i = 36; i < bytes.length - 8; i++) {
+      if (bytes[i] == 100 && bytes[i+1] == 97 && bytes[i+2] == 116 && bytes[i+3] == 97) {
+        dataStart = i + 8;
+        break;
+      }
+    }
+
+    final stride = wavBlockAlign > 0 ? wavBlockAlign : 2;
+    final audioDataLen = bytes.length - dataStart;
+    final pcmSamples = <double>[];
+    for (int i = 0; i + stride <= audioDataLen; i += stride) {
+      double frameVal = 0.0;
+      for (int ch = 0; ch < wavChannels; ch++) {
+        final offset = dataStart + i + ch * 2;
+        if (offset + 1 >= bytes.length) break;
+        final raw    = bytes[offset] | (bytes[offset + 1] << 8);
+        final signed = (raw > 32767) ? raw - 65536 : raw;
+        frameVal += signed / 32768.0;
+      }
+      pcmSamples.add(frameVal / wavChannels);
+    }
+
+    if (pcmSamples.isEmpty) return null;
+
+    return await AudioExportService.analyzeFromPcm(
+      pcmSamples: pcmSamples,
+      sessionDir: sessionDir,
+      sampleRate: wavSampleRate,
+      targetHitTime: targetHitTime?.clamp(0.0, 300.0) ?? 3.0,
+      onProgress: (progress) {
+        onProgress(0.8 + progress.progress * 0.2, progress.message);
+      },
+    );
+  } catch (e) {
+    debugPrint('[音頻分析] 異常：$e');
+    return null;
   }
 }
 
@@ -1413,7 +1510,6 @@ class _HistoryTileState extends State<_HistoryTile> {
       final clipPath     = widget.entry.filePath;
       final sessionDir   = p.dirname(clipPath);
       final csvPath      = p.join(sessionDir, 'pose_landmarks.csv');
-      final hasCsv       = File(csvPath).existsSync();
       final durationSeconds = widget.entry.durationSeconds;
 
       // 檢查時長有效性
@@ -1472,117 +1568,17 @@ class _HistoryTileState extends State<_HistoryTile> {
         );
       }
 
+      // 在 analyze() 之後重新確認 CSV 是否存在（首次分析時由 analyze() 產生）
+      final hasCsv = File(csvPath).existsSync();
+
       // Stage 2: 音頻分析（70-100%）
-      debugPrint('[完整分析] 開始音頻分析...');
       progressNotifier.value = (0.7, '音頻分析中...');
-
-      var sampleRate = 44100; // 預設值；讀到 WAV header 時更新為真實值
-      final wavFile = File(p.join(sessionDir, 'audio.wav'));
-      debugPrint('[完整分析] WAV 檔案路徑: ${wavFile.path}');
-      
-      AudioAnalysisResult? audioResult;
-      var wavExists = await wavFile.exists();
-      
-      // 如果 WAV 不存在，尝试从视频提取
-      if (!wavExists) {
-        debugPrint('[完整分析] 📥 WAV 不存在，尝试从视频提取...');
-        progressNotifier.value = (0.72, '从视频提取音频中...');
-        
-        // 使用原始视频提取音频（clipPath 是导入的或已分析的视频）
-        debugPrint('[完整分析] 提取音频源: $clipPath');
-        
-        final samplesExtracted = await AudioExtractionService.extractAudioFromVideo(
-          videoPath: clipPath,
-          outputWavPath: wavFile.path,
-          onProgress: (progress, message) {
-            final adjustedProgress = 0.72 + progress * 0.08;
-            progressNotifier.value = (adjustedProgress, message);
-          },
-        );
-        
-        if (samplesExtracted > 0) {
-          debugPrint('[完整分析] ✅ 音频提取成功: $samplesExtracted 样本');
-          wavExists = await wavFile.exists();
-        } else {
-          debugPrint('[完整分析] ⚠️  音频提取失败或系统无FFmpeg支持');
-        }
-      }
-      
-      if (wavExists) {
-        debugPrint('[完整分析] ✅ WAV 檔案存在');
-        try {
-          Uint8List? bytes = await wavFile.readAsBytes();
-          debugPrint('[完整分析] WAV 字節數: ${bytes.length}');
-
-          if (bytes.isEmpty || bytes.length < 44) {
-            debugPrint('[完整分析] ⚠️  WAV 檔案太小');
-            bytes = null;
-          } else {
-            // 從 WAV header 讀取真實格式
-            final wavHd2 = bytes.buffer.asByteData();
-            final wavChannels2   = wavHd2.getUint16(22, Endian.little);
-            final wavSampleRate2 = wavHd2.getUint32(24, Endian.little);
-            final wavBlockAlign2 = wavHd2.getUint16(32, Endian.little);
-            sampleRate = wavSampleRate2;
-
-            int dataStart = 44;
-            for (int i = 36; i < bytes.length - 8; i++) {
-              if (bytes[i] == 100 && bytes[i + 1] == 97 &&
-                  bytes[i + 2] == 116 && bytes[i + 3] == 97) {
-                dataStart = i + 8;
-                break;
-              }
-            }
-
-            // int16 LE → float32，多 channel 混為 mono
-            // 直接從 bytes[dataStart] 讀取，避免 sublist() 複製整份 WAV 資料
-            final audioDataLen = bytes.length - dataStart;
-            final pcmSamples = <double>[];
-
-            for (int i = 0; i + wavBlockAlign2 <= audioDataLen; i += wavBlockAlign2) {
-              double frameVal = 0.0;
-              for (int ch = 0; ch < wavChannels2; ch++) {
-                final offset = dataStart + i + ch * 2;
-                if (offset + 1 >= bytes.length) break;
-                final raw = bytes[offset] | (bytes[offset + 1] << 8);
-                final signed = (raw > 32767) ? raw - 65536 : raw;
-                frameVal += signed / 32768.0;
-              }
-              pcmSamples.add(frameVal / wavChannels2);
-            }
-
-            // 立即釋放 WAV 原始資料，pcmSamples 獨立存活
-            bytes = null;
-
-            debugPrint('[完整分析] WAV 格式: rate=$wavSampleRate2 ch=$wavChannels2 ba=$wavBlockAlign2');
-            debugPrint('[完整分析] PCM 樣本數: ${pcmSamples.length}');
-
-            if (pcmSamples.isNotEmpty) {
-              debugPrint('[完整分析] 🎵 開始調用 AudioExportService.analyzeFromPcm...');
-              audioResult = await AudioExportService.analyzeFromPcm(
-                pcmSamples: pcmSamples,
-                sessionDir: sessionDir,
-                sampleRate: sampleRate,
-                onProgress: (progress) {
-                  // 調整音頻進度到 80-100% 範圍
-                  final adjustedProgress = 0.8 + progress.progress * 0.2;
-                  progressNotifier.value = (adjustedProgress, progress.message);
-                },
-              );
-              debugPrint('[完整分析] 📊 分析返回結果: ${audioResult != null ? "成功" : "null"}');
-              if (audioResult != null) {
-                debugPrint('[完整分析] ✅ 分類: ${audioResult.predictedClass}, 反饋: ${audioResult.feedbackLabel}');
-              }
-            } else {
-              debugPrint('[完整分析] ⚠️  PCM 樣本為空');
-            }
-          }
-        } catch (e) {
-          debugPrint('[完整分析] ❌ 音頻分析異常：$e');
-        }
-      } else {
-        debugPrint('[完整分析] ℹ️  WAV 檔案不存在，无法提取音频（可能是舊錄製或系统无FFmpeg支持）');
-      }
+      final audioResult = await _analyzeWavFile(
+        sessionDir:    sessionDir,
+        clipPath:      clipPath,
+        targetHitTime: widget.entry.hitSecond,
+        onProgress:    (progress, message) => progressNotifier.value = (progress, message),
+      );
 
       navigator.pop(); // 無論 mounted 與否，一定關閉 Dialog
       if (mounted) setState(() => _isAnalyzing = false);
@@ -1610,34 +1606,33 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
       unawaited(RecordingHistoryStorage.instance.upsertEntry(updatedEntry));
 
-      // 背景錯誤姿勢分析（posture_only）：上傳骨架 CSV，Worker 執行 ONNX，
-      // 完成後（idle 狀態）自動將 swingPostureLabel 寫入 entry。
+      final videoId       = p.basename(sessionDir);
+      final entrySnapshot = updatedEntry;
+
+      // 背景更新 ONNX 姿勢資料（posture_only，不消耗 AI 配額）
       if (hasCsv) {
-        final videoId       = p.basename(sessionDir);
-        final entrySnapshot = updatedEntry;
         _triggerPostureAnalysisInBackground(
           videoId:  videoId,
           clipPath: entrySnapshot.filePath,
           csvPath:  csvPath,
-          onPostureResult: (postureLabel) {
-            if (!mounted) return;
-            final withPosture = entrySnapshot.copyWith(swingPostureLabel: postureLabel);
-            widget.onEntryUpdated?.call(entrySnapshot, withPosture);
+          onPostureResult: (postureLabel, analysisId) {
+            final withPosture = entrySnapshot.copyWith(
+              swingPostureLabel: postureLabel,
+              postureAnalysisId: analysisId,
+            );
             RecordingHistoryStorage.instance.upsertEntry(withPosture);
+            if (!mounted) return;
+            widget.onEntryUpdated?.call(entrySnapshot, withPosture);
           },
         );
       }
-
-      // 顯示完成訊息
       final audioMsg = audioResult != null
           ? '\n🎵 音頻：${audioResult.feedbackLabel}'
           : '';
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('完整分析完成 ✅$audioMsg'),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      messenger.showSnackBar(SnackBar(
+        content: Text('完整分析完成 ✅$audioMsg'),
+        duration: const Duration(seconds: 4),
+      ));
     } catch (e) {
       debugPrint('[完整分析] 錯誤: $e');
       navigator.pop();
@@ -1659,7 +1654,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     required String videoId,
     required String clipPath,
     required String csvPath,
-    required void Function(String? postureLabel) onPostureResult,
+    required void Function(String? postureLabel, String analysisId) onPostureResult,
   }) {
     unawaited(() async {
       try {
@@ -1682,7 +1677,7 @@ class _HistoryTileState extends State<_HistoryTile> {
             final topError = status.onnxResult?.officialErrors.firstOrNull
                           ?? status.onnxResult?.suspectErrors.firstOrNull;
             debugPrint('[PostureAnalysis] 完成，topError=$topError');
-            onPostureResult(topError ?? '');
+            onPostureResult(topError ?? '', analysisId);
             return;
           }
           if (status.isFailed) {
@@ -1752,41 +1747,58 @@ class _HistoryTileState extends State<_HistoryTile> {
       }
     }
 
+    // ── AI 分析模式選擇 ───────────────────────────────────────────────────
+    if (!mounted) return;
+    final sessionDirForMode = p.dirname(widget.entry.filePath);
+    final aiMode = await _showAiModeDialog(context, sessionDirForMode);
+    if (aiMode == null) return;
+
     setState(() => _isSubmittingAi = true);
     if (!mounted) { setState(() => _isSubmittingAi = false); return; }
     try {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
       final hasCsv     = File(csvPath).existsSync();
+      final audioPath  = p.join(sessionDir, 'audio.wav');
       // videoId 使用 session 目錄名稱（如 "1779413178538_hit_1"），
       // 符合後端 video_id varchar(255) 長度限制，避免送完整路徑超長
       final videoId    = p.basename(sessionDir);
 
       // ignore: use_build_context_synchronously
+      var aiCallbackFired = false;
       await AiCoachPage.submitAndPush(
-        context:  context,
-        videoId:  videoId,
-        clipPath: widget.entry.filePath,
-        csvPath:  hasCsv ? csvPath : null,
-        onAnalysisComplete: (errorType) {
-          if (!mounted) return;
+        context:          context,
+        videoId:          videoId,
+        clipPath:         widget.entry.filePath,
+        csvPath:          hasCsv ? csvPath : null,
+        audioPath:        audioPath,
+        promptVersion:    aiMode.promptVersion,
+        phaseTimestamps:  aiMode.phaseTimestamps,
+        audioAnalysisJson: _buildAudioAnalysisJson(widget.entry),
+        onAnalysisComplete: (geminiErrorType, onnxErrorType, analysisId) {
+          aiCallbackFired = true;
           final updated = widget.entry.copyWith(
             hasAiCoachAnalysis: true,
-            swingPostureLabel:  errorType,
+            geminiPostureLabel: geminiErrorType,
+            // posture_only 已設定的 swingPostureLabel 優先保留，僅在 null 時才從 full 回填
+            swingPostureLabel:  widget.entry.swingPostureLabel ?? onnxErrorType,
+            postureAnalysisId:  analysisId,
+            aiPromptVersion:    aiMode.promptVersion,
           );
-          widget.onEntryUpdated?.call(widget.entry, updated);
+          // DB 存檔不需要 mounted，確保離開頁面後資料仍能寫入
           RecordingHistoryStorage.instance.upsertEntry(updated);
           StatisticsService().loadAllStatistics();
-          // 分析完成後刷新首頁球數顯示
           unawaited(PlanService.getPlanStatus());
+          if (!mounted) return;
+          widget.onEntryUpdated?.call(widget.entry, updated);
         },
       );
 
-      // 若 onAnalysisComplete 尚未觸發（分析仍在進行），至少先標記已送出
-      if (mounted && !widget.entry.hasAiCoachAnalysis) {
+      // 若 callback 尚未觸發（後端仍在處理），至少先標記已送出
+      if (!aiCallbackFired) {
         final updated = widget.entry.copyWith(hasAiCoachAnalysis: true);
-        widget.onEntryUpdated?.call(widget.entry, updated);
         RecordingHistoryStorage.instance.upsertEntry(updated);
+        if (mounted) widget.onEntryUpdated?.call(widget.entry, updated);
       }
     } catch (e) {
       debugPrint('[AI分析] 提交失敗: $e');
@@ -2008,7 +2020,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                           ]),
                         ],
                         const SizedBox(height: 7),
-                        // 標籤列
+                        // 標籤列（基本 badges）
                         Wrap(
                           spacing: 4,
                           runSpacing: 4,
@@ -2032,48 +2044,120 @@ class _HistoryTileState extends State<_HistoryTile> {
                               _badgeWithIcon('AI', const Color(0xFF7C3AED),
                                   Icons.psychology_rounded),
                             if (widget.entry.swingPostureLabel != null)
-                              _badge(
+                              _badgeWithIcon(
                                 SwingPosture.zhName(widget.entry.swingPostureLabel!),
-                                SwingPosture.color(widget.entry.swingPostureLabel!),
-                              ),
-                            // ── 速度 ──────────
-                            if (widget.entry.bestSpeedValue != null &&
-                                widget.entry.bestSpeedValue! > 0)
-                              _badgeWithIcon(
-                                widget.entry.bestSpeedValue!.toStringAsFixed(1),
                                 const Color(0xFF1565C0),
-                                Icons.speed_rounded,
+                                Icons.memory_rounded,
                               ),
-                            // ── 5 個音訊特徵 TAG（綠=通過，紅=未通過）──
-                            if (widget.entry.audioPasses != null)
-                              for (final feat in AudioAnalysisService.featureLabels.entries)
-                                _badge(
-                                  () {
-                                    final v = widget.entry.audioFeatureValues?[feat.key];
-                                    final valStr = v != null
-                                        ? ' ${AudioAnalysisService.formatFeatureValue(feat.key, v)}'
-                                        : '';
-                                    return '${feat.value}$valStr';
-                                  }(),
-                                  widget.entry.audioPasses![feat.key] == true
-                                      ? const Color(0xFF4CAF50)
-                                      : const Color(0xFFF44336),
-                                ),
-                            // ── GOOD TAG ──────────────────────────────
-                            if (widget.entry.goodShot != null)
+                            if (widget.entry.geminiPostureLabel != null)
                               _badgeWithIcon(
-                                'GOOD',
-                                widget.entry.goodShot == true
-                                    ? const Color(0xFF4CAF50)
-                                    : const Color(0xFFF44336),
-                                widget.entry.goodShot == true
-                                    ? Icons.sports_golf_rounded
-                                    : Icons.close_rounded,
+                                SwingPosture.zhName(widget.entry.geminiPostureLabel!),
+                                const Color(0xFF7C3AED),
+                                Icons.auto_awesome_rounded,
                               ),
-                            if (widget.entry.goodShot == true)
-                              _badge('甜蜜點命中', const Color(0xFF4CAF50)),
                           ],
                         ),
+                        // ── 速度 + 甜蜜點 數據行（未分析時反灰）────────
+                        if (!_isLongVideo) ...[
+                          const SizedBox(height: 6),
+                          Builder(builder: (context) {
+                            final hasSpeed = widget.entry.bestSpeedValue != null &&
+                                widget.entry.bestSpeedValue! > 0;
+                            final goodShot = widget.entry.goodShot;
+                            final dimColor = const Color(0xFFCBD0D8);
+                            final speedColor = hasSpeed
+                                ? const Color(0xFF1565C0)
+                                : dimColor;
+                            final sweetColor = goodShot == true
+                                ? const Color(0xFF4CAF50)
+                                : goodShot == false
+                                    ? const Color(0xFFF44336)
+                                    : dimColor;
+                            return Row(
+                              children: [
+                                Icon(Icons.speed_rounded,
+                                    size: 13, color: speedColor),
+                                const SizedBox(width: 3),
+                                Text(
+                                  hasSpeed
+                                      ? widget.entry.bestSpeedValue!
+                                          .toStringAsFixed(1)
+                                      : '—',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: speedColor,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Container(
+                                  width: 1,
+                                  height: 13,
+                                  color: const Color(0xFFE0E4EA),
+                                ),
+                                const SizedBox(width: 10),
+                                const Text(
+                                  '甜蜜點',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Color(0xFF9AA6B2)),
+                                ),
+                                const SizedBox(width: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: sweetColor.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color:
+                                            sweetColor.withValues(alpha: 0.45)),
+                                  ),
+                                  child: Text(
+                                    goodShot == true
+                                        ? '命中'
+                                        : goodShot == false
+                                            ? '未命中'
+                                            : '—',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: sweetColor,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }),
+                        ],
+                        // ── 5大音頻特徵 數據條行（未分析時反灰）────────
+                        if (!_isLongVideo) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              for (final feat
+                                  in AudioAnalysisService.featureLabels
+                                      .entries) ...[
+                                if (feat.key !=
+                                    AudioAnalysisService.featureLabels.keys
+                                        .first)
+                                  const SizedBox(width: 4),
+                                Expanded(
+                                  child: _AudioFeatureMiniBar(
+                                    label: feat.value,
+                                    featureKey: feat.key,
+                                    value: widget.entry.audioPasses == null
+                                        ? null
+                                        : (widget.entry.audioFeatureValues ?? const <String, double>{})[feat.key],
+                                    passed: widget.entry.audioPasses == null
+                                        ? false
+                                        : widget.entry.audioPasses![feat.key] ?? false,
+                                    enabled: widget.entry.audioPasses != null,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -2515,67 +2599,15 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       );
 
       progressNotifier.value = (0.7, '音頻分析中...');
-      final wavFile = File(p.join(sessionDir, 'audio.wav'));
-      var wavExists = await wavFile.exists();
-      if (!wavExists) {
-        progressNotifier.value = (0.72, '提取音頻中...');
-        final samplesExtracted = await AudioExtractionService.extractAudioFromVideo(
-          videoPath: clipPath,
-          outputWavPath: wavFile.path,
-          onProgress: (progress, message) {
-            progressNotifier.value = (0.72 + progress * 0.08, message);
-          },
-        );
-        if (samplesExtracted > 0) wavExists = await wavFile.exists();
-      }
+      final audioResult = await _analyzeWavFile(
+        sessionDir:    sessionDir,
+        clipPath:      clipPath,
+        targetHitTime: clip.hitSecond,
+        onProgress:    (progress, message) => progressNotifier.value = (progress, message),
+      );
 
-      AudioAnalysisResult? audioResult;
-      if (wavExists) {
-        try {
-          final bytes = await wavFile.readAsBytes();
-          if (bytes.length >= 44) {
-            // 從 WAV header 讀取真實格式，不硬塞 44100
-            final wavHd = bytes.buffer.asByteData();
-            final wavChannels   = wavHd.getUint16(22, Endian.little);
-            final wavSampleRate = wavHd.getUint32(24, Endian.little);
-            final wavBlockAlign = wavHd.getUint16(32, Endian.little);
-            int dataStart = 44;
-            for (int i = 36; i < bytes.length - 8; i++) {
-              if (bytes[i] == 100 && bytes[i+1] == 97 && bytes[i+2] == 116 && bytes[i+3] == 97) {
-                dataStart = i + 8;
-                break;
-              }
-            }
-            // 使用 blockAlign 正確步進，支援多聲道平均為 mono
-            final audioDataLen = bytes.length - dataStart;
-            final pcmSamples = <double>[];
-            final stride = wavBlockAlign > 0 ? wavBlockAlign : 2;
-            for (int i = 0; i + stride <= audioDataLen; i += stride) {
-              double frameVal = 0.0;
-              for (int ch = 0; ch < wavChannels; ch++) {
-                final offset = dataStart + i + ch * 2;
-                if (offset + 1 >= bytes.length) break;
-                final raw = bytes[offset] | (bytes[offset + 1] << 8);
-                final signed = (raw > 32767) ? raw - 65536 : raw;
-                frameVal += signed / 32768.0;
-              }
-              pcmSamples.add(frameVal / wavChannels);
-            }
-            if (pcmSamples.isNotEmpty) {
-              audioResult = await AudioExportService.analyzeFromPcm(
-                pcmSamples: pcmSamples,
-                sessionDir: sessionDir,
-                sampleRate: wavSampleRate,  // 使用 WAV header 的真實採樣率
-                onProgress: (progress) {
-                  progressNotifier.value = (0.8 + progress.progress * 0.2, progress.message);
-                },
-              );
-            }
-          }
-        } catch (e) {
-          debugPrint('[切片完整分析] 音頻分析異常：$e');
-        }
-      }
+      final csvPathLocal = p.join(sessionDir, 'pose_landmarks.csv');
+      final hasCsvLocal  = File(csvPathLocal).existsSync();
 
       navigator.pop();
       if (mounted) setState(() => _isAnalyzing = false);
@@ -2600,6 +2632,26 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       }
       unawaited(RecordingHistoryStorage.instance.upsertEntry(updatedEntry));
 
+      final videoId       = p.basename(sessionDir);
+      final entrySnapshot = updatedEntry;
+
+      // 背景更新 ONNX 姿勢資料（posture_only，不消耗 AI 配額）
+      if (hasCsvLocal) {
+        _triggerPostureAnalysisInBackground(
+          videoId:  videoId,
+          clipPath: entrySnapshot.filePath,
+          csvPath:  csvPathLocal,
+          onPostureResult: (postureLabel, analysisId) {
+            final withPosture = entrySnapshot.copyWith(
+              swingPostureLabel: postureLabel,
+              postureAnalysisId: analysisId,
+            );
+            RecordingHistoryStorage.instance.upsertEntry(withPosture);
+            if (!mounted) return;
+            widget.onEntryUpdated?.call(entrySnapshot, withPosture);
+          },
+        );
+      }
       final audioMsg = audioResult != null ? '\n🎵 音頻：${audioResult.feedbackLabel}' : '';
       messenger.showSnackBar(SnackBar(
         content: Text('完整分析完成 ✅$audioMsg'),
@@ -2637,6 +2689,50 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         ),
       ),
     );
+  }
+
+  /// 背景錯誤姿勢分析：提交 posture_only 分析，輪詢直到 idle，回傳最佳錯誤類型。
+  /// 不阻塞 UI，失敗時靜默忽略。
+  void _triggerPostureAnalysisInBackground({
+    required String videoId,
+    required String clipPath,
+    required String csvPath,
+    required void Function(String? postureLabel, String analysisId) onPostureResult,
+  }) {
+    unawaited(() async {
+      try {
+        final svc = AnalysisService.instance;
+        final analysisId = await svc.submitForAnalysis(
+          videoId:  videoId,
+          clipPath: clipPath,
+          csvPath:  csvPath,
+          mode:     'posture_only',
+        );
+        debugPrint('[PostureAnalysis] 已提交: $analysisId');
+
+        // 輪詢，最多 90 秒（每 6 秒一次）
+        for (int i = 0; i < 15; i++) {
+          await Future<void>.delayed(const Duration(seconds: 6));
+          final status = await svc.getStatus(analysisId);
+          debugPrint('[PostureAnalysis] 狀態: ${status.status}');
+
+          if (status.isIdle) {
+            final topError = status.onnxResult?.officialErrors.firstOrNull
+                          ?? status.onnxResult?.suspectErrors.firstOrNull;
+            debugPrint('[PostureAnalysis] 完成，topError=$topError');
+            onPostureResult(topError ?? '', analysisId);
+            return;
+          }
+          if (status.isFailed) {
+            debugPrint('[PostureAnalysis] 失敗，略過');
+            return;
+          }
+        }
+        debugPrint('[PostureAnalysis] 逾時，略過');
+      } catch (e) {
+        debugPrint('[PostureAnalysis] 例外: $e');
+      }
+    }());
   }
 
   Future<void> _runAiAnalysis() async {
@@ -2693,39 +2789,55 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       }
     }
 
+    // ── AI 分析模式選擇 ───────────────────────────────────────────────────
+    if (!mounted) return;
+    final sessionDirForMode = p.dirname(widget.clip.filePath);
+    final aiMode = await _showAiModeDialog(context, sessionDirForMode);
+    if (aiMode == null) return;
+
     setState(() => _isSubmittingAi = true);
     if (!mounted) { setState(() => _isSubmittingAi = false); return; }
     try {
       final sessionDir = p.dirname(widget.clip.filePath);
       final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
       final hasCsv     = File(csvPath).existsSync();
+      final audioPath  = p.join(sessionDir, 'audio.wav');
       final videoId    = p.basename(sessionDir);
 
       // ignore: use_build_context_synchronously
+      var aiCallbackFired = false;
       await AiCoachPage.submitAndPush(
-        context:  context,
-        videoId:  videoId,
-        clipPath: widget.clip.filePath,
-        csvPath:  hasCsv ? csvPath : null,
-        onAnalysisComplete: (errorType) {
-          if (!mounted) return;
+        context:          context,
+        videoId:          videoId,
+        clipPath:         widget.clip.filePath,
+        csvPath:          hasCsv ? csvPath : null,
+        audioPath:        audioPath,
+        promptVersion:    aiMode.promptVersion,
+        phaseTimestamps:  aiMode.phaseTimestamps,
+        audioAnalysisJson: _buildAudioAnalysisJson(widget.clip),
+        onAnalysisComplete: (geminiErrorType, onnxErrorType, analysisId) {
+          aiCallbackFired = true;
           final updated = widget.clip.copyWith(
             hasAiCoachAnalysis: true,
-            swingPostureLabel:  errorType,
+            geminiPostureLabel: geminiErrorType,
+            swingPostureLabel:  widget.clip.swingPostureLabel ?? onnxErrorType,
+            postureAnalysisId:  analysisId,
+            aiPromptVersion:    aiMode.promptVersion,
           );
-          widget.onEntryUpdated?.call(widget.clip, updated);
+          // DB 存檔不需要 mounted，確保離開頁面後資料仍能寫入
           RecordingHistoryStorage.instance.upsertEntry(updated);
           StatisticsService().loadAllStatistics();
-          // 分析完成後刷新首頁球數顯示
           unawaited(PlanService.getPlanStatus());
+          if (!mounted) return;
+          widget.onEntryUpdated?.call(widget.clip, updated);
         },
       );
 
-      // 若 onAnalysisComplete 尚未觸發（分析仍在進行），至少先標記已送出
-      if (mounted && !widget.clip.hasAiCoachAnalysis) {
+      // 若 callback 尚未觸發（後端仍在處理），至少先標記已送出
+      if (!aiCallbackFired) {
         final updated = widget.clip.copyWith(hasAiCoachAnalysis: true);
-        widget.onEntryUpdated?.call(widget.clip, updated);
         RecordingHistoryStorage.instance.upsertEntry(updated);
+        if (mounted) widget.onEntryUpdated?.call(widget.clip, updated);
       }
     } catch (e) {
       debugPrint('[切片AI分析] 提交失敗: $e');
@@ -2844,7 +2956,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                 ),
                               ],
                               const SizedBox(height: 5),
-                              // 標籤
+                              // 標籤（基本 badges）
                               Wrap(
                                 spacing: 4,
                                 runSpacing: 3,
@@ -2854,48 +2966,112 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                   if (clip.hasAiCoachAnalysis)
                                     _smallBadge('AI', const Color(0xFF7C3AED)),
                                   if (clip.swingPostureLabel != null)
-                                    _smallBadge(
+                                    _smallBadgeWithIcon(
                                       SwingPosture.zhName(clip.swingPostureLabel!),
-                                      SwingPosture.color(clip.swingPostureLabel!),
+                                      const Color(0xFF1565C0),
+                                      Icons.memory_rounded,
+                                    ),
+                                  if (clip.geminiPostureLabel != null)
+                                    _smallBadgeWithIcon(
+                                      SwingPosture.zhName(clip.geminiPostureLabel!),
+                                      const Color(0xFF7C3AED),
+                                      Icons.auto_awesome_rounded,
                                     ),
                                   if (clip.audioTags?.contains('no_audio') == true)
                                     _smallBadge('無聲音', const Color(0xFF9E9E9E)),
-                                  // ── 速度 ──────────
-                                  if (clip.bestSpeedValue != null &&
-                                      clip.bestSpeedValue! > 0)
-                                    _smallBadgeWithIcon(
-                                      clip.bestSpeedValue!.toStringAsFixed(1),
-                                      const Color(0xFF1565C0),
-                                      Icons.speed_rounded,
-                                    ),
-                                  // ── 5 個音訊特徵 TAG（綠=通過，紅=未通過）──
-                                  if (clip.audioPasses != null)
-                                    for (final feat in AudioAnalysisService.featureLabels.entries)
-                                      _smallBadge(
-                                        () {
-                                          final v = clip.audioFeatureValues?[feat.key];
-                                          final valStr = v != null
-                                              ? ' ${AudioAnalysisService.formatFeatureValue(feat.key, v)}'
-                                              : '';
-                                          return '${feat.value}$valStr';
-                                        }(),
-                                        clip.audioPasses![feat.key] == true
-                                            ? const Color(0xFF4CAF50)
-                                            : const Color(0xFFF44336),
+                                ],
+                              ),
+                              // ── 速度 + 甜蜜點 數據行（未分析時反灰）──
+                              const SizedBox(height: 5),
+                              Builder(builder: (context) {
+                                final hasSpeed = clip.bestSpeedValue != null &&
+                                    clip.bestSpeedValue! > 0;
+                                final goodShot = clip.goodShot;
+                                const dimColor = Color(0xFFCBD0D8);
+                                final speedColor =
+                                    hasSpeed ? const Color(0xFF1565C0) : dimColor;
+                                final sweetColor = goodShot == true
+                                    ? const Color(0xFF4CAF50)
+                                    : goodShot == false
+                                        ? const Color(0xFFF44336)
+                                        : dimColor;
+                                return Row(
+                                  children: [
+                                    Icon(Icons.speed_rounded,
+                                        size: 12, color: speedColor),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      hasSpeed
+                                          ? clip.bestSpeedValue!.toStringAsFixed(1)
+                                          : '—',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: speedColor,
                                       ),
-                                  // ── GOOD TAG ──────────────────────────────
-                                  if (clip.goodShot != null)
-                                    _smallBadgeWithIcon(
-                                      'GOOD',
-                                      clip.goodShot == true
-                                          ? const Color(0xFF4CAF50)
-                                          : const Color(0xFFF44336),
-                                      clip.goodShot == true
-                                          ? Icons.sports_golf_rounded
-                                          : Icons.close_rounded,
                                     ),
-                                  if (clip.goodShot == true)
-                                    _smallBadge('甜蜜點命中', const Color(0xFF4CAF50)),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                        width: 1,
+                                        height: 11,
+                                        color: const Color(0xFFE0E4EA)),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      '甜蜜點',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: Color(0xFF9AA6B2)),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 5, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: sweetColor.withValues(alpha: 0.10),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                            color: sweetColor.withValues(alpha: 0.45)),
+                                      ),
+                                      child: Text(
+                                        goodShot == true
+                                            ? '命中'
+                                            : goodShot == false
+                                                ? '未命中'
+                                                : '—',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: sweetColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }),
+                              // ── 5大音頻特徵 數據條行（未分析時反灰）──
+                              const SizedBox(height: 5),
+                              Row(
+                                children: [
+                                  for (final feat in AudioAnalysisService
+                                      .featureLabels.entries) ...[
+                                    if (feat.key !=
+                                        AudioAnalysisService.featureLabels.keys
+                                            .first)
+                                      const SizedBox(width: 3),
+                                    Expanded(
+                                      child: _AudioFeatureMiniBar(
+                                        label: feat.value,
+                                        featureKey: feat.key,
+                                        value: clip.audioPasses == null
+                                            ? null
+                                            : (clip.audioFeatureValues ?? const <String, double>{})[feat.key],
+                                        passed: clip.audioPasses == null
+                                            ? false
+                                            : clip.audioPasses![feat.key] ?? false,
+                                        enabled: clip.audioPasses != null,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ],
@@ -3357,6 +3533,114 @@ class _HistoryFilterChip extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// AI 分析模式選擇
+// ────────────────────────────────────────────────────────────────────────────
+
+/// AI 分析模式選擇結果
+class _AiModeResult {
+  final String promptVersion;
+  final Map<String, double>? phaseTimestamps;
+
+  const _AiModeResult({
+    required this.promptVersion,
+    this.phaseTimestamps,
+  });
+}
+
+/// 顯示 AI 分析模式選擇對話框，若 v3 選中但 phases.json 不存在則提示並返回 null。
+Future<_AiModeResult?> _showAiModeDialog(
+    BuildContext context, String sessionDir) async {
+  final chosen = await showDialog<String>(
+    context: context,
+    builder: (_) => const _SelectAiModeDialog(),
+  );
+  if (chosen == null) return null;
+
+  // V2：繼續彈出 FPS + Resolution 選擇
+  if (chosen == 'v2') {
+    return const _AiModeResult(promptVersion: 'v2');
+  }
+
+  // V3：讀取 phases.json
+  Map<String, double>? phaseTimestamps;
+  if (chosen == 'v3') {
+    final phasesFile = File(p.join(sessionDir, 'phases.json'));
+    if (!await phasesFile.exists()) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('找不到 phases.json，請先執行完整分析再選擇此模式'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return null;
+    }
+    try {
+      final raw = json.decode(await phasesFile.readAsString()) as Map<String, dynamic>;
+      phaseTimestamps = raw.map((k, v) => MapEntry(k, (v as num).toDouble()));
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('phases.json 格式錯誤'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  return _AiModeResult(promptVersion: chosen, phaseTimestamps: phaseTimestamps);
+}
+
+class _SelectAiModeDialog extends StatelessWidget {
+  const _SelectAiModeDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('選擇 AI 分析模式'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _modeTile(context, 'v1', Icons.flash_on_rounded,
+              '原版提示詞（快速）', '標準提示，速度最快'),
+          const SizedBox(height: 8),
+          _modeTile(context, 'v2', Icons.videocam_rounded,
+              '完整讀取影片版本（精確）', '讓 AI 完整閱讀影片後分析'),
+          const SizedBox(height: 8),
+          _modeTile(context, 'v3', Icons.photo_library_rounded,
+              '讀取關鍵禎版本（8 大姿勢圖）', '從 phases.json 提取關鍵幀時間點'),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
+
+  Widget _modeTile(BuildContext ctx, String version, IconData icon,
+      String title, String subtitle) {
+    return ListTile(
+      leading: Icon(icon, color: const Color(0xFF7C3AED)),
+      title: Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+      subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
+      onTap: () => Navigator.pop(ctx, version),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    );
+  }
+}
+
+
 // 「今日不再提醒」SharedPreferences 輔助
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -3882,6 +4166,126 @@ class _CandidateCard extends StatelessWidget {
       height: 48,
       color: const Color(0xFFE8EDF2),
       child: const Icon(Icons.videocam, size: 24, color: Colors.grey),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 音頻特徵迷你量規（影片卡片用）
+// ────────────────────────────────────────────────────────────────────────────
+
+const _kCardFeatureDisplayRanges = <String, List<double>>{
+  'rms_dbfs':          [-45.0, -5.0],
+  'spectral_centroid': [1500.0, 7000.0],
+  'sharpness_hfxloud': [0.0, 6.0],
+  'highband_amp':      [0.0, 60.0],
+  'peak_dbfs':         [-30.0, 0.0],
+};
+
+class _AudioFeatureMiniBar extends StatelessWidget {
+  final String label;
+  final String featureKey;
+  final double? value;
+  final bool passed;
+  final bool enabled;
+
+  const _AudioFeatureMiniBar({
+    required this.label,
+    required this.featureKey,
+    required this.value,
+    required this.passed,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const dimColor = Color(0xFFCBD0D8);
+    final barColor = !enabled
+        ? dimColor
+        : passed
+            ? const Color(0xFF4CAF50)
+            : const Color(0xFFF44336);
+    final displayRange = _kCardFeatureDisplayRanges[featureKey] ?? [0.0, 100.0];
+    final threshold = AudioAnalysisService.ruleIntervals[featureKey] ?? [0.0, 1.0];
+
+    double norm(double v) =>
+        ((v - displayRange[0]) / (displayRange[1] - displayRange[0])).clamp(0.0, 1.0);
+
+    final tLowN  = norm(threshold[0]);
+    final tHighN = norm(threshold[1]);
+    final valN   = value != null ? norm(value!) : null;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 9,
+            color: enabled ? const Color(0xFF6F7B86) : dimColor,
+            fontWeight: FontWeight.w600,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 2),
+        LayoutBuilder(builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          return SizedBox(
+            height: 8,
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: enabled ? 0.08 : 0.04),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                if (enabled)
+                  Positioned(
+                    left: tLowN * width,
+                    width: (tHighN - tLowN) * width,
+                    top: 1.5,
+                    bottom: 1.5,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4CAF50).withValues(alpha: 0.30),
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                  ),
+                if (valN != null)
+                  Positioned(
+                    left: (valN * width - 3).clamp(0.0, width - 6),
+                    top: 1,
+                    bottom: 1,
+                    width: 6,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: barColor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        }),
+        const SizedBox(height: 2),
+        Text(
+          value != null
+              ? AudioAnalysisService.formatFeatureValue(featureKey, value!)
+              : '—',
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            color: barColor,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
     );
   }
 }
