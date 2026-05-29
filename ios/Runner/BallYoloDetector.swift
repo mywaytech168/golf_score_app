@@ -76,7 +76,8 @@ final class BallYoloDetector {
             if !inIsFloat, let qp = inTensor.quantizationParameters {
                 inZeroPoint = qp.zeroPoint
             }
-            print("[BallYoloDetector] input: \(inIsFloat ? \"FLOAT32\" : \"INT8\") zp=\(inZeroPoint)")
+            let inType = inIsFloat ? "FLOAT32" : "INT8"
+            print("[BallYoloDetector] input: \(inType) zp=\(inZeroPoint)")
 
             // 讀取輸出量化參數
             let outTensor = try interp.output(at: 0)
@@ -87,7 +88,7 @@ final class BallYoloDetector {
             }
             interpreter = interp
             let shape = outTensor.shape.dimensions
-            print("[BallYoloDetector] \u2705 \u6a21\u578b\u8f09\u5165\u6210\u529f  output=\(shape)  outFloat=\(outIsFloat)")
+            print("[BallYoloDetector] ✅ 模型載入成功  output=\(shape)  outFloat=\(outIsFloat)")
             return true
         } catch {
             print("[BallYoloDetector] ❌ 模型載入失敗: \(error)")
@@ -149,16 +150,18 @@ final class BallYoloDetector {
                 inputData.withUnsafeMutableBytes { (ptr: UnsafeMutableRawBufferPointer) in
                     guard let base = ptr.baseAddress?.assumingMemoryBound(to: Float.self) else { return }
                     for y in 0 ..< S {
-                        let srcY   = min(tileTop  + Int(Float(y) * scaleY), frameH - 1)
+                        let srcY = min(tileTop + Int(Float(y) * scaleY), frameH - 1)
                         let rowOff = srcY * bytesPerRow
                         for x in 0 ..< S {
-                            let srcX  = min(tileLeft + Int(Float(x) * scaleX), frameW - 1)
-                            let off   = rowOff + srcX * 4  // BGRA
-                            let b     = Float(bgraBase[off])     / 255.0
-                            let g     = Float(bgraBase[off + 1]) / 255.0
-                            let r     = Float(bgraBase[off + 2]) / 255.0
-                            let idx   = (y * S + x) * 3
-                            base[idx] = r; base[idx + 1] = g; base[idx + 2] = b
+                            let srcX = min(tileLeft + Int(Float(x) * scaleX), frameW - 1)
+                            let off = rowOff + srcX * 4
+                            let b = Float(bgraBase[off]) / 255.0
+                            let g = Float(bgraBase[off + 1]) / 255.0
+                            let r = Float(bgraBase[off + 2]) / 255.0
+                            let idx = (y * S + x) * 3
+                            base[idx] = r
+                            base[idx + 1] = g
+                            base[idx + 2] = b
                         }
                     }
                 }
@@ -167,18 +170,20 @@ final class BallYoloDetector {
                 // INT8：亮度量化 (luma + zeroPoint) → [-128, 127]
                 var inputBytes = [Int8](repeating: Int8(clamping: inZeroPoint), count: S * S * 3)
                 for y in 0 ..< S {
-                    let srcY   = min(tileTop  + Int(Float(y) * scaleY), frameH - 1)
+                    let srcY = min(tileTop + Int(Float(y) * scaleY), frameH - 1)
                     let rowOff = srcY * bytesPerRow
                     for x in 0 ..< S {
                         let srcX = min(tileLeft + Int(Float(x) * scaleX), frameW - 1)
-                        let off  = rowOff + srcX * 4  // BGRA
-                        let b    = Int(bgraBase[off])
-                        let g    = Int(bgraBase[off + 1])
-                        let r    = Int(bgraBase[off + 2])
+                        let off = rowOff + srcX * 4
+                        let b = Int(bgraBase[off])
+                        let g = Int(bgraBase[off + 1])
+                        let r = Int(bgraBase[off + 2])
                         let luma = (299 * r + 587 * g + 114 * b) / 1000
-                        let q    = Int8(clamping: luma + inZeroPoint)
-                        let idx  = (y * S + x) * 3
-                        inputBytes[idx] = q; inputBytes[idx + 1] = q; inputBytes[idx + 2] = q
+                        let q = Int8(clamping: luma + inZeroPoint)
+                        let idx = (y * S + x) * 3
+                        inputBytes[idx] = q
+                        inputBytes[idx + 1] = q
+                        inputBytes[idx + 2] = q
                     }
                 }
                 try interp.copy(Data(bytes: inputBytes, count: inputBytes.count), toInputAt: 0)
@@ -187,9 +192,12 @@ final class BallYoloDetector {
             try interp.invoke()
             return parseOutput(
                 try interp.output(at: 0),
-                tileLeft: tileLeft, tileTop: tileTop,
-                scaleX: scaleX, scaleY: scaleY,
-                confThreshold: confThreshold)
+                tileLeft: tileLeft,
+                tileTop: tileTop,
+                scaleX: scaleX,
+                scaleY: scaleY,
+                confThreshold: confThreshold
+            )
         } catch {
             print("[BallYoloDetector] 推理失敗: \(error)")
             return []
@@ -213,11 +221,13 @@ final class BallYoloDetector {
 
         func getVal(ch: Int, anchor: Int) -> Float {
             if outIsFloat {
-                return bytes.withUnsafeBytes {
-                    $0.load(fromByteOffset: (ch * n + anchor) * 4, as: Float.self)
+                return bytes.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) in
+                    rawBuffer.load(fromByteOffset: (ch * n + anchor) * 4, as: Float.self)
                 }
             } else {
-                let raw: UInt8 = bytes.withUnsafeBytes { $0[ch * n + anchor] }
+                let raw: UInt8 = bytes.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) in
+                    rawBuffer.load(fromByteOffset: ch * n + anchor, as: UInt8.self)
+                }
                 return Float(Int(raw) - outZeroPoint) * outScale
             }
         }

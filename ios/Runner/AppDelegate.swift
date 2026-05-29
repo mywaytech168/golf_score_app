@@ -1,7 +1,5 @@
 import AVFoundation
 import Flutter
-/Users/chengweiyu/golf_score_app/ios/Runner/BallTrajectoryChannel.swift:86:7 Cannot find 'BallYoloDetector' in scope
-/Users/chengweiyu/golf_score_app/ios/Runner/BallTrajectoryChannel.swift:229:22 Cannot find type 'BallYoloDetector' in scope
 import UIKit
 
 @main
