@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
@@ -47,10 +48,27 @@ class ExternalVideoImporter {
       final sessionDir = p.join(appDir.path, 'golf_recordings', sessionId);
       await Directory(sessionDir).create(recursive: true);
 
-      // 複製影片
-      onProgress?.call(0.0, '複製影片中...');
+      // 複製/轉檔影片
+      // iOS / Android：重新編碼為標準 MP4（H.264 + AAC + faststart），確保相容性
+      //   - iOS：AVAssetExportSession → 原生 H.264
+      //   - Android：VideoTranscoder Surface pipeline → H.264，bitrate ≤ 12 Mbps
+      //     若來源已是標準 H.264（bitrate < 20 Mbps），直接複製（快速路徑）
+      // 其他平台（Desktop）：直接複製
       final videoPath = p.join(sessionDir, 'swing.mp4');
-      await File(sourcePath).copy(videoPath);
+      if (Platform.isIOS || Platform.isAndroid) {
+        onProgress?.call(0.0, '轉檔中...');
+        const _channel = MethodChannel('com.example.golf_score_app/video_transcoder');
+        final transcoded = await _channel.invokeMethod<String>(
+          'transcodeToMp4',
+          {'srcPath': sourcePath, 'dstPath': videoPath},
+        );
+        if (transcoded == null) {
+          throw Exception('transcodeToMp4 未回傳路徑');
+        }
+      } else {
+        onProgress?.call(0.0, '複製影片中...');
+        await File(sourcePath).copy(videoPath);
+      }
 
       // 取得時長並驗證
       final durationSeconds = await _resolveDurationSeconds(videoPath);

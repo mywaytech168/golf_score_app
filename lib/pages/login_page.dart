@@ -117,7 +117,6 @@ class _LoginPageState extends State<LoginPage> {
 
         if (!mounted) return;
         _showSnackBar(AppLocalizations.of(context).msgLoginSuccess);
-        if (Platform.isIOS) { await _navigateToHome(); return; }
         final ok = await _ensureBlePermissions();
         if (!mounted || !ok) return;
         await _navigateToHome();

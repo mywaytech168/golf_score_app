@@ -16,6 +16,7 @@ class AudioExportService {
     required String sessionDir,
     required int sampleRate,
     required void Function(AudioAnalysisProgress progress)? onProgress,
+    double targetHitTime = 3.0,
   }) async {
     try {
       debugPrint('$_logTag 🎵 analyzeFromPcm 開始');
@@ -33,7 +34,7 @@ class AudioExportService {
       final config = AudioAnalysisConfig(
         sessionDir: sessionDir,
         sampleRate: sampleRate,
-        targetHitTime: 3.0,
+        targetHitTime: targetHitTime,
         targetTolTime: 0.5,
         peakRelStrength: 0.8,
         madK: 4.0,

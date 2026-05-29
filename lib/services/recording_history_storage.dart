@@ -23,7 +23,7 @@ class RecordingHistoryStorage {
   static const String _folderName  = 'golf_recordings';
   static const String _legacyJson  = 'recording_history.json';
   static const String _dbName      = 'recording_history.db';
-  static const int    _dbVersion   = 3;
+  static const int    _dbVersion   = 6;
   static const String _table       = 'recordings';
 
   Database? _db;
@@ -70,7 +70,12 @@ class RecordingHistoryStorage {
             hasAiCoachAnalysis  INTEGER NOT NULL DEFAULT 0,
             isUploaded          INTEGER NOT NULL DEFAULT 0,
             recordedAspectRatio TEXT,
-            swingPostureLabel   TEXT
+            swingPostureLabel   TEXT,
+            geminiPostureLabel  TEXT,
+            postureAnalysisId   TEXT,
+            audioPassCount      INTEGER,
+            audioPasses         TEXT,
+            audioFeatureValues  TEXT
           )
         ''');
         // 索引加速常用排序/篩選
@@ -83,6 +88,17 @@ class RecordingHistoryStorage {
         }
         if (oldVersion < 3) {
           await db.execute('ALTER TABLE $_table ADD COLUMN swingPostureLabel TEXT');
+        }
+        if (oldVersion < 4) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN postureAnalysisId TEXT');
+        }
+        if (oldVersion < 5) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN audioPassCount INTEGER');
+          await db.execute('ALTER TABLE $_table ADD COLUMN audioPasses TEXT');
+          await db.execute('ALTER TABLE $_table ADD COLUMN audioFeatureValues TEXT');
+        }
+        if (oldVersion < 6) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN geminiPostureLabel TEXT');
         }
       },
     );
@@ -149,10 +165,35 @@ class RecordingHistoryStorage {
     try {
       final db   = await _openDb();
       final rows = await db.query(_table, orderBy: 'recordedAt DESC');
-      return rows.map(_fromRow).toList();
+      final entries = rows.map(_fromRow).toList();
+      // 清理孤兒 clip.mp4：若同一 session 目錄下已有 skeleton.mp4 或 final.mp4
+      // 代表分析已完成但舊 clip.mp4 條目未被刪除（歷史 bug 殘留），自動移除
+      await _purgeOrphanClips(db, entries);
+      return (await db.query(_table, orderBy: 'recordedAt DESC')).map(_fromRow).toList();
     } catch (e) {
       debugPrint('❌ [RecordingHistoryStorage] loadHistory 失敗: $e');
       return [];
+    }
+  }
+
+  /// 清理孤兒 clip.mp4 條目（分析後 clip.mp4 未被刪除的殘留）
+  Future<void> _purgeOrphanClips(Database db, List<RecordingHistoryEntry> entries) async {
+    // 取得所有已分析（isAnalyzed=1）且 filePath 非 clip.mp4 的 session 目錄
+    final analyzedDirs = entries
+        .where((e) => e.isAnalyzed && !e.filePath.endsWith('clip.mp4'))
+        .map((e) => p.dirname(e.filePath))
+        .toSet();
+
+    // 找出同一目錄下還殘留的 clip.mp4 孤兒條目
+    final orphans = entries.where((e) =>
+        e.filePath.endsWith('clip.mp4') &&
+        analyzedDirs.contains(p.dirname(e.filePath)));
+
+    if (orphans.isEmpty) return;
+
+    for (final o in orphans) {
+      await db.delete(_table, where: 'filePath = ?', whereArgs: [o.filePath]);
+      debugPrint('🧹 [RecordingHistoryStorage] 清理孤兒條目：${o.filePath}');
     }
   }
 
@@ -242,6 +283,11 @@ class RecordingHistoryStorage {
     'isUploaded':          e.isUploaded          ? 1 : 0,
     'recordedAspectRatio': e.recordedAspectRatio,
     'swingPostureLabel':   e.swingPostureLabel,
+    'geminiPostureLabel':  e.geminiPostureLabel,
+    'postureAnalysisId':   e.postureAnalysisId,
+    'audioPassCount':      e.audioPassCount,
+    'audioPasses':         e.audioPasses != null ? jsonEncode(e.audioPasses) : null,
+    'audioFeatureValues':  e.audioFeatureValues != null ? jsonEncode(e.audioFeatureValues) : null,
   };
 
   static RecordingHistoryEntry _fromRow(Map<String, dynamic> row) {
@@ -259,6 +305,28 @@ class RecordingHistoryStorage {
       try {
         final decoded = jsonDecode(rawTags);
         if (decoded is List) audioTags = decoded.whereType<String>().toList();
+      } catch (_) {}
+    }
+
+    Map<String, bool>? audioPasses;
+    final rawPasses = row['audioPasses'] as String?;
+    if (rawPasses != null && rawPasses.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawPasses);
+        if (decoded is Map) {
+          audioPasses = decoded.map((k, v) => MapEntry(k as String, (v as bool?) ?? false));
+        }
+      } catch (_) {}
+    }
+
+    Map<String, double>? audioFeatureValues;
+    final rawFeatures = row['audioFeatureValues'] as String?;
+    if (rawFeatures != null && rawFeatures.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawFeatures);
+        if (decoded is Map) {
+          audioFeatureValues = decoded.map((k, v) => MapEntry(k as String, (v as num).toDouble()));
+        }
       } catch (_) {}
     }
 
@@ -284,6 +352,9 @@ class RecordingHistoryStorage {
       audioLabel:         row['audioLabel']          as String?,
       sourceVideoPath:    row['sourceVideoPath']     as String?,
       audioTags:          audioTags,
+      audioPassCount:     row['audioPassCount']       as int?,
+      audioPasses:        audioPasses,
+      audioFeatureValues: audioFeatureValues,
       shareCode:          row['shareCode']           as String?,
       shareExpiresAt:     row['shareExpiresAt'] != null
           ? DateTime.tryParse(row['shareExpiresAt'] as String)
@@ -293,6 +364,8 @@ class RecordingHistoryStorage {
       isUploaded:          (row['isUploaded']          as int?) == 1,
       recordedAspectRatio:  row['recordedAspectRatio']          as String?,
       swingPostureLabel:    row['swingPostureLabel']             as String?,
+      geminiPostureLabel:   row['geminiPostureLabel']            as String?,
+      postureAnalysisId:    row['postureAnalysisId']             as String?,
     );
   }
 }

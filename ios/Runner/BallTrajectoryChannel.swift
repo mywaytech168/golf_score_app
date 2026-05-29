@@ -33,7 +33,7 @@ func registerBallTrajectoryChannel(messenger: FlutterBinaryMessenger) {
 
     case "extractBlobs", "extractBlobsWithConfig":
       guard let args      = call.arguments as? [String: Any],
-            let videoPath = args["videoPath"] as? String else {
+            let videoPath = (args["inputPath"] ?? args["videoPath"]) as? String else {
         result(FlutterMethodNotImplemented); return
       }
       var cfg = BlobConfig()
@@ -73,6 +73,31 @@ func registerBallTrajectoryChannel(messenger: FlutterBinaryMessenger) {
         } catch {
           DispatchQueue.main.async {
             result(FlutterError(code: "render_failed", message: error.localizedDescription, details: nil))
+          }
+        }
+      }
+
+    case "extractBlobsYolo":
+      guard let args      = call.arguments as? [String: Any],
+            let videoPath = args["inputPath"] as? String else {
+        result(FlutterMethodNotImplemented); return
+      }
+      let hitSec = (args["hitSec"] as? NSNumber)?.doubleValue
+      BallYoloDetector.shared.tryLoad()
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let out: [String: Any]
+          if BallYoloDetector.shared.isLoaded {
+            out = try btExtractBlobsYolo(videoPath: videoPath, hitSec: hitSec)
+          } else {
+            // YOLO 未能載入時回退到傳統 blob 偵測
+            print("[BallTrajectory] ⚠️ YOLO 未載入，回退到 blob 偵測")
+            out = try btExtractBlobs(videoPath: videoPath, config: BlobConfig())
+          }
+          DispatchQueue.main.async { result(out) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "extract_failed", message: error.localizedDescription, details: nil))
           }
         }
       }
@@ -140,6 +165,148 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
 
   AnalysisProgressSink.shared.send(
     op: "extractBlobs", progress: 1.0, label: "球體偵測完成",
+    current: frameIdx, total: frameIdx)
+
+  return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]
+}
+
+// MARK: - YOLO blob extraction
+
+private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws -> [String: Any] {
+  let asset = AVURLAsset(url: URL(fileURLWithPath: videoPath))
+  guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+    throw NSError(domain: "BallTrajectory", code: -1,
+                  userInfo: [NSLocalizedDescriptionKey: "找不到視頻軌道"])
+  }
+
+  let composition = AVVideoComposition(propertiesOf: asset)
+  let displayW    = Int(composition.renderSize.width)
+  let displayH    = Int(composition.renderSize.height)
+  let fps         = Double(max(1, videoTrack.nominalFrameRate))
+  let totalFrames = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
+
+  let reader = try AVAssetReader(asset: asset)
+  let readerOut = AVAssetReaderVideoCompositionOutput(
+    videoTracks: asset.tracks(withMediaType: .video),
+    videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+  )
+  readerOut.videoComposition = composition
+  readerOut.alwaysCopiesSampleData = false
+  reader.add(readerOut)
+  guard reader.startReading() else {
+    throw reader.error ?? NSError(domain: "BallTrajectory", code: -2,
+                                  userInfo: [NSLocalizedDescriptionKey: "reader 啟動失敗"])
+  }
+
+  // ── ROI 追蹤常數（對應 Android BallYoloExtractor）────────────
+  let ROI_RATIO_X:              Float = 0.6519
+  let ROI_RATIO_Y:              Float = 0.78
+  let MAX_MISS_FRAMES                 = 5
+  let MAX_ROI_SHIFT_PRE:        Float = 200
+  let MAX_ROI_SHIFT_POST:       Float = 300
+  let CONF_PRE_IMPACT:          Float = 0.25
+  let CONF_POST_IMPACT:         Float = 0.05
+  let POST_IMPACT_CHASE_DY:     Float = 150
+  let POST_IMPACT_MAX_FRAMES          = 20
+
+  // ── ROI 追蹤狀態 ──────────────────────────────────────────────
+  var roiCx:           Float = Float(displayW) * ROI_RATIO_X
+  var roiCy:           Float = Float(displayH) * ROI_RATIO_Y
+  var missCount              = 0
+  var lastGoodCx:      Float = -1
+  var lastGoodCy:      Float = -1
+  var postImpactMisses       = 0
+  let hitFrame               = hitSec.map { Int($0 * fps) } ?? -1
+
+  var frames: [[String: Any]] = []
+  var frameIdx: Int = 0
+
+  while reader.status == .reading {
+    guard let sample: CMSampleBuffer = readerOut.copyNextSampleBuffer() else { break }
+
+    // 在 autoreleasepool 內取得偵測結果，ROI 更新在外部進行
+    var ptsUs:      Int64 = 0
+    var detections: [BallYoloDetector.Detection] = []
+    var frameOk = false
+
+    autoreleasepool {
+      guard let pixBuf = CMSampleBufferGetImageBuffer(sample) else { return }
+      let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+      ptsUs = Int64(CMTimeGetSeconds(pts) * 1_000_000)
+
+      CVPixelBufferLockBaseAddress(pixBuf, .readOnly)
+      defer { CVPixelBufferUnlockBaseAddress(pixBuf, .readOnly) }
+      guard let base = CVPixelBufferGetBaseAddress(pixBuf) else { return }
+
+      let bpr  = CVPixelBufferGetBytesPerRow(pixBuf)
+      let rgba = base.assumingMemoryBound(to: UInt8.self)
+
+      let isPostImpact = hitFrame >= 0 && frameIdx >= hitFrame
+      let confThresh   = isPostImpact ? CONF_POST_IMPACT : CONF_PRE_IMPACT
+
+      detections = BallYoloDetector.shared.detect(
+        bgraBase: rgba, bytesPerRow: bpr,
+        frameW: displayW, frameH: displayH,
+        roiCenterX: Int(roiCx), roiCenterY: Int(roiCy),
+        confThreshold: confThresh)
+      frameOk = true
+    }
+
+    guard frameOk else { continue }
+
+    // ── 更新 ROI 追蹤狀態 ────────────────────────────────────
+    let isPostImpact = hitFrame >= 0 && frameIdx >= hitFrame
+    let maxShift: Float = isPostImpact ? MAX_ROI_SHIFT_POST : MAX_ROI_SHIFT_PRE
+
+    let nearby = detections.filter { d in
+      let dx = Float(d.cx) - roiCx; let dy = Float(d.cy) - roiCy
+      return (dx * dx + dy * dy).squareRoot() <= maxShift
+    }
+
+    if let best = nearby.max(by: { $0.conf < $1.conf }) {
+      roiCx = Float(best.cx); roiCy = Float(best.cy)
+      lastGoodCx = roiCx; lastGoodCy = roiCy
+      missCount = 0; postImpactMisses = 0
+    } else {
+      missCount += 1
+      // _handleMiss 邏輯
+      if isPostImpact {
+        postImpactMisses += 1
+        if postImpactMisses <= POST_IMPACT_MAX_FRAMES {
+          roiCy -= POST_IMPACT_CHASE_DY  // 每幀向上追蹤飛球
+          let halfTile = Float(BallYoloDetector.inputSize) / 2
+          roiCx = max(halfTile, min(roiCx, Float(displayW) - halfTile))
+          roiCy = max(halfTile, roiCy)
+        }
+      } else {
+        if missCount >= MAX_MISS_FRAMES {
+          roiCx = lastGoodCx >= 0 ? lastGoodCx : Float(displayW) * ROI_RATIO_X
+          roiCy = lastGoodCy >= 0 ? lastGoodCy : Float(displayH) * ROI_RATIO_Y
+          missCount = 0
+        }
+      }
+    }
+
+    // ── 組建 entry ────────────────────────────────────────────
+    let blobs: [[String: Any]] = detections.map { d in
+      // YOLO bbox 面積 ÷ 16 正規化為 blob-comparable area（對應 Android）
+      let area = max(6, min(150, d.bboxW * d.bboxH / 16))
+      return ["cx": d.cx, "cy": d.cy, "area": area, "circ": 1.0,
+              "diffMean": Double(d.conf) * 50.0]
+    }
+    frames.append(["ptsUs": ptsUs, "blobs": blobs])
+    frameIdx += 1
+
+    if frameIdx % 10 == 0 {
+      let prog: Double = min(0.95, Double(frameIdx) / Double(totalFrames))
+      AnalysisProgressSink.shared.send(
+        op: "extractBlobs", progress: prog,
+        label: "YOLO偵測中 \(Int(prog * 100))%", current: frameIdx, total: totalFrames)
+    }
+  }
+
+  AnalysisProgressSink.shared.send(
+    op: "extractBlobs", progress: 1.0, label: "YOLO偵測完成",
     current: frameIdx, total: frameIdx)
 
   return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]

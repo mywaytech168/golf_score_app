@@ -17,7 +17,8 @@ class VideoAnalysisService {
   static const _audioChannel = MethodChannel('audio_extractor_channel');
   static const _poseAnalyzerChannel = MethodChannel('com.example.golf_score_app/pose_analyzer');
   static const _frameExtractorChannel = MethodChannel('com.example.golf_score_app/frame_extractor');
-  static const _frameIntervalMs = 33; // ~30fps（與 SkeletonOverlayRenderer.ANALYSIS_INTERVAL_MS 一致）
+  // 採樣率由原生端自主從影片元數據讀取（nominalFrameRate / KEY_FRAME_RATE），
+  // Dart 側不再指定 targetFps，避免硬編 30fps 誤導實際採樣行為。
 
   Future<VideoAnalysisResult> analyze({
     required String videoPath,
@@ -67,7 +68,7 @@ class VideoAnalysisService {
       debugPrint(
         '[VideoAnalysis] 📊 完成統計:\n'
         '  骨架: $validFrames/$totalFrames 幀有效\n'
-        '  音訊: ${hasAudio ? "✅ 已提取" : "❌ 無音訊"}${hasSilence ? " ⚠️ 無聲音" : ""}\n'
+        '  音訊: ${hasAudio ? "✅ 已提取" : "ℹ️ 無音訊，略過音訊分析"}${hasSilence ? " ⚠️ 無聲音" : ""}\n'
         '  總時間: ${overallSw.elapsedMilliseconds}ms\n'
         '  吞吐率: $fps fps'
       );
@@ -116,12 +117,13 @@ class VideoAnalysisService {
         {
           'videoPath': videoPath,
           'outputCsvPath': csvPath,
-          'targetFps': 1000 ~/ _frameIntervalMs, // 30fps
+          // targetFps 不傳：原生端自主從影片 nominalFrameRate/KEY_FRAME_RATE 讀取，
+          // 確保 60fps 影片以 60fps 採樣、30fps 影片以 30fps 採樣。
           'maxWidth': 720,
         },
       );
       if (result == null || result['status'] != 'completed') {
-        throw Exception('Kotlin 骨架分析失敗: $result');
+        throw Exception('骨架分析失敗: $result');
       }
     } finally {
       progressSvc.progress.removeListener(_listenPose);
@@ -139,7 +141,7 @@ class VideoAnalysisService {
   }) async {
     final writer = PoseCsvWriter(csvPath);
     final totalMs = durationSeconds * 1000;
-    final totalSteps = (totalMs / _frameIntervalMs).ceil().clamp(1, 99999);
+    final totalSteps = (totalMs / 33).ceil().clamp(1, 99999);
     const double imgW = 720, imgH = 1280;
     const batchSize = 4;
 
@@ -153,11 +155,11 @@ class VideoAnalysisService {
 
     // 步驟 1️⃣: 收集所有幀時間戳
     final frameTimestamps = <int>[];
-    for (var ms = 0; ms < totalMs; ms += _frameIntervalMs) {
+    for (var ms = 0; ms < totalMs; ms += 33) {
       frameTimestamps.add(ms);
     }
 
-    debugPrint('[VideoAnalysis] 配置: ${frameTimestamps.length} 幀, ${_frameIntervalMs}ms 間隔, $batchSize 幀/批次');
+    debugPrint('[VideoAnalysis] 配置: ${frameTimestamps.length} 幀, ${33}ms 間隔, $batchSize 幀/批次');
 
     for (int batchStart = 0; batchStart < frameTimestamps.length; batchStart += batchSize) {
       final batchEnd = (batchStart + batchSize).clamp(0, frameTimestamps.length);
@@ -373,7 +375,8 @@ class VideoAnalysisService {
     }
   }
 
-  /// 提取音訊並保存為 WAV
+  /// 提取音訊並保存為 WAV。
+  /// 影片無音訊軌時回傳 false（不拋例外）。
   Future<bool> _extractAudio({
     required String videoPath,
     required String audioPath,
@@ -382,6 +385,12 @@ class VideoAnalysisService {
       'videoPath': videoPath,
     });
     if (result == null) return false;
+
+    // 無音訊軌 — native 回傳 no_audio:true，屬正常情況，非錯誤
+    if (result['no_audio'] == true) {
+      debugPrint('[VideoAnalysis] ℹ️ 影片無音訊軌，略過音訊提取');
+      return false;
+    }
 
     final wavPath = result['path'] as String?;
     if (wavPath == null) return false;

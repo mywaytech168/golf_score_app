@@ -1,8 +1,11 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../models/statistics_response.dart';
+import '../services/audio_analysis_service.dart';
 import '../services/local_statistics_calculator.dart';
+import '../services/recording_history_storage.dart';
 import '../theme/app_theme.dart';
+import '../widgets/audio_feature_pass_row.dart';
 import '../widgets/posture_breakdown_card.dart';
 
 class TodayInfoPage extends StatefulWidget {
@@ -16,6 +19,8 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
   bool _loading = true;
   bool _hasError = false;
   StatisticsResponse? _stats;
+  /// 各音頻特徵通過率 key→0.0~1.0（null=無資料）
+  Map<String, double>? _featurePassRates;
   DateTime _selectedDate = DateTime.now();
 
   @override
@@ -45,14 +50,69 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
     setState(() => _loading = true);
     try {
       final isToday = _isToday(_selectedDate);
+      final period = isToday ? 'today' : 'day';
+      final dateStr = isToday ? null : _formatApi(_selectedDate);
       final stats = await LocalStatisticsCalculator.compute(
-        period: isToday ? 'today' : 'day',
-        date: isToday ? null : _formatApi(_selectedDate),
+        period: period,
+        date: dateStr,
       );
-      if (mounted) setState(() { _stats = stats; _loading = false; _hasError = false; });
+      final featurePassRates = await _computeFeaturePassRates(period, dateStr);
+      if (mounted) {
+        setState(() {
+          _stats = stats;
+          _featurePassRates = featurePassRates;
+          _loading = false;
+          _hasError = false;
+        });
+      }
     } catch (e) {
       debugPrint('[TodayInfoPage] 載入失敗: $e');
-      if (mounted) setState(() { _stats = null; _loading = false; _hasError = true; });
+      if (mounted) setState(() { _stats = null; _featurePassRates = null; _loading = false; _hasError = true; });
+    }
+  }
+
+  Future<Map<String, double>?> _computeFeaturePassRates(String period, String? dateStr) async {
+    try {
+      final all = await RecordingHistoryStorage.instance.loadHistory();
+      final now = DateTime.now();
+      final filtered = all.where((e) {
+        if (e.audioPasses == null) return false;
+        final t = e.recordedAt;
+        if (period == 'today') {
+          return t.year == now.year && t.month == now.month && t.day == now.day;
+        } else if (period == 'day' && dateStr != null) {
+          final parts = dateStr.split('-');
+          if (parts.length != 3) return false;
+          final y = int.tryParse(parts[0]);
+          final m = int.tryParse(parts[1]);
+          final d = int.tryParse(parts[2]);
+          return y != null && m != null && d != null &&
+              t.year == y && t.month == m && t.day == d;
+        }
+        return true;
+      }).toList();
+
+      if (filtered.isEmpty) return null;
+
+      final totals = <String, int>{};
+      final passes = <String, int>{};
+      for (final entry in filtered) {
+        final ap = entry.audioPasses!;
+        for (final key in AudioAnalysisService.featureLabels.keys) {
+          totals[key] = (totals[key] ?? 0) + 1;
+          if (ap[key] == true) passes[key] = (passes[key] ?? 0) + 1;
+        }
+      }
+
+      if (totals.isEmpty) return null;
+      return {
+        for (final key in AudioAnalysisService.featureLabels.keys)
+          if (totals.containsKey(key))
+            key: (passes[key] ?? 0) / totals[key]!,
+      };
+    } catch (e) {
+      debugPrint('[TodayInfoPage] feature pass rates 失敗: $e');
+      return null;
     }
   }
 
@@ -152,21 +212,22 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                     _MetricGrid(
                       speed: _speed,
                       sweet: _sweet,
-                      crisp: _crisp,
                       loading: _loading,
                     ),
-                    if (!_loading && (_stats?.postureBreakdown.values.any((v) => v > 0) ?? false)) ...[
+                    if (!_loading) ...[
+                      const SizedBox(height: kSpaceMD),
+                      AudioFeaturePassRow(passRates: _featurePassRates),
+                    ],
+                    if (!_loading) ...[
                       const SizedBox(height: kSpaceMD),
                       PostureBreakdownCard(
-                        breakdown: _stats!.postureBreakdown,
+                        breakdown: _stats?.postureBreakdown ?? {},
                         title: isToday
                             ? AppLocalizations.of(context).todayPostureToday
                             : AppLocalizations.of(context).todayPosture,
                       ),
                     ],
-                    if (!_loading && _practice == 0 && _rounds == 0)
-                      _EmptyState(isToday: isToday),
-                    const SizedBox(height: kSpaceXL),
+                    const SizedBox(height: kSpaceMD),
                   ],
                 ),
               ),
@@ -298,43 +359,6 @@ class _DatePickerRow extends StatelessWidget {
   }
 }
 
-// ── 空狀態 ──────────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  final bool isToday;
-  const _EmptyState({required this.isToday});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: kSpaceXL),
-      child: Column(
-        children: [
-          Icon(
-            isToday ? Icons.sports_golf_rounded : Icons.event_busy_rounded,
-            size: 56,
-            color: kTextHint,
-          ),
-          const SizedBox(height: kSpaceMD),
-          Text(
-            isToday
-                ? AppLocalizations.of(context).todayNoRecord
-                : AppLocalizations.of(context).todayNoRecordDate,
-            style: const TextStyle(fontSize: 15, color: kTextSecondary),
-          ),
-          if (isToday) ...[
-            const SizedBox(height: kSpaceXS),
-            Text(
-              AppLocalizations.of(context).todayGoRecord,
-              style: const TextStyle(fontSize: 13, color: kTextHint),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 // ── 練習摘要橫幅 ─────────────────────────────────────────────────
 
 class _SummaryBanner extends StatelessWidget {
@@ -458,13 +482,11 @@ class _VertDivider extends StatelessWidget {
 class _MetricGrid extends StatelessWidget {
   final double? speed;
   final double? sweet;
-  final double? crisp;
   final bool loading;
 
   const _MetricGrid({
     required this.speed,
     required this.sweet,
-    required this.crisp,
     required this.loading,
   });
 
@@ -488,28 +510,23 @@ class _MetricGrid extends StatelessWidget {
         color: kSweetColor,
         progress: sweet != null ? (sweet! / 100).clamp(0.0, 1.0) : null,
       ),
-      _MetricItem(
-        label: l.todayCrispness,
-        value: crisp != null ? crisp!.clamp(0, 100).toStringAsFixed(0) : '--',
-        unit: crisp != null ? '/100' : '',
-        icon: Icons.graphic_eq_rounded,
-        color: kCrispColor,
-        progress: crisp != null ? (crisp! / 100).clamp(0.0, 1.0) : null,
-      ),
     ];
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: kSpaceSM,
-        mainAxisSpacing: kSpaceSM,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: items.length,
-      itemBuilder: (_, i) =>
-          loading ? const _SkeletonCard() : _MetricCardWidget(item: items[i]),
+    if (loading) {
+      return Row(
+        children: List.generate(2, (i) => [
+          if (i > 0) const SizedBox(width: kSpaceSM),
+          const Expanded(child: _SkeletonCard()),
+        ]).expand((e) => e).toList(),
+      );
+    }
+    return Row(
+      children: [
+        for (int i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(width: kSpaceSM),
+          Expanded(child: _MetricCardWidget(item: items[i])),
+        ],
+      ],
     );
   }
 }
@@ -538,65 +555,42 @@ class _MetricCardWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(kSpaceMD),
+      padding: const EdgeInsets.symmetric(horizontal: kSpaceSM, vertical: kSpaceMD),
       decoration: kCardDecoration(radius: kRadiusMD),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 28,
+            height: 28,
             decoration: BoxDecoration(
               color: item.color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(kSpaceSM),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(item.icon, color: item.color, size: 18),
+            child: Icon(item.icon, color: item.color, size: 15),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    item.value,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: item.value == '--' ? kTextHint : item.color,
-                    ),
+          const SizedBox(width: kSpaceSM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.value + (item.unit.isNotEmpty ? item.unit : ''),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: item.value == '--' ? kTextHint : item.color,
                   ),
-                  if (item.unit.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 2, bottom: 2),
-                      child: Text(
-                        item.unit,
-                        style: const TextStyle(fontSize: 11, color: kTextSecondary),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: kSpaceXS),
-              Text(
-                item.label,
-                style: const TextStyle(fontSize: 11, color: kTextSecondary),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (item.progress != null) ...[
-                const SizedBox(height: kSpaceSM),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: LinearProgressIndicator(
-                    value: item.progress,
-                    backgroundColor: item.color.withValues(alpha: 0.12),
-                    color: item.color,
-                    minHeight: 3,
-                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  item.label,
+                  style: const TextStyle(fontSize: 10, color: kTextSecondary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
-            ],
+            ),
           ),
         ],
       ),
@@ -676,23 +670,26 @@ class _SkeletonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(kSpaceMD),
+      padding: const EdgeInsets.symmetric(horizontal: kSpaceSM, vertical: kSpaceMD),
       decoration: kCardDecoration(radius: kRadiusMD),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: const Row(
         children: [
-          _SkeletonBox(width: 36, height: 36, radius: kSpaceSM),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SkeletonBox(width: 40, height: 20),
-              SizedBox(height: kSpaceXS),
-              _SkeletonBox(width: 60, height: 12),
-            ],
+          _SkeletonBox(width: 28, height: 28, radius: 8),
+          SizedBox(width: kSpaceSM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SkeletonBox(width: 50, height: 14),
+                SizedBox(height: kSpaceXS),
+                _SkeletonBox(width: 36, height: 10),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 }
+

@@ -101,6 +101,8 @@ class AudioAnalysisEngine {
           feedbackLabel: audioScore.feedbackLabel,
           distances: audioScore.distances,
           featureValues: audioScore.featureValues,
+          passCount: audioScore.passCount,
+          passes: audioScore.passes,
         );
       } else {
         onProgress?.call(AudioAnalysisProgress(
@@ -112,6 +114,8 @@ class AudioAnalysisEngine {
           feedbackLabel: 'Unknown',
           distances: {},
           featureValues: {},
+          passCount: 0,
+          passes: {},
         );
       }
 
@@ -143,6 +147,9 @@ class AudioAnalysisEngine {
         csvPath: config.csvPath,
         txtPath: config.txtPath,
         features: List.unmodifiable(_features),
+        passCount: _classification!.passCount,
+        passes: _classification!.passes,
+        featureValues: _classification!.featureValues,
       );
     } catch (e) {
       debugPrint('[AudioEngine] 错误: $e');

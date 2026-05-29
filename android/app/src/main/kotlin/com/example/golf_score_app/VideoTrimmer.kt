@@ -109,6 +109,12 @@ class VideoTrimmer(private val context: Context) {
             // All subsequent PTSs are rebased to this so the clip starts at PTS 0.
             var baseTimeUs = Long.MIN_VALUE
 
+            // adjustedEndUs is recalculated once baseTimeUs is known so the output
+            // clip is always exactly (endMs - startMs) ms long regardless of where
+            // the previous sync frame lands.
+            val requestedDurationUs = endUs - startUs
+            var adjustedEndUs = endUs   // overwritten after first sample
+
             val buf  = ByteBuffer.allocate(BUFFER_SIZE)
             val info = android.media.MediaCodec.BufferInfo()
 
@@ -117,12 +123,18 @@ class VideoTrimmer(private val context: Context) {
                 if (trackIndex < 0) break                  // EOS
 
                 val sampleTimeUs = extractor.sampleTime
-                if (sampleTimeUs > endUs) break            // past end — stop immediately
+
+                if (baseTimeUs == Long.MIN_VALUE) {
+                    baseTimeUs   = sampleTimeUs
+                    // Clip ends exactly requestedDuration after the keyframe start.
+                    adjustedEndUs = baseTimeUs + requestedDurationUs
+                    Log.d(TAG, "baseTimeUs=${baseTimeUs/1000}ms adjustedEndUs=${adjustedEndUs/1000}ms (requested end=${endUs/1000}ms)")
+                }
+
+                if (sampleTimeUs > adjustedEndUs) break    // past adjusted end — stop
 
                 val muxerTrack = trackMap[trackIndex]
                 if (muxerTrack == null) { extractor.advance(); continue }
-
-                if (baseTimeUs == Long.MIN_VALUE) baseTimeUs = sampleTimeUs
 
                 buf.clear()
                 val size = extractor.readSampleData(buf, 0)

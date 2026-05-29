@@ -60,6 +60,11 @@ android {
     packaging {
         exclude("lib/*/libVkLayer_*.so")
     }
+
+    // ✅ TFLite 模型不可被壓縮：AAPT 對壓縮資産無法用 openFd() 讀取
+    androidResources {
+        noCompress += listOf("tflite", "lite")
+    }
 }
 
 flutter {

@@ -573,6 +573,39 @@ namespace UploadServer.Data
                     .HasColumnName("completed_at")
                     .HasColumnType("datetime");
 
+                entity.Property(e => e.Mode)
+                    .HasMaxLength(32)
+                    .HasColumnType("varchar(32)")
+                    .HasDefaultValue("full");
+
+                entity.Property(e => e.PromptVersion)
+                    .HasMaxLength(8)
+                    .HasColumnType("varchar(8)")
+                    .HasDefaultValue("v1");
+
+                entity.Property(e => e.PhaseTimestampsJson)
+                    .HasColumnName("phase_timestamps_json")
+                    .HasColumnType("TEXT");
+
+                entity.Property(e => e.AudioAnalysisJson)
+                    .HasColumnName("audio_analysis_json")
+                    .HasColumnType("LONGTEXT");
+
+                entity.Property(e => e.KeyframesJson)
+                    .HasColumnName("keyframes_json")
+                    .HasColumnType("LONGTEXT");
+
+                entity.Property(e => e.AudioB2Path)
+                    .HasColumnName("audio_b2_path")
+                    .HasMaxLength(512);
+
+                entity.Property(e => e.V2Fps)
+                    .HasColumnName("v2_fps");
+
+                entity.Property(e => e.V2Resolution)
+                    .HasColumnName("v2_resolution")
+                    .HasMaxLength(64);
+
                 entity.HasIndex(e => e.UserId).HasDatabaseName("idx_ai_coach_user_id");
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_ai_coach_status");
 

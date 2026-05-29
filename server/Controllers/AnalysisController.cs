@@ -39,27 +39,44 @@ namespace UploadServer.Controllers
         {
             var analysis = new AiCoachAnalysis
             {
-                UserId        = UserId,
-                VideoId       = req.VideoId,
-                ErrorTypeHint = req.ErrorTypeHint,
-                Status        = "pending",
+                UserId               = UserId,
+                VideoId              = req.VideoId,
+                ErrorTypeHint        = req.ErrorTypeHint,
+                Mode                 = req.Mode,
+                PromptVersion        = req.PromptVersion,
+                Status               = "pending",
+                PhaseTimestampsJson  = req.PhaseTimestamps != null
+                    ? System.Text.Json.JsonSerializer.Serialize(req.PhaseTimestamps)
+                    : null,
+                AudioAnalysisJson    = req.AudioAnalysisJson,
+                V2Fps                = req.V2Fps,
+                V2Resolution         = req.V2Resolution,
             };
             analysis.ClipB2Path = B2Service.AiCoachClipKey(analysis.Id);
             if (req.HasCsv)
-                analysis.CsvB2Path = B2Service.AiCoachCsvKey(analysis.Id);
+                analysis.CsvB2Path   = B2Service.AiCoachCsvKey(analysis.Id);
+            if (req.HasAudio)
+                analysis.AudioB2Path = B2Service.AiCoachAudioKey(analysis.Id);
+            if (req.Keyframes?.Count > 0)
+                analysis.KeyframesJson = System.Text.Json.JsonSerializer.Serialize(req.Keyframes);
 
             _db.AiCoachAnalyses.Add(analysis);
             await _db.SaveChangesAsync();
 
-            var clipUploadUrl = _b2.GenerateClipUploadUrl(analysis.Id);
-            var csvUploadUrl  = req.HasCsv ? _b2.GenerateCsvUploadUrl(analysis.Id) : null;
+            var clipUploadUrl  = _b2.GenerateClipUploadUrl(analysis.Id);
+            var csvUploadUrl   = req.HasCsv   ? _b2.GenerateCsvUploadUrl(analysis.Id)   : null;
+            var audioUploadUrl = req.HasAudio ? _b2.GenerateAudioUploadUrl(analysis.Id) : null;
 
-            _logger.LogInformation("建立 AI Coach 分析請求: {Id} HasCsv={HasCsv}", analysis.Id, req.HasCsv);
+            _logger.LogInformation(
+                "建立 AI Coach 分析請求: {Id} Mode={Mode} HasCsv={HasCsv} HasAudio={HasAudio} Keyframes={KF}",
+                analysis.Id, analysis.Mode, req.HasCsv, req.HasAudio, req.Keyframes?.Count ?? 0);
+
             return Ok(new AnalysisRequestResponse
             {
                 AnalysisId    = analysis.Id,
                 ClipUploadUrl = clipUploadUrl,
                 CsvUploadUrl  = csvUploadUrl,
+                AudioUploadUrl = audioUploadUrl,
             });
         }
 
@@ -87,6 +104,39 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// 升級 idle 記錄為完整 Gemini 分析
+        /// POST /api/analysis/{id}/upgrade
+        /// </summary>
+        [HttpPost("{id}/upgrade")]
+        public async Task<IActionResult> Upgrade(string id, [FromBody] AnalysisUpgradeDto? dto)
+        {
+            var analysis = await _db.AiCoachAnalyses
+                .FirstOrDefaultAsync(a => a.Id == id && a.UserId == UserId);
+
+            if (analysis == null)
+                return NotFound(new { message = "分析記錄不存在" });
+
+            if (analysis.Status != "idle")
+                return BadRequest(new { message = $"只有 idle 狀態可升級，目前: {analysis.Status}" });
+
+            analysis.Mode   = "full";
+            analysis.Status = "queued";
+            if (dto?.PromptVersion != null)
+                analysis.PromptVersion = dto.PromptVersion;
+
+            // 重置重試計數，讓 Worker 可以重新處理
+            analysis.RetryCount = 0;
+
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "升級分析: {Id} → Mode=full PromptVersion={Ver}",
+                id, analysis.PromptVersion);
+
+            return Ok(new { message = "升級請求已提交", promptVersion = analysis.PromptVersion });
+        }
+
+        /// <summary>
         /// 輪詢分析狀態與結果
         /// GET /api/analysis/{id}
         /// </summary>
@@ -99,21 +149,7 @@ namespace UploadServer.Controllers
             if (analysis == null)
                 return NotFound(new { message = "分析記錄不存在" });
 
-            object? result = null;
-            if (analysis.Status == "completed" && !string.IsNullOrEmpty(analysis.ResultJson))
-            {
-                try { result = JsonSerializer.Deserialize<JsonElement>(analysis.ResultJson); }
-                catch { result = analysis.ResultJson; }
-            }
-
-            return Ok(new AnalysisStatusResponse
-            {
-                AnalysisId = analysis.Id,
-                Status     = analysis.Status,
-                Summary    = analysis.Summary,
-                Severity   = analysis.Severity,
-                Result     = result,
-            });
+            return Ok(BuildStatusResponse(analysis));
         }
 
         /// <summary>
@@ -128,11 +164,13 @@ namespace UploadServer.Controllers
                 .OrderByDescending(a => a.CreatedAt)
                 .Select(a => new AnalysisStatusResponse
                 {
-                    AnalysisId = a.Id,
-                    VideoId    = a.VideoId,
-                    Status     = a.Status,
-                    Summary    = a.Summary,
-                    Severity   = a.Severity,
+                    AnalysisId    = a.Id,
+                    VideoId       = a.VideoId,
+                    Status        = a.Status,
+                    Mode          = a.Mode,
+                    PromptVersion = a.PromptVersion,
+                    Summary       = a.Summary,
+                    Severity      = a.Severity,
                 })
                 .ToListAsync();
 
@@ -152,26 +190,41 @@ namespace UploadServer.Controllers
                 .Take(10)
                 .ToListAsync();
 
-            var responses = rows.Select(a =>
-            {
-                object? result = null;
-                if (a.Status == "completed" && !string.IsNullOrEmpty(a.ResultJson))
-                {
-                    try { result = JsonSerializer.Deserialize<JsonElement>(a.ResultJson); }
-                    catch { result = a.ResultJson; }
-                }
-                return new AnalysisStatusResponse
-                {
-                    AnalysisId = a.Id,
-                    VideoId    = a.VideoId,
-                    Status     = a.Status,
-                    Summary    = a.Summary,
-                    Severity   = a.Severity,
-                    Result     = result,
-                };
-            }).ToList();
+            return Ok(rows.Select(BuildStatusResponse).ToList());
+        }
 
-            return Ok(responses);
+        // ── helpers ────────────────────────────────────────────────────────────
+
+        private static AnalysisStatusResponse BuildStatusResponse(AiCoachAnalysis a)
+        {
+            object? result = null;
+            if (a.Status == "completed" && !string.IsNullOrEmpty(a.ResultJson))
+            {
+                try { result = JsonSerializer.Deserialize<JsonElement>(a.ResultJson); }
+                catch { result = a.ResultJson; }
+            }
+
+            object? onnxResult = null;
+            if (!string.IsNullOrEmpty(a.OnnxResultJson))
+            {
+                try { onnxResult = JsonSerializer.Deserialize<JsonElement>(a.OnnxResultJson); }
+                catch { /* ONNX JSON 損毀時忽略 */ }
+            }
+
+            return new AnalysisStatusResponse
+            {
+                AnalysisId    = a.Id,
+                VideoId       = a.VideoId,
+                Status        = a.Status,
+                Mode          = a.Mode,
+                PromptVersion = a.PromptVersion,
+                Summary       = a.Summary,
+                Severity      = a.Severity,
+                Result        = result,
+                OnnxResult    = onnxResult,
+                InputTokens   = a.InputTokens,
+                OutputTokens  = a.OutputTokens,
+            };
         }
     }
 }

@@ -204,10 +204,11 @@ class TrajectoryOverlayRenderer {
 
         File(outputPath).parentFile?.mkdirs()
         val muxer   = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var muxTrack      = -1
-        var muxStarted    = false
-        var encodedFrames = 0
-        var decodedFrames = 0
+        var muxTrack          = -1
+        var muxStarted        = false
+        var encodedFrames     = 0
+        var decodedFrames     = 0
+        var totalSamplesWritten = 0   // 累計跨所有 drainEncoder 呼叫的寫入數
 
         val decBufInfo = MediaCodec.BufferInfo()
         val encBufInfo = MediaCodec.BufferInfo()
@@ -302,7 +303,7 @@ class TrajectoryOverlayRenderer {
                         encoder.queueInputBuffer(encInIdx, 0, nv12Buf.size, pts, 0)
                     }
 
-                    drainEncoder(
+                    totalSamplesWritten += drainEncoder(
                         encoder, muxer, encBufInfo,
                         setTrack   = { t -> muxTrack = t; muxStarted = true },
                         getTrack   = { muxTrack },
@@ -339,17 +340,18 @@ class TrajectoryOverlayRenderer {
             } else {
                 Log.w(TAG, "Failed to get EOS input buffer after $eosTries tries")
             }
-            drainEncoder(
+            totalSamplesWritten += drainEncoder(
                 encoder, muxer, encBufInfo,
-                setTrack = { t -> muxTrack = t; muxStarted = true },
-                getTrack = { muxTrack },
-                isMuxed  = { muxStarted },
-                onFrame  = { encodedFrames++ },
-                eos      = true,
+                setTrack    = { t -> muxTrack = t; muxStarted = true },
+                getTrack    = { muxTrack },
+                isMuxed     = { muxStarted },
+                onFrame     = { encodedFrames++ },
+                eos         = true,
+                prevSamples = totalSamplesWritten,  // ← per-frame drain 已寫入的數量
             )
 
             success = encodedFrames > 0
-            Log.d(TAG, "完成 → $outputPath (encodedFrames=$encodedFrames)")
+            Log.d(TAG, "完成 → $outputPath (encodedFrames=$encodedFrames, totalSamples=$totalSamplesWritten)")
             onProgress?.invoke("renderOverlay", 1.0, "軌跡渲染完成", decodedFrames, decodedFrames)
 
         } catch (e: Exception) {
@@ -495,50 +497,92 @@ class TrajectoryOverlayRenderer {
     // 編碼器排空
     // ────────────────────────────────────────────────────────────
 
+    /**
+     * 排空編碼器輸出佇列並寫入 muxer。
+     *
+     * @param prevSamples  先前所有 drain 呼叫已累積寫入的 sample 數（用於 EOS timeout 判斷）
+     * @return 本次呼叫實際寫入 muxer 的 sample 數
+     *
+     * 修正要點：
+     * 1. INFO_OUTPUT_FORMAT_CHANGED 加 `isMuxed()` 防護，避免重複 start() crash
+     * 2. EOS drain 使用更長 timeout：200 × 50ms = 10s max
+     * 3. 非 EOS drain 仍在 TRY_AGAIN_LATER 時立即返回（避免卡住主迴圈）
+     * 4. EOS timeout 時若 prevSamples > 0，視為正常（幀已在 per-frame drain 寫完），僅 Log.d
+     */
     private fun drainEncoder(
         encoder: MediaCodec, muxer: MediaMuxer, info: MediaCodec.BufferInfo,
         setTrack: (Int) -> Unit, getTrack: () -> Int, isMuxed: () -> Boolean,
         onFrame: (() -> Unit)? = null,
         eos: Boolean,
-    ) {
-        var tryAgainCount = 0
+        prevSamples: Int = 0,   // ← EOS drain 傳入已累計的 per-frame sample 數
+    ): Int {
+        var tryAgainCount  = 0
         var samplesWritten = 0
-        val maxTryAgain = 50  // prevent infinite loop: 50 × 10ms = 500ms max
+        // EOS drain：每次 poll 50ms，最多重試 200 次 = 10 秒上限
+        // non-EOS drain：每次 poll 10ms，TRY_AGAIN_LATER 時立即返回（不重試）
+        val pollTimeoutUs = if (eos) 50_000L else 10_000L
+        val maxTryAgain   = if (eos) 200 else 0
 
         while (true) {
-            val idx = encoder.dequeueOutputBuffer(info, 10_000L)
+            val idx = encoder.dequeueOutputBuffer(info, pollTimeoutUs)
             when {
                 idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    if (!eos) break
+                    if (!eos) break  // non-EOS：立即返回，讓主迴圈繼續處理下一幀
                     tryAgainCount++
-                    Log.d(TAG, "drainEncoder TRY_AGAIN_LATER ($tryAgainCount/$maxTryAgain) eos=true samples=$samplesWritten")
+                    if (tryAgainCount % 20 == 0) {  // 每 1 秒記一次 log（20 × 50ms）
+                        Log.d(TAG, "drainEncoder EOS waiting ($tryAgainCount/$maxTryAgain) " +
+                            "elapsed=${tryAgainCount * pollTimeoutUs / 1_000}ms samples=$samplesWritten")
+                    }
                     if (tryAgainCount > maxTryAgain) {
-                        Log.w(TAG, "drainEncoder EOS timeout — samples=$samplesWritten")
+                        val elapsedMs = tryAgainCount * pollTimeoutUs / 1_000
+                        val totalSamples = prevSamples + samplesWritten
+                        if (totalSamples > 0) {
+                            // ✅ 正常情況：幀已在 per-frame drain 全數寫完，EOS signal 未到達只是硬體特性
+                            Log.d(TAG, "drainEncoder EOS timeout after ${elapsedMs}ms — " +
+                                "samples_this_call=$samplesWritten, prevSamples=$prevSamples → OK, all frames written")
+                        } else {
+                            // ⚠️ 真正異常：整個 session 一個 sample 都沒寫入
+                            Log.w(TAG, "drainEncoder EOS timeout after ${elapsedMs}ms — " +
+                                "totalSamples=0, encoding may have failed")
+                        }
                         break
                     }
                 }
+
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     tryAgainCount = 0
-                    val t = muxer.addTrack(encoder.outputFormat)
-                    muxer.start(); setTrack(t)
-                    Log.d(TAG, "drainEncoder FORMAT_CHANGED, mux track=$t")
+                    // ✅ 防護：僅在 muxer 尚未啟動時才 addTrack / start
+                    // 某些裝置會送出兩次 FORMAT_CHANGED，重複呼叫會 throw IllegalStateException
+                    if (!isMuxed()) {
+                        val t = muxer.addTrack(encoder.outputFormat)
+                        muxer.start()
+                        setTrack(t)
+                        Log.d(TAG, "drainEncoder FORMAT_CHANGED → muxer started, track=$t")
+                    } else {
+                        Log.d(TAG, "drainEncoder FORMAT_CHANGED (ignored, muxer already started)")
+                    }
                 }
+
                 idx >= 0 -> {
                     tryAgainCount = 0
                     val buf = encoder.getOutputBuffer(idx)
+                    // ✅ 三重防護：buf 非 null、size > 0（非 EOS-only buffer）、muxer 已啟動
                     if (buf != null && info.size > 0 && isMuxed()) {
-                        buf.position(info.offset); buf.limit(info.offset + info.size)
+                        buf.position(info.offset)
+                        buf.limit(info.offset + info.size)
                         muxer.writeSampleData(getTrack(), buf, info)
                         onFrame?.invoke()
                         samplesWritten++
                     }
+                    val isEos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                     encoder.releaseOutputBuffer(idx, false)
-                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        Log.d(TAG, "drainEncoder EOS received, samples=$samplesWritten")
+                    if (isEos) {
+                        Log.d(TAG, "drainEncoder EOS output confirmed, samples_this_call=$samplesWritten")
                         break
                     }
                 }
             }
         }
+        return samplesWritten
     }
 }

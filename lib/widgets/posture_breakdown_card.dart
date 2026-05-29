@@ -4,7 +4,7 @@ import '../models/swing_posture.dart';
 import '../theme/app_theme.dart';
 
 /// 姿勢分析統計卡片
-/// 顯示 1 種完美 + 5 種錯誤姿勢的次數分佈
+/// 顯示 1 種完美 + 5 種錯誤姿勢的次數分佈（無資料時顯示全 0，不隱藏）
 /// [breakdown] key = SwingPosture label，value = 次數（來自 StatisticsResponse.postureBreakdown）
 class PostureBreakdownCard extends StatelessWidget {
   final Map<String, int> breakdown;
@@ -16,13 +16,10 @@ class PostureBreakdownCard extends StatelessWidget {
     this.title,
   });
 
-  /// 是否有任何已分析資料
   bool get _hasData => breakdown.values.any((v) => v > 0);
 
   @override
   Widget build(BuildContext context) {
-    if (!_hasData) return const SizedBox.shrink();
-
     return Container(
       padding: const EdgeInsets.all(kSpaceMD),
       decoration: kCardDecoration(radius: kRadiusMD),
@@ -35,19 +32,26 @@ class PostureBreakdownCard extends StatelessWidget {
               const Icon(Icons.accessibility_new_rounded,
                   color: kPrimaryGreen, size: 18),
               const SizedBox(width: kSpaceSM),
-              Text(
-                title ?? '姿勢分析',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: kTextPrimary,
+              Expanded(
+                child: Text(
+                  title ?? '姿勢分析',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: kTextPrimary,
+                  ),
                 ),
               ),
+              if (!_hasData)
+                const Text(
+                  '尚無 AI 分析資料',
+                  style: TextStyle(fontSize: 11, color: kTextHint),
+                ),
             ],
           ),
           const SizedBox(height: kSpaceMD),
 
-          // ── 2×3 格子 ──────────────────────────────────────────
+          // ── 2×3 格子（無資料時全格顯示 0） ────────────────────
           GridView.count(
             crossAxisCount: 3,
             shrinkWrap: true,

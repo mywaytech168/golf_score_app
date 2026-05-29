@@ -56,12 +56,14 @@ class VideoAnalysisPipelineService {
       final hasCSV = await File(csvPath).exists();
       final hasAudio = analysis.audioPath.isNotEmpty && await File(analysis.audioPath).exists();
 
-      debugPrint('[VideoAnalysisPipeline] ✅ 基礎分析完成: CSV=$hasCSV, Audio=$hasAudio');
+      debugPrint('[VideoAnalysisPipeline] ✅ 基礎分析完成: CSV=$hasCSV, '
+          'Audio=${hasAudio ? "✅" : "❌ 無音訊（略過）"}');
 
+      // 無音訊屬正常情況（例如無聲錄製或靜音影片），骨架存在即視為完整
       return BasicAnalysisResult(
         csvPath: csvPath,
         audioPath: analysis.audioPath,
-        isComplete: hasCSV && hasAudio,
+        isComplete: hasCSV,  // 只要骨架存在即完整，音訊為選用
       );
     } catch (e) {
       debugPrint('[VideoAnalysisPipeline] ❌ 基礎分析錯誤: $e');

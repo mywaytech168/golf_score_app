@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -187,6 +188,16 @@ class ClipPipelineService {
       endSec: hit.endSec,
     );
 
+    // 補產生 audio_features.csv（時序 RMS dBFS），供播放器多模態時間軸波形使用
+    await _writeAudioFeaturesCsv(sessionDir);
+
+    // 儲存 8 階段時間點（phases.json），供影片播放器關鍵禎跳轉使用
+    await _savePhasesJson(
+      sessionDir: sessionDir,
+      hit: hit,
+      clipActualStartSec: clipActualStartSec,
+    );
+
     debugPrint('[Pipeline] hit ${hit.hitIndex} → ✅ 裁切完成：$trimmed');
 
     final clipDuration = math.max(1, (hit.endSec - hit.startSec).round());
@@ -203,8 +214,48 @@ class ClipPipelineService {
         hitSecond: hit.hitSec - clipActualStartSec,
         startSecond: clipActualStartSec,
         endSecond: hit.endSec,
+        bestSpeedValue: hit.speedValue > 0 ? hit.speedValue : null,
       ),
     );
+  }
+
+  /// 公開入口：供 UI 頁面對已存在的 clip 補存 phases.json。
+  ///
+  /// [hit] 的時間欄位（addressSec 等）應為相對於 clip 起點的秒數（clipActualStartSec=0）。
+  static Future<void> savePhasesJson({
+    required String sessionDir,
+    required SwingHit hit,
+    double clipActualStartSec = 0.0,
+  }) =>
+      _savePhasesJson(
+        sessionDir: sessionDir,
+        hit: hit,
+        clipActualStartSec: clipActualStartSec,
+      );
+
+  /// 儲存 8 階段時間點到 phases.json（clip 相對秒數），供影片播放器快速讀取。
+  static Future<void> _savePhasesJson({
+    required String sessionDir,
+    required SwingHit hit,
+    required double clipActualStartSec,
+  }) async {
+    double clip(double srcSec) => (srcSec - clipActualStartSec).clamp(0.0, 3600.0);
+    final map = {
+      'address':       clip(hit.addressSec),
+      'takeaway':      clip(hit.takeawaySec),
+      'backswing':     clip(hit.backswingSec),
+      'top':           clip(hit.backswingTopSec),
+      'downswing':     clip(hit.downswingSec),
+      'impact':        clip(hit.hitSec),
+      'followthrough': clip(hit.followThroughSec),
+      'finish':        clip(hit.finishSec),
+    };
+    try {
+      await File(p.join(sessionDir, 'phases.json'))
+          .writeAsString(jsonEncode(map));
+    } catch (e) {
+      debugPrint('[Pipeline] phases.json 儲存失敗: $e');
+    }
   }
 
   /// 從原始 CSV 擷取 [startSec, endSec] 範圍的骨架幀，重新以 0 為起點編號寫出。
@@ -363,7 +414,7 @@ class ClipPipelineService {
       debugPrint('[Pipeline.analyze] 球偵測模式: ${ballMode.label}');
 
       final extraction = ballMode == BallDetectionMode.tflite
-          ? await BallTrajectoryService.extractBlobsTflite(inputPath: clipPath)
+          ? await BallTrajectoryService.extractBlobsTflite(inputPath: clipPath, hitSec: hitSec)
           : await BallTrajectoryService.extractBlobs(inputPath: clipPath);
       progressSvc.progress.removeListener(_listenBlobs);
 
@@ -608,6 +659,91 @@ class ClipPipelineService {
       debugPrint('[Pipeline._sliceAudio] ✅ 寫出完成 → $dstAudioPath');
     } catch (e) {
       debugPrint('[Pipeline._sliceAudio] 錯誤: $e');
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // audio_features.csv 產生器
+  // 從 session 目錄的 audio.wav 計算時序 RMS dBFS（每 50ms 一個點），
+  // 寫出 audio_features.csv，供 ChartDataService 繪製音訊波形使用。
+  // 不依賴 Python 或外部引擎，純 Dart 計算。
+  // ──────────────────────────────────────────────────────────────
+
+  static Future<void> _writeAudioFeaturesCsv(String sessionDir) async {
+    const tag = '[Pipeline._writeAudioFeaturesCsv]';
+    try {
+      final wavFile = File(p.join(sessionDir, 'audio.wav'));
+      if (!await wavFile.exists()) {
+        debugPrint('$tag audio.wav 不存在，略過');
+        return;
+      }
+
+      final bytes = await wavFile.readAsBytes();
+      if (bytes.length < 44) {
+        debugPrint('$tag WAV 過小 (${bytes.length} bytes)，略過');
+        return;
+      }
+
+      // ── 解析 WAV header ──────────────────────────────────────
+      final hd          = bytes.buffer.asByteData();
+      final sampleRate  = hd.getUint32(24, Endian.little);
+      final blockAlign  = hd.getUint16(32, Endian.little); // bytes per frame
+
+      // 搜尋 "data" chunk（與 _sliceAudio 同邏輯）
+      int dataStart = 44;
+      for (int i = 36; i < bytes.length - 8; i++) {
+        if (bytes[i] == 100 && bytes[i + 1] == 97 &&
+            bytes[i + 2] == 116 && bytes[i + 3] == 97) {
+          dataStart = i + 8;
+          break;
+        }
+      }
+      if (dataStart >= bytes.length || blockAlign == 0) {
+        debugPrint('$tag WAV 解析失敗（dataStart=$dataStart）');
+        return;
+      }
+
+      final dataBytes   = ByteData.sublistView(bytes, dataStart);
+      final totalFrames = (bytes.length - dataStart) ~/ blockAlign;
+      if (totalFrames == 0) return;
+
+      // ── 每 hopMs 毫秒計算一次 RMS dBFS ──────────────────────
+      const hopMs   = 50; // 時間解析度 50ms
+      final hopFrames = math.max(1, (sampleRate * hopMs / 1000).toInt());
+      const eps = 1e-10;
+
+      final lines = StringBuffer('time_sec,rms_dbfs\n');
+
+      for (int fStart = 0; fStart < totalFrames; fStart += hopFrames) {
+        final fEnd = math.min(fStart + hopFrames, totalFrames);
+        double sumSq = 0.0;
+        int count    = 0;
+
+        for (int f = fStart; f < fEnd; f++) {
+          final byteOff = f * blockAlign;
+          if (byteOff + 1 >= dataBytes.lengthInBytes) break;
+          // int16 LE，只取第一聲道
+          final int16  = dataBytes.getInt16(byteOff, Endian.little);
+          final norm   = int16 / 32768.0;
+          sumSq += norm * norm;
+          count++;
+        }
+        if (count == 0) continue;
+
+        final rms     = math.sqrt(sumSq / count);
+        final rmsDbfs = rms > eps
+            ? 20.0 * (math.log(rms) / math.ln10)
+            : -80.0;
+        final timeSec = fStart / sampleRate;
+        lines.write('${timeSec.toStringAsFixed(4)},'
+            '${rmsDbfs.toStringAsFixed(2)}\n');
+      }
+
+      final csvFile = File(p.join(sessionDir, 'audio_features.csv'));
+      await csvFile.writeAsString(lines.toString());
+      debugPrint('$tag ✅ 寫出完成 (${totalFrames ~/ hopFrames} 行) → ${csvFile.path}');
+    } catch (e) {
+      debugPrint('$tag 錯誤: $e');
     }
   }
 }

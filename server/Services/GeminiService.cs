@@ -1,22 +1,27 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace UploadServer.Services
 {
     public record GeminiCoachResult(
         string RawJson,
         string Summary,
-        string Severity
+        string Severity,
+        int InputTokens,
+        int OutputTokens,
+        int? ResolvedV2Fps = null,
+        string? ResolvedV2Resolution = null
     );
 
     public class GeminiService
     {
         private const long InlineLimitBytes = 20 * 1024 * 1024; // 20 MB
 
-        // Prompt 範本（移植自 gemini_ai_coach_prompt_template.md）
-        private const string PromptTemplate = """
-            你是一位高爾夫 AI 教練，請根據「5 秒影片切片」與「模型分析 JSON」輸出教練評語。
+        // ── 提示詞版本 ─────────────────────────────────────────────────
+
+        /// v1：原始版本（現有邏輯）
+        private const string PromptV1 = """
+            你是一位高爾夫 AI 教練，請根據「5 秒影片切片」、「模型分析 JSON」與「音訊分析 JSON」輸出教練評語。
 
             任務目標：
             - 用繁體中文回答。
@@ -24,12 +29,27 @@ namespace UploadServer.Services
             - 不要臆測影片外看不到的資訊。
             - 如果模型分析 JSON 與影片觀察不一致，請明確指出「模型結果可能需要複查」。
 
+            ── 影片骨架模型（判斷動作錯誤）──
             五種錯誤類型：
             1. Over the top（外切）：通過球桿角度偵測。
             2. Early release（casting）：通過下桿時手部節點偵測。
             3. Weight shift（重心沒轉）：通過腳部節點偵測。
             4. Spine angle 流失（姿勢跑掉）：通過軀幹節點偵測。
             5. Impact 沒壓桿（手在球後）：通過擊球時手部節點偵測與球桿位置偵測。
+
+            ── 音訊分析（判斷擊球瞬間品質，不可用於判斷身體動作）──
+            音訊共有 5 個特徵：rms_dbfs（音量）、spectral_centroid（頻率）、sharpness_hfxloud（清脆）、highband_amp（高頻）、peak_dbfs（峰值）。
+            甜蜜點規則：每個特徵通過算 1 項。pass_count >= 3 代表聲音接近甜蜜點。
+            音訊聲音分級：0~1 項→差；2 項→普通；3 項→接近甜蜜點；4 項→甜蜜點；5 項→高品質甜蜜點。
+            音訊使用規則：
+            - primary_error 以影片骨架模型為主；音訊只補充 impact 品質與甜蜜點描述。
+            - 不可單獨依賴音訊判斷外切、重心未轉、脊椎角度等身體動作問題。
+            - 若影片顯示 impact 錯誤且音訊 pass_count < 3，教練評語加強 impact 修正建議。
+            - 若影片有動作錯誤但音訊 pass_count >= 3，說明「擊球品質尚可，但動作仍可優化」。
+            - 若影片模型與音訊明顯矛盾，在 model_check.notes 寫「模型結果可能需要複查」。
+            - 若音訊 available=false，impact_quality 仍須填入但 audio_feedback 填「無音訊分析資料」。
+
+            impact_quality.quality_level 對應：0~1→"poor"；2→"fair"；3→"near_sweet_spot"；4→"sweet_spot"；5→"premium_sweet_spot"。
 
             請輸出嚴格 JSON，不要輸出 Markdown：
             {
@@ -40,16 +60,16 @@ namespace UploadServer.Services
                 "severity": "low|medium|high",
                 "evidence": ["從影片或模型分析看到的依據"]
               },
-              "coach_feedback": [
-                "評語 1",
-                "評語 2"
-              ],
+              "impact_quality": {
+                "audio_sweet_spot": true,
+                "pass_count": 3,
+                "total_features": 5,
+                "quality_level": "near_sweet_spot",
+                "audio_feedback": "音訊擊球品質說明（1~2句）"
+              },
+              "coach_feedback": ["評語 1（含音訊補充）", "評語 2"],
               "practice_suggestions": [
-                {
-                  "drill": "練習名稱",
-                  "instruction": "具體做法",
-                  "reps": "建議次數"
-                }
+                { "drill": "練習名稱", "instruction": "具體做法", "reps": "建議次數" }
               ],
               "next_training_goal": "下一次練習目標",
               "model_check": {
@@ -60,47 +80,219 @@ namespace UploadServer.Services
 
             模型分析 JSON：
             {{MODEL_ANALYSIS_JSON}}
+
+            音訊分析 JSON：
+            {{AUDIO_ANALYSIS_JSON}}
             """;
 
-        // 錯誤類型目錄
+        /// v2：完整影片分析優化版本
+        private const string PromptV2 = """
+            你是一位頂尖高爾夫教練，現在要分析一段完整的揮桿影片，同時結合音訊分析判斷擊球品質。
+            請**逐幀仔細觀看**整段影片，從準備姿勢到收桿全程進行分析。
+
+            分析要求（按順序逐一確認）：
+            ① 準備姿勢（Address）：站姿、握桿、重心分佈
+            ② 起桿（Takeaway）：手臂、肩膀與髖部的協調
+            ③ 上桿（Backswing）：手腕角度、肩膀轉動幅度
+            ④ 頂點（Top）：桿頭位置、脊柱角度保持
+            ⑤ 下桿（Downswing）：髖部先行、肩膀跟上的順序
+            ⑥ 擊球（Impact）：重心轉移完成、手部超前球
+            ⑦ 送桿（Follow-through）：手臂伸展、軀幹旋轉
+            ⑧ 收桿（Finish）：平衡與完整度
+
+            從以上8個階段找出最主要的問題，並結合下方 ONNX 推論結果綜合判斷。
+
+            ── 影片骨架模型五種常見錯誤（error_type 英文 id）──
+            - early_release_casting：早放拋桿（下桿過早釋放手腕角）
+            - impact：撞擊失誤（擊球時手部未超前球）
+            - over_the_top：外側切入（下桿路徑由外向內）
+            - spine_angle：脊柱角度流失（揮桿中軀幹抬起）
+            - weight_shift：重心轉移不足（重心未完整轉向目標側）
+            若揮桿完美無明顯錯誤，請設 "error_type": ""（空字串）。
+
+            ── 音訊分析（判斷擊球瞬間品質，不可用於判斷身體動作）──
+            音訊共有 5 個特徵：rms_dbfs（音量）、spectral_centroid（頻率）、sharpness_hfxloud（清脆）、highband_amp（高頻）、peak_dbfs（峰值）。
+            甜蜜點規則：pass_count >= 3 代表聲音接近甜蜜點。
+            音訊聲音分級：0~1 項→差；2 項→普通；3 項→接近甜蜜點；4 項→甜蜜點；5 項→高品質甜蜜點。
+            音訊使用規則：
+            - primary_error 以影片骨架模型為主；音訊只補充 impact 品質與甜蜜點描述。
+            - 不可單獨依賴音訊判斷身體動作問題。
+            - 若影片顯示 impact 錯誤且音訊 pass_count < 3，教練評語加強 impact 修正建議。
+            - 若影片有動作錯誤但音訊 pass_count >= 3，說明「擊球品質尚可，但動作仍可優化」。
+            - 若影片模型與音訊明顯矛盾，在 model_check.notes 寫「模型結果可能需要複查」。
+            - 若音訊 available=false，impact_quality.audio_feedback 填「無音訊分析資料」。
+
+            impact_quality.quality_level 對應：0~1→"poor"；2→"fair"；3→"near_sweet_spot"；4→"sweet_spot"；5→"premium_sweet_spot"。
+
+            請輸出嚴格 JSON，不要輸出 Markdown：
+            {
+              "summary": "一句整體評語（不超過50字）",
+              "primary_error": {
+                "error_type": "錯誤類型英文 id 或空字串",
+                "zh_name": "中文名稱",
+                "severity": "low|medium|high",
+                "evidence": ["階段①②…中觀察到的具體動作依據"]
+              },
+              "impact_quality": {
+                "audio_sweet_spot": true,
+                "pass_count": 3,
+                "total_features": 5,
+                "quality_level": "near_sweet_spot",
+                "audio_feedback": "音訊擊球品質說明（1~2句）"
+              },
+              "coach_feedback": ["評語1（針對具體動作，含音訊補充）", "評語2"],
+              "practice_suggestions": [
+                { "drill": "練習名稱", "instruction": "具體操作步驟", "reps": "建議次數/組數" }
+              ],
+              "next_training_goal": "下一次練習的具體目標",
+              "model_check": {
+                "is_consistent_with_video": true,
+                "notes": "ONNX 結果與影片觀察是否一致的說明"
+              }
+            }
+
+            ONNX 推論結果（僅供參考，以影片觀察為主）：
+            {{MODEL_ANALYSIS_JSON}}
+
+            音訊分析 JSON：
+            {{AUDIO_ANALYSIS_JSON}}
+            """;
+
+        /// v3：8 關鍵幀圖片 + 音訊版本（不傳影片，用圖片直接分析各揮桿階段）
+        private const string PromptV3 = """
+            你是一位高爾夫 AI 教練。以下提供揮桿動作的 8 張關鍵幀圖片（JPEG）以及擊球音訊（WAV），
+            請仔細觀看每一張圖片，並聆聽音訊，綜合分析整個揮桿動作與擊球品質。
+
+            {{PHASE_TIMESTAMPS}}
+
+            請依序對每張圖片分析對應的揮桿階段：
+            - 準備（address）：站姿、重心、握桿
+            - 起桿（takeaway）：手臂路徑是否內側
+            - 上桿（backswing）：肩膀轉動與手腕鉸鏈
+            - 頂點（top）：桿面角度、脊柱維持
+            - 下桿（downswing）：髖部開始時機
+            - 擊球（impact）：手部超前、重心在前腳
+            - 送桿（followthrough）：手臂伸展
+            - 收桿（finish）：完整平衡
+
+            依以上關鍵幀圖片觀察，結合 ONNX 骨架推論結果，給出診斷。
+
+            ── ONNX 骨架模型五種常見錯誤（error_type 英文 id）──
+            - early_release_casting / impact / over_the_top / spine_angle / weight_shift
+            若無明顯錯誤，error_type 填空字串。
+
+            ── 音訊分析（判斷擊球瞬間品質，不可用於判斷身體動作）──
+            你已收到擊球音訊（WAV），請直接聆聽並判斷聲音品質；以下 JSON 為程式預計算的特徵值供參考。
+            音訊共有 5 個特徵：rms_dbfs（音量）、spectral_centroid（頻率）、sharpness_hfxloud（清脆）、highband_amp（高頻）、peak_dbfs（峰值）。
+            甜蜜點規則：pass_count >= 3 代表聲音接近甜蜜點。
+            音訊聲音分級：0~1 項→差；2 項→普通；3 項→接近甜蜜點；4 項→甜蜜點；5 項→高品質甜蜜點。
+            音訊使用規則：
+            - primary_error 以關鍵幀圖片觀察為主；音訊只補充 impact 品質與甜蜜點描述。
+            - 不可單獨依賴音訊判斷身體動作問題。
+            - 若圖片顯示 impact 錯誤且音訊 pass_count < 3，教練評語加強 impact 修正建議。
+            - 若圖片有動作錯誤但音訊 pass_count >= 3，說明「擊球品質尚可，但動作仍可優化」。
+            - 若圖片觀察與音訊明顯矛盾，在 model_check.notes 寫「需要複查」。
+            - 若音訊 available=false，impact_quality.audio_feedback 填「無音訊分析資料」。
+
+            impact_quality.quality_level 對應：0~1→"poor"；2→"fair"；3→"near_sweet_spot"；4→"sweet_spot"；5→"premium_sweet_spot"。
+
+            請輸出嚴格 JSON，不要輸出 Markdown：
+            {
+              "summary": "一句整體評語",
+              "primary_error": {
+                "error_type": "",
+                "zh_name": "",
+                "severity": "low|medium|high",
+                "evidence": ["基於哪張關鍵幀（第幾張、哪個階段）觀察到的"]
+              },
+              "impact_quality": {
+                "audio_sweet_spot": true,
+                "pass_count": 3,
+                "total_features": 5,
+                "quality_level": "near_sweet_spot",
+                "audio_feedback": "音訊擊球品質說明（1~2句）"
+              },
+              "coach_feedback": ["評語1（含音訊補充）", "評語2"],
+              "practice_suggestions": [
+                { "drill": "練習名稱", "instruction": "具體做法", "reps": "建議次數" }
+              ],
+              "next_training_goal": "下次目標",
+              "model_check": { "is_consistent_with_video": true, "notes": "" }
+            }
+
+            ONNX 骨架推論結果：
+            {{MODEL_ANALYSIS_JSON}}
+
+            音訊特徵 JSON（供參考，以實際聆聽為主）：
+            {{AUDIO_ANALYSIS_JSON}}
+            """;
+
+        // ── 錯誤類型目錄 ──────────────────────────────────────────────
+
         private static readonly Dictionary<string, (string ZhName, string Detector, string[] Signals)> ErrorCatalog = new()
         {
-            ["over_the_top"] = ("外切", "club_angle",
-                ["club_shaft_angle_sequence", "clubhead_path"]),
-            ["early_release_casting"] = ("Early release / casting", "downswing_hand_nodes",
-                ["left_wrist", "right_wrist", "elbow_wrist_angle", "downswing_phase"]),
-            ["weight_shift_no_rotation"] = ("重心沒轉", "foot_nodes",
-                ["left_ankle", "right_ankle", "hip_center_shift"]),
-            ["spine_angle_loss"] = ("Spine angle 流失 / 姿勢跑掉", "torso_nodes",
-                ["left_shoulder", "right_shoulder", "left_hip", "right_hip", "torso_tilt_angle"]),
-            ["impact_no_shaft_lean"] = ("Impact 沒壓桿 / 手在球後", "impact_hand_nodes_and_club_position",
-                ["impact_frame", "lead_wrist_position", "ball_position", "club_shaft_angle"]),
+            ["over_the_top"]            = ("外切", "club_angle",          ["club_shaft_angle_sequence", "clubhead_path"]),
+            ["early_release_casting"]   = ("Early release / casting", "downswing_hand_nodes",
+                                           ["left_wrist", "right_wrist", "elbow_wrist_angle", "downswing_phase"]),
+            ["weight_shift"]            = ("重心沒轉", "foot_nodes",
+                                           ["left_ankle", "right_ankle", "hip_center_shift"]),
+            ["spine_angle"]             = ("Spine angle 流失", "torso_nodes",
+                                           ["left_shoulder", "right_shoulder", "left_hip", "right_hip", "torso_tilt_angle"]),
+            ["impact"]                  = ("Impact 沒壓桿", "impact_hand_nodes_and_club_position",
+                                           ["impact_frame", "lead_wrist_position", "ball_position", "club_shaft_angle"]),
         };
 
         private readonly HttpClient _http;
         private readonly string _apiKey;
         private readonly string _model;
+        private readonly IConfiguration _config;
         private readonly ILogger<GeminiService> _logger;
 
         public GeminiService(IHttpClientFactory httpFactory, IConfiguration config, ILogger<GeminiService> logger)
         {
-            _http    = httpFactory.CreateClient("gemini");
-            _apiKey  = config["Gemini:ApiKey"] ?? throw new InvalidOperationException("Gemini:ApiKey 未設定");
-            _model   = config["Gemini:Model"] ?? "gemini-2.5-flash";
-            _logger  = logger;
+            _http   = httpFactory.CreateClient("gemini");
+            _apiKey = config["Gemini:ApiKey"] ?? throw new InvalidOperationException("Gemini:ApiKey 未設定");
+            _model  = config["Gemini:Model"]  ?? "gemini-2.5-flash";
+            _config = config;
+            _logger = logger;
         }
 
+        /// <summary>
+        /// 呼叫 Gemini 分析揮桿影片。
+        /// v1   ：inline base64 影片（1 FPS，低 token）
+        /// v2   ：Files API 上傳 + videoMetadata.fps（完整解析，高精度）
+        /// v3   ：8 關鍵禎 JPEG（inline）+ audio WAV（inline）；不傳影片
+        /// </summary>
         public async Task<GeminiCoachResult> AnalyzeAsync(
             byte[] clipBytes,
             string? errorTypeHint,
+            string promptVersion = "v1",
+            Dictionary<string, double>? phaseTimestamps = null,
+            string? audioAnalysisJson = null,
+            string[]? keyframesBase64 = null,
+            byte[]? audioWavBytes = null,
+            int? v2Fps = null,
+            string? v2Resolution = null,
             CancellationToken ct = default)
+        {
+            var modelAnalysis = BuildModelAnalysis(clipBytes, errorTypeHint);
+            var prompt        = RenderPrompt(modelAnalysis, promptVersion, phaseTimestamps, audioAnalysisJson);
+
+            return promptVersion switch
+            {
+                "v2" => await AnalyzeWithFilesApiAsync(clipBytes, prompt, v2Fps, v2Resolution, ct),
+                "v3" => await AnalyzeWithKeyframesAsync(keyframesBase64, audioWavBytes, prompt, ct),
+                _    => await AnalyzeInlineAsync(clipBytes, prompt, ct),
+            };
+        }
+
+        // ── v1 / v3：inline base64（同原本邏輯）──────────────────────────
+
+        private async Task<GeminiCoachResult> AnalyzeInlineAsync(
+            byte[] clipBytes, string prompt, CancellationToken ct)
         {
             if (clipBytes.Length >= InlineLimitBytes)
                 throw new InvalidOperationException($"Clip 超過 20MB inline 限制 ({clipBytes.Length / 1024 / 1024}MB)");
-
-            var modelAnalysis = BuildModelAnalysis(clipBytes, errorTypeHint);
-            var prompt        = RenderPrompt(modelAnalysis);
-            var videoB64      = Convert.ToBase64String(clipBytes);
 
             var body = new
             {
@@ -110,7 +302,7 @@ namespace UploadServer.Services
                     {
                         parts = new object[]
                         {
-                            new { inlineData = new { mimeType = "video/mp4", data = videoB64 } },
+                            new { inlineData = new { mimeType = "video/mp4", data = Convert.ToBase64String(clipBytes) } },
                             new { text = prompt },
                         }
                     }
@@ -118,10 +310,186 @@ namespace UploadServer.Services
                 generationConfig = new { responseMimeType = "application/json" },
             };
 
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
+            return await CallGeminiAsync(body, "inline", clipBytes.Length, ct);
+        }
+
+        // ── v2：Files API + videoMetadata.fps（完整 FPS 解析）─────────────
+
+        private const int DefaultV2Fps = 10;
+        // 合法值："MEDIA_RESOLUTION_HIGH" | "MEDIA_RESOLUTION_MEDIUM"（預設 HIGH）
+        private const string DefaultV2Resolution = "MEDIA_RESOLUTION_HIGH";
+
+        private async Task<GeminiCoachResult> AnalyzeWithFilesApiAsync(
+            byte[] clipBytes, string prompt,
+            int? v2FpsOverride, string? v2ResolutionOverride,
+            CancellationToken ct)
+        {
+            // per-request 值優先；fallback 到 appsettings.json；再 fallback 到 hardcoded 預設
+            var fps        = v2FpsOverride        ?? _config.GetValue<int?>("Gemini:V2Fps")           ?? DefaultV2Fps;
+            var resolution = v2ResolutionOverride ?? _config.GetValue<string?>("Gemini:V2Resolution") ?? DefaultV2Resolution;
+            string? fileUri  = null;
+            string? fileName = null;
+
+            try
+            {
+                // 1. 上傳 clip 到 Gemini Files API
+                (fileUri, fileName) = await UploadVideoFileAsync(clipBytes, ct);
+                _logger.LogInformation("Files API 上傳完成: {Name} ({KB}KB)", fileName, clipBytes.Length / 1024);
+
+                // 2. 等待 file 狀態變 ACTIVE（最多 30 秒）
+                await WaitForFileActiveAsync(fileName, ct);
+
+                // 3. 用 fileData + videoMetadata 請求分析
+                var body = new
+                {
+                    contents = new[]
+                    {
+                        new
+                        {
+                            parts = new object[]
+                            {
+                                new
+                                {
+                                    fileData      = new { mimeType = "video/mp4", fileUri },
+                                    videoMetadata = new { fps },
+                                },
+                                new { text = prompt },
+                            }
+                        }
+                    },
+                    generationConfig = new
+                    {
+                        responseMimeType = "application/json",
+                        mediaResolution  = resolution,
+                    },
+                };
+
+                var r = await CallGeminiAsync(body, $"filesApi/fps={fps}/res={resolution}", clipBytes.Length, ct);
+                return r with { ResolvedV2Fps = fps, ResolvedV2Resolution = resolution };
+            }
+            finally
+            {
+                // 4. 分析完畢後刪除 file（不論成敗）
+                if (fileName != null)
+                    await DeleteVideoFileAsync(fileName, CancellationToken.None);
+            }
+        }
+
+        /// <summary>上傳 clip 到 Gemini Files API，回傳 (fileUri, fileName)。</summary>
+        private async Task<(string fileUri, string fileName)> UploadVideoFileAsync(
+            byte[] clipBytes, CancellationToken ct)
+        {
+            var uploadUrl = $"https://generativelanguage.googleapis.com/upload/v1beta/files?key={_apiKey}";
+
+            var metaJson = JsonSerializer.Serialize(new { file = new { display_name = "golf_swing_v2" } });
+
+            var multipart = new MultipartContent("related");
+            multipart.Add(new StringContent(metaJson, Encoding.UTF8, "application/json"));
+            var videoPart = new ByteArrayContent(clipBytes);
+            videoPart.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("video/mp4");
+            multipart.Add(videoPart);
+
+            var req = new HttpRequestMessage(HttpMethod.Post, uploadUrl) { Content = multipart };
+            req.Headers.Add("X-Goog-Upload-Protocol", "multipart");
+
+            using var resp = await _http.SendAsync(req, ct);
+            var raw = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+                throw new HttpRequestException($"Files API 上傳失敗 {resp.StatusCode}: {raw}");
+
+            var doc      = JsonDocument.Parse(raw);
+            var fileObj  = doc.RootElement.GetProperty("file");
+            var fileUri  = fileObj.GetProperty("uri").GetString()!;
+            var fileName = fileObj.GetProperty("name").GetString()!; // "files/xxxx"
+            return (fileUri, fileName);
+        }
+
+        /// <summary>輪詢直到 file 狀態為 ACTIVE 或逾時（30 秒）。</summary>
+        private async Task WaitForFileActiveAsync(string fileName, CancellationToken ct)
+        {
+            var getUrl = $"https://generativelanguage.googleapis.com/v1beta/{fileName}?key={_apiKey}";
+            for (int i = 0; i < 10; i++)
+            {
+                await Task.Delay(3000, ct);
+                using var resp = await _http.GetAsync(getUrl, ct);
+                var raw = await resp.Content.ReadAsStringAsync(ct);
+                if (!resp.IsSuccessStatusCode) continue;
+
+                var doc   = JsonDocument.Parse(raw);
+                var state = doc.RootElement.TryGetProperty("state", out var s) ? s.GetString() : null;
+                _logger.LogDebug("Files API state={State}", state);
+                if (state == "ACTIVE") return;
+                if (state == "FAILED") throw new InvalidOperationException("Files API 處理失敗");
+            }
+            throw new TimeoutException("Files API 等待 ACTIVE 逾時（30 秒）");
+        }
+
+        /// <summary>刪除 Files API 上的 file（靜默忽略失敗）。</summary>
+        private async Task DeleteVideoFileAsync(string fileName, CancellationToken ct)
+        {
+            var deleteUrl = $"https://generativelanguage.googleapis.com/v1beta/{fileName}?key={_apiKey}";
+            try
+            {
+                using var resp = await _http.DeleteAsync(deleteUrl, ct);
+                _logger.LogDebug("Files API 刪除 {Name}: {Status}", fileName, resp.StatusCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Files API 刪除失敗（忽略）: {Err}", ex.Message);
+            }
+        }
+
+        // ── v3：8 關鍵禎 JPEG + audio WAV（inline，不傳影片）────────────
+
+        private async Task<GeminiCoachResult> AnalyzeWithKeyframesAsync(
+            string[]? keyframesBase64,
+            byte[]? audioWavBytes,
+            string prompt,
+            CancellationToken ct)
+        {
+            if (keyframesBase64 == null || keyframesBase64.Length == 0)
+                throw new InvalidOperationException("V3 分析需要關鍵禎圖片（keyframesBase64 不可為空）");
+
+            var parts = new List<object>();
+
+            // 8 JPEG keyframes
+            foreach (var b64 in keyframesBase64)
+                parts.Add(new { inlineData = new { mimeType = "image/jpeg", data = b64 } });
+
+            // audio WAV（可選）
+            if (audioWavBytes != null && audioWavBytes.Length > 0)
+                parts.Add(new { inlineData = new { mimeType = "audio/wav", data = Convert.ToBase64String(audioWavBytes) } });
+
+            parts.Add(new { text = prompt });
+
+            var body = new
+            {
+                contents = new[]
+                {
+                    new { parts = parts.ToArray<object>() }
+                },
+                generationConfig = new { responseMimeType = "application/json" },
+            };
+
+            int payloadSize = keyframesBase64.Sum(b => b.Length * 3 / 4) + (audioWavBytes?.Length ?? 0);
+            _logger.LogInformation(
+                "V3 分析：{KF} 關鍵禎 + audio={HasAudio} 估計 payload={KB}KB",
+                keyframesBase64.Length, audioWavBytes != null, payloadSize / 1024);
+
+            return await CallGeminiAsync(body, $"v3/keyframes={keyframesBase64.Length}", payloadSize, ct);
+        }
+
+        // ── 共用：呼叫 Gemini generateContent ────────────────────────────
+
+        private async Task<GeminiCoachResult> CallGeminiAsync(
+            object body, string mode, int clipBytes, CancellationToken ct)
+        {
+            var url     = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
             var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
-            _logger.LogInformation("呼叫 Gemini API ({Model}), clip={KB}KB", _model, clipBytes.Length / 1024);
+            _logger.LogInformation("呼叫 Gemini API ({Model}) mode={Mode} clip={KB}KB",
+                _model, mode, clipBytes / 1024);
 
             using var resp = await _http.PostAsync(url, content, ct);
             var raw = await resp.Content.ReadAsStringAsync(ct);
@@ -132,14 +500,17 @@ namespace UploadServer.Services
                 throw new HttpRequestException($"Gemini API 回傳 {resp.StatusCode}");
             }
 
-            var resultJson = ExtractText(raw);
+            var (resultJson, inputTokens, outputTokens) = ExtractResult(raw);
             var (summary, severity) = ParseSummary(resultJson);
 
-            _logger.LogInformation("Gemini 分析完成，severity={Severity}", severity);
-            return new GeminiCoachResult(resultJson, summary, severity);
+            _logger.LogInformation(
+                "Gemini 分析完成 mode={Mode} severity={Severity} inputTokens={In} outputTokens={Out}",
+                mode, severity, inputTokens, outputTokens);
+
+            return new GeminiCoachResult(resultJson, summary, severity, inputTokens, outputTokens);
         }
 
-        // ── 私有方法 ────────────────────────────────────────────────────
+        // ── 私有方法 ──────────────────────────────────────────────────
 
         private static object BuildModelAnalysis(byte[] clipBytes, string? errorTypeHint)
         {
@@ -152,7 +523,7 @@ namespace UploadServer.Services
                     zh_name          = cat.ZhName,
                     confidence       = 0.95,
                     severity         = "high",
-                    source           = "flutter_hint",
+                    source           = "onnx_inference",
                     detector         = cat.Detector,
                     required_signals = cat.Signals,
                 });
@@ -160,19 +531,19 @@ namespace UploadServer.Services
 
             return new
             {
-                schema_version = "ai_coach_model_analysis.v0.1",
+                schema_version = "ai_coach_model_analysis.v0.2",
                 created_at     = DateTime.UtcNow.ToString("o"),
-                clip = new
+                clip           = new
                 {
-                    size_bytes            = clipBytes.Length,
-                    mime_type             = "video/mp4",
+                    size_bytes             = clipBytes.Length,
+                    mime_type              = "video/mp4",
                     is_inline_gemini_ready = clipBytes.Length < InlineLimitBytes,
                 },
                 model_outputs = new
                 {
                     error_detection_model = new
                     {
-                        status          = detectedErrors.Count > 0 ? "hint_provided" : "no_hint",
+                        status          = detectedErrors.Count > 0 ? "onnx_result" : "no_hint",
                         detected_errors = detectedErrors,
                     }
                 },
@@ -180,28 +551,104 @@ namespace UploadServer.Services
             };
         }
 
-        private static string RenderPrompt(object modelAnalysis)
+        private static string RenderPrompt(
+            object modelAnalysis,
+            string promptVersion,
+            Dictionary<string, double>? phaseTimestamps,
+            string? audioAnalysisJson = null)
         {
-            var json = JsonSerializer.Serialize(modelAnalysis, new JsonSerializerOptions { WriteIndented = true });
-            return PromptTemplate.Replace("{{MODEL_ANALYSIS_JSON}}", json);
+            var modelJson = JsonSerializer.Serialize(modelAnalysis, new JsonSerializerOptions { WriteIndented = true });
+
+            var template = promptVersion switch
+            {
+                "v2" => PromptV2,
+                "v3" => PromptV3,
+                _    => PromptV1,
+            };
+
+            var result = template.Replace("{{MODEL_ANALYSIS_JSON}}", modelJson);
+
+            if (promptVersion == "v3")
+            {
+                var phaseBlock = BuildPhaseBlock(phaseTimestamps);
+                result = result.Replace("{{PHASE_TIMESTAMPS}}", phaseBlock);
+            }
+
+            // 音訊分析替換（所有版本）
+            var audioBlock = BuildAudioAnalysisBlock(audioAnalysisJson);
+            result = result.Replace("{{AUDIO_ANALYSIS_JSON}}", audioBlock);
+
+            return result;
         }
 
-        private static string ExtractText(string geminiRaw)
+        private static string BuildPhaseBlock(Dictionary<string, double>? phases)
         {
+            if (phases == null || phases.Count == 0)
+                return "（未提供關鍵禎時間點，請自行從影片中識別8個揮桿階段）";
+
+            static string PhaseName(string key) => key switch
+            {
+                "address"       => "①準備姿勢",
+                "takeaway"      => "②起桿",
+                "backswing"     => "③上桿",
+                "top"           => "④頂點",
+                "downswing"     => "⑤下桿",
+                "impact"        => "⑥擊球",
+                "followthrough" => "⑦送桿",
+                "finish"        => "⑧收桿",
+                _               => key,
+            };
+
+            var order = new[] { "address", "takeaway", "backswing", "top", "downswing", "impact", "followthrough", "finish" };
+            var lines = new System.Text.StringBuilder("揮桿關鍵時間點（請重點觀察這些秒數的畫面）：\n");
+            foreach (var key in order)
+            {
+                if (phases.TryGetValue(key, out var sec))
+                    lines.AppendLine($"  {PhaseName(key)}: {sec:F1}s");
+            }
+            return lines.ToString();
+        }
+
+        private static string BuildAudioAnalysisBlock(string? audioAnalysisJson)
+        {
+            if (string.IsNullOrWhiteSpace(audioAnalysisJson))
+                return """{"available": false, "pass_count": 0, "total_features": 5, "sweet_spot": false, "notes": "無音訊分析資料"}""";
+            return audioAnalysisJson;
+        }
+
+        private static (string text, int inputTokens, int outputTokens) ExtractResult(string geminiRaw)
+        {
+            string text = geminiRaw;
+            int inputTokens = 0, outputTokens = 0;
+
             try
             {
                 var doc = JsonDocument.Parse(geminiRaw);
+
+                // 提取 candidates[0].content.parts[0].text
                 foreach (var candidate in doc.RootElement.GetProperty("candidates").EnumerateArray())
                 {
                     foreach (var part in candidate.GetProperty("content").GetProperty("parts").EnumerateArray())
                     {
-                        if (part.TryGetProperty("text", out var text))
-                            return text.GetString() ?? geminiRaw;
+                        if (part.TryGetProperty("text", out var t))
+                        {
+                            text = t.GetString() ?? geminiRaw;
+                            break;
+                        }
                     }
+                    break;
+                }
+
+                // 提取 usageMetadata
+                if (doc.RootElement.TryGetProperty("usageMetadata", out var usage))
+                {
+                    if (usage.TryGetProperty("promptTokenCount",     out var pt)) inputTokens  = pt.GetInt32();
+                    if (usage.TryGetProperty("candidatesTokenCount", out var ct)) outputTokens = ct.GetInt32();
                 }
             }
-            catch { /* fall through */ }
-            return geminiRaw;
+            catch { /* fall through with geminiRaw */ }
+
+            return (text, inputTokens, outputTokens);
         }
 
         private static (string summary, string severity) ParseSummary(string resultJson)

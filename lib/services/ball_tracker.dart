@@ -256,7 +256,9 @@ class BallTracker {
 
   // ── ROI（比例化，適應不同手機解析度）───────────────────
   static const double _fixedRoiCenterRatioX = 0.6519;
-  static const double _fixedRoiCenterRatioY = 0.5646;
+  // ROI_Y: 球在球座上時位於畫面下方約 78%（y≈1498 on 1920px frame）
+  // 舊值 0.5646 → tile y[764,1404]，球實際在 y≈1574 → tile 外！
+  static const double _fixedRoiCenterRatioY = 0.78;
   static const double _roiFixedSizeRatioW   = 0.3704;
   static const double _roiFixedSizeRatioH   = 0.2083;
 
@@ -270,8 +272,9 @@ class BallTracker {
   static const double _roiHalfMaxAbs     = 280.0; // 絕對上限
 
   // ── P0 / P1 ───────────────────────────────────────────
-  static const int    _p1DeadlineFrames  = 3;   // P1 最多等待幀數（Flutter 比 v3 寬鬆）
-  static const double _p1MaxDistPx       = 120.0; // P1 離 P0 最遠距離（防止誤接遠點）
+  static const int    _p1DeadlineFrames  = 25;  // P1 最多等待幀數（@30fps≈0.83s，給球飛出足夠時間）
+  static const double _p1MinDistPx       = 0.0; // P1 最小移動量：0=接受靜止球（高爾夫球在球座上直到被擊中才移動）
+  static const double _p1MaxDistPx       = 220.0; // P1 離 P0 最遠距離（高速球飛行距離可達 200px+）
   static const int    _waitMaxFrames     = 180;
 
   // ── Tracking 終止 ─────────────────────────────────────
@@ -319,10 +322,10 @@ class BallTracker {
   static const double _tqMiss      = -2.5;  // 完全沒候選
   static const double _tqMinStop   = 18.0;  // 低於此分數強制停止
 
-  // ── hitSec 搜尋視窗 ───────────────────────────────────
-  // 比前版縮短：只在擊球前 0.7 秒到擊球後 1.5 秒尋找球
-  static const double _hitLeadSec  = 0.7;
-  static const double _hitTrailSec = 1.5;
+  // ── hitSec 搜尋視窗（幀數為單位，避免 fps 浮動問題）────
+  // 只在擊球前 5 幀到擊球後 20 幀尋找 P0（靜止球不計入）
+  static const int _hitLeadFrames  = 5;   // hitFrame - 5
+  static const int _hitTrailFrames = 20;  // hitFrame + 20
 
   // ── 執行狀態（每次 track() 重置）────────────────────────
   _TrackState _state         = _TrackState.waitP0;
@@ -382,10 +385,12 @@ class BallTracker {
   • 分階段 hardMax: E=$_stepAbsHardMaxEarly / S=$_stepAbsHardMaxStable / M=$_stepAbsHardMaxMiss
 ''');
 
-    // 計算擊球時間視窗
+    // 計算擊球幀視窗（以幀數為單位）
     if (hitSec != null) {
-      _hitWindowStart = math.max(0, ((hitSec - _hitLeadSec) * fps).round());
-      _hitWindowEnd   = ((hitSec + _hitTrailSec) * fps).round();
+      final hitFrame = (hitSec * fps).round();
+      _hitWindowStart = math.max(0, hitFrame - _hitLeadFrames);
+      _hitWindowEnd   = hitFrame + _hitTrailFrames;
+      debugPrint('[BallTracker] hitFrame=$hitFrame window=[$_hitWindowStart, $_hitWindowEnd]');
     } else {
       _hitWindowStart = 0;
       _hitWindowEnd   = -1;
@@ -532,12 +537,23 @@ class BallTracker {
     List<BlobData> raw, int pIndex, int missCount, double? areaEma,
   ) {
     if (_state == _TrackState.waitP0 || _state == _TrackState.waitP1) {
-      return raw
+      final result = raw
           .where((b) =>
               b.area >= _areaLoBase &&
               b.area <= _areaHiBase &&
               b.circ >= _circBase)
           .toList();
+      // 【臨時 debug】追蹤 waitP0 動態過濾狀況
+      if (raw.isNotEmpty && result.isEmpty) {
+        final details = raw.map((b) =>
+            '(cx=${b.cx},cy=${b.cy},area=${b.area},circ=${b.circ.toStringAsFixed(2)})').join(' | ');
+        debugPrint('[DynFilter.waitP0] ❌ ${raw.length}→0  blobsIn=$details'
+            '  lo=$_areaLoBase hi=$_areaHiBase circMin=${_circBase.toStringAsFixed(2)}');
+      } else if (result.isNotEmpty) {
+        debugPrint('[DynFilter.waitP0] ✅ ${raw.length}→${result.length}  '
+            'passed=(cx=${result[0].cx},cy=${result[0].cy},area=${result[0].area},circ=${result[0].circ.toStringAsFixed(2)})');
+      }
+      return result;
     }
 
     final cfg = _getDynamicCfg(pIndex, missCount: missCount, areaEma: areaEma);
@@ -657,6 +673,10 @@ class BallTracker {
       return;
     }
 
+    // 【臨時 debug】確認 _handleWaitP0 有收到 blob
+    debugPrint('[waitP0.handle] frame=$frameIdx blobs=${blobs.length} '
+        '${blobs.map((b) => "(${b.cx},${b.cy},a=${b.area})").join(",")}');
+
     final roiX = (w * _fixedRoiCenterRatioX).round();
     final roiY = (h * _fixedRoiCenterRatioY).round();
     final best = blobs.reduce((a, b) =>
@@ -695,10 +715,11 @@ class BallTracker {
     if (blobs.isEmpty) return;
 
     final p0 = _trackPts.first;
-    // P1 條件：不靜止（>3px）且不過遠（<_p1MaxDistPx，避免誤接背景亮點）
+    // P1 條件：移動量 >= _p1MinDistPx（0=接受靜止球，高爾夫球在球座上直到擊球後才飛走）
+    //          且不過遠（<_p1MaxDistPx，避免誤接背景亮點）
     final valid = blobs.where((b) {
       final d = _dist(b.cx, b.cy, p0.x, p0.y);
-      return d > 3 && d <= _p1MaxDistPx;
+      return d >= _p1MinDistPx && d <= _p1MaxDistPx;
     }).toList();
     if (valid.isEmpty) return;
 

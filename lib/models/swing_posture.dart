@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// 揮桿姿勢分類 label 常數
-/// 對應後端 ONNX 模型 dataset.py 的 CLASS_TO_LABELS 定義：
+/// 對應後端 模型 dataset.py 的 CLASS_TO_LABELS 定義：
 ///   Good → error_type = "" (完美，無錯誤)
 ///   其餘 5 種 → 對應 ERROR_LABELS
 class SwingPosture {

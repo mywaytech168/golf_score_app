@@ -87,6 +87,15 @@ class RecordingHistoryEntry {
   /// 例如：['no_audio']、['no_valid_hits']、['pro']
   final List<String>? audioTags;
 
+  /// 5 項音訊特徵通過數（0~5）；≥ 3 表示命中
+  final int? audioPassCount;
+
+  /// 各特徵是否通過閾值：key = 特徵名稱，value = 是否通過
+  final Map<String, bool>? audioPasses;
+
+  /// 各特徵實際值：key = 特徵名稱，value = 實際數值（用於圖表顯示）
+  final Map<String, double>? audioFeatureValues;
+
   /// 分享碼（16 碼）；null 表示從未分享過
   final String? shareCode;
 
@@ -110,10 +119,23 @@ class RecordingHistoryEntry {
   /// 錄製時的影片尺寸名稱；固定為 'wide'（16:9）
   final String? recordedAspectRatio;
 
-  /// 揮桿姿勢分類 label（來自 AI Coach ONNX 推論）
+  /// 揮桿姿勢分類 label（來自後端 ONNX 骨架模型推論）
   /// '' = 完美(Good)；其餘對應 SwingPosture 5 種錯誤常數
   /// null = 尚未分析
   final String? swingPostureLabel;
+
+  /// 揮桿姿勢分類 label（來自 Gemini AI Coach 分析）
+  /// '' = 完美(Good)；其餘對應 SwingPosture 5 種錯誤常數
+  /// null = 尚未有 Gemini 分析結果
+  final String? geminiPostureLabel;
+
+  /// posture_only 後端分析記錄 ID（ai_coach_analyses.id）
+  /// null = 尚未觸發或尚未完成
+  final String? postureAnalysisId;
+
+  /// 最後一次 AI Coach 分析使用的 Gemini prompt 版本："v1" | "v2" | "v3"
+  /// null = 尚未分析或舊資料（版本不明）
+  final String? aiPromptVersion;
 
   const RecordingHistoryEntry({
     required this.filePath,
@@ -134,6 +156,9 @@ class RecordingHistoryEntry {
     this.audioLabel,
     this.sourceVideoPath,
     this.audioTags,
+    this.audioPassCount,
+    this.audioPasses,
+    this.audioFeatureValues,
     this.shareCode,
     this.shareExpiresAt,
     this.sharerName,
@@ -142,6 +167,9 @@ class RecordingHistoryEntry {
     this.bestSpeedValue,
     this.recordedAspectRatio,
     this.swingPostureLabel,
+    this.geminiPostureLabel,
+    this.postureAnalysisId,
+    this.aiPromptVersion,
   });
 
   /// 是否已上傳（明確標記 或 AI Coach 分析過）
@@ -175,6 +203,9 @@ class RecordingHistoryEntry {
     String? audioLabel,
     String? sourceVideoPath,
     List<String>? audioTags,
+    int? audioPassCount,
+    Map<String, bool>? audioPasses,
+    Map<String, double>? audioFeatureValues,
     String? shareCode,
     DateTime? shareExpiresAt,
     DateTime? createdAt,
@@ -184,6 +215,9 @@ class RecordingHistoryEntry {
     double? bestSpeedValue,
     String? recordedAspectRatio,
     String? swingPostureLabel,
+    String? geminiPostureLabel,
+    String? postureAnalysisId,
+    String? aiPromptVersion,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -204,6 +238,9 @@ class RecordingHistoryEntry {
       audioLabel: audioLabel ?? this.audioLabel,
       sourceVideoPath: sourceVideoPath ?? this.sourceVideoPath,
       audioTags: audioTags ?? this.audioTags,
+      audioPassCount: audioPassCount ?? this.audioPassCount,
+      audioPasses: audioPasses ?? this.audioPasses,
+      audioFeatureValues: audioFeatureValues ?? this.audioFeatureValues,
       shareCode: shareCode ?? this.shareCode,
       shareExpiresAt: shareExpiresAt ?? this.shareExpiresAt,
       sharerName: sharerName ?? this.sharerName,
@@ -212,6 +249,9 @@ class RecordingHistoryEntry {
       bestSpeedValue: bestSpeedValue ?? this.bestSpeedValue,
       recordedAspectRatio: recordedAspectRatio ?? this.recordedAspectRatio,
       swingPostureLabel: swingPostureLabel ?? this.swingPostureLabel,
+      geminiPostureLabel: geminiPostureLabel ?? this.geminiPostureLabel,
+      postureAnalysisId: postureAnalysisId ?? this.postureAnalysisId,
+      aiPromptVersion: aiPromptVersion ?? this.aiPromptVersion,
     );
   }
 
@@ -250,6 +290,9 @@ class RecordingHistoryEntry {
       'audioLabel': audioLabel,
       'sourceVideoPath': sourceVideoPath,
       'audioTags': audioTags,
+      'audioPassCount': audioPassCount,
+      'audioPasses': audioPasses,
+      'audioFeatureValues': audioFeatureValues,
       'shareCode': shareCode,
       'shareExpiresAt': shareExpiresAt?.toUtc().toIso8601String(),
       'createdAt': createdAt?.toIso8601String(),
@@ -258,7 +301,10 @@ class RecordingHistoryEntry {
       'isUploaded': isUploaded,
       'bestSpeedValue': bestSpeedValue,
       'recordedAspectRatio': recordedAspectRatio,
-      'swingPostureLabel': swingPostureLabel,
+      'swingPostureLabel':   swingPostureLabel,
+      'geminiPostureLabel':  geminiPostureLabel,
+      'postureAnalysisId':   postureAnalysisId,
+      'aiPromptVersion':     aiPromptVersion,
     };
   }
 
@@ -304,6 +350,11 @@ class RecordingHistoryEntry {
       audioLabel: (json['audioLabel'] as String?),
       sourceVideoPath: (json['sourceVideoPath'] as String?),
       audioTags: audioTags,
+      audioPassCount: (json['audioPassCount'] as int?),
+      audioPasses: (json['audioPasses'] as Map?)?.map(
+          (k, v) => MapEntry(k as String, (v as bool?) ?? false)),
+      audioFeatureValues: (json['audioFeatureValues'] as Map?)?.map(
+          (k, v) => MapEntry(k as String, (v as num).toDouble())),
       shareCode: json['shareCode'] as String?,
       shareExpiresAt: json['shareExpiresAt'] != null
           ? DateTime.tryParse(json['shareExpiresAt'] as String)
@@ -317,6 +368,9 @@ class RecordingHistoryEntry {
       bestSpeedValue:     (json['bestSpeedValue']     as num?)?.toDouble(),
       recordedAspectRatio: json['recordedAspectRatio'] as String?,
       swingPostureLabel:   json['swingPostureLabel']   as String?,
+      geminiPostureLabel:  json['geminiPostureLabel']  as String?,
+      postureAnalysisId:   json['postureAnalysisId']   as String?,
+      aiPromptVersion:     json['aiPromptVersion']     as String?,
     );
   }
 }

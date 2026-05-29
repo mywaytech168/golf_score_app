@@ -77,6 +77,9 @@ namespace UploadServer.Services
         public static string AiCoachCsvKey(string analysisId) =>
             $"ai_coach/{analysisId}/pose_landmarks.csv";
 
+        public static string AiCoachAudioKey(string analysisId) =>
+            $"ai_coach/{analysisId}/audio.wav";
+
         /// <summary>產生 clip 上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
         public string GenerateClipUploadUrl(string analysisId, int expiryMinutes = 20)
         {
@@ -106,6 +109,22 @@ namespace UploadServer.Services
                 ContentType = "text/csv",
             };
             _logger.LogInformation("產生 CSV PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
+        /// <summary>產生 audio.wav 上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
+        public string GenerateAudioUploadUrl(string analysisId, int expiryMinutes = 20)
+        {
+            var key = AiCoachAudioKey(analysisId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "audio/wav",
+            };
+            _logger.LogInformation("產生 audio PUT URL: {Key}", key);
             return _s3.GetPreSignedURL(request);
         }
 
