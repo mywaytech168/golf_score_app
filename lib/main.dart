@@ -26,6 +26,7 @@ import 'providers/recording_provider.dart';
 import 'providers/video_provider.dart';
 import 'providers/app_state_provider.dart';
 import 'providers/locale_provider.dart';
+import 'providers/plan_provider.dart';
 
 Future<void> main() async {
   _filterSystemLogs();
@@ -93,6 +94,7 @@ class _MyAppState extends State<MyApp> {
         ChangeNotifierProvider(create: (_) => StatisticsProvider()),
         ChangeNotifierProvider(create: (_) => RecordingProvider()),
         ChangeNotifierProvider(create: (_) => VideoProvider()),
+        ChangeNotifierProvider(create: (_) => PlanProvider()),
       ],
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, _) {

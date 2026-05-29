@@ -10,12 +10,13 @@ import 'package:provider/provider.dart';
 import '../models/recording_history_entry.dart';
 import '../models/statistics_response.dart';
 import '../providers/user_provider.dart';
+import '../providers/plan_provider.dart';
+import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
 import '../services/recording_history_storage.dart';
 import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
-import '../services/plan_service.dart';
 import '../services/announcement_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../widgets/audio_feature_pass_row.dart';
@@ -37,12 +38,6 @@ class _HomePageState extends State<HomePage> {
   late final StatisticsService _statisticsService = StatisticsService();
   late final PurchaseService _purchaseService = PurchaseService();
 
-  PlanStatus _planStatus = const PlanStatus(
-    plan: UserPlan.free,
-    todayUsed: 0,
-    dailyLimit: 10,
-  );
-
   int _unreadAnnouncements = 0;
   Map<String, double>? _featurePassRates;
 
@@ -52,8 +47,10 @@ class _HomePageState extends State<HomePage> {
     _loadInitialHistory();
     _initializeStatistics();
     _initializePurchaseService();
-    _loadPlanStatus();
     _loadUnreadCount();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<PlanProvider>().refresh();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserProvider>().loadProfile();
     });
@@ -75,15 +72,6 @@ class _HomePageState extends State<HomePage> {
     _loadUnreadCount(); // 返回後刷新未讀數
   }
 
-  Future<void> _loadPlanStatus() async {
-    try {
-      final status = await PlanService.getPlanStatus();
-      if (mounted) setState(() => _planStatus = status);
-    } catch (e) {
-      debugPrint('⚠️ [HomePage] 載入方案狀態失敗: $e');
-    }
-  }
-
   @override
   void dispose() {
     _statisticsService.dispose();
@@ -101,7 +89,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _initializeStatistics() async {
     try {
       await _statisticsService.loadAllStatistics();
-      await _loadPlanStatus(); // 統計刷新後同步用量
+      if (mounted) context.read<PlanProvider>().refresh(); // 統計刷新後同步用量
       final rates = await _computeFeaturePassRates();
       if (mounted) setState(() => _featurePassRates = rates);
     } on UnauthorizedException {
@@ -283,124 +271,146 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGreenHeader(BuildContext context) {
-    final l         = AppLocalizations.of(context);
-    final plan      = _planStatus.plan;
-    final used      = _planStatus.todayUsed;
-    final baseLimit = _planStatus.dailyLimit;   // 方案原始上限（不含獎勵）
-    final total     = _planStatus.totalLimit;   // dailyLimit + bonusBalls（實際可用）
-    final planColor = Color(plan.colorValue);
+    final l = AppLocalizations.of(context);
 
-    final overLimit = !plan.isUnlimited && used >= total;
-    String quotaText;
-    if (plan.isUnlimited) {
-      quotaText = l.homeTodayUnlimited;
-    } else if (overLimit) {
-      quotaText = '${l.homeTodayUsage(used, baseLimit)}  ${l.homeTodayLimit}';
-    } else {
-      quotaText = l.homeTodayUsage(used, baseLimit);
-    }
+    return Consumer2<UserProvider, PlanProvider>(
+      builder: (context, user, planProvider, _) {
+        final planStatus = planProvider.status;
+        final plan      = planStatus.plan;
+        final used      = planStatus.todayUsed;
+        final baseLimit = planStatus.dailyLimit;
+        final total     = planStatus.totalLimit;
+        final planColor = Color(plan.colorValue);
 
-    return Consumer<UserProvider>(
-      builder: (context, user, _) {
-        // 頭像
-        final avatar = Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white24,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white38, width: 1.5),
-          ),
-          child: user.avatarPath != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(11),
-                  child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
-                )
-              : const Icon(Icons.golf_course_rounded, color: Colors.white, size: 22),
+        final overLimit = !plan.isUnlimited && used >= total;
+        String quotaText;
+        if (plan.isUnlimited) {
+          quotaText = l.homeTodayUnlimited;
+        } else if (overLimit) {
+          quotaText = '${l.homeTodayUsage(used, baseLimit)}  ${l.homeTodayLimit}';
+        } else {
+          quotaText = l.homeTodayUsage(used, baseLimit);
+        }
+
+        return _buildGreenHeaderContent(
+          context: context,
+          user: user,
+          plan: plan,
+          planColor: planColor,
+          quotaText: quotaText,
+          overLimit: overLimit,
         );
+      },
+    );
+  }
 
-        // 方案 badge
-        final planBadge = Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.20),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white38),
-          ),
-          child: Text(
-            plan.label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: planColor == const Color(0xFF1E8E5A)
-                  ? Colors.white
-                  : Color(plan.colorValue),
+  Widget _buildGreenHeaderContent({
+    required BuildContext context,
+    required UserProvider user,
+    required UserPlan plan,
+    required Color planColor,
+    required String quotaText,
+    required bool overLimit,
+  }) {
+    final l = AppLocalizations.of(context);
+
+    // 頭像
+    final avatar = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.white24,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white38, width: 1.5),
+      ),
+      child: user.avatarPath != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
+            )
+          : const Icon(Icons.golf_course_rounded, color: Colors.white, size: 22),
+    );
+
+    // 方案 badge
+    final planBadge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.20),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white38),
+      ),
+      child: Text(
+        plan.label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: planColor == const Color(0xFF1E8E5A)
+              ? Colors.white
+              : Color(plan.colorValue),
+        ),
+      ),
+    );
+
+    return GreenPageHeader(
+      leading: Padding(
+        padding: const EdgeInsets.only(left: kSpaceMD, right: kSpaceSM),
+        child: avatar,
+      ),
+      title: l.homeHi(user.displayName),
+      subtitle: quotaText,
+      actions: [
+        planBadge,
+        // 公告鈴鐺
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              tooltip: l.annBoardTitle,
+              icon: const Icon(Icons.notifications_rounded, color: Colors.white),
+              onPressed: _openAnnouncements,
             ),
-          ),
-        );
-
-        return GreenPageHeader(
-          leading: Padding(
-            padding: const EdgeInsets.only(left: kSpaceMD, right: kSpaceSM),
-            child: avatar,
-          ),
-          title: l.homeHi(user.displayName),
-          subtitle: quotaText,
-          actions: [
-            planBadge,
-            // 公告鈴鐺
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                IconButton(
-                  tooltip: l.annBoardTitle,
-                  icon: const Icon(Icons.notifications_rounded, color: Colors.white),
-                  onPressed: _openAnnouncements,
-                ),
-                if (_unreadAnnouncements > 0)
-                  Positioned(
-                    top: 6, right: 6,
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 16),
-                      height: 16,
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFE05252),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Center(
-                        child: Text(
-                          _unreadAnnouncements > 99
-                              ? '99+'
-                              : '$_unreadAnnouncements',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+            if (_unreadAnnouncements > 0)
+              Positioned(
+                top: 6, right: 6,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 16),
+                  height: 16,
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE05252),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      _unreadAnnouncements > 99
+                          ? '99+'
+                          : '$_unreadAnnouncements',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
-              ],
-            ),
-            IconButton(
-              tooltip: l.homeRewardBalls,
-              icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const RewardPage()),
-              ).then((_) => _loadPlanStatus()),
-            ),
-            IconButton(
-              tooltip: l.settingsTitle,
-              icon: const Icon(Icons.settings_rounded, color: Colors.white),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
+                ),
               ),
-            ),
           ],
-        );
-      },
+        ),
+        IconButton(
+          tooltip: l.homeRewardBalls,
+          icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const RewardPage()),
+          ).then((_) => context.read<PlanProvider>().refresh()),
+        ),
+        IconButton(
+          tooltip: l.settingsTitle,
+          icon: const Icon(Icons.settings_rounded, color: Colors.white),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SettingsPage()),
+          ),
+        ),
+      ],
     );
   }
 }

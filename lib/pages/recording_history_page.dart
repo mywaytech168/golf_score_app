@@ -1437,15 +1437,15 @@ class _HistoryTileState extends State<_HistoryTile> {
     if (_isAnalyzing) return;
 
     // ── iOS 長影片記憶體警告（> 60 秒）──────────────────────────────
-    if (Platform.isIOS && widget.entry.durationSeconds > 60 && mounted) {
+    if ((Platform.isIOS || Platform.isAndroid) && widget.entry.durationSeconds > 60 && mounted) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('影片較長'),
           content: Text(
             '此影片長度為 ${widget.entry.durationSeconds} 秒。\n\n'
-            '建議先在相機 App 裁切至 30 秒內再匯入分析，\n'
-            '以避免 iOS 記憶體不足導致 App 閃退。\n\n'
+            '建議先裁切至 30 秒內再匯入分析，\n'
+            '以避免記憶體不足導致 App 閃退。\n\n'
             '確定繼續分析整支影片？',
           ),
           actions: [
@@ -1521,7 +1521,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       debugPrint('[完整分析] 開始視頻分析...');
       progressNotifier.value = (0.0, '視頻分析中...');
 
-      RecordingHistoryEntry? updatedEntry;
+      late RecordingHistoryEntry updatedEntry;
 
       if (_isLongVideo) {
         // 長影片：先進行基礎分析
@@ -1570,6 +1570,31 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       // 在 analyze() 之後重新確認 CSV 是否存在（首次分析時由 analyze() 產生）
       final hasCsv = File(csvPath).existsSync();
+
+      // 短影片「完整分析」後，偵測揮桿 8 階段並寫入 phases.json
+      // 長影片由「偵測擊球」生成的切片已在 ClipPipelineService._trimHit 寫入
+      if (!_isLongVideo && _isOriginalVideo && hasCsv) {
+        try {
+          progressNotifier.value = (0.68, '偵測揮桿階段...');
+          final phaseHits = await SwingImpactDetector.detect(csvPath: csvPath);
+          if (phaseHits.isNotEmpty) {
+            await ClipPipelineService.savePhasesJson(
+              sessionDir: sessionDir,
+              hit: phaseHits.first,
+              clipActualStartSec: 0.0,
+            );
+            // 同步更新 hitSecond，供播放器 impact 鑽石顯示
+            updatedEntry = updatedEntry.copyWith(
+              hitSecond: phaseHits.first.hitSec,
+            );
+            debugPrint('[完整分析] ✅ phases.json 寫出完成 (hit=${phaseHits.first.hitSec.toStringAsFixed(2)}s)');
+          } else {
+            debugPrint('[完整分析] ⚠️ SwingImpactDetector 未偵測到擊球，略過 phases.json');
+          }
+        } catch (e) {
+          debugPrint('[完整分析] ⚠️ phases 偵測失敗 (略過): $e');
+        }
+      }
 
       // Stage 2: 音頻分析（70-100%）
       progressNotifier.value = (0.7, '音頻分析中...');

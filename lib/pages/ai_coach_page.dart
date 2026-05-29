@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
+import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
 
 /// AI Coach 分析頁面
@@ -184,6 +185,38 @@ class _AiCoachPageState extends State<AiCoachPage> {
     final vid  = widget.videoId;
     final clip = widget.clipPath;
     if (vid == null || clip == null) return;
+    if (!mounted) return;
+
+    // ── 重新分析前先檢查球數配額 ─────────────────────────────────
+    try {
+      final planStatus = await PlanService.getPlanStatus();
+      if (!mounted) return;
+      if (!planStatus.plan.isUnlimited && planStatus.remaining <= 0) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            icon: const Icon(Icons.sports_golf_rounded,
+                color: Color(0xFF7C3AED), size: 32),
+            title: const Text('今日球數已用完'),
+            content: Text(
+              '今日已使用 ${planStatus.todayUsed} 次，已達上限 ${planStatus.totalLimit} 次。\n\n'
+              '明天可繼續使用，或升級方案取得更多次數。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      // 後端不可用時讓使用者繼續（後端會做最終驗證）
+      debugPrint('[AiCoach] 重新分析配額檢查失敗（略過）: $e');
+    }
+
     if (!mounted) return;
 
     // 以 forceReanalyze=true 取代目前頁面

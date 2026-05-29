@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +13,6 @@ import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/audio_waveform_strip.dart';
 import 'ai_coach_page.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
@@ -133,7 +133,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     }
 
     // 讀取揮桿 8 階段時間點；並預載圖表資料（供波形使用）
-    if (widget.entry?.videoType == VideoType.localClip) {
+    // localClip（切片）或 isAnalyzed（匯入後已完成分析）都載入
+    final entry = widget.entry;
+    if (entry != null &&
+        (entry.videoType == VideoType.localClip || entry.isAnalyzed)) {
       _loadPhases();
       _loadCharts();
     }
@@ -341,7 +344,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             _buildTopBar(context),
             Expanded(child: _buildVideo()),
             if (_initialized) _buildControls(),
-            if (_initialized && !_isLongVideo) _buildWaveformStrip(),
             if (_initialized && _phases != null) _buildPhaseStrip(),
             _buildChartsPanel(),
             _buildAiPanel(),
@@ -451,34 +453,58 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
     final position = ctrl.value.position;
     final duration = ctrl.value.duration;
-    final progress = duration.inMilliseconds > 0
-        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
+    final durSec   = duration.inMilliseconds / 1000.0;
+    final posSec   = position.inMilliseconds / 1000.0;
+    final progress = durSec > 0 ? (posSec / durSec).clamp(0.0, 1.0) : 0.0;
 
     return Container(
       color: Colors.black87,
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: const Color(0xFF1E8E5A),
-              thumbColor: Colors.white,
-              inactiveTrackColor: Colors.white24,
-              overlayColor: Colors.white24,
-            ),
-            child: Slider(
-              value: progress,
-              onChanged: (v) => ctrl.seekTo(duration * v),
+          // ── 多模態時間軸（音訊 RMS + 速度曲線 + 階段 tick + impact 鑽石）
+          SizedBox(
+            height: 56,
+            child: Stack(
+              children: [
+                // 層1：資料可視化背景
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _MultiModalTimelinePainter(
+                      audioRms:      _chartData?.audioRms      ?? const [],
+                      wristSpeed:    _chartData?.wristSpeed    ?? const [],
+                      phases:        _phases                   ?? const {},
+                      hitSecond:     widget.entry?.hitSecond,
+                      currentSecond: posSec,
+                      totalSeconds:  durSec,
+                      goodShot:      widget.entry?.goodShot,
+                    ),
+                  ),
+                ),
+                // 層2：透明 track 的 Slider（保留 thumb 拖曳 seek）
+                Positioned.fill(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 0,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                      thumbColor: Colors.white,
+                      activeTrackColor: Colors.transparent,
+                      inactiveTrackColor: Colors.transparent,
+                      overlayColor: Colors.white24,
+                    ),
+                    child: Slider(
+                      value: progress,
+                      onChanged: (v) => ctrl.seekTo(duration * v),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          // Impact 時間標記（僅分析 Tab 且有 hitSecond）
-          if (_tabController.index == 2 && widget.entry?.hitSecond != null)
-            _buildImpactTimelineMarker(ctrl, duration),
+          const SizedBox(height: 2),
+          // ── 播放控制 Row ─────────────────────────────────────────
           Row(
             children: [
               Text(_fmt(position),
@@ -509,102 +535,37 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               const Spacer(),
               Text(_fmt(duration),
                   style: const TextStyle(color: Colors.white54, fontSize: 12)),
-              // 圖表圖示：所有影片都顯示；AI 圖示不顯示在長影片上
-              ...[
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _toggleCharts,
-                  child: AnimatedRotation(
-                    turns: _chartsExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 250),
-                    child: Icon(
-                      Icons.bar_chart_rounded,
-                      color: _chartsExpanded
-                          ? const Color(0xFF1E8E5A)
-                          : Colors.white54,
-                      size: 24,
-                    ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: _toggleCharts,
+                child: AnimatedRotation(
+                  turns: _chartsExpanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 250),
+                  child: Icon(
+                    Icons.bar_chart_rounded,
+                    color: _chartsExpanded
+                        ? const Color(0xFF1E8E5A)
+                        : Colors.white54,
+                    size: 24,
                   ),
                 ),
-                if (!_isLongVideo) ...[
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: _toggleAi,
-                    child: Icon(
-                      Icons.psychology_rounded,
-                      color: _aiExpanded
-                          ? const Color(0xFF7C3AED)
-                          : Colors.white54,
-                      size: 24,
-                    ),
+              ),
+              if (!_isLongVideo) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _toggleAi,
+                  child: Icon(
+                    Icons.psychology_rounded,
+                    color: _aiExpanded
+                        ? const Color(0xFF7C3AED)
+                        : Colors.white54,
+                    size: 24,
                   ),
-                ],
+                ),
               ],
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  // ── 時間軸 Impact Marker ─────────────────────────────────────
-
-  Widget _buildImpactTimelineMarker(VideoPlayerController ctrl, Duration duration) {
-    final hitSec = widget.entry!.hitSecond!;
-    final durSec = duration.inMilliseconds / 1000.0;
-    if (durSec <= 0) return const SizedBox.shrink();
-
-    final frac = (hitSec / durSec).clamp(0.0, 1.0);
-    final goodShot = widget.entry?.goodShot;
-    final markerColor = goodShot == true
-        ? const Color(0xFFFFD700)
-        : goodShot == false
-            ? const Color(0xFF9E9E9E)
-            : const Color(0xFFFF6F00);
-
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onTapDown: (details) {
-        ctrl.seekTo(Duration(milliseconds: (hitSec * 1000).round()));
-      },
-      child: LayoutBuilder(
-        builder: (ctx, constraints) {
-          const hPad = 20.0; // approximate Slider horizontal track padding
-          final x = hPad + frac * (constraints.maxWidth - hPad * 2);
-          return SizedBox(
-            height: 10,
-            child: CustomPaint(
-              painter: _ImpactTimelinePainter(x: x, color: markerColor),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  // ── 聲音波形橫條 ──────────────────────────────────────────────
-
-  Widget _buildWaveformStrip() {
-    final ctrl = _controller;
-    final rms  = _chartData?.audioRms;
-    if (ctrl == null || !ctrl.value.isInitialized || rms == null || rms.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final entry      = widget.entry;
-    final totalSec   = ctrl.value.duration.inMilliseconds / 1000.0;
-    final currentSec = ctrl.value.position.inMilliseconds / 1000.0;
-    final features   = entry?.audioFeatureValues;
-
-    return AudioWaveformStrip(
-      rmsPoints:        rms,
-      totalSeconds:     totalSec,
-      hitSecond:        entry?.hitSecond,
-      currentSecond:    currentSec,
-      spectralCentroid: features?['spectral_centroid'],
-      peakDbfs:         features?['peak_dbfs'],
-      onSeek: (sec) => ctrl.seekTo(
-        Duration(milliseconds: (sec * 1000).round()),
       ),
     );
   }
@@ -711,10 +672,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // ── 圖表面板 ─────────────────────────────────────────────────
 
   Widget _buildChartsPanel() {
+    // 姿勢/音頻特徵 tab 需要更多高度
+    final contentHeight = _chartsExpanded
+        ? (_chartTabIndex >= 3 ? 300.0 : 260.0)
+        : 0.0;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOut,
-      height: _chartsExpanded ? 260 : 0,
+      height: contentHeight,
       color: const Color(0xFF121212),
       child: ClipRect(child: _buildChartContent()),
     );
@@ -771,7 +736,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 final t = _chartTabs[i];
                 final selected = i == _chartTabIndex;
                 return GestureDetector(
-                  onTap: () => setState(() => _chartTabIndex = i),
+                  onTap: () {
+                    setState(() => _chartTabIndex = i);
+                    // 選到姿勢 tab 時自動載入 AI 狀態（取得 ONNX 分數）
+                    if (i == 3 && _aiStatus == null && !_aiLoading) {
+                      _loadAiStatus();
+                    }
+                  },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     alignment: Alignment.center,
@@ -827,85 +798,175 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     );
   }
 
-  // ── 姿勢 Tab 靜態顯示 ────────────────────────────────────────
+  // ── 姿勢 Tab（ONNX 分數橫向 bar chart）─────────────────────────
 
   Widget _buildPostureContent() {
-    final label = widget.entry?.swingPostureLabel;
-    if (label == null) {
+    // 載入中
+    if (_aiLoading) {
       return const Center(
-        child: Text('尚無姿勢分析，請先完成分析',
-            style: TextStyle(color: Colors.white38, fontSize: 12)),
+        child: SizedBox(
+          width: 22, height: 22,
+          child: CircularProgressIndicator(
+              color: Color(0xFF7C3AED), strokeWidth: 2),
+        ),
       );
     }
-    final zhName   = SwingPosture.zhName(label);
-    final isGood   = label.isEmpty;
-    final color    = isGood ? const Color(0xFF1E8E5A) : const Color(0xFF7C3AED);
-    final icon     = SwingPosture.icon(label);
 
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 36),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: color.withValues(alpha: 0.5)),
+    final onnxResult = _aiStatus?.onnxResult;
+
+    // 有完整 ONNX 分數 → 橫條圖（與圖表頁 _OnnxPostureCard 一致）
+    if (onnxResult != null && onnxResult.scores.isNotEmpty) {
+      final sorted = onnxResult.scores.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
+      return SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: sorted.map((e) {
+            final label     = SwingPosture.zhName(e.key);
+            final score     = e.value.clamp(0.0, 1.0);
+            final isOfficial = onnxResult.officialErrors.contains(e.key);
+            final isSuspect  = onnxResult.suspectErrors.contains(e.key);
+            final color = isOfficial
+                ? const Color(0xFFEF4444)
+                : isSuspect
+                    ? const Color(0xFFF97316)
+                    : const Color(0xFF22C55E);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(label,
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.white70)),
+                      Text(
+                        '${(score * 100).toStringAsFixed(0)}%',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: color),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: score,
+                      minHeight: 7,
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
+                      valueColor: AlwaysStoppedAnimation(color),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      );
+    }
+
+    // 只有頂層標籤（posture_only / fallback）
+    final label = widget.entry?.swingPostureLabel;
+    if (label != null) {
+      final zhName = SwingPosture.zhName(label);
+      final isGood = label.isEmpty;
+      final color  = isGood ? const Color(0xFF22C55E) : const Color(0xFF7C3AED);
+
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(SwingPosture.icon(label), color: color, size: 32),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: color.withValues(alpha: 0.4)),
+              ),
+              child: Text(zhName,
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700)),
             ),
-            child: Text(
-              zhName,
-              style: TextStyle(
-                  color: color, fontSize: 15, fontWeight: FontWeight.w700),
+            const SizedBox(height: 14),
+            TextButton.icon(
+              onPressed: _loadAiStatus,
+              icon: const Icon(Icons.refresh_rounded, size: 13),
+              label: const Text('載入詳細分數', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF7C3AED),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6)),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+      );
+    }
+
+    return const Center(
+      child: Text('尚無姿勢分析，請先完成分析',
+          style: TextStyle(color: Colors.white38, fontSize: 12)),
     );
   }
 
-  // ── 音頻特徵 Tab 靜態顯示 ─────────────────────────────────────
+  // ── 音頻特徵 Tab（量規 bar chart，與圖表頁 _AudioFeatureGaugeRow 一致）
+
+  static const _kAudioDisplayRanges = <String, List<double>>{
+    'rms_dbfs':          [-45.0, -5.0],
+    'spectral_centroid': [1500.0, 7000.0],
+    'sharpness_hfxloud': [0.0, 6.0],
+    'highband_amp':      [0.0, 60.0],
+    'peak_dbfs':         [-30.0, 0.0],
+  };
 
   Widget _buildAudioFeaturesContent() {
     final entry         = widget.entry;
-    final featureValues = entry?.audioFeatureValues;
-    if (featureValues == null || featureValues.isEmpty) {
-      return const Center(
-        child: Text('尚無音頻特徵，請先完成分析',
-            style: TextStyle(color: Colors.white38, fontSize: 12)),
-      );
-    }
-    final passes    = entry?.audioPasses ?? {};
-    final passCount = passes.values.where((v) => v).length;
-    final isGood    = entry?.goodShot ?? false;
-    const goodColor = Color(0xFF1E8E5A);
-    const badColor  = Color(0xFFE05252);
-    final scoreColor = isGood ? goodColor : badColor;
+    final featureValues = entry?.audioFeatureValues ?? const <String, double>{};
+    final passes        = entry?.audioPasses ?? const <String, bool>{};
+    final hasData       = featureValues.isNotEmpty;
+    final passCount     = passes.values.where((v) => v).length;
+    final goodShot      = entry?.goodShot;
+    const goodColor     = Color(0xFF22C55E);
+    const badColor      = Color(0xFFEF4444);
+    final scoreColor    = goodShot == true
+        ? goodColor
+        : goodShot == false
+            ? badColor
+            : Colors.white54;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── 通過數 + 標籤 ───────────────────────────────────
+          // ── 通過數 + 結果標籤 ──────────────────────────────────
           Row(
             children: [
               Text(
-                '$passCount / 5 項通過',
+                hasData ? '$passCount / 5 項通過' : '尚無音頻分析',
                 style: TextStyle(
-                    color: scoreColor,
+                    color: hasData ? scoreColor : Colors.white38,
                     fontSize: 12,
                     fontWeight: FontWeight.w700),
               ),
-              if (entry?.audioLabel?.isNotEmpty ?? false) ...[
+              if (hasData && entry?.audioLabel?.isNotEmpty == true) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: scoreColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     entry!.audioLabel!,
@@ -918,42 +979,151 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               ],
             ],
           ),
-          const SizedBox(height: 8),
-          // ── 每個特徵行 ─────────────────────────────────────
+          const SizedBox(height: 10),
+          // ── 5 個特徵量規行（仿圖表頁 _AudioFeatureGaugeRow）──────
           for (final feat in AudioAnalysisService.featureLabels.entries)
             Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: Row(
-                children: [
-                  Icon(
-                    (passes[feat.key] ?? false)
-                        ? Icons.check_circle_outline
-                        : Icons.cancel_outlined,
-                    color: (passes[feat.key] ?? false) ? goodColor : badColor,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(feat.value,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12)),
-                  const Spacer(),
-                  if (featureValues[feat.key] != null)
-                    Text(
-                      AudioAnalysisService.formatFeatureValue(
-                          feat.key, featureValues[feat.key]!),
-                      style: TextStyle(
-                        color: (passes[feat.key] ?? false)
-                            ? goodColor
-                            : Colors.white54,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                ],
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildDarkGaugeRow(
+                label:        feat.value,
+                featureKey:   feat.key,
+                value:        featureValues[feat.key],
+                passed:       passes[feat.key] ?? false,
+                hasData:      hasData,
+                displayRange: _kAudioDisplayRanges[feat.key] ?? [0.0, 100.0],
+                threshold:    AudioAnalysisService.ruleIntervals[feat.key] ??
+                              [0.0, 1.0],
               ),
             ),
         ],
       ),
+    );
+  }
+
+  /// 深色主題量規行（仿 recording_detail_page 的 _AudioFeatureGaugeRow）
+  Widget _buildDarkGaugeRow({
+    required String label,
+    required String featureKey,
+    required double? value,
+    required bool passed,
+    required bool hasData,
+    required List<double> displayRange,
+    required List<double> threshold,
+  }) {
+    const goodColor = Color(0xFF22C55E);
+    const badColor  = Color(0xFFEF4444);
+    final barColor  = !hasData
+        ? Colors.white24
+        : passed
+            ? goodColor
+            : badColor;
+
+    double norm(double v) =>
+        ((v - displayRange[0]) / (displayRange[1] - displayRange[0]))
+            .clamp(0.0, 1.0);
+
+    final tLowN  = norm(threshold[0]);
+    final tHighN = norm(threshold[1]);
+    final valN   = value != null ? norm(value) : null;
+
+    return Row(
+      children: [
+        // 標籤
+        SizedBox(
+          width: 32,
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white70)),
+        ),
+        const SizedBox(width: 8),
+        // 量規軌道
+        Expanded(
+          child: LayoutBuilder(builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            return SizedBox(
+              height: 16,
+              child: Stack(
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  // 背景軌道
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white
+                            .withValues(alpha: hasData ? 0.08 : 0.04),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                  // 甜蜜點區間（綠色帶）
+                  if (hasData)
+                    Positioned(
+                      left:  tLowN * width,
+                      width: (tHighN - tLowN) * width,
+                      top:   3,
+                      bottom: 3,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: goodColor.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                    ),
+                  // 實際值標記點
+                  if (valN != null)
+                    Positioned(
+                      left:   (valN * width - 4).clamp(0.0, width - 8),
+                      top:    2,
+                      bottom: 2,
+                      width:  8,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: barColor,
+                          borderRadius: BorderRadius.circular(3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: barColor.withValues(alpha: 0.55),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }),
+        ),
+        const SizedBox(width: 8),
+        // 數值 + 通過圖示
+        SizedBox(
+          width: 68,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                value != null
+                    ? AudioAnalysisService.formatFeatureValue(featureKey, value)
+                    : '—',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: barColor,
+                    fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                (hasData && passed)
+                    ? Icons.check_circle_rounded
+                    : Icons.cancel_rounded,
+                color: barColor,
+                size: 13,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1611,7 +1781,7 @@ class _SweetSpotRingPainter extends CustomPainter {
     if (goodShot == null || progress <= 0) return;
 
     final color  = _baseColor;
-    final center = Offset(size.width / 2, size.height * 0.60);
+    final center = Offset(size.width * 0.5194, size.height * 0.8469);
 
     for (int i = 0; i < 3; i++) {
       final delay = i * 0.18;
@@ -1717,40 +1887,247 @@ class _SweetSpotBadge extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 時間軸 Impact 標記 Painter
+// 多模態時間軸 Painter
+// 合併：音訊 RMS 波形柱 + 手腕速度曲線 + 8 階段 tick + impact 鑽石 + 播放游標
 // ════════════════════════════════════════════════════════════════
 
-class _ImpactTimelinePainter extends CustomPainter {
-  final double x;
-  final Color color;
+class _MultiModalTimelinePainter extends CustomPainter {
+  final List<ChartPoint> audioRms;
+  final List<ChartPoint> wristSpeed;
+  final Map<String, double> phases;
+  final double? hitSecond;
+  final double currentSecond;
+  final double totalSeconds;
+  final bool? goodShot;
 
-  const _ImpactTimelinePainter({required this.x, required this.color});
+  // Flutter Slider 內部 track 兩側的 horizontal padding（固定 20px）
+  static const double _hPad = 20.0;
+
+  static const _phaseLabels = <String, String>{
+    'address':       '準',
+    'takeaway':      '起',
+    'backswing':     '上',
+    'top':           '頂',
+    'downswing':     '下',
+    'impact':        '擊',
+    'followthrough': '送',
+    'finish':        '收',
+  };
+
+  const _MultiModalTimelinePainter({
+    required this.audioRms,
+    required this.wristSpeed,
+    required this.phases,
+    this.hitSecond,
+    required this.currentSecond,
+    required this.totalSeconds,
+    this.goodShot,
+  });
+
+  double _secToX(double sec, double trackW) =>
+      _hPad + (sec / totalSeconds).clamp(0.0, 1.0) * trackW;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 向上的三角形標記
-    final path = Path()
-      ..moveTo(x, 0)
-      ..lineTo(x - 4, size.height)
-      ..lineTo(x + 4, size.height)
-      ..close();
+    if (totalSeconds <= 0) return;
 
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color.withValues(alpha: 0.35)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
-        ..style = PaintingStyle.fill,
+    final trackW = size.width - _hPad * 2;
+
+    // ── 層1：基礎軌道（細線，讓空白處仍有視覺參考）──────────────
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(_hPad, size.height / 2 - 1.0, trackW, 2.0),
+        const Radius.circular(1.0),
+      ),
+      Paint()..color = Colors.white.withValues(alpha: 0.10),
     );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.fill,
+
+    // ── 層2：音訊 RMS 波形柱（底部 46% 高度空間）──────────────
+    if (audioRms.isNotEmpty) {
+      const numBars = 72;
+      const barGap  = 1.2;
+      final barW    = (trackW - (numBars - 1) * barGap) / numBars;
+      final maxBarH = size.height * 0.44;
+      final barBotY = size.height - 2.0;
+
+      // 每根 bar 取對應時間區段的最大振幅
+      final buckets = List<double>.filled(numBars, 0.0);
+      for (final pt in audioRms) {
+        final bi = ((pt.x / totalSeconds) * numBars).floor().clamp(0, numBars - 1);
+        final h  = ((pt.y + 60.0) / 55.0).clamp(0.0, 1.0); // rms_dbfs: -60~0
+        if (h > buckets[bi]) buckets[bi] = h;
+      }
+
+      final cursorFrac = (currentSecond / totalSeconds).clamp(0.0, 1.0);
+      final hitBarIdx  = hitSecond != null
+          ? ((hitSecond! / totalSeconds) * numBars).floor().clamp(0, numBars - 1)
+          : -1;
+
+      final paintPlayed = Paint()..color = const Color(0xFF1E8E5A).withValues(alpha: 0.80);
+      final paintFuture = Paint()..color = Colors.white.withValues(alpha: 0.18);
+      final paintHit    = Paint()..color = const Color(0xFFFF8F00);
+      final paintGlow   = Paint()
+        ..color      = const Color(0xFFFF8F00).withValues(alpha: 0.28)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+
+      for (int i = 0; i < numBars; i++) {
+        final bx = _hPad + i * (barW + barGap);
+        final h  = max(buckets[i], 0.05) * maxBarH;
+        final top = barBotY - h;
+        final rr = RRect.fromRectAndRadius(
+          Rect.fromLTWH(bx, top, barW, h),
+          const Radius.circular(1.5),
+        );
+        final isHit    = i == hitBarIdx;
+        final isPlayed = (i + 0.5) / numBars <= cursorFrac;
+
+        if (isHit) {
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(bx - 2, barBotY - maxBarH - 2, barW + 4, maxBarH + 4),
+              const Radius.circular(2),
+            ),
+            paintGlow,
+          );
+          canvas.drawRRect(rr, paintHit);
+        } else {
+          canvas.drawRRect(rr, isPlayed ? paintPlayed : paintFuture);
+        }
+      }
+    }
+
+    // ── 層3：手腕速度折線（上部 46% 高度空間）────────────────────
+    if (wristSpeed.isNotEmpty) {
+      final maxSpd = wristSpeed.map((p) => p.y).reduce(max);
+      if (maxSpd > 0) {
+        const topY  = 2.0;
+        final botY  = size.height * 0.50;
+        final zoneH = botY - topY;
+
+        final path = Path();
+        bool first = true;
+        for (final pt in wristSpeed) {
+          final x    = _secToX(pt.x, trackW);
+          final norm = (pt.y / maxSpd).clamp(0.0, 1.0);
+          final y    = botY - norm * zoneH;
+          if (first) { path.moveTo(x, y); first = false; }
+          else        { path.lineTo(x, y); }
+        }
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color      = const Color(0xFFFF8F00).withValues(alpha: 0.60)
+            ..style      = PaintingStyle.stroke
+            ..strokeWidth = 1.5
+            ..strokeCap  = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round,
+        );
+      }
+    }
+
+    // ── 層4：8 階段 tick 標記 + 底部文字 ──────────────────────────
+    if (phases.isNotEmpty) {
+      for (final e in phases.entries) {
+        if (e.value < 0 || e.value > totalSeconds) continue;
+        final isImpact = e.key == 'impact';
+        final x = _secToX(e.value, trackW);
+
+        // 垂直 tick 線
+        canvas.drawLine(
+          Offset(x, isImpact ? size.height * 0.08 : size.height * 0.28),
+          Offset(x, size.height * 0.82),
+          Paint()
+            ..color      = isImpact
+                ? const Color(0xFFFF8F00).withValues(alpha: 0.90)
+                : Colors.white.withValues(alpha: 0.22)
+            ..strokeWidth = isImpact ? 1.5 : 1.0,
+        );
+
+        // 底部單字 label
+        final label = _phaseLabels[e.key] ?? '';
+        if (label.isNotEmpty) {
+          _drawText(
+            canvas, label,
+            Offset(x, size.height * 0.85),
+            isImpact
+                ? const Color(0xFFFF8F00)
+                : Colors.white.withValues(alpha: 0.22),
+            8.5,
+          );
+        }
+      }
+    }
+
+    // ── 層5：Impact 鑽石標記 ────────────────────────────────────
+    if (hitSecond != null) {
+      final x  = _secToX(hitSecond!, trackW);
+      final cy = size.height * 0.25;
+      final Color dc = goodShot == true
+          ? const Color(0xFFFFD700)
+          : goodShot == false
+              ? const Color(0xFF9E9E9E)
+              : const Color(0xFFFF8F00);
+
+      // 暈光
+      canvas.drawCircle(
+        Offset(x, cy), 7,
+        Paint()
+          ..color      = dc.withValues(alpha: 0.28)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+      // 鑽石形
+      const r = 5.0;
+      final diamond = Path()
+        ..moveTo(x,           cy - r)
+        ..lineTo(x + r * 0.7, cy)
+        ..lineTo(x,           cy + r)
+        ..lineTo(x - r * 0.7, cy)
+        ..close();
+      canvas.drawPath(diamond, Paint()..color = dc);
+    }
+
+    // ── 層6：播放游標（白色細線 + 頂部小三角）───────────────────
+    final cx = _hPad + (currentSecond / totalSeconds).clamp(0.0, 1.0) * trackW;
+    canvas.drawRect(
+      Rect.fromLTWH(cx - 0.75, 0, 1.5, size.height * 0.84),
+      Paint()..color = Colors.white.withValues(alpha: 0.88),
     );
+    final arrowPath = Path()
+      ..moveTo(cx - 3.5, 0)
+      ..lineTo(cx + 3.5, 0)
+      ..lineTo(cx, 5.0)
+      ..close();
+    canvas.drawPath(arrowPath, Paint()..color = Colors.white);
+  }
+
+  void _drawText(
+    Canvas canvas,
+    String text,
+    Offset anchor,
+    Color color,
+    double fontSize,
+  ) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(anchor.dx - tp.width / 2, anchor.dy));
   }
 
   @override
-  bool shouldRepaint(_ImpactTimelinePainter old) =>
-      old.x != x || old.color != color;
+  bool shouldRepaint(_MultiModalTimelinePainter old) =>
+      old.currentSecond != currentSecond ||
+      old.hitSecond     != hitSecond     ||
+      old.totalSeconds  != totalSeconds  ||
+      old.audioRms      != audioRms      ||
+      old.wristSpeed    != wristSpeed    ||
+      old.phases        != phases        ||
+      old.goodShot      != goodShot;
 }

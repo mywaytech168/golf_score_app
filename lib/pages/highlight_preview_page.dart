@@ -153,8 +153,14 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
       return;
     }
 
+    // iOS has no public Downloads folder — route through share sheet so the
+    // user can save to Files, Mail, AirDrop, etc.
+    if (Platform.isIOS) {
+      await Share.shareXFiles([XFile(f.path)], text: 'Highlight debug log');
+      return;
+    }
+
     try {
-      // Android requires storage permission for writing to public folders on older API levels.
       if (Platform.isAndroid) {
         final status = await Permission.manageExternalStorage.request();
         if (!status.isGranted && !status.isLimited) {
@@ -179,15 +185,11 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   Future<Directory?> _getDownloadsDirectory() async {
     try {
       if (Platform.isAndroid) {
-        // On Android, use external storage public Downloads (documented fallback)
         final directory = Directory('/storage/emulated/0/Download');
         if (await directory.exists()) return directory;
         return await getExternalStorageDirectory();
       } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         return await getDownloadsDirectory();
-      } else if (Platform.isIOS) {
-        // iOS sandbox: use app Documents as best-effort
-        return await getApplicationDocumentsDirectory();
       }
     } catch (_) {}
     return null;

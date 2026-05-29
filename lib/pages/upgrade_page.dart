@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:pay/pay.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/plan_provider.dart';
 import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
@@ -113,6 +115,7 @@ class _UpgradePageState extends State<UpgradePage> {
 
   @override
   Widget build(BuildContext context) {
+    final currentPlan = context.watch<PlanProvider>().plan;
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
       body: Column(
@@ -128,11 +131,11 @@ class _UpgradePageState extends State<UpgradePage> {
                   const SizedBox(height: 24),
                   _PlanToggle(selected: _selected, onChanged: (p) => setState(() => _selected = p)),
                   const SizedBox(height: 20),
-                  _SelectedPlanCard(plan: _selected),
+                  _SelectedPlanCard(plan: _selected, currentPlan: currentPlan),
                   const SizedBox(height: 28),
                   _FeatureTable(highlighted: _selected),
                   const SizedBox(height: 28),
-                  _CtaButton(plan: _selected, onTap: () => _onUpgrade(context)),
+                  _CtaButton(plan: _selected, currentPlan: currentPlan, onTap: () => _onUpgrade(context)),
                   const SizedBox(height: 40),
                 ],
               ),
@@ -225,7 +228,8 @@ class _PlanToggle extends StatelessWidget {
 
 class _SelectedPlanCard extends StatelessWidget {
   final _Plan plan;
-  const _SelectedPlanCard({required this.plan});
+  final UserPlan currentPlan;
+  const _SelectedPlanCard({required this.plan, required this.currentPlan});
 
   @override
   Widget build(BuildContext context) {
@@ -268,6 +272,14 @@ class _SelectedPlanCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(10)),
                   child: Text(AppLocalizations.of(context).upgradeRecommended, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+              ],
+              if (currentPlan.index == plan.index) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: plan.primaryColor, borderRadius: BorderRadius.circular(10)),
+                  child: const Text('已訂閱', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                 ),
               ],
               const Spacer(),
@@ -548,36 +560,49 @@ class _ValueCell extends StatelessWidget {
 
 class _CtaButton extends StatelessWidget {
   final _Plan plan;
+  final UserPlan currentPlan;
   final VoidCallback onTap;
 
-  const _CtaButton({required this.plan, required this.onTap});
+  const _CtaButton({required this.plan, required this.currentPlan, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final isFree = plan == _Plan.free;
+    final isFree      = plan == _Plan.free;
+    final isSubscribed = currentPlan.index == plan.index && !isFree;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: SizedBox(
         width: double.infinity,
         height: 52,
         child: ElevatedButton(
-          onPressed: onTap,
+          onPressed: (isFree || isSubscribed) ? null : onTap,
           style: ElevatedButton.styleFrom(
-            backgroundColor: isFree ? Colors.grey[400] : plan.primaryColor,
+            backgroundColor: isSubscribed
+                ? Colors.green[700]
+                : isFree ? Colors.grey[400] : plan.primaryColor,
             foregroundColor: Colors.white,
-            elevation: isFree ? 0 : 4,
+            disabledBackgroundColor: isSubscribed ? Colors.green[700] : Colors.grey[400],
+            disabledForegroundColor: Colors.white,
+            elevation: (isFree || isSubscribed) ? 0 : 4,
             shadowColor: plan.primaryColor.withValues(alpha: 0.4),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(isFree ? Icons.check_circle_outline : Icons.workspace_premium_rounded, size: 20),
+              Icon(
+                isSubscribed
+                    ? Icons.check_circle_rounded
+                    : isFree ? Icons.check_circle_outline : Icons.workspace_premium_rounded,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Text(
-                isFree
-                    ? AppLocalizations.of(context).upgradeCurrentPlan
-                    : AppLocalizations.of(context).upgradeSubscribePlan(plan.label),
+                isSubscribed
+                    ? '目前方案'
+                    : isFree
+                        ? AppLocalizations.of(context).upgradeCurrentPlan
+                        : AppLocalizations.of(context).upgradeSubscribePlan(plan.label),
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
             ],
@@ -610,8 +635,8 @@ class _PaySheetState extends State<_PaySheet> {
   void initState() {
     super.initState();
     final asset = _isIOS
-        ? 'assets/pay/apple_pay_config.json'
-        : 'assets/pay/google_pay_config.json';
+        ? 'pay/apple_pay_config.json'
+        : 'pay/google_pay_config.json';
     PaymentConfiguration.fromAsset(asset).then((cfg) {
       if (mounted) setState(() => _payConfig = cfg);
     }).catchError((_) {
@@ -678,6 +703,9 @@ class _PaySheetState extends State<_PaySheet> {
     final ok = await PlanService.purchasePlan(userPlan, store: store, purchaseToken: token);
     if (!mounted) return;
     if (ok) {
+      // 即時更新全域方案狀態（首頁、球數、本頁面）
+      await context.read<PlanProvider>().refresh();
+      if (!mounted) return;
       _showSuccess(switch (store) {
         'google_pay' => 'Google Pay',
         'apple_pay'  => 'Apple Pay',
