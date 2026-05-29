@@ -54,13 +54,14 @@ final class BallYoloDetector {
         guard !loadAttempted else { return isLoaded }
         loadAttempted = true
 
-        // Flutter assets 在 iOS bundle 內路徑為 flutter_assets/...
-        guard let modelPath = Bundle.main.path(
-            forResource: "golfballyolov8n_int8",
-            ofType: "tflite",
-            inDirectory: "flutter_assets/assets/models"
-        ) else {
-            print("[BallYoloDetector] ❌ 模型 asset 未找到")
+        // Flutter assets 在 iOS bundle 內的完整路徑：
+        //   <App>.app/flutter_assets/assets/models/golfballyolov8n_int8.tflite
+        // 注意：Bundle.main.path(forResource:inDirectory:) 不支援含 "/" 的巢狀目錄，
+        //       改用直接拼接路徑 + FileManager 確認存在。
+        let modelPath = Bundle.main.bundlePath
+            + "/flutter_assets/assets/models/golfballyolov8n_int8.tflite"
+        guard FileManager.default.fileExists(atPath: modelPath) else {
+            print("[BallYoloDetector] ❌ 模型 asset 未找到，嘗試路徑：\(modelPath)")
             return false
         }
 
