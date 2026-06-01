@@ -113,6 +113,8 @@ flutter:
     - assets/overlays/stance_overlay.png
     - assets/overlays/golf png.png
     - assets/overlays/person_ball_outline_transparent.png
+    - assets/overlays/Group 720x1280_0.png
+    - assets/overlays/Group 1080x1920_0.png
     - assets/audio/audio_class_stats.json
     - assets/pay/google_pay_config.json
     - assets/pay/apple_pay_config.json

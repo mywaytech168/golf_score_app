@@ -17,12 +17,14 @@ class InternalVideoProcessor {
     }
 
     // 若未來需進行轉檔等操作，在此處擴展邏輯
-    // 目前先複製到暫存區保持兼容
-    final cacheDir = await getTemporaryDirectory();
+    // 使用文件目錄持久保存，不會因 App 更新被清除
+    final docsDir = await getApplicationDocumentsDirectory();
+    final importDir = p.join(docsDir.path, 'imported_videos');
+    await Directory(importDir).create(recursive: true);
     final fileName = baseName != null
         ? '$baseName${p.extension(sourcePath)}'
         : p.basename(sourcePath);
-    final persistedPath = p.join(cacheDir.path, fileName);
+    final persistedPath = p.join(importDir, fileName);
     if (!await File(persistedPath).exists()) {
       await File(sourcePath).copy(persistedPath);
     }

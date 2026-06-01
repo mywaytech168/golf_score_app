@@ -225,8 +225,11 @@ class VideoTranscoder {
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER       -> Unit
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED  -> Unit
                     outIdx >= 0 -> {
-                        // render=true：把 PTS 對應的幀送進 encoder input Surface
-                        decoder.releaseOutputBuffer(outIdx, bufInfo.size > 0)
+                        // 傳入原始 PTS（μs→ns），讓 SurfaceTexture 用來源時間戳，
+                        // 避免 encoder 用系統時鐘壓縮 PTS 造成播放加速。
+                        val renderTs = if (bufInfo.size > 0) bufInfo.presentationTimeUs * 1000L else -1L
+                        if (renderTs >= 0) decoder.releaseOutputBuffer(outIdx, renderTs)
+                        else decoder.releaseOutputBuffer(outIdx, false)
                         if (bufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             decOutEOS = true
                             encoder.signalEndOfInputStream()

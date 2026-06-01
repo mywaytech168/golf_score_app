@@ -591,9 +591,9 @@ namespace UploadServer.Data
                     .HasColumnName("audio_analysis_json")
                     .HasColumnType("LONGTEXT");
 
-                entity.Property(e => e.KeyframesJson)
-                    .HasColumnName("keyframes_json")
-                    .HasColumnType("LONGTEXT");
+                entity.Property(e => e.KeyframeCount)
+                    .HasColumnName("keyframe_count")
+                    .HasDefaultValue(0);
 
                 entity.Property(e => e.AudioB2Path)
                     .HasColumnName("audio_b2_path")

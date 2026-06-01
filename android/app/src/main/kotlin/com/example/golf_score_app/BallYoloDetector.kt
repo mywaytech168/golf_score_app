@@ -2,6 +2,7 @@ package com.example.golf_score_app
 
 import android.content.res.AssetManager
 import android.util.Log
+import com.example.golf_score_app.BuildConfig
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
@@ -54,6 +55,9 @@ class BallYoloDetector(private val assetManager: AssetManager) {
     // debug 計數
     private var detectCallCount = 0
 
+    // coordScale 快取：模型格式不會改變，第一次確認後不再掃 8400 anchors
+    private var cachedCoordScale: Float? = null
+
     val isLoaded: Boolean get() = interpreter != null
 
     // ──────────────────────────────────────────────────────────────
@@ -64,7 +68,7 @@ class BallYoloDetector(private val assetManager: AssetManager) {
             val modelBuf = ByteBuffer.allocateDirect(bytes.size).apply {
                 order(ByteOrder.nativeOrder()); put(bytes); rewind()
             }
-            val opts = Interpreter.Options().apply { setNumThreads(2) }
+            val opts = Interpreter.Options().apply { setNumThreads(4) }
             interpreter = Interpreter(modelBuf, opts)
 
             // 讀取輸入型態 → 決定 buffer 大小與填值方式
@@ -207,22 +211,27 @@ class BallYoloDetector(private val assetManager: AssetManager) {
             else (outBuf.get(ch * 8400 + anchor).toInt() - outZeroPoint) * outScale
 
         // ── 偵測模型輸出座標格式（normalized [0,1] 或 pixel [0,640]）───
-        // YOLOv8 依 export 設定不同可能輸出 normalized 或 pixel 座標。
-        // 若最高信心偵測的 cx < 2.0，幾乎確定是 normalized 格式。
-        var maxConfForScale = 0f
-        var maxCxForScale = 0f
-        for (i in 0 until 8400) {
-            val c = getValue(4, i)
-            if (c > maxConfForScale) { maxConfForScale = c; maxCxForScale = getValue(0, i) }
+        // 模型格式不會改變，只在第一次確認，之後直接用快取值（省 8400 次 ByteBuffer 讀取/幀）
+        val coordScale: Float
+        if (cachedCoordScale != null) {
+            coordScale = cachedCoordScale!!
+        } else {
+            var maxConfForScale = 0f; var maxCxForScale = 0f
+            for (i in 0 until 8400) {
+                val c = getValue(4, i)
+                if (c > maxConfForScale) { maxConfForScale = c; maxCxForScale = getValue(0, i) }
+            }
+            coordScale = if (maxConfForScale > 0.05f && maxCxForScale < 2.0f) INPUT_SIZE.toFloat() else 1.0f
+            if (maxConfForScale > 0.05f) {  // 有足夠信心才鎖定格式
+                cachedCoordScale = coordScale
+                Log.d(TAG, "coordScale locked=$coordScale (maxConf=${"%.4f".format(maxConfForScale)} maxCx_raw=${"%.4f".format(maxCxForScale)})")
+            }
         }
-        // 如果 cx < 2.0 時，判定為 normalized [0,1]，需乘以 INPUT_SIZE 還原
-        val coordScale = if (maxConfForScale > 0.05f && maxCxForScale < 2.0f) INPUT_SIZE.toFloat() else 1.0f
-        val coordFormat = if (coordScale > 1f) "normalized→scaled" else "pixel"
 
-        // debug：每 20 次 detect 完整掃描（診斷 edge filter + 低信心球偵測）
+        // debug：每 20 次 detect 完整掃描（僅 debug build，避免 release 浪費 8400 次讀取）
         detectCallCount++
-        if (detectCallCount % 20 == 0) {
-            // Top-5 above LOW_THRESH (不含 edge filter，看模型到底偵測到什麼)
+        if (BuildConfig.DEBUG && detectCallCount % 20 == 0) {
+            val coordFormat = if (coordScale > 1f) "normalized→scaled" else "pixel"
             val LOW_THRESH = 0.10f
             data class Det(val conf: Float, val cx: Float, val cy: Float, val w: Float, val h: Float)
             val topDets = mutableListOf<Det>()
@@ -236,16 +245,13 @@ class BallYoloDetector(private val assetManager: AssetManager) {
             val topStr = topDets.take(5).joinToString(" | ") {
                 val inEdge = it.cx < TILE_EDGE_MARGIN || it.cy < TILE_EDGE_MARGIN ||
                              it.cx > INPUT_SIZE - TILE_EDGE_MARGIN || it.cy > INPUT_SIZE - TILE_EDGE_MARGIN
-                // 顯示實際 float 值（不用 .toInt() 避免截斷 normalized 座標）
                 "conf=${"%.3f".format(it.conf)} tile=(${"%.1f".format(it.cx)},${"%.1f".format(it.cy)}) ${if (inEdge) "EDGE" else "OK"}"
             }
-            Log.d(TAG, "[debug#$detectCallCount] roi=(${roiCenterX},${roiCenterY}) tile=($tileLeft,$tileTop) " +
-                "coordFormat=$coordFormat coordScale=$coordScale maxConf=${"%.4f".format(maxConfForScale)} " +
-                "maxCx_raw=${"%.4f".format(maxCxForScale)}")
+            Log.d(TAG, "[debug#$detectCallCount] roi=(${roiCenterX},${roiCenterY}) tile=($tileLeft,$tileTop) coordFormat=$coordFormat")
             if (topDets.isNotEmpty()) {
                 Log.d(TAG, "[debug#$detectCallCount] top-${minOf(5, topDets.size)} above 0.10: $topStr")
             } else {
-                Log.d(TAG, "[debug#$detectCallCount] ⚠️ 無任何偵測超過 0.10 (模型可能未偵測到球或球不在 tile 中)")
+                Log.d(TAG, "[debug#$detectCallCount] ⚠️ 無任何偵測超過 0.10")
             }
         }
 

@@ -531,6 +531,14 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
   // idle：顯示翻轉按鈕 + 準備按鈕
   List<Widget> _idleOverlay(CameraState cameraState) => [
+    Center(
+      child: Image.asset(
+        _config.quality == VideoQuality.fhd
+            ? 'assets/overlays/Group 1080x1920_0.png'
+            : 'assets/overlays/Group 720x1280_0.png',
+        fit: BoxFit.contain,
+      ),
+    ),
     Positioned(
       top: 16, right: 16,
       child: _FlipButton(

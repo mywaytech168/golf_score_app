@@ -134,15 +134,32 @@ namespace UploadServer.Services
                         catch { /* JSON 損毀時忽略 */ }
                     }
 
-                    // v3：解析關鍵禎 + 下載 audio
+                    // v3：從 B2 下載關鍵禎 + audio
                     string[]? keyframesBase64 = null;
                     byte[]? audioWavBytes = null;
                     if (analysis.PromptVersion == "v3")
                     {
-                        if (!string.IsNullOrEmpty(analysis.KeyframesJson))
+                        if (analysis.KeyframeCount > 0)
                         {
-                            try { keyframesBase64 = JsonSerializer.Deserialize<string[]>(analysis.KeyframesJson); }
-                            catch { /* JSON 損毀時忽略 */ }
+                            var frames = new List<string>(analysis.KeyframeCount);
+                            for (int i = 0; i < analysis.KeyframeCount; i++)
+                            {
+                                try
+                                {
+                                    var kfUrl   = _b2.GenerateDownloadUrlForKey(B2Service.AiCoachKeyframeKey(analysis.Id, i));
+                                    var kfBytes = await DownloadBytesAsync(kfUrl, ct);
+                                    frames.Add(Convert.ToBase64String(kfBytes));
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "V3 keyframe[{I}] 下載失敗（略過）", i);
+                                }
+                            }
+                            if (frames.Count > 0)
+                            {
+                                keyframesBase64 = frames.ToArray();
+                                _logger.LogInformation("V3 keyframes 下載完成: {N}/{Total}", frames.Count, analysis.KeyframeCount);
+                            }
                         }
                         if (!string.IsNullOrEmpty(analysis.AudioB2Path))
                         {

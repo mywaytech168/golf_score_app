@@ -86,9 +86,10 @@ namespace UploadServer.Migrations
                         .HasColumnType("varchar(64)")
                         .HasColumnName("v2_resolution");
 
-                    b.Property<string>("KeyframesJson")
-                        .HasColumnType("LONGTEXT")
-                        .HasColumnName("keyframes_json");
+                    b.Property<int>("KeyframeCount")
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("keyframe_count");
 
                     b.Property<string>("PhaseTimestampsJson")
                         .HasColumnType("TEXT")

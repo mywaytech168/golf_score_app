@@ -63,8 +63,8 @@ namespace UploadServer.Models
         /// <summary>Flutter 客戶端音訊分析結果 JSON（含 pass_count / passes / features）；null = 無音訊分析</summary>
         public string? AudioAnalysisJson { get; set; }
 
-        /// <summary>v3：8 個關鍵禎 base64 JPEG 陣列的 JSON（["data...", ...]）；null = 未提供</summary>
-        public string? KeyframesJson { get; set; }
+        /// <summary>v3：上傳到 B2 的關鍵禎數量（0 = 未使用 v3 keyframe 流程）</summary>
+        public int KeyframeCount { get; set; } = 0;
 
         /// <summary>v3：audio.wav 在 B2 的路徑；null = 未上傳音訊</summary>
         public string? AudioB2Path { get; set; }

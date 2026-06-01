@@ -18,20 +18,24 @@ class AnalysisRequestResult {
   final String? csvUploadUrl;
   /// HasAudio=true 時才有值；V3 用此 URL 上傳 audio.wav
   final String? audioUploadUrl;
+  /// keyframeCount>0 時才有值；依序上傳 keyframe_0.jpg ... keyframe_N.jpg
+  final List<String>? keyframeUploadUrls;
 
   AnalysisRequestResult({
     required this.analysisId,
     required this.clipUploadUrl,
     this.csvUploadUrl,
     this.audioUploadUrl,
+    this.keyframeUploadUrls,
   });
 
   factory AnalysisRequestResult.fromJson(Map<String, dynamic> j) =>
       AnalysisRequestResult(
-        analysisId:     j['analysisId']     as String,
-        clipUploadUrl:  j['clipUploadUrl']  as String,
-        csvUploadUrl:   j['csvUploadUrl']   as String?,
-        audioUploadUrl: j['audioUploadUrl'] as String?,
+        analysisId:         j['analysisId']     as String,
+        clipUploadUrl:      j['clipUploadUrl']  as String,
+        csvUploadUrl:       j['csvUploadUrl']   as String?,
+        audioUploadUrl:     j['audioUploadUrl'] as String?,
+        keyframeUploadUrls: (j['keyframeUploadUrls'] as List<dynamic>?)?.cast<String>(),
       );
 }
 
@@ -337,17 +341,17 @@ class AnalysisService {
   ///
   /// - [hasCsv]=true 時同時回傳 [csvUploadUrl]，供後端 Worker 執行 ONNX 推論。
   /// - [hasAudio]=true 時同時回傳 [audioUploadUrl]（V3 用）。
-  /// - [keyframes]：V3 時傳入 base64 JPEG 字串陣列（嵌入 request body）。
+  /// - [keyframeCount]：V3 時傳入要上傳的關鍵禎數量，Server 回傳對應 presigned URL 陣列。
   /// - [mode]："posture_only"（只跑 ONNX → idle）或 "full"（ONNX + Gemini）。
   /// - [promptVersion]："v1" | "v2" | "v3"（僅 mode="full" 有效）。
   Future<AnalysisRequestResult> requestAnalysis({
     required String videoId,
     bool hasCsv = false,
     bool hasAudio = false,
+    int keyframeCount = 0,
     String mode = 'full',
     String promptVersion = 'v1',
     Map<String, double>? phaseTimestamps,
-    List<String>? keyframes,
     String? audioAnalysisJson,
     int? v2Fps,
     String? v2Resolution,
@@ -355,13 +359,13 @@ class AnalysisService {
     final resp = await _dio.post(
       '/api/analysis/request',
       data: {
-        'videoId':       videoId,
-        'hasCsv':        hasCsv,
-        'hasAudio':      hasAudio,
-        'mode':          mode,
-        'promptVersion': promptVersion,
+        'videoId':        videoId,
+        'hasCsv':         hasCsv,
+        'hasAudio':       hasAudio,
+        'keyframeCount':  keyframeCount,
+        'mode':           mode,
+        'promptVersion':  promptVersion,
         if (phaseTimestamps != null)   'phaseTimestamps':  phaseTimestamps,
-        if (keyframes != null)         'keyframes':        keyframes,
         if (audioAnalysisJson != null) 'audioAnalysisJson': audioAnalysisJson,
         if (v2Fps != null)             'v2Fps':            v2Fps,
         if (v2Resolution != null)      'v2Resolution':     v2Resolution,
@@ -423,6 +427,27 @@ class AnalysisService {
   }
 
   // ── 步驟 2c ───────────────────────────────────────────────────
+
+  /// 直傳單一 keyframe JPEG（base64 bytes）到 B2（Presigned PUT）—— V3 專用
+  Future<void> uploadKeyframe({
+    required String uploadUrl,
+    required Uint8List bytes,
+  }) async {
+    await _dio.put(
+      uploadUrl,
+      data: bytes,
+      options: Options(
+        headers: {
+          'Content-Type':   'image/jpeg',
+          'Content-Length': bytes.length.toString(),
+        },
+        sendTimeout:    const Duration(minutes: 2),
+        receiveTimeout: const Duration(minutes: 2),
+      ),
+    );
+  }
+
+  // ── 步驟 2d ───────────────────────────────────────────────────
 
   /// 直傳 audio.wav 到 B2（Presigned PUT）—— V3 專用
   Future<void> uploadAudio({
@@ -495,15 +520,15 @@ class AnalysisService {
     final hasAudio = audioPath != null && File(audioPath).existsSync()
         && promptVersion == 'v3';
 
-    // V3：事先抽取關鍵禎（base64 JPEG），嵌入 request body
-    List<String>? keyframes;
+    // V3：事先抽取關鍵禎 bytes（只取 bytes，不再嵌入 request body）
+    List<Uint8List>? keyframeBytes;
     if (promptVersion == 'v3' && phaseTimestamps != null && phaseTimestamps.isNotEmpty) {
       try {
-        keyframes = await V3AnalysisService.instance.extractKeyframes(
+        keyframeBytes = await V3AnalysisService.instance.extractKeyframeBytes(
           clipPath:        clipPath,
           phaseTimestamps: phaseTimestamps,
         );
-        debugPrint('✅ V3 關鍵禎抽取完成: ${keyframes.length} 幀');
+        debugPrint('✅ V3 關鍵禎抽取完成: ${keyframeBytes.length} 幀');
       } catch (e) {
         debugPrint('⚠️ V3 關鍵禎抽取失敗（略過）: $e');
       }
@@ -513,10 +538,10 @@ class AnalysisService {
       videoId:           videoId,
       hasCsv:            hasCsv,
       hasAudio:          hasAudio,
+      keyframeCount:     keyframeBytes?.length ?? 0,
       mode:              mode,
       promptVersion:     promptVersion,
       phaseTimestamps:   phaseTimestamps,
-      keyframes:         keyframes,
       audioAnalysisJson: audioAnalysisJson,
       v2Fps:             v2Fps,
       v2Resolution:      v2Resolution,
@@ -540,6 +565,19 @@ class AnalysisService {
         audioUploadUrl: req.audioUploadUrl!,
         audioPath:      audioPath,
       );
+    }
+
+    // V3：依序上傳每個關鍵禎到 B2
+    if (keyframeBytes != null && req.keyframeUploadUrls != null) {
+      final urls = req.keyframeUploadUrls!;
+      for (int i = 0; i < keyframeBytes.length && i < urls.length; i++) {
+        try {
+          await uploadKeyframe(uploadUrl: urls[i], bytes: keyframeBytes[i]);
+          debugPrint('✅ Keyframe[$i] 上傳完成: ${keyframeBytes[i].length ~/ 1024}KB');
+        } catch (e) {
+          debugPrint('⚠️ Keyframe[$i] 上傳失敗（略過）: $e');
+        }
+      }
     }
 
     await notifyReady(req.analysisId);

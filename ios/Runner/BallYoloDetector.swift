@@ -54,16 +54,26 @@ final class BallYoloDetector {
         guard !loadAttempted else { return isLoaded }
         loadAttempted = true
 
-        // Flutter assets 在 iOS bundle 內的完整路徑：
-        //   <App>.app/flutter_assets/assets/models/golfballyolov8n_int8.tflite
-        // 注意：Bundle.main.path(forResource:inDirectory:) 不支援含 "/" 的巢狀目錄，
-        //       改用直接拼接路徑 + FileManager 確認存在。
-        let modelPath = Bundle.main.bundlePath
-            + "/flutter_assets/assets/models/golfballyolov8n_int8.tflite"
-        guard FileManager.default.fileExists(atPath: modelPath) else {
-            print("[BallYoloDetector] ❌ 模型 asset 未找到，嘗試路徑：\(modelPath)")
+        // Flutter assets 在 iOS bundle 內可能有兩種位置：
+        //   1. <App>.app/flutter_assets/...              （標準 Flutter 3.x）
+        //   2. <App>.app/Frameworks/App.framework/flutter_assets/...  （部分 build 設定）
+        let assetRelative = "flutter_assets/assets/models/golfballyolov8n_int8.tflite"
+        let bundlePath    = Bundle.main.bundlePath
+        let candidatePaths = [
+            bundlePath + "/" + assetRelative,
+            bundlePath + "/Frameworks/App.framework/" + assetRelative,
+        ]
+
+        // 診斷 log：印出每個路徑的存在狀態
+        for p in candidatePaths {
+            print("[BallYoloDetector] 路徑檢查：\(FileManager.default.fileExists(atPath: p) ? "✅" : "❌") \(p)")
+        }
+
+        guard let modelPath = candidatePaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            print("[BallYoloDetector] ❌ 模型在所有路徑均未找到，bundlePath=\(bundlePath)")
             return false
         }
+        print("[BallYoloDetector] 使用模型路徑：\(modelPath)")
 
         do {
             var opts = Interpreter.Options()

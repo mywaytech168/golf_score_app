@@ -68,6 +68,19 @@ class SkeletonOverlayRenderer(private val context: Context) {
         style = Paint.Style.FILL; isAntiAlias = true
     }
 
+    // YUV 平面緩衝區：懶初始化，第一幀後穩定不再分配（節省 ~3MB/幀 GC）
+    private var yBuf = ByteArray(0)
+    private var uBuf = ByteArray(0)
+    private var vBuf = ByteArray(0)
+
+    // Nearest-neighbor 查找表：encW/encH 固定後只建一次，避免每幀 new IntArray
+    private var srcXTable = IntArray(0)
+    private var srcYTable = IntArray(0)
+    private var cachedEncW = -1
+    private var cachedEncH = -1
+    private var cachedSrcW = -1
+    private var cachedSrcH = -1
+
     // ────────────────────────────────────────────────────────────
     // 主入口
     // ────────────────────────────────────────────────────────────
@@ -186,6 +199,13 @@ class SkeletonOverlayRenderer(private val context: Context) {
         var samplesWritten = 0
         var success    = false
 
+        // ── 效能計時累計 ────────────────────────────────────────────
+        var timeYuvUs    = 0L
+        var timeDrawUs   = 0L
+        var timeCompUs   = 0L
+        var timeEncUs    = 0L
+        var timeDrainUs  = 0L
+
         // ── 預配置可重用緩衝區 ────────────────────────────────────
         // 優化：YUV → NV12 直接轉換，省去 YUV→RGB→NV12 的中間層
         // 骨架單獨畫在透明 overlay，再 composite 進 NV12（稀疏操作）
@@ -248,18 +268,25 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     val origTimeSec = startSec + clipTimeSec
                     val csvTimeMs   = (origTimeSec * 1000.0).roundToInt()
 
-                    // ── 1. YUV → NV12 直接轉換 + downscale to encW×encH（~7x 加速）──
+                    // ── 1. YUV → NV12 直接轉換 + downscale to encW×encH ──
+                    var t0 = System.nanoTime()
                     yuvToNv12WithRotation(image, videoW, videoH, rotation, displayW, displayH, encW, encH, nv12Buf)
-                    // srcW=displayW, srcH=displayH：原始解析度作為 source
+                    timeYuvUs += (System.nanoTime() - t0) / 1000
 
                     // ── 2. 骨架疊加（透明 overlay → composite 進 NV12）──
+                    t0 = System.nanoTime()
                     overlayBmp.eraseColor(android.graphics.Color.TRANSPARENT)
                     getSmoothedLandmarks(frameData, csvTimeMs, sortedFrameKeys)?.let { landmarks ->
                         drawSkeleton(overlayCanvas, landmarks, poseW, poseH, encW, encH, skeletonRadius)
                     }
+                    timeDrawUs += (System.nanoTime() - t0) / 1000
+
+                    t0 = System.nanoTime()
                     compositeSkeleton(overlayBmp, overlayPixels, encW, encH, nv12Buf)
+                    timeCompUs += (System.nanoTime() - t0) / 1000
 
                     // ── 3. 餵編碼器 ─────────────────────────────
+                    t0 = System.nanoTime()
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
                     // 使用浮點除法避免 fps.toLong() 截斷（如 29.97→29）
                     val ptsUs = (frameCount.toDouble() * 1_000_000.0 / fps).toLong()
@@ -279,7 +306,9 @@ class SkeletonOverlayRenderer(private val context: Context) {
                     } else {
                         Log.w(TAG, "dequeueInputBuffer 返回 $encInIdx，略過幀 pts=$ptsUs")
                     }
+                    timeEncUs += (System.nanoTime() - t0) / 1000
 
+                    t0 = System.nanoTime()
                     drainEncoder(
                         encoder, muxer, encBufInfo,
                         setTrack = { t -> muxTrack = t; muxStarted = true },
@@ -288,6 +317,7 @@ class SkeletonOverlayRenderer(private val context: Context) {
                         eos      = false,
                         onSampleWritten = { encodedFrames++; samplesWritten++ },
                     )
+                    timeDrainUs += (System.nanoTime() - t0) / 1000
 
                 } finally {
                     image.close()
@@ -337,6 +367,16 @@ class SkeletonOverlayRenderer(private val context: Context) {
                 onProgress?.invoke("renderSkeleton", 1.0, "骨架渲染完成", frameCount, frameCount)
                 Log.d(TAG, "✅ SUCCESS: renderedFrames=$frameCount, encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
                 Log.d(TAG, "骨架渲染完成: $frameCount 幀 → $outputPath")
+                if (frameCount > 0) {
+                    Log.i(TAG, "⏱ 效能分析 (總計 / 每幀平均):")
+                    Log.i(TAG, "  YUV→NV12    : ${timeYuvUs/1000}ms total, ${timeYuvUs/frameCount}µs/frame")
+                    Log.i(TAG, "  drawSkeleton: ${timeDrawUs/1000}ms total, ${timeDrawUs/frameCount}µs/frame")
+                    Log.i(TAG, "  composite   : ${timeCompUs/1000}ms total, ${timeCompUs/frameCount}µs/frame")
+                    Log.i(TAG, "  enc queue   : ${timeEncUs/1000}ms total, ${timeEncUs/frameCount}µs/frame")
+                    Log.i(TAG, "  drainEncoder: ${timeDrainUs/1000}ms total, ${timeDrainUs/frameCount}µs/frame")
+                    val totalUs = timeYuvUs + timeDrawUs + timeCompUs + timeEncUs + timeDrainUs
+                    Log.i(TAG, "  合計        : ${totalUs/1000}ms, ${totalUs/frameCount}µs/frame")
+                }
             } else {
                 Log.e(TAG, "❌ ERROR: encodedFrames=$encodedFrames, samplesWritten=$samplesWritten")
                 Log.e(TAG, "Skeleton MP4 編碼失敗: renderedFrames=$frameCount, encodedFrames=$encodedFrames, drainedOutputs=$drainedOutputs, samplesWritten=$samplesWritten")
@@ -567,16 +607,23 @@ class SkeletonOverlayRenderer(private val context: Context) {
         val yStride       = yP.rowStride
         val uvStride      = uP.rowStride
         val uvPixelStride = uP.pixelStride
-        val yBytes = ByteArray(yP.buffer.remaining()).also { yP.buffer.get(it) }
-        val uBytes = ByteArray(uP.buffer.remaining()).also { uP.buffer.get(it) }
-        val vBytes = ByteArray(vP.buffer.remaining()).also { vP.buffer.get(it) }
+        val yNeeded = yP.buffer.remaining(); if (yBuf.size < yNeeded) yBuf = ByteArray(yNeeded); yP.buffer.get(yBuf, 0, yNeeded)
+        val uNeeded = uP.buffer.remaining(); if (uBuf.size < uNeeded) uBuf = ByteArray(uNeeded); uP.buffer.get(uBuf, 0, uNeeded)
+        val vNeeded = vP.buffer.remaining(); if (vBuf.size < vNeeded) vBuf = ByteArray(vNeeded); vP.buffer.get(vBuf, 0, vNeeded)
+        val yBytes = yBuf; val uBytes = uBuf; val vBytes = vBuf
+
+        // 預計算 nearest-neighbor 查找表：只在尺寸改變時重建（同 clip 內只建一次）
+        if (encW != cachedEncW || encH != cachedEncH || srcW != cachedSrcW || srcH != cachedSrcH) {
+            srcXTable = IntArray(encW) { dx -> (dx.toLong() * srcW / encW).toInt() }
+            srcYTable = IntArray(encH) { dy -> (dy.toLong() * srcH / encH).toInt() }
+            cachedEncW = encW; cachedEncH = encH; cachedSrcW = srcW; cachedSrcH = srcH
+        }
 
         val uvBase = encW * encH
         for (dy in 0 until encH) {
+            val sy = srcYTable[dy]
             for (dx in 0 until encW) {
-                // Nearest-neighbor downscaling: output pixel → source pixel
-                val sx = (dx.toLong() * srcW / encW).toInt()
-                val sy = (dy.toLong() * srcH / encH).toInt()
+                val sx = srcXTable[dx]
                 val ci: Int; val cj: Int
                 when (rotation) {
                     90  -> { ci = sy;           cj = codedH - 1 - sx }

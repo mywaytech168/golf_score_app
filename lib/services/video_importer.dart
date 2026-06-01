@@ -25,10 +25,11 @@ class ExternalVideoImporter {
     final timestamp = DateTime.now();
     final baseName = _buildBaseName(timestamp);
 
-    // 複製影片檔案到應用程式的暫存目錄
-    final cacheDir = await getTemporaryDirectory();
+    // 複製影片檔案到應用程式的文件目錄（持久保存，不會因更新被清除）
+    final cacheDir = await getApplicationDocumentsDirectory();
     final fileName = '$baseName${p.extension(sourcePath)}';
-    final persistedPath = p.join(cacheDir.path, fileName);
+    final persistedPath = p.join(cacheDir.path, 'imported_videos', fileName);
+    await Directory(p.join(cacheDir.path, 'imported_videos')).create(recursive: true);
     await File(sourcePath).copy(persistedPath);
 
     final durationSeconds = await _resolveDurationSeconds(persistedPath);

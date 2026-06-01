@@ -190,7 +190,9 @@ class _RecordScreenState extends State<RecordScreen> {
               if (_showOverlay)
                 Center(
                   child: Image.asset(
-                    'assets/overlays/person_ball_outline_transparent.png',
+                    _config.quality == VideoQuality.fhd
+                        ? 'assets/overlays/Group 1080x1920_0.png'
+                        : 'assets/overlays/Group 720x1280_0.png',
                     fit: BoxFit.contain,
                   ),
                 ),

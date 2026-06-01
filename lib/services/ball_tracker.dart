@@ -274,7 +274,7 @@ class BallTracker {
   // ── P0 / P1 ───────────────────────────────────────────
   static const int    _p1DeadlineFrames  = 25;  // P1 最多等待幀數（@30fps≈0.83s，給球飛出足夠時間）
   static const double _p1MinDistPx       = 0.0; // P1 最小移動量：0=接受靜止球（高爾夫球在球座上直到被擊中才移動）
-  static const double _p1MaxDistPx       = 220.0; // P1 離 P0 最遠距離（高速球飛行距離可達 200px+）
+  static const double _p1MaxDistPx       = 320.0; // P1 離 P0 最遠距離（高速球飛行距離可達 200-300px/frame）
   static const int    _waitMaxFrames     = 180;
 
   // ── Tracking 終止 ─────────────────────────────────────
@@ -295,13 +295,16 @@ class BallTracker {
   // 前 _earlyPhaseLen 個點：嚴格（v3 標準）
   // 穩定追蹤（無 miss）：中等
   // miss 之後：放寬
+  // 擊球後（post-impact）：大幅放寬（球速可達 200-300px/frame）
   static const int    _earlyPhaseLen         = 5;
   static const double _stepAbsHardMaxEarly   = 130.0; // Phase 0: 嚴格（與 v3 一致）
   static const double _stepAbsHardMaxStable  = 160.0; // Phase 1: 穩定
   static const double _stepAbsHardMaxMiss    = 200.0; // Phase 2: miss 後
+  static const double _stepAbsHardMaxPostImpact = 350.0; // Phase 3: 擊球後飛行
   static const double _predDistHardMaxEarly  = 170.0; // Phase 0: 嚴格（與 v3 一致）
   static const double _predDistHardMaxStable = 210.0; // Phase 1: 穩定
   static const double _predDistHardMaxMiss   = 250.0; // Phase 2: miss 後
+  static const double _predDistHardMaxPostImpact = 450.0; // Phase 3: 擊球後飛行
 
   static const bool   _useStepDistGuard      = true;
   static const double _stepEmaAlpha          = 0.25;
@@ -343,6 +346,7 @@ class BallTracker {
 
   int _hitWindowStart = 0;
   int _hitWindowEnd   = -1;
+  int _hitFrameIdx    = -1; // 擊球幀（用於 post-impact step guard 放寬）
 
   // ══════════════════════════════════════════════════════════
   // 公開入口：track()
@@ -369,6 +373,7 @@ class BallTracker {
     _blueHist.clear();
     _outlierStrikes  = 0;
     _trackQuality    = _tqInit;
+    _hitFrameIdx     = -1;
     _kf = Kalman2D(dt: 1.0 / math.max(fps, 1.0));
 
     final roiHalfW    = videoW * _roiFixedSizeRatioW / 2;
@@ -390,6 +395,7 @@ class BallTracker {
       final hitFrame = (hitSec * fps).round();
       _hitWindowStart = math.max(0, hitFrame - _hitLeadFrames);
       _hitWindowEnd   = hitFrame + _hitTrailFrames;
+      _hitFrameIdx    = hitFrame;
       debugPrint('[BallTracker] hitFrame=$hitFrame window=[$_hitWindowStart, $_hitWindowEnd]');
     } else {
       _hitWindowStart = 0;
@@ -433,8 +439,12 @@ class BallTracker {
   // 分階段 step guard 門檻
   // ══════════════════════════════════════════════════════════
 
-  /// 根據追蹤長度與 miss 狀態，回傳本幀適用的 stepAbsHardMax
-  double _phaseStepHardMax() {
+  /// 根據追蹤長度、miss 狀態、是否擊球後，回傳本幀適用的 stepAbsHardMax
+  double _phaseStepHardMax(int frameIdx) {
+    // 擊球後球速極快（200-300px/frame），大幅放寬
+    if (_hitFrameIdx >= 0 && frameIdx >= _hitFrameIdx) {
+      return _stepAbsHardMaxPostImpact;
+    }
     if (_trackPts.length < _earlyPhaseLen) {
       return _stepAbsHardMaxEarly;  // 前 5 點：嚴格
     }
@@ -444,8 +454,12 @@ class BallTracker {
     return _stepAbsHardMaxMiss;     // miss 後：放寬
   }
 
-  /// 根據追蹤長度與 miss 狀態，回傳本幀適用的 predDistHardMax
-  double _phasePredHardMax() {
+  /// 根據追蹤長度、miss 狀態、是否擊球後，回傳本幀適用的 predDistHardMax
+  double _phasePredHardMax(int frameIdx) {
+    // 擊球後球速極快，Kalman 預測誤差也大，放寬
+    if (_hitFrameIdx >= 0 && frameIdx >= _hitFrameIdx) {
+      return _predDistHardMaxPostImpact;
+    }
     if (_trackPts.length < _earlyPhaseLen) {
       return _predDistHardMaxEarly;
     }
@@ -868,8 +882,8 @@ class BallTracker {
           final lim     = baseLim * (1.0 + 0.35 * _noCandCount);
 
           // 分階段 hard max（核心優化）
-          final hardStep = _phaseStepHardMax();
-          final hardPred = _phasePredHardMax();
+          final hardStep = _phaseStepHardMax(frameIdx);
+          final hardPred = _phasePredHardMax(frameIdx);
           final stepLim  = math.min(hardStep, lim);
 
           if (step > stepLim || predDist > hardPred) {

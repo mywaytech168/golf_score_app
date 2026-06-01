@@ -27,11 +27,13 @@ func registerVideoTranscoderChannel(messenger: FlutterBinaryMessenger) {
 
 // MARK: - 主轉檔函數
 
-/// 三路策略，選最快可行路徑：
+/// 兩路策略（iOS AVFoundation 原生支援 H.264 / HEVC，不需重新編碼）：
 ///
-///   路徑 A  H.264 + MP4 容器  → 直接複製檔案（毫秒級）
-///   路徑 B  H.264 + 非 MP4   → AVExport passthrough remux（秒級，不重新編碼）
-///   路徑 C  HEVC / 其他       → 重新編碼為 H.264 1920×1080（必要時才慢）
+///   路徑 A  已是 MP4 容器（任意 codec）→ 直接複製（毫秒級）
+///   路徑 B  非 MP4（MOV 等）           → Passthrough remux，只換容器（秒級）
+///
+/// iOS 分析管線（AVAssetReader / MLKit / audio extractor）全部原生支援 HEVC，
+/// 不需降轉 H.264。
 private func transcodeToMp4(
   srcPath: String,
   dstPath: String,
@@ -41,7 +43,7 @@ private func transcodeToMp4(
   let dstURL = URL(fileURLWithPath: dstPath)
   let asset  = AVURLAsset(url: srcURL)
 
-  // ── 1. 非同步載入 metadata（正確做法，避免阻塞 + 確保值已就緒）──
+  // ── 1. 非同步載入 metadata ──────────────────────────────────
   asset.loadValuesAsynchronously(forKeys: ["playable", "tracks"]) {
     var err: NSError?
 
@@ -61,18 +63,12 @@ private func transcodeToMp4(
       return
     }
 
-    // ── 2. 偵測 codec + 決定路徑 ──────────────────────────────
+    // ── 2. 只看容器格式，不管 codec ───────────────────────────
     let srcExt   = srcURL.pathExtension.lowercased()
     let isMp4Box = srcExt == "mp4" || srcExt == "m4v"
 
-    let videoTrack = asset.tracks(withMediaType: .video).first!
-    let isH264     = videoTrack.formatDescriptions.contains { raw in
-      let desc = raw as! CMFormatDescription
-      return CMFormatDescriptionGetMediaSubType(desc) == kCMVideoCodecType_H264
-    }
-
-    // 路徑 A：H.264 MP4 → 直接複製（毫秒級）
-    if isH264 && isMp4Box {
+    // 路徑 A：已是 MP4 容器 → 直接複製
+    if isMp4Box {
       do {
         try vtPrepareDestination(at: dstURL)
         try FileManager.default.copyItem(at: srcURL, to: dstURL)
@@ -86,23 +82,13 @@ private func transcodeToMp4(
       return
     }
 
-    // 路徑 B：H.264 非 MP4 → passthrough remux（僅換容器，秒級）
-    // 路徑 C：HEVC / 其他  → 重新編碼為 H.264 1920×1080
-    let wantPassthrough = isH264
-    let preferredPreset = wantPassthrough
-      ? AVAssetExportPresetPassthrough
-      : AVAssetExportPreset1920x1080
-
-    // 確認 preset 對此 asset 可用，否則退回 1920×1080
-    let supported   = AVAssetExportSession.exportPresets(compatibleWith: asset)
-    let finalPreset = supported.contains(preferredPreset)
-      ? preferredPreset
-      : AVAssetExportPreset1920x1080
-
-    guard let session = AVAssetExportSession(asset: asset, presetName: finalPreset) else {
+    // 路徑 B：非 MP4（MOV 等）→ Passthrough remux（只換容器，保留原始 codec）
+    guard let session = AVAssetExportSession(
+      asset: asset, presetName: AVAssetExportPresetPassthrough
+    ) else {
       DispatchQueue.main.async {
         result(FlutterError(code: "session_error",
-                            message: "無法建立 AVAssetExportSession (preset=\(finalPreset))",
+                            message: "無法建立 AVAssetExportSession",
                             details: nil))
       }
       return

@@ -55,15 +55,19 @@ class BallYoloExtractor(assetManager: AssetManager) {
         private const val CONF_PRE_IMPACT  = 0.25f
         private const val CONF_POST_IMPACT = 0.05f
 
-        // ── 擊球後 ROI 上升追蹤（post-impact ascending scan）──────
-        // 高爾夫球擊球後在畫面中以約 120-180px/frame 的速度向上飛行（@30fps 側面鏡頭）
-        // 每幀 miss → ROI 向上移動 POST_IMPACT_CHASE_DY px 以追蹤飛球
-        private const val POST_IMPACT_CHASE_DY   = 150f  // 每幀向上移動量（px）
-        private const val POST_IMPACT_CHASE_DX   = 0f    // 水平漂移（px，0=純垂直追蹤）
-        private const val POST_IMPACT_MAX_FRAMES = 20    // 最多追蹤 20 幀（≈0.67s @30fps）
+        // ── 擊球後 ROI 速度追蹤（post-impact velocity chase）──────
+        // 使用最近偵測到的速度向量預測下一幀 ROI 位置，而非固定上移
+        // 若尚無速度向量，預設向上 POST_IMPACT_CHASE_DY_DEFAULT px
+        private const val POST_IMPACT_CHASE_DY_DEFAULT = 150f  // 無速度時的預設向上量（px）
+        private const val POST_IMPACT_MAX_FRAMES = 20          // 最多追蹤 20 幀（≈0.67s @30fps）
     }
 
     private val detector = BallYoloDetector(assetManager)
+
+    // YUV 平面緩衝區：懶初始化，第一幀後穩定不再分配（節省 ~3MB/幀 GC）
+    private var yRawBuf = ByteArray(0)
+    private var uRawBuf = ByteArray(0)
+    private var vRawBuf = ByteArray(0)
 
     // ── ROI 追蹤狀態 ────────────────────────────────────────────
     private var roiCx             = -1f   // frame 座標，-1 表示尚未初始化
@@ -71,7 +75,12 @@ class BallYoloExtractor(assetManager: AssetManager) {
     private var missCount         = 0     // 目前連續 miss 幀數
     private var lastGoodCx        = -1f   // 最後一次可信偵測的球位置（miss reset 時優先回到此位置）
     private var lastGoodCy        = -1f
-    private var postImpactMisses  = 0     // 擊球後連續 miss 幀數（用於上升追蹤計數）
+    private var postImpactMisses  = 0     // 擊球後連續 miss 幀數（用於速度追蹤計數）
+    // 速度向量：由最後兩次成功偵測計算，miss 時用來預測下一幀 ROI 位置
+    private var chaseVelX         = 0f
+    private var chaseVelY         = -POST_IMPACT_CHASE_DY_DEFAULT  // 預設向上
+    private var prevDetCx         = -1f   // 上一次成功偵測的位置（用於計算速度）
+    private var prevDetCy         = -1f
     /** true 代表模型已成功載入。 */
     fun tryLoadModel(): Boolean = detector.tryLoad()
 
@@ -94,6 +103,10 @@ class BallYoloExtractor(assetManager: AssetManager) {
         lastGoodCx       = -1f
         lastGoodCy       = -1f
         postImpactMisses = 0
+        chaseVelX        = 0f
+        chaseVelY        = -POST_IMPACT_CHASE_DY_DEFAULT
+        prevDetCx        = -1f
+        prevDetCy        = -1f
 
         if (!java.io.File(inputPath).exists()) {
             Log.w(TAG, "File not found: $inputPath")
@@ -189,17 +202,17 @@ class BallYoloExtractor(assetManager: AssetManager) {
                 try {
                     val pts    = bufInfo.presentationTimeUs
 
-                    // ── 取 YUV 三個平面（供 YUV→RGB 轉換，提升球偵測準確率）──
+                    // ── 取 YUV 三個平面（重用類別欄位，避免每幀 ~3MB ByteArray 分配）──
                     val yPlane  = image.planes[0]
                     val uPlane  = image.planes[1]
                     val vPlane  = image.planes[2]
-                    val yBuf    = yPlane.buffer
-                    val uBuf    = uPlane.buffer
-                    val vBuf    = vPlane.buffer
-                    val yRaw    = ByteArray(videoH * yPlane.rowStride)
-                    val uRaw    = ByteArray(uBuf.remaining())
-                    val vRaw    = ByteArray(vBuf.remaining())
-                    yBuf.get(yRaw); uBuf.get(uRaw); vBuf.get(vRaw)
+                    val yBufRaw = yPlane.buffer
+                    val uBufRaw = uPlane.buffer
+                    val vBufRaw = vPlane.buffer
+                    val yNeed = yBufRaw.remaining(); if (yRawBuf.size < yNeed) yRawBuf = ByteArray(yNeed); yBufRaw.get(yRawBuf, 0, yNeed)
+                    val uNeed = uBufRaw.remaining(); if (uRawBuf.size < uNeed) uRawBuf = ByteArray(uNeed); uBufRaw.get(uRawBuf, 0, uNeed)
+                    val vNeed = vBufRaw.remaining(); if (vRawBuf.size < vNeed) vRawBuf = ByteArray(vNeed); vBufRaw.get(vRawBuf, 0, vNeed)
+                    val yRaw = yRawBuf; val uRaw = uRawBuf; val vRaw = vRawBuf
 
                     // ── 首幀初始化 ROI ──────────────────────────
                     if (roiCx < 0f) {
@@ -235,12 +248,24 @@ class BallYoloExtractor(assetManager: AssetManager) {
                         if (nearby.isNotEmpty()) {
                             // 在 ROI 範圍內，取最高 confidence
                             val best = nearby.maxByOrNull { it[4] }!!
+                            // 更新速度向量（由前一次偵測位置計算）
+                            if (prevDetCx >= 0f) {
+                                val vx = best[0] - prevDetCx
+                                val vy = best[1] - prevDetCy
+                                // 用 EMA 平滑速度（避免單幀跳點影響），限制在合理範圍
+                                chaseVelX = chaseVelX * 0.4f + vx * 0.6f
+                                chaseVelY = chaseVelY * 0.4f + vy * 0.6f
+                                chaseVelX = chaseVelX.coerceIn(-400f, 400f)
+                                chaseVelY = chaseVelY.coerceIn(-400f, 100f) // 高爾夫球向上為主，限制向下
+                            }
+                            prevDetCx        = best[0]
+                            prevDetCy        = best[1]
                             roiCx            = best[0]
                             roiCy            = best[1]
                             lastGoodCx       = best[0]  // 記錄最後可信球位
                             lastGoodCy       = best[1]
                             missCount        = 0
-                            postImpactMisses = 0         // 找到球：重置上升追蹤計數
+                            postImpactMisses = 0         // 找到球：重置速度追蹤計數
                         } else {
                             // 所有偵測都超出 maxShift（可能都是誤偵測），不更新 ROI
                             missCount++
@@ -342,20 +367,32 @@ class BallYoloExtractor(assetManager: AssetManager) {
      */
     private fun _handleMiss(frameCount: Int, isPostImpact: Boolean, videoW: Int, videoH: Int) {
         if (isPostImpact) {
-            // ── 擊球後：上升追蹤模式 ────────────────────────────
+            // ── 擊球後：速度向量追蹤模式 ────────────────────────
+            // 使用從最後兩次偵測計算的速度向量預測球位置（而非固定上移）
+            // 若尚未建立速度向量，使用預設向上移動
             postImpactMisses++
             if (postImpactMisses <= POST_IMPACT_MAX_FRAMES) {
-                val prevCy = roiCy
-                // 每幀向上（y 遞減）並可選水平漂移，clamp 到 tile 不超出畫面邊界
-                roiCx += POST_IMPACT_CHASE_DX
-                roiCy -= POST_IMPACT_CHASE_DY
+                val prevCx = roiCx; val prevCy = roiCy
+                val effectiveVx = if (chaseVelX != 0f || chaseVelY != -POST_IMPACT_CHASE_DY_DEFAULT) {
+                    chaseVelX  // 已有真實速度向量
+                } else {
+                    0f         // 無速度資料時不做水平移動
+                }
+                val effectiveVy = if (chaseVelX != 0f || chaseVelY != -POST_IMPACT_CHASE_DY_DEFAULT) {
+                    chaseVelY  // 已有真實速度向量
+                } else {
+                    -POST_IMPACT_CHASE_DY_DEFAULT  // 預設向上
+                }
+                roiCx += effectiveVx
+                roiCy += effectiveVy
                 val halfTile = BallYoloDetector.INPUT_SIZE / 2f
                 roiCx = roiCx.coerceIn(halfTile, videoW - halfTile)
-                roiCy = roiCy.coerceAtLeast(halfTile)
-                Log.d(TAG, "post-impact chase↑ frame=$frameCount miss=$postImpactMisses " +
-                    "roi=(${roiCx.toInt()},${prevCy.toInt()}) → (${roiCx.toInt()},${roiCy.toInt()})")
+                roiCy = roiCy.coerceIn(halfTile, videoH - halfTile)
+                Log.d(TAG, "post-impact chase[vel=(${effectiveVx.toInt()},${effectiveVy.toInt()})] " +
+                    "frame=$frameCount miss=$postImpactMisses " +
+                    "roi=(${prevCx.toInt()},${prevCy.toInt()}) → (${roiCx.toInt()},${roiCy.toInt()})")
             } else {
-                // 追蹤超時，放棄本次上升掃描（保留最後 ROI 位置，不再移動）
+                // 追蹤超時，放棄（保留最後 ROI 位置，不再移動）
                 Log.d(TAG, "post-impact chase timeout @ frame=$frameCount (>$POST_IMPACT_MAX_FRAMES frames without ball)")
             }
         } else {

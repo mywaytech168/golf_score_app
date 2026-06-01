@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
@@ -13,27 +11,25 @@ class V3AnalysisService {
 
   V3AnalysisService._internal();
 
-  Future<List<String>> extractKeyframes({
+  /// 抽取各揮桿階段的關鍵禎圖片，回傳 JPEG bytes 陣列（不做 base64 編碼）。
+  Future<List<Uint8List>> extractKeyframeBytes({
     required String clipPath,
     required Map<String, double> phaseTimestamps,
   }) async {
-    final List<String> keyframes = [];
+    final List<Uint8List> keyframes = [];
     final tempDir = await getTemporaryDirectory();
 
     for (final phase in phaseTimestamps.entries) {
-      final timestamp = phase.value;
       final thumbnailPath = await VideoThumbnail.thumbnailFile(
         video: clipPath,
         thumbnailPath: tempDir.path,
         imageFormat: ImageFormat.JPEG,
-        timeMs: (timestamp * 1000).toInt(),
+        timeMs: (phase.value * 1000).toInt(),
         quality: 90,
       );
 
       if (thumbnailPath != null) {
-        final bytes = await File(thumbnailPath).readAsBytes();
-        final base64Image = base64Encode(bytes);
-        keyframes.add(base64Image);
+        keyframes.add(await File(thumbnailPath).readAsBytes());
       }
     }
 

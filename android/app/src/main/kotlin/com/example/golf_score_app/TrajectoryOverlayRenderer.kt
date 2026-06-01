@@ -13,8 +13,6 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.util.Log
 import java.io.File
-import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -32,6 +30,11 @@ import kotlin.math.roundToInt
  *   - 陰影線（黑半透明，稍粗）增強對比
  */
 class TrajectoryOverlayRenderer {
+
+    // YUV 平面緩衝區：懶初始化，第一幀後穩定不再分配（節省 ~3MB/幀 GC）
+    private var yBuf = ByteArray(0)
+    private var uBuf = ByteArray(0)
+    private var vBuf = ByteArray(0)
 
     companion object {
         private const val TAG = "TrajOverlay"
@@ -215,14 +218,14 @@ class TrajectoryOverlayRenderer {
         var inputEos   = false
         var success    = false
 
-        // ── 預分配可重用緩衝區（避免每幀 ~13MB GC 壓力）────────
-        val yuvPixels  = IntArray(videoW * videoH)
-        val encPixels  = IntArray(encW   * encH)
-        val nv12Buf    = ByteArray(encW * encH + encW * encH / 2)
-        val frameBmp   = Bitmap.createBitmap(videoW, videoH, Bitmap.Config.ARGB_8888)
-        val padBmp     = if (encW != videoW || encH != videoH)
-                             Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
-                         else null
+        // ── 預分配可重用緩衝區 ────────────────────────────────────
+        // YUV→NV12 直接轉換：省去 YUV→RGB→NV12 雙重色彩轉換（節省 ~10ms/幀）
+        val nv12Buf       = ByteArray(encW * encH + encW * encH / 2)
+        val overlayBmp    = Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
+        val overlayCanvas = Canvas(overlayBmp)
+        val overlayPixels = IntArray(encW * encH)
+        // 軌跡點 cursor：pts 單調遞增，用 cursor 取代每幀 O(log n) binary search → O(1) amortized
+        var trajCursor = 0
 
         try {
             while (true) {
@@ -260,43 +263,28 @@ class TrajectoryOverlayRenderer {
                 try {
                     val pts = decBufInfo.presentationTimeUs
 
-                    // ── YUV → Bitmap（重用 frameBmp + yuvPixels）──
-                    yuvFillPixels(image, videoW, videoH, yuvPixels)
-                    frameBmp.setPixels(yuvPixels, 0, videoW, 0, 0, videoW, videoH)
+                    // ── 1. YUV → NV12 直接轉換（跳過 RGB 中間層，省 ~10ms/幀）──
+                    yuvFillNv12(image, videoW, videoH, encW, encH, nv12Buf)
 
-                    // ROI 中心 = 當幀最新軌跡點（沒有軌跡點時不繪製）
+                    // ── 2. 軌跡疊加（透明 overlay → composite 進 NV12）──
+                    overlayBmp.eraseColor(android.graphics.Color.TRANSPARENT)
+                    // cursor 單調推進（pts 遞增），O(1) amortized，取代 O(log n) binary search
+                    while (trajCursor < sortedPts.size && sortedPts[trajCursor].first <= pts) trajCursor++
+                    val visible = sortedPts.subList(0, trajCursor)
 
-                    // ── 找出本幀應顯示的軌跡點（二分搜尋，O(log n)）──
-                    val visibleEnd = sortedPts.binarySearchLast { it.first <= pts }
-                    var visible = if (visibleEnd >= 0) {
-                        sortedPts.subList(0, visibleEnd + 1)
-                    } else {
-                        emptyList()
-                    }
-                    
-                    // 不要過濾軌跡點，避免軌跡斷掉（Debug: 先顯示完整軌跡）
-                    // if (roiSize > 0) {
-                    //     visible = visible.filter { (_, x, y) ->
-                    //         x.toFloat() in roiLeft..roiRight && y.toFloat() in roiTop..roiBottom
-                    //     }
-                    // }
-                    
-                    if (visible.size >= 2) drawTrajectory(Canvas(frameBmp), visible)
-                    else if (visible.isNotEmpty()) drawDot(Canvas(frameBmp), visible[0].second, visible[0].third)
+                    if (visible.size >= 2) drawTrajectory(overlayCanvas, visible)
+                    else if (visible.isNotEmpty()) drawDot(overlayCanvas, visible[0].second, visible[0].third)
 
-                    // ── 繪製 ROI 邊界框（以最新軌跡點為中心）──
                     if (roiSize > 0 && visible.isNotEmpty()) {
                         val last = visible.last()
-                        drawROI(Canvas(frameBmp), last.second, last.third, roiSize, videoW, videoH)
+                        drawROI(overlayCanvas, last.second, last.third, roiSize, encW, encH)
                     }
 
-                    // ── Bitmap → 編碼器（重用 encPixels + nv12Buf）──
+                    compositeOverlay(overlayBmp, overlayPixels, encW, encH, nv12Buf)
+
+                    // ── 3. 餵編碼器 ─────────────────────────────
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
                     if (encInIdx >= 0) {
-                        val srcBmp = if (padBmp != null) {
-                            Canvas(padBmp).drawBitmap(frameBmp, 0f, 0f, null); padBmp
-                        } else frameBmp
-                        bitmapFillNv12(srcBmp, encW, encH, encPixels, nv12Buf)
                         val buf = encoder.getInputBuffer(encInIdx)!!
                         buf.clear()
                         buf.put(nv12Buf, 0, nv12Buf.size)
@@ -357,8 +345,7 @@ class TrajectoryOverlayRenderer {
         } catch (e: Exception) {
             Log.e(TAG, "渲染失敗: $e", e)
         } finally {
-            runCatching { frameBmp.recycle() }
-            runCatching { padBmp?.recycle() }
+            runCatching { overlayBmp.recycle() }
             runCatching { decoder.stop(); decoder.release() }
             runCatching { encoder.stop(); encoder.release() }
             runCatching { extractor.release() }
@@ -433,64 +420,79 @@ class TrajectoryOverlayRenderer {
     }
 
     // ────────────────────────────────────────────────────────────
-    // YUV Image → IntArray  /  Bitmap → NV12 ByteArray (in-place)
+    // YUV → NV12 直接轉換（無 RGB 中間層）+ overlay 合成
     // ────────────────────────────────────────────────────────────
 
-    /** Decode YUV420 image into pre-allocated ARGB pixels array (no heap alloc). */
-    private fun yuvFillPixels(image: Image, w: Int, h: Int, pixels: IntArray) {
-        val yP  = image.planes[0]
-        val uP  = image.planes[1]
-        val vP  = image.planes[2]
+    /**
+     * YUV420 Image → NV12 ByteArray，直接複製 Y/UV byte，無色彩轉換乘法。
+     * 重用類別層級的 yBuf/uBuf/vBuf，避免每幀 ByteArray 分配。
+     */
+    private fun yuvFillNv12(
+        image: Image,
+        videoW: Int, videoH: Int,
+        encW: Int, encH: Int,
+        nv12: ByteArray,
+    ) {
+        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
         val yStride       = yP.rowStride
         val uvStride      = uP.rowStride
         val uvPixelStride = uP.pixelStride
 
-        // Bulk-copy ByteBuffers to ByteArrays — avoids per-pixel JVM virtual calls
-        val yBytes = ByteArray(yP.buffer.remaining()).also { yP.buffer.get(it) }
-        val uBytes = ByteArray(uP.buffer.remaining()).also { uP.buffer.get(it) }
-        val vBytes = ByteArray(vP.buffer.remaining()).also { vP.buffer.get(it) }
+        val yNeeded = yP.buffer.remaining(); if (yBuf.size < yNeeded) yBuf = ByteArray(yNeeded); yP.buffer.get(yBuf, 0, yNeeded)
+        val uNeeded = uP.buffer.remaining(); if (uBuf.size < uNeeded) uBuf = ByteArray(uNeeded); uP.buffer.get(uBuf, 0, uNeeded)
+        val vNeeded = vP.buffer.remaining(); if (vBuf.size < vNeeded) vBuf = ByteArray(vNeeded); vP.buffer.get(vBuf, 0, vNeeded)
 
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val yv    = (yBytes[j * yStride + i].toInt() and 0xFF) - 16
-                val uvOff = (j / 2) * uvStride + (i / 2) * uvPixelStride
-                val u     = (uBytes[uvOff].toInt() and 0xFF) - 128
-                val v     = (vBytes[uvOff].toInt() and 0xFF) - 128
-                val r = ((298 * yv + 409 * v + 128) shr 8).coerceIn(0, 255)
-                val g = ((298 * yv - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
-                val b = ((298 * yv + 516 * u + 128) shr 8).coerceIn(0, 255)
-                pixels[j * w + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-            }
-        }
-    }
-
-    /** Encode Bitmap into pre-allocated NV12 byte array (no heap alloc). */
-    private fun bitmapFillNv12(bmp: Bitmap, w: Int, h: Int, pixels: IntArray, nv12: ByteArray) {
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val uvBase = w * h
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val p = pixels[j * w + i]
-                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
-                nv12[j * w + i] = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).toByte()
-                if (j % 2 == 0 && i % 2 == 0) {
-                    val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
-                    val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
-                    val base = uvBase + (j / 2) * w + (i / 2) * 2
-                    if (base + 1 < nv12.size) { nv12[base] = u.toByte(); nv12[base + 1] = v.toByte() }
+        val uvBase = encW * encH
+        for (dy in 0 until encH) {
+            val sy = dy.coerceAtMost(videoH - 1)
+            for (dx in 0 until encW) {
+                val sx   = dx.coerceAtMost(videoW - 1)
+                val yIdx = sy * yStride + sx
+                nv12[dy * encW + dx] = if (yIdx < yBuf.size) yBuf[yIdx] else 16
+                if (dy % 2 == 0 && dx % 2 == 0) {
+                    val uvOff = (sy / 2) * uvStride + (sx / 2) * uvPixelStride
+                    val base  = uvBase + (dy / 2) * encW + dx
+                    if (base + 1 < nv12.size) {
+                        nv12[base]     = if (uvOff < uBuf.size) uBuf[uvOff] else 128.toByte()
+                        nv12[base + 1] = if (uvOff < vBuf.size) vBuf[uvOff] else 128.toByte()
+                    }
                 }
             }
         }
     }
 
-    /** Returns index of last element satisfying [predicate], or -1. */
-    private inline fun <T> List<T>.binarySearchLast(predicate: (T) -> Boolean): Int {
-        var lo = 0; var hi = size - 1; var result = -1
-        while (lo <= hi) {
-            val mid = (lo + hi) ushr 1
-            if (predicate(this[mid])) { result = mid; lo = mid + 1 } else hi = mid - 1
+    /**
+     * 將透明 overlay（ARGB Bitmap）alpha-blend 合成進已填好的 NV12 緩衝區。
+     * 只處理非透明像素（軌跡線條），對完整幀而言是稀疏操作（<1% 像素）。
+     */
+    private fun compositeOverlay(overlay: Bitmap, pixels: IntArray, w: Int, h: Int, nv12: ByteArray) {
+        overlay.getPixels(pixels, 0, w, 0, 0, w, h)
+        val uvBase = w * h
+        for (j in 0 until h) {
+            for (i in 0 until w) {
+                val argb  = pixels[j * w + i]
+                val alpha = (argb ushr 24) and 0xFF
+                if (alpha < 16) continue
+                val r = (argb shr 16) and 0xFF
+                val g = (argb shr 8)  and 0xFF
+                val b = argb          and 0xFF
+                val yv = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).coerceIn(16, 235)
+                val yIdx = j * w + i
+                nv12[yIdx] = if (alpha >= 240) yv.toByte()
+                             else (((nv12[yIdx].toInt() and 0xFF) * (255 - alpha) + yv * alpha + 127) / 255).toByte()
+                if (j % 2 == 0 && i % 2 == 0) {
+                    val u    = (((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128).coerceIn(16, 240)
+                    val v    = (((112 * r - 94 * g - 18 * b + 128) shr 8) + 128).coerceIn(16, 240)
+                    val base = uvBase + (j / 2) * w + i
+                    if (base + 1 < nv12.size) {
+                        nv12[base]     = if (alpha >= 240) u.toByte()
+                                         else (((nv12[base].toInt()     and 0xFF) * (255 - alpha) + u * alpha + 127) / 255).toByte()
+                        nv12[base + 1] = if (alpha >= 240) v.toByte()
+                                         else (((nv12[base + 1].toInt() and 0xFF) * (255 - alpha) + v * alpha + 127) / 255).toByte()
+                    }
+                }
+            }
         }
-        return result
     }
 
     // ────────────────────────────────────────────────────────────

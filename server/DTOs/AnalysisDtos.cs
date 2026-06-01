@@ -30,8 +30,8 @@ namespace UploadServer.DTOs
         /// <summary>v3 時傳入的揮桿 8 階段秒數（key=address/takeaway/...，value=秒數）；null = 未提供</summary>
         public Dictionary<string, double>? PhaseTimestamps { get; set; }
 
-        /// <summary>V3: Base64 encoded keyframe images</summary>
-        public List<string>? Keyframes { get; set; }
+        /// <summary>v3：要上傳的關鍵禎數量（0 = 不使用 keyframe 流程）；Server 會回傳對應數量的 presigned URL</summary>
+        public int KeyframeCount { get; set; } = 0;
 
         /// <summary>客戶端音訊分析結果 JSON（含 pass_count / passes / features）；null = 無音訊分析</summary>
         public string? AudioAnalysisJson { get; set; }
@@ -59,6 +59,9 @@ namespace UploadServer.DTOs
 
         /// <summary>Flutter 用此 URL 直傳 audio.wav 到 B2（HasAudio=true 時才有值）</summary>
         public string? AudioUploadUrl { get; set; }
+
+        /// <summary>Flutter 依序直傳 keyframe_0.jpg ... keyframe_N.jpg 到 B2（KeyframeCount>0 時才有值）</summary>
+        public List<string>? KeyframeUploadUrls { get; set; }
     }
 
     public class AnalysisStatusResponse

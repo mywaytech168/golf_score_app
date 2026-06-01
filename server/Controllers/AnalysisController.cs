@@ -57,8 +57,8 @@ namespace UploadServer.Controllers
                 analysis.CsvB2Path   = B2Service.AiCoachCsvKey(analysis.Id);
             if (req.HasAudio)
                 analysis.AudioB2Path = B2Service.AiCoachAudioKey(analysis.Id);
-            if (req.Keyframes?.Count > 0)
-                analysis.KeyframesJson = System.Text.Json.JsonSerializer.Serialize(req.Keyframes);
+            if (req.KeyframeCount > 0)
+                analysis.KeyframeCount = req.KeyframeCount;
 
             _db.AiCoachAnalyses.Add(analysis);
             await _db.SaveChangesAsync();
@@ -67,16 +67,23 @@ namespace UploadServer.Controllers
             var csvUploadUrl   = req.HasCsv   ? _b2.GenerateCsvUploadUrl(analysis.Id)   : null;
             var audioUploadUrl = req.HasAudio ? _b2.GenerateAudioUploadUrl(analysis.Id) : null;
 
+            List<string>? keyframeUploadUrls = null;
+            if (req.KeyframeCount > 0)
+                keyframeUploadUrls = Enumerable.Range(0, req.KeyframeCount)
+                    .Select(i => _b2.GenerateKeyframeUploadUrl(analysis.Id, i))
+                    .ToList();
+
             _logger.LogInformation(
-                "建立 AI Coach 分析請求: {Id} Mode={Mode} HasCsv={HasCsv} HasAudio={HasAudio} Keyframes={KF}",
-                analysis.Id, analysis.Mode, req.HasCsv, req.HasAudio, req.Keyframes?.Count ?? 0);
+                "建立 AI Coach 分析請求: {Id} Mode={Mode} HasCsv={HasCsv} HasAudio={HasAudio} KeyframeCount={KF}",
+                analysis.Id, analysis.Mode, req.HasCsv, req.HasAudio, req.KeyframeCount);
 
             return Ok(new AnalysisRequestResponse
             {
-                AnalysisId    = analysis.Id,
-                ClipUploadUrl = clipUploadUrl,
-                CsvUploadUrl  = csvUploadUrl,
-                AudioUploadUrl = audioUploadUrl,
+                AnalysisId        = analysis.Id,
+                ClipUploadUrl     = clipUploadUrl,
+                CsvUploadUrl      = csvUploadUrl,
+                AudioUploadUrl    = audioUploadUrl,
+                KeyframeUploadUrls = keyframeUploadUrls,
             });
         }
 
