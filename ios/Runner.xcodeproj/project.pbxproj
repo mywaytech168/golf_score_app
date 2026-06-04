@@ -23,6 +23,7 @@
 		AA00010F1CF9AA000000000F /* BallTrajectoryChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00010E1CF9AA000000000E /* BallTrajectoryChannel.swift */; };
 		AA0001111CF9AA0000000011 /* BallYoloDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001101CF9AA0000000010 /* BallYoloDetector.swift */; };
 		AA0001131CF9AA0000000013 /* VideoTranscoderChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */; };
+		AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001141CF9AA0000000014 /* VideoExportChannel.swift */; };
 		EBD96FC061E6446ADA9EA04D /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3EE3AF767EEE86B6ED334B6 /* Pods_Runner.framework */; };
 /* End PBXBuildFile section */
 
@@ -77,6 +78,7 @@
 		AA00010E1CF9AA000000000E /* BallTrajectoryChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BallTrajectoryChannel.swift; sourceTree = "<group>"; };
 		AA0001101CF9AA0000000010 /* BallYoloDetector.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BallYoloDetector.swift; sourceTree = "<group>"; };
 		AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoTranscoderChannel.swift; sourceTree = "<group>"; };
+		AA0001141CF9AA0000000014 /* VideoExportChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoExportChannel.swift; sourceTree = "<group>"; };
 		BC5660C4942F611BB7C5199E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		C9E16FC20A40393144B19E4D /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 		D3EE3AF767EEE86B6ED334B6 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -171,6 +173,7 @@
 				AA00010E1CF9AA000000000E /* BallTrajectoryChannel.swift */,
 				AA0001101CF9AA0000000010 /* BallYoloDetector.swift */,
 				AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */,
+				AA0001141CF9AA0000000014 /* VideoExportChannel.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -429,6 +432,7 @@
 				AA00010F1CF9AA000000000F /* BallTrajectoryChannel.swift in Sources */,
 				AA0001111CF9AA0000000011 /* BallYoloDetector.swift in Sources */,
 				AA0001131CF9AA0000000013 /* VideoTranscoderChannel.swift in Sources */,
+				AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
