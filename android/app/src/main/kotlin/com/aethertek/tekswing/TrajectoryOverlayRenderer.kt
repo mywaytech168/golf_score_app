@@ -1,4 +1,4 @@
-package com.example.golf_score_app
+﻿package com.aethertek.tekswing
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -160,18 +160,20 @@ class TrajectoryOverlayRenderer {
         val videoH    = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
         val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
         val fps       = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat() }
-                            .getOrElse { 30f }  // ✅ 改為 30fps，保持與原錄影一致
-        
-        // 🎬 明確記錄 fps 來源
-        val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
-        Log.d(TAG, "[TrajectoryOverlay] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
+                            .getOrElse { 30f }
 
-        val totalFrames = android.media.MediaMetadataRetriever().use { mmr ->
+        val (rotation, totalFrames) = android.media.MediaMetadataRetriever().use { mmr ->
             mmr.setDataSource(inputPath)
-            val durationMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 0L
-            if (fps > 0) (durationMs * fps / 1000.0).toInt() else 0
+            val rot = mmr.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+            )?.toIntOrNull() ?: 0
+            val durationMs = mmr.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+            val frames = if (fps > 0) (durationMs * fps / 1000.0).toInt() else 0
+            Pair(rot, frames)
         }
+        Log.d(TAG, "[TrajectoryOverlay] coded=${videoW}x${videoH} rot=$rotation° fps=$fps")
 
         val encW = (videoW + 15) and -16
         val encH = (videoH + 15) and -16
@@ -207,6 +209,8 @@ class TrajectoryOverlayRenderer {
 
         File(outputPath).parentFile?.mkdirs()
         val muxer   = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        // 保留輸入影片的 rotation metadata，播放器才能正確顯示直向
+        if (rotation != 0) muxer.setOrientationHint(rotation)
         var muxTrack          = -1
         var muxStarted        = false
         var encodedFrames     = 0
@@ -219,11 +223,12 @@ class TrajectoryOverlayRenderer {
         var success    = false
 
         // ── 預分配可重用緩衝區 ────────────────────────────────────
-        // YUV→NV12 直接轉換：省去 YUV→RGB→NV12 雙重色彩轉換（節省 ~10ms/幀）
+        // YUV→NV12 與 composite 由 NativeLib（golf_native.so C）處理：
+        //   ・NativeLib.yuvFillNv12    → 替代原 JVM yuvFillNv12（~10× 加速）
+        //   ・NativeLib.compositeOverlay → 替代原 JVM compositeOverlay（省 getPixels() + ~10× 加速）
         val nv12Buf       = ByteArray(encW * encH + encW * encH / 2)
         val overlayBmp    = Bitmap.createBitmap(encW, encH, Bitmap.Config.ARGB_8888)
         val overlayCanvas = Canvas(overlayBmp)
-        val overlayPixels = IntArray(encW * encH)
         // 軌跡點 cursor：pts 單調遞增，用 cursor 取代每幀 O(log n) binary search → O(1) amortized
         var trajCursor = 0
 
@@ -263,10 +268,18 @@ class TrajectoryOverlayRenderer {
                 try {
                     val pts = decBufInfo.presentationTimeUs
 
-                    // ── 1. YUV → NV12 直接轉換（跳過 RGB 中間層，省 ~10ms/幀）──
-                    yuvFillNv12(image, videoW, videoH, encW, encH, nv12Buf)
+                    // ── 1. YUV 平面讀取（Kotlin）→ Native C YUV→NV12 轉換 ──
+                    val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
+                    val yStride = yP.rowStride; val uvStride = uP.rowStride; val uvPixelStride = uP.pixelStride
+                    val yNeeded = yP.buffer.remaining(); if (yBuf.size < yNeeded) yBuf = ByteArray(yNeeded); yP.buffer.get(yBuf, 0, yNeeded)
+                    val uNeeded = uP.buffer.remaining(); if (uBuf.size < uNeeded) uBuf = ByteArray(uNeeded); uP.buffer.get(uBuf, 0, uNeeded)
+                    val vNeeded = vP.buffer.remaining(); if (vBuf.size < vNeeded) vBuf = ByteArray(vNeeded); vP.buffer.get(vBuf, 0, vNeeded)
+                    NativeLib.yuvFillNv12(
+                        yBuf, uBuf, vBuf, yStride, uvStride, uvPixelStride,
+                        videoW, videoH, encW, encH, nv12Buf,
+                    )
 
-                    // ── 2. 軌跡疊加（透明 overlay → composite 進 NV12）──
+                    // ── 2. 軌跡疊加（Canvas 繪製 overlay → C composite 進 NV12）──
                     overlayBmp.eraseColor(android.graphics.Color.TRANSPARENT)
                     // cursor 單調推進（pts 遞增），O(1) amortized，取代 O(log n) binary search
                     while (trajCursor < sortedPts.size && sortedPts[trajCursor].first <= pts) trajCursor++
@@ -280,7 +293,7 @@ class TrajectoryOverlayRenderer {
                         drawROI(overlayCanvas, last.second, last.third, roiSize, encW, encH)
                     }
 
-                    compositeOverlay(overlayBmp, overlayPixels, encW, encH, nv12Buf)
+                    NativeLib.compositeOverlay(overlayBmp, encW, encH, nv12Buf)
 
                     // ── 3. 餵編碼器 ─────────────────────────────
                     val encInIdx = encoder.dequeueInputBuffer(50_000L)
@@ -410,90 +423,22 @@ class TrajectoryOverlayRenderer {
         val top    = (centerY - halfRoi).coerceIn(0f, (videoH - 1).toFloat())
         val right  = (centerX + halfRoi).coerceIn(0f, (videoW - 1).toFloat())
         val bottom = (centerY + halfRoi).coerceIn(0f, (videoH - 1).toFloat())
-        
+
         canvas.drawRect(left, top, right, bottom, roiBorderPaint)
-        
-        // 繪製中心十字標記
+
+        // 十字標記以 rect 實際中心為準（rect 被夾緊時中心會偏移）
         val crossSize = 15f
-        canvas.drawLine(centerX - crossSize, centerY.toFloat(), centerX + crossSize, centerY.toFloat(), roiBorderPaint)
-        canvas.drawLine(centerX.toFloat(), centerY - crossSize, centerX.toFloat(), centerY + crossSize, roiBorderPaint)
+        val cx = (left + right) / 2f
+        val cy = (top + bottom) / 2f
+        canvas.drawLine(cx - crossSize, cy, cx + crossSize, cy, roiBorderPaint)
+        canvas.drawLine(cx, cy - crossSize, cx, cy + crossSize, roiBorderPaint)
     }
 
     // ────────────────────────────────────────────────────────────
-    // YUV → NV12 直接轉換（無 RGB 中間層）+ overlay 合成
+    // YUV→NV12 與 composite 已移至 NativeLib（golf_native.so C 實作）
+    //   ・NativeLib.yuvFillNv12()    → 替代 yuvFillNv12()
+    //   ・NativeLib.compositeOverlay() → 替代 compositeOverlay()
     // ────────────────────────────────────────────────────────────
-
-    /**
-     * YUV420 Image → NV12 ByteArray，直接複製 Y/UV byte，無色彩轉換乘法。
-     * 重用類別層級的 yBuf/uBuf/vBuf，避免每幀 ByteArray 分配。
-     */
-    private fun yuvFillNv12(
-        image: Image,
-        videoW: Int, videoH: Int,
-        encW: Int, encH: Int,
-        nv12: ByteArray,
-    ) {
-        val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
-        val yStride       = yP.rowStride
-        val uvStride      = uP.rowStride
-        val uvPixelStride = uP.pixelStride
-
-        val yNeeded = yP.buffer.remaining(); if (yBuf.size < yNeeded) yBuf = ByteArray(yNeeded); yP.buffer.get(yBuf, 0, yNeeded)
-        val uNeeded = uP.buffer.remaining(); if (uBuf.size < uNeeded) uBuf = ByteArray(uNeeded); uP.buffer.get(uBuf, 0, uNeeded)
-        val vNeeded = vP.buffer.remaining(); if (vBuf.size < vNeeded) vBuf = ByteArray(vNeeded); vP.buffer.get(vBuf, 0, vNeeded)
-
-        val uvBase = encW * encH
-        for (dy in 0 until encH) {
-            val sy = dy.coerceAtMost(videoH - 1)
-            for (dx in 0 until encW) {
-                val sx   = dx.coerceAtMost(videoW - 1)
-                val yIdx = sy * yStride + sx
-                nv12[dy * encW + dx] = if (yIdx < yBuf.size) yBuf[yIdx] else 16
-                if (dy % 2 == 0 && dx % 2 == 0) {
-                    val uvOff = (sy / 2) * uvStride + (sx / 2) * uvPixelStride
-                    val base  = uvBase + (dy / 2) * encW + dx
-                    if (base + 1 < nv12.size) {
-                        nv12[base]     = if (uvOff < uBuf.size) uBuf[uvOff] else 128.toByte()
-                        nv12[base + 1] = if (uvOff < vBuf.size) vBuf[uvOff] else 128.toByte()
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * 將透明 overlay（ARGB Bitmap）alpha-blend 合成進已填好的 NV12 緩衝區。
-     * 只處理非透明像素（軌跡線條），對完整幀而言是稀疏操作（<1% 像素）。
-     */
-    private fun compositeOverlay(overlay: Bitmap, pixels: IntArray, w: Int, h: Int, nv12: ByteArray) {
-        overlay.getPixels(pixels, 0, w, 0, 0, w, h)
-        val uvBase = w * h
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val argb  = pixels[j * w + i]
-                val alpha = (argb ushr 24) and 0xFF
-                if (alpha < 16) continue
-                val r = (argb shr 16) and 0xFF
-                val g = (argb shr 8)  and 0xFF
-                val b = argb          and 0xFF
-                val yv = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).coerceIn(16, 235)
-                val yIdx = j * w + i
-                nv12[yIdx] = if (alpha >= 240) yv.toByte()
-                             else (((nv12[yIdx].toInt() and 0xFF) * (255 - alpha) + yv * alpha + 127) / 255).toByte()
-                if (j % 2 == 0 && i % 2 == 0) {
-                    val u    = (((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128).coerceIn(16, 240)
-                    val v    = (((112 * r - 94 * g - 18 * b + 128) shr 8) + 128).coerceIn(16, 240)
-                    val base = uvBase + (j / 2) * w + i
-                    if (base + 1 < nv12.size) {
-                        nv12[base]     = if (alpha >= 240) u.toByte()
-                                         else (((nv12[base].toInt()     and 0xFF) * (255 - alpha) + u * alpha + 127) / 255).toByte()
-                        nv12[base + 1] = if (alpha >= 240) v.toByte()
-                                         else (((nv12[base + 1].toInt() and 0xFF) * (255 - alpha) + v * alpha + 127) / 255).toByte()
-                    }
-                }
-            }
-        }
-    }
 
     // ────────────────────────────────────────────────────────────
     // 編碼器排空

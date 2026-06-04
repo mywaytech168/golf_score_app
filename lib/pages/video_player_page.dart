@@ -180,6 +180,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
       if (isOriginal && widget.startPosition != null) {
         await ctrl.seekTo(widget.startPosition!);
+      } else if (!isOriginal) {
+        // localClip：Surface trim 後 clip 精確從 hitSec-2.5 開始，hitSecond≈2.5。
+        // 若因 fallback（raw mux）導致 clip 較長，自動 seek 到 hitSecond-2.5。
+        final hitSec = widget.entry?.hitSecond;
+        if (hitSec != null && hitSec > 3.0) {
+          // hitSecond > 3 表示 clip 有較多前置幀（fallback 路徑），需要 seek
+          final seekMs = ((hitSec - 2.5).clamp(0.0, hitSec) * 1000).round();
+          await ctrl.seekTo(Duration(milliseconds: seekMs));
+        }
       }
       ctrl.play();
 

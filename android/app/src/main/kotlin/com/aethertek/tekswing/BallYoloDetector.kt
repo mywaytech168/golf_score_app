@@ -1,8 +1,8 @@
-package com.example.golf_score_app
+﻿package com.aethertek.tekswing
 
 import android.content.res.AssetManager
 import android.util.Log
-import com.example.golf_score_app.BuildConfig
+import com.aethertek.tekswing.BuildConfig
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
@@ -120,8 +120,10 @@ class BallYoloDetector(private val assetManager: AssetManager) {
     /**
      * 對 [roiCenterX, roiCenterY] 附近裁切出 640×640 patch 並執行推論。
      *
-     * @param roiCenterX  ROI 中心 X（frame 座標）
-     * @param roiCenterY  ROI 中心 Y（frame 座標）
+     * @param roiCenterX      ROI 中心 X（frame 座標）
+     * @param roiCenterY      ROI 中心 Y（frame 座標）
+     * @param tileEdgeMargin  tile 邊緣排除距離（pixels in tile space）；
+     *                        預設 24f；擊球後可降低至 8f 讓高速球靠近邊緣也能通過
      * @return 偵測列表，FloatArray(5) = [cx_frame, cy_frame, w_px, h_px, conf]
      *         座標已轉換回原始 frame 座標空間
      */
@@ -135,6 +137,8 @@ class BallYoloDetector(private val assetManager: AssetManager) {
         roiCenterY: Int,
         // 允許呼叫端動態調整：擊球後可降低至 0.05f 讓微小/高速球也能通過
         confThreshold: Float = CONF_THRESHOLD,
+        // 擊球後可降低至 8f，避免高速球在 tile 邊緣被過濾
+        tileEdgeMargin: Float = TILE_EDGE_MARGIN,
     ): List<FloatArray> {
         val interp = interpreter ?: return emptyList()
         val inBuf  = inputBuf   ?: return emptyList()
@@ -158,43 +162,21 @@ class BallYoloDetector(private val assetManager: AssetManager) {
             tileW = INPUT_SIZE; tileH = INPUT_SIZE
         }
 
-        // ── 填入 [1, 640, 640, 3] input（YUV420 → RGB，pixel/255）──
-        // YUV420 (I420/NV12/NV21 通用)：
-        //   UV 平面解析度為 Y 的一半（每 2x2 像素共用一組 UV）
-        //   BT.601 limited range：Y=[16,235], U/V=[16,240]
-        //   R = Y + 1.402*(V-128)
-        //   G = Y - 0.344*(U-128) - 0.714*(V-128)
-        //   B = Y + 1.772*(U-128)
+        // ── 填入 [1, 640, 640, 3] input（Native C 加速）─────────────
+        // 原 JVM 迴圈 640×640=40萬次，由 NativeLib.fillYoloInput 替代。
+        // 使用 GetDirectBufferAddress 直接寫入 inBuf（ByteBuffer.allocateDirect），零複製。
         inBuf.rewind()
-        val scaleX = tileW.toFloat() / INPUT_SIZE
-        val scaleY = tileH.toFloat() / INPUT_SIZE
-
-        for (y in 0 until INPUT_SIZE) {
-            val srcY = (tileTop  + (y * scaleY).toInt()).coerceIn(0, frameH - 1)
-            val uvRow = srcY / 2          // UV 行（每兩行共用）
-            for (x in 0 until INPUT_SIZE) {
-                val srcX = (tileLeft + (x * scaleX).toInt()).coerceIn(0, frameW - 1)
-                val uvCol = srcX / 2      // UV 列（每兩列共用）
-
-                val yv = yData[srcY * yStride + srcX].toInt() and 0xFF
-                val ui = uvRow * uStride + uvCol * uPixelStride
-                val vi = uvRow * vStride + uvCol * vPixelStride
-                val uv = if (ui < uData.size) (uData[ui].toInt() and 0xFF) - 128 else 0
-                val vv = if (vi < vData.size) (vData[vi].toInt() and 0xFF) - 128 else 0
-
-                val r = (yv + 1.402f  * vv).coerceIn(0f, 255f) / 255f
-                val g = (yv - 0.344f  * uv - 0.714f * vv).coerceIn(0f, 255f) / 255f
-                val b = (yv + 1.772f  * uv).coerceIn(0f, 255f) / 255f
-
-                if (inIsFloat) {
-                    inBuf.putFloat(r); inBuf.putFloat(g); inBuf.putFloat(b)
-                } else {
-                    inBuf.put((r * 255 + inZeroPoint).toInt().coerceIn(-128, 127).toByte())
-                    inBuf.put((g * 255 + inZeroPoint).toInt().coerceIn(-128, 127).toByte())
-                    inBuf.put((b * 255 + inZeroPoint).toInt().coerceIn(-128, 127).toByte())
-                }
-            }
-        }
+        NativeLib.fillYoloInput(
+            yData, yStride,
+            uData, uStride, uPixelStride,
+            vData, vStride, vPixelStride,
+            frameW, frameH,
+            tileLeft, tileTop, tileW, tileH,
+            INPUT_SIZE,
+            inBuf,
+            inIsFloat,
+            inZeroPoint,
+        )
         inBuf.rewind()
 
         // ── 推論 ─────────────────────────────────────────────────
@@ -243,8 +225,8 @@ class BallYoloDetector(private val assetManager: AssetManager) {
             }
             topDets.sortByDescending { it.conf }
             val topStr = topDets.take(5).joinToString(" | ") {
-                val inEdge = it.cx < TILE_EDGE_MARGIN || it.cy < TILE_EDGE_MARGIN ||
-                             it.cx > INPUT_SIZE - TILE_EDGE_MARGIN || it.cy > INPUT_SIZE - TILE_EDGE_MARGIN
+                val inEdge = it.cx < tileEdgeMargin || it.cy < tileEdgeMargin ||
+                             it.cx > INPUT_SIZE - tileEdgeMargin || it.cy > INPUT_SIZE - tileEdgeMargin
                 "conf=${"%.3f".format(it.conf)} tile=(${"%.1f".format(it.cx)},${"%.1f".format(it.cy)}) ${if (inEdge) "EDGE" else "OK"}"
             }
             Log.d(TAG, "[debug#$detectCallCount] roi=(${roiCenterX},${roiCenterY}) tile=($tileLeft,$tileTop) coordFormat=$coordFormat")
@@ -256,6 +238,8 @@ class BallYoloDetector(private val assetManager: AssetManager) {
         }
 
         // ── 篩選 + 座標轉換回 frame 空間 ────────────────────────
+        val scaleX = tileW.toFloat() / INPUT_SIZE
+        val scaleY = tileH.toFloat() / INPUT_SIZE
         val dets = mutableListOf<FloatArray>()
         for (i in 0 until 8400) {
             val conf = getValue(4, i)
@@ -268,9 +252,10 @@ class BallYoloDetector(private val assetManager: AssetManager) {
             val h_tile  = getValue(3, i) * coordScale
 
             // 排除 tile 邊緣的 false positive（YOLOv8 anchor grid 在邊界常產生噪訊）
-            if (cx_tile < TILE_EDGE_MARGIN || cy_tile < TILE_EDGE_MARGIN ||
-                cx_tile > INPUT_SIZE - TILE_EDGE_MARGIN ||
-                cy_tile > INPUT_SIZE - TILE_EDGE_MARGIN) continue
+            // tileEdgeMargin 由呼叫端控制：正常=24f，擊球後=8f（允許高速球靠邊緣）
+            if (cx_tile < tileEdgeMargin || cy_tile < tileEdgeMargin ||
+                cx_tile > INPUT_SIZE - tileEdgeMargin ||
+                cy_tile > INPUT_SIZE - tileEdgeMargin) continue
 
             // 轉回 frame 座標
             val cx = tileLeft + cx_tile * scaleX

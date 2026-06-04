@@ -36,13 +36,15 @@ Future<void> main() async {
   MediaKit.ensureInitialized();
   AnalysisProgressService.instance.start();
   await MobileAds.instance.initialize();
-  await InAppPurchaseService.initialize();
+  await InAppPurchaseService.instance.init();
   final purchaseService = PurchaseService();
   await purchaseService.initialize();
   final adManager = DailyAdManager();
   await adManager.initialize();
-  AdService.loadInterstitialAd();
-  AdService.loadRewardedAd();
+  unawaited(AdService.loadAiCoachInterstitial());
+  unawaited(AdService.loadBallDetectionInterstitial());
+  unawaited(AdService.loadFullAnalysisInterstitial());
+  unawaited(AdService.loadRewardedAiCoach());
 
   // Load saved locale before running the app
   final localeProvider = LocaleProvider();

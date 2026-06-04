@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using UploadServer.Constants;
 using UploadServer.Data;
 using UploadServer.DTOs;
@@ -51,16 +52,28 @@ namespace UploadServer.Services
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return null;
 
+            // 訂閱到期自動降回 free
+            if (user.Plan != "free" && user.SubscriptionExpiry.HasValue
+                && user.SubscriptionExpiry.Value < DateTime.UtcNow
+                && user.SubscriptionStatus != "active")
+            {
+                user.Plan               = "free";
+                user.SubscriptionStatus = "expired";
+                user.UpdatedAt          = DateTime.UtcNow;
+                _logger.LogInformation("用戶 {UserId} 訂閱已到期，降回 free", userId);
+            }
+
             var today = Today;
             if (user.TodayUsedDate != today)
             {
                 user.TodayUsed     = 0;
                 user.TodayUsedDate = today;
-                await _db.SaveChangesAsync();
             }
+            await _db.SaveChangesAsync();
 
             var limit = DailyLimitFor(user.Plan);
-            return new PlanStatusResponse(user.Plan, limit, user.TodayUsed, user.BonusBalls);
+            return new PlanStatusResponse(user.Plan, limit, user.TodayUsed, user.BonusBalls,
+                user.SubscriptionExpiry, user.SubscriptionStatus);
         }
 
         public async Task<bool> UpdatePlanAsync(string userId, string plan)
@@ -401,7 +414,6 @@ namespace UploadServer.Services
             if (req.Plan is not ("pro" or "elite"))
                 return new PurchasePlanResponse(false, "無效的方案", null);
 
-            // 先建立 pending 記錄，確保驗證失敗也留下嘗試紀錄
             var purchaseRecord = new PurchaseRecord
             {
                 UserId        = userId,
@@ -415,76 +427,79 @@ namespace UploadServer.Services
             _db.PurchaseRecords.Add(purchaseRecord);
             await _db.SaveChangesAsync();
 
-            if (!await ValidatePurchaseTokenAsync(req))
+            var result = await ValidateSubscriptionAsync(req);
+            if (!result.Success)
             {
                 purchaseRecord.Status = PurchaseStatus.Failed;
                 await _db.SaveChangesAsync();
-                _logger.LogWarning("用戶 {UserId} 付款驗證失敗 store={Store}", userId, req.Store);
-                return new PurchasePlanResponse(false, "付款驗證失敗", null);
+                _logger.LogWarning("用戶 {UserId} 訂閱驗證失敗 store={Store}", userId, req.Store);
+                return new PurchasePlanResponse(false, "訂閱驗證失敗", null);
             }
 
-            user.Plan               = req.Plan;
-            user.UpdatedAt          = DateTime.UtcNow;
-            purchaseRecord.Status     = PurchaseStatus.Verified;
-            purchaseRecord.VerifiedAt = DateTime.UtcNow;
+            user.Plan                     = req.Plan;
+            user.SubscriptionExpiry       = result.ExpiryTime;
+            user.SubscriptionStatus       = "active";
+            user.SubscriptionOriginalId   = result.OriginalTransactionId;
+            user.UpdatedAt                = DateTime.UtcNow;
+            purchaseRecord.Status                = PurchaseStatus.Verified;
+            purchaseRecord.VerifiedAt            = DateTime.UtcNow;
+            purchaseRecord.OriginalTransactionId = result.OriginalTransactionId;
+            purchaseRecord.ExpiresAt             = result.ExpiryTime;
+            purchaseRecord.IsAutoRenewing        = result.IsAutoRenewing;
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("用戶 {UserId} 透過 {Store} 升級為 {Plan}", userId, req.Store, req.Plan);
-            return new PurchasePlanResponse(true, "方案已升級", req.Plan);
+            _logger.LogInformation("用戶 {UserId} 透過 {Store} 訂閱 {Plan}，到期 {Expiry}",
+                userId, req.Store, req.Plan, result.ExpiryTime);
+            return new PurchasePlanResponse(true, "訂閱成功", req.Plan);
         }
 
-        private async Task<bool> ValidatePurchaseTokenAsync(PurchasePlanRequest req)
+        public record SubscriptionValidationResult(
+            bool Success,
+            DateTime? ExpiryTime = null,
+            string? OriginalTransactionId = null,
+            bool? IsAutoRenewing = null
+        );
+
+        private async Task<SubscriptionValidationResult> ValidateSubscriptionAsync(PurchasePlanRequest req)
         {
-            if (string.IsNullOrWhiteSpace(req.PurchaseToken)) return false;
+            if (string.IsNullOrWhiteSpace(req.PurchaseToken))
+                return new SubscriptionValidationResult(false);
 
             return req.Store switch
             {
-                "google_pay"  => ValidateGooglePayToken(req.PurchaseToken),
-                "google_play" => await ValidateGooglePlayTokenAsync(req.PurchaseToken, req.ProductId),
-                "app_store"   => await ValidateAppStoreReceiptAsync(req.PurchaseToken),
-                _             => false,
+                "google_play" => await ValidateGooglePlaySubscriptionAsync(req.PurchaseToken, req.ProductId),
+                "app_store"   => await ValidateAppStoreSubscriptionAsync(req.PurchaseToken),
+                _             => new SubscriptionValidationResult(false),
             };
         }
 
-        private bool ValidateGooglePayToken(string token)
-        {
-            var testMode = _config.GetValue<bool>("GooglePay:TestMode", false);
-
-            if (!testMode)
-            {
-                _logger.LogError("Google Pay 生產環境驗證尚未實作，拒絕付款請求");
-                return false;
-            }
-
-            // gateway: "example" 的固定測試 token
-            if (token == "examplePaymentMethodToken") return true;
-
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(token);
-                return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object;
-            }
-            catch { return false; }
-        }
-
-        private async Task<bool> ValidateGooglePlayTokenAsync(string purchaseToken, string? productId)
+        /// <summary>
+        /// 驗證 Google Play 訂閱（subscriptions API）並回傳到期資訊。
+        /// 測試模式下接受 GooglePlay:TestTokens 設定中的 token。
+        /// </summary>
+        public async Task<SubscriptionValidationResult> ValidateGooglePlaySubscriptionAsync(
+            string purchaseToken, string? subscriptionId)
         {
             var testMode   = _config.GetValue<bool>("GooglePlay:TestMode", false);
             var testTokens = _config.GetSection("GooglePlay:TestTokens").Get<string[]>() ?? [];
 
             if (testMode && testTokens.Contains(purchaseToken))
             {
-                _logger.LogInformation("Google Play 測試模式：接受測試 token {Token}", purchaseToken);
-                return true;
+                _logger.LogInformation("Google Play 測試模式：接受測試 token");
+                return new SubscriptionValidationResult(true,
+                    ExpiryTime: DateTime.UtcNow.AddMonths(1),
+                    OriginalTransactionId: "test-order-id",
+                    IsAutoRenewing: true);
             }
 
             var packageName        = _config["GooglePlay:PackageName"];
             var serviceAccountJson = _config["GooglePlay:ServiceAccountJson"];
 
-            if (string.IsNullOrEmpty(packageName) || string.IsNullOrEmpty(serviceAccountJson) || string.IsNullOrEmpty(productId))
+            if (string.IsNullOrEmpty(packageName) || string.IsNullOrEmpty(serviceAccountJson)
+                || string.IsNullOrEmpty(subscriptionId))
             {
-                _logger.LogWarning("Google Play 驗證配置不完整（PackageName / ServiceAccountJson / productId）");
-                return false;
+                _logger.LogWarning("Google Play 配置不完整（PackageName / ServiceAccountJson / subscriptionId）");
+                return new SubscriptionValidationResult(false);
             }
 
             try
@@ -492,80 +507,181 @@ namespace UploadServer.Services
                 var credential = Google.Apis.Auth.OAuth2.GoogleCredential
                     .FromJson(serviceAccountJson)
                     .CreateScoped("https://www.googleapis.com/auth/androidpublisher");
-
                 var accessToken = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
 
                 var client = _httpClientFactory.CreateClient();
                 client.DefaultRequestHeaders.Authorization =
                     new AuthenticationHeaderValue("Bearer", accessToken);
 
-                var url = $"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{purchaseToken}";
+                // subscriptions API（非 products API）
+                var url = $"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/" +
+                          $"{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{purchaseToken}";
                 var response = await client.GetAsync(url);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Google Play API 回應錯誤: {Status}", response.StatusCode);
-                    return false;
+                    _logger.LogWarning("Google Play 訂閱 API 回應錯誤: {Status}", response.StatusCode);
+                    return new SubscriptionValidationResult(false);
                 }
 
                 var json = await response.Content.ReadAsStringAsync();
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
-                return doc.RootElement.GetProperty("purchaseState").GetInt32() == 0;
+                var root = doc.RootElement;
+
+                // paymentState: 0=pending, 1=received, 2=free trial
+                var paymentState = root.TryGetProperty("paymentState", out var ps) ? ps.GetInt32() : -1;
+                if (paymentState != 1 && paymentState != 2)
+                {
+                    _logger.LogWarning("Google Play 訂閱付款狀態異常: {State}", paymentState);
+                    return new SubscriptionValidationResult(false);
+                }
+
+                var expiryMs = root.TryGetProperty("expiryTimeMillis", out var exp)
+                    ? long.Parse(exp.GetString()!)
+                    : 0L;
+                var expiryTime = DateTimeOffset.FromUnixTimeMilliseconds(expiryMs).UtcDateTime;
+
+                var orderId = root.TryGetProperty("orderId", out var oid) ? oid.GetString() : null;
+                var autoRenewing = root.TryGetProperty("autoRenewing", out var ar) && ar.GetBoolean();
+
+                return new SubscriptionValidationResult(true, expiryTime, orderId, autoRenewing);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Google Play 驗證失敗");
-                return false;
+                _logger.LogError(ex, "Google Play 訂閱驗證失敗");
+                return new SubscriptionValidationResult(false);
             }
         }
 
-        private async Task<bool> ValidateAppStoreReceiptAsync(string receiptData)
+        /// <summary>
+        /// 驗證 Apple App Store 訂閱收據（verifyReceipt）並回傳到期資訊。
+        /// 注意：Apple 已宣布棄用此 API，未來應遷移至 App Store Server API。
+        /// </summary>
+        public async Task<SubscriptionValidationResult> ValidateAppStoreSubscriptionAsync(string receiptData)
         {
             var sharedSecret = _config["AppStore:SharedSecret"];
             var isSandbox    = _config.GetValue<bool>("AppStore:Sandbox", false);
 
             if (string.IsNullOrEmpty(sharedSecret))
             {
-                _logger.LogWarning("App Store 驗證配置不完整（缺少 SharedSecret）");
-                return false;
+                _logger.LogWarning("App Store 配置不完整（缺少 SharedSecret）");
+                return new SubscriptionValidationResult(false);
             }
 
             try
             {
-                var url    = isSandbox
-                    ? "https://sandbox.itunes.apple.com/verifyReceipt"
-                    : "https://buy.itunes.apple.com/verifyReceipt";
-
                 var client = _httpClientFactory.CreateClient();
                 var body   = new { receipt_data = receiptData, password = sharedSecret };
-                var resp   = await client.PostAsJsonAsync(url, body);
+
+                var url  = isSandbox
+                    ? "https://sandbox.itunes.apple.com/verifyReceipt"
+                    : "https://buy.itunes.apple.com/verifyReceipt";
+                var resp = await client.PostAsJsonAsync(url, body);
 
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("App Store API 回應錯誤: {Status}", resp.StatusCode);
-                    return false;
+                    return new SubscriptionValidationResult(false);
                 }
 
                 var json = await resp.Content.ReadAsStringAsync();
                 using var doc = System.Text.Json.JsonDocument.Parse(json);
-                var status = doc.RootElement.GetProperty("status").GetInt32();
+                var root   = doc.RootElement;
+                var status = root.GetProperty("status").GetInt32();
 
+                // status 21007 = sandbox receipt sent to production → retry sandbox
                 if (status == 21007 && !isSandbox)
                 {
-                    _logger.LogInformation("App Store：偵測到 sandbox 收據，切換 sandbox 端點重試");
-                    var sr = await client.PostAsJsonAsync("https://sandbox.itunes.apple.com/verifyReceipt", body);
-                    if (!sr.IsSuccessStatusCode) return false;
+                    _logger.LogInformation("App Store：偵測到 sandbox 收據，切換重試");
+                    var sr = await client.PostAsJsonAsync(
+                        "https://sandbox.itunes.apple.com/verifyReceipt", body);
+                    if (!sr.IsSuccessStatusCode) return new SubscriptionValidationResult(false);
                     using var sd = System.Text.Json.JsonDocument.Parse(await sr.Content.ReadAsStringAsync());
-                    status = sd.RootElement.GetProperty("status").GetInt32();
+                    root   = sd.RootElement.Clone();
+                    status = root.GetProperty("status").GetInt32();
                 }
 
-                return status == 0;
+                if (status != 0) return new SubscriptionValidationResult(false);
+
+                // latest_receipt_info 是陣列，取最後一筆（最新 renewal）
+                if (!root.TryGetProperty("latest_receipt_info", out var receiptInfoArr)
+                    || receiptInfoArr.GetArrayLength() == 0)
+                    return new SubscriptionValidationResult(false);
+
+                // 找到最大 expires_date_ms
+                JsonElement latestItem = default;
+                bool foundLatest = false;
+                long latestExpiry = 0;
+                foreach (var item in receiptInfoArr.EnumerateArray())
+                {
+                    if (item.TryGetProperty("expires_date_ms", out var edMs)
+                        && long.TryParse(edMs.GetString(), out var ms) && ms > latestExpiry)
+                    {
+                        latestExpiry = ms;
+                        latestItem   = item;
+                        foundLatest  = true;
+                    }
+                }
+                if (!foundLatest) return new SubscriptionValidationResult(false);
+
+                var expiryTime = DateTimeOffset.FromUnixTimeMilliseconds(latestExpiry).UtcDateTime;
+                var originalTxId = latestItem.TryGetProperty("original_transaction_id", out var otid)
+                    ? otid.GetString() : null;
+
+                // pending_renewal_info で autoRenewStatus 確認
+                var autoRenewing = false;
+                if (root.TryGetProperty("pending_renewal_info", out var renewalArr))
+                    foreach (var r in renewalArr.EnumerateArray())
+                        if (r.TryGetProperty("auto_renew_status", out var ars))
+                            autoRenewing = ars.GetString() == "1";
+
+                return new SubscriptionValidationResult(true, expiryTime, originalTxId, autoRenewing);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "App Store 驗證失敗");
-                return false;
+                _logger.LogError(ex, "App Store 訂閱驗證失敗");
+                return new SubscriptionValidationResult(false);
             }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // 球數購買
+        // ════════════════════════════════════════════════════════════════
+
+        private static readonly Dictionary<string, int> _ballPackMap = new()
+        {
+            ["golf_balls_1"]   = 1,
+            ["golf_balls_5"]   = 5,
+            ["golf_balls_10"]  = 10,
+            ["golf_balls_50"]  = 50,
+            ["golf_balls_100"] = 100,
+        };
+
+        public async Task<PurchaseBallsResponse> PurchaseBallsAsync(string userId, PurchaseBallsRequest req)
+        {
+            if (!_ballPackMap.TryGetValue(req.ProductId, out var balls))
+                return new PurchaseBallsResponse(false, "無效的球包商品", 0, 0);
+
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return new PurchaseBallsResponse(false, "用戶不存在", 0, 0);
+
+            user.BonusBalls += balls;
+            user.UpdatedAt   = DateTime.UtcNow;
+
+            _db.BallRecords.Add(new BallRecord
+            {
+                UserId       = userId,
+                Reason       = BallReason.Purchase,
+                Delta        = balls,
+                BalanceAfter = user.BonusBalls,
+                CreatedAt    = DateTime.UtcNow,
+            });
+
+            await _db.SaveChangesAsync();
+            _logger.LogInformation("用戶 {UserId} 購買 {ProductId} +{Balls} 球，新餘額 {Balance}",
+                userId, req.ProductId, balls, user.BonusBalls);
+
+            return new PurchaseBallsResponse(true, $"成功購買 {balls} 球", balls, user.BonusBalls);
         }
 
         // ════════════════════════════════════════════════════════════════

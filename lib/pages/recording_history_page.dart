@@ -5,18 +5,22 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/export_quality.dart';
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
+import '../models/swing_hit.dart';
 import '../models/swing_posture.dart';
 import '../services/recording_history_storage.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/statistics_service.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/clip_pipeline_service.dart';
+import '../services/golf_analysis_service.dart';
+import '../services/analysis_progress_service.dart';
 import '../services/video_analysis_pipeline_service.dart';
 import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
@@ -33,11 +37,12 @@ import 'video_comparison_page.dart';
 import 'video_player_page.dart';
 import 'recording_detail_page.dart';
 import '../widgets/share_upload_dialog.dart';
+import '../services/video_export_service.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, delete }
+enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, download, delete }
 
-enum _ClipMenuAction { rename, share, delete }
+enum _ClipMenuAction { rename, share, download, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -1241,27 +1246,17 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
     if (_isDetecting) return;
 
-    // ── 確認對話框（今日不再提醒）────────────────────────────────────
+    // ── 偵測模式選擇對話框（含 V1/V2 切換）────────────────────────────
+    SkeletonAnalysisMode detectionMode = SkeletonAnalysisMode.v1;
     if (mounted) {
-      final skipToday = await _SkipHelper.shouldSkip('detection');
-      if (!skipToday) {
-        if (!mounted) return;
-        final result = await showDialog<_ConfirmResult>(
-          context: context,
-          barrierDismissible: true,
-          builder: (_) => const _ConfirmActionDialog(
-            icon: Icons.sports_golf_rounded,
-            iconColor: Color(0xFFE65100),
-            title: '確定偵測擊球？',
-            description: '系統將分析整支影片，自動偵測所有擊球時刻並裁切為獨立片段，時間依影片長度而定。',
-            confirmLabel: '開始偵測',
-          ),
-        );
-        if (result == null) return; // 使用者取消
-        if (result.skipToday) {
-          await _SkipHelper.markSkipToday('detection');
-        }
-      }
+      final result = await showDialog<_DetectionModeResult>(
+        context: context,
+        barrierDismissible: true,
+        builder: (_) => const _DetectionModeDialog(),
+      );
+      if (result == null) return; // 使用者取消
+      detectionMode = result.mode;
+      if (result.skipToday) await _SkipHelper.markSkipToday('detection');
     }
 
     setState(() => _isDetecting = true);
@@ -1272,6 +1267,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備骨架分析...'));
+    final cancelToken = _CancelToken();
 
     showDialog(
       context: context,
@@ -1280,6 +1276,13 @@ class _HistoryTileState extends State<_HistoryTile> {
         title: '擊球偵測中',
         progressNotifier: progressNotifier,
         progressColor: Colors.blue,
+        onCancel: () {
+          cancelToken.cancel();
+          unawaited(_cancelNativeAnalysis());   // 通知 Kotlin 停止分析迴圈
+          navigator.pop();
+          if (mounted) setState(() => _isDetecting = false);
+          messenger.showSnackBar(const SnackBar(content: Text('已取消擊球偵測')));
+        },
       ),
     );
 
@@ -1287,7 +1290,181 @@ class _HistoryTileState extends State<_HistoryTile> {
       final sessionDir = p.dirname(widget.entry.filePath);
       final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
 
-      // 1. 確保骨架與音訊已分析（若無則先進行基礎分析）
+      // ── V2：音訊峰值直接偵測，完全跳過全幀骨架分析 ──────────────────
+      if (detectionMode == SkeletonAnalysisMode.v2) {
+        // 監聽 native EventChannel 進度，即時更新對話框進度條
+        final progressSvc = AnalysisProgressService.instance;
+        progressSvc.reset('V2 音訊掃描中...');
+        void _listenV2() {
+          final (pct, label) = progressSvc.progress.value;
+          // V2 audio peaks 佔整體進度的 0~0.6，裁切佔 0.6~1.0
+          progressNotifier.value = (pct * 0.6, label);
+        }
+        progressSvc.progress.addListener(_listenV2);
+
+        final peakMs = await GolfAnalysisService.findAudioPeaks(
+          videoPath: widget.entry.filePath,
+          searchStartMs: 500,
+          minGapMs: 2000,
+        );
+        progressSvc.progress.removeListener(_listenV2);
+        if (cancelToken.isCancelled) return;
+        debugPrint('[偵測擊球 V2] 音訊峰值: $peakMs');
+
+        if (peakMs.isEmpty) {
+          navigator.pop();
+          setState(() => _isDetecting = false);
+          messenger.showSnackBar(const SnackBar(
+            content: Text('V2：影片無音訊或未偵測到擊球聲'),
+            backgroundColor: Colors.orange,
+          ));
+          return;
+        }
+
+        progressNotifier.value = (0.4, '裁切片段中...');
+        // 把音訊峰值轉為 SwingHit（±2.5 秒精確窗口）
+        // 每個峰值各自對應一個 clip；若兩峰值相距 < 5 秒，clip 可重疊，這是預期行為。
+        // trimWithSurface() 保證每個 clip 精確 5 秒，以峰值為中心。
+        final totalDur = widget.entry.durationSeconds.toDouble();
+        final v2Hits = peakMs.map((ms) {
+          final hitSec = ms / 1000.0;
+          return SwingHit(
+            hitIndex:   peakMs.indexOf(ms) + 1,
+            hitFrame:   (hitSec * 30).round(),
+            hitSec:     hitSec,
+            startSec:   (hitSec - 2.5).clamp(0.0, totalDur),
+            endSec:     (hitSec + 2.5).clamp(0.0, totalDur),
+            speedValue: 0.0,
+            audioValue: 1.0,
+          );
+        }).toList();
+
+        // 直接裁切，不跑骨架分析（進度從 0.6 起算）
+        await _clipAndSaveHits(
+          hits: v2Hits,
+          navigator: navigator,
+          messenger: messenger,
+          progressNotifier: progressNotifier,
+          baseProgress: 0.6,
+          cancelToken: cancelToken,
+        );
+        return;
+      }
+
+      // ── V3：音訊找候選時間點 → 局部骨架精確定位 → 切片 ──────────────
+      if (detectionMode == SkeletonAnalysisMode.v3) {
+        // Step 1：音訊掃描（監聽 native 進度，0.0~0.15）
+        final progressSvc = AnalysisProgressService.instance;
+        progressSvc.reset('V3 音訊掃描中...');
+        void listenAudio() {
+          if (progressSvc.currentOp == 'findAudioPeaks') {
+            final (pct, label) = progressSvc.progress.value;
+            progressNotifier.value = (pct * 0.15, label);
+          }
+        }
+        progressSvc.progress.addListener(listenAudio);
+
+        final peakMs = await GolfAnalysisService.findAudioPeaks(
+          videoPath: widget.entry.filePath,
+          searchStartMs: 500,
+          minGapMs: 2000,
+        );
+        progressSvc.progress.removeListener(listenAudio);
+        if (cancelToken.isCancelled) return;
+        debugPrint('[偵測擊球 V3] 音訊峰值: $peakMs');
+
+        if (peakMs.isEmpty) {
+          navigator.pop();
+          setState(() => _isDetecting = false);
+          messenger.showSnackBar(const SnackBar(
+            content: Text('V3：影片無音訊或未偵測到擊球聲'),
+            backgroundColor: Colors.orange,
+          ));
+          return;
+        }
+
+        // Step 2：對每個音訊峰值做局部骨架分析（±3 秒窗口 → 精確 impactMs）
+        final totalDur = widget.entry.durationSeconds.toDouble();
+        final v3Hits   = <SwingHit>[];
+
+        for (int i = 0; i < peakMs.length; i++) {
+          if (cancelToken.isCancelled) return;
+
+          final peak     = peakMs[i];
+          final baseFrom = 0.15 + (i / peakMs.length) * 0.55;   // 0.15 ~ 0.70
+          final baseTo   = 0.15 + ((i + 1) / peakMs.length) * 0.55;
+          final label    = 'V3 骨架分析 ${i+1}/${peakMs.length}';
+          progressNotifier.value = (baseFrom, label);
+
+          // 監聽 Kotlin 進度，顯示「第幾個影片 / 總數：Kotlin 幀狀態」
+          final peakLabel = '第${i+1}/${peakMs.length}個';
+          progressSvc.reset('V3 骨架分析 $peakLabel...');
+          void listenSkel() {
+            final (pct, frameLbl) = progressSvc.progress.value;
+            final mapped  = baseFrom + pct * (baseTo - baseFrom);
+            // 合併：「第N/M個：Kotlin幀進度」
+            final display = '$peakLabel：$frameLbl';
+            progressNotifier.value = (mapped.clamp(0.0, 1.0), display);
+          }
+          progressSvc.progress.addListener(listenSkel);
+
+          // 直接用音訊峰值做骨架分析（跳過重複音訊偵測）
+          // 骨架窗口：peak ± 3 秒（6 秒），從中找右腕 Y 最低點 = 精確 impact
+          final result = await GolfAnalysisService.analyzeVideoAtCandidate(
+            videoPath:   widget.entry.filePath,
+            candidateMs: peak,
+            windowMs:    3000,
+          );
+          progressSvc.progress.removeListener(listenSkel);
+          if (cancelToken.isCancelled) return;
+
+          // result == null：骨架驗證未通過（非擊球動作），跳過此峰值
+          if (result == null) {
+            debugPrint('[偵測擊球 V3] hit ${i+1}: peak=${peak}ms → 骨架驗證失敗，已排除');
+            continue;
+          }
+
+          final hitMs  = result.impactTimeMs;
+          final hitSec = hitMs / 1000.0;
+
+          debugPrint('[偵測擊球 V3] hit ${i+1}: audioPeak=${peak}ms → impact=${hitMs}ms '
+              '(精修 ${hitMs - peak}ms)');
+
+          v3Hits.add(SwingHit(
+            hitIndex:     i + 1,
+            hitFrame:     (hitSec * 30).round(),
+            hitSec:       hitSec,
+            startSec:     (hitSec - 2.5).clamp(0.0, totalDur),
+            endSec:       (hitSec + 2.5).clamp(0.0, totalDur),
+            speedValue:   0.0,
+            audioValue:   1.0,
+            skeletonJson: result.skeletonJson, // V3 局部骨架，直接寫入 clip CSV
+          ));
+        }
+
+        if (v3Hits.isEmpty) {
+          navigator.pop();
+          setState(() => _isDetecting = false);
+          messenger.showSnackBar(const SnackBar(
+            content: Text('V3：無法找到有效擊球時間點'),
+            backgroundColor: Colors.orange,
+          ));
+          return;
+        }
+
+        // Step 3：裁切（進度從 0.7 起算）
+        await _clipAndSaveHits(
+          hits: v3Hits,
+          navigator: navigator,
+          messenger: messenger,
+          progressNotifier: progressNotifier,
+          baseProgress: 0.7,
+          cancelToken: cancelToken,
+        );
+        return;
+      }
+
+      // ── V1：確保骨架與音訊已分析（若無則先進行基礎分析）──────────────
       if (!await File(csvPath).exists()) {
         debugPrint('[偵測擊球] CSV 不存在，先執行基礎分析...');
         final durationSeconds = widget.entry.durationSeconds;
@@ -1299,10 +1476,13 @@ class _HistoryTileState extends State<_HistoryTile> {
             progressNotifier.value = (0.3, label);
           },
         );
+        if (cancelToken.isCancelled) return;
         if (basicAnalysis == null) {
           throw '基礎分析失敗：無法生成骨架';
         }
       }
+
+      if (cancelToken.isCancelled) return;
 
       // 2. 讀取 CSV 檢查骨架數據
       debugPrint('[偵測擊球] 📋 讀取 CSV 文件...');
@@ -1310,31 +1490,25 @@ class _HistoryTileState extends State<_HistoryTile> {
       try {
         csvLines = await File(csvPath).readAsLines();
         debugPrint('[偵測擊球] 📋 CSV 行數: ${csvLines.length}');
-        
-        // 統計有效骨架
-        int validFrames = 0;
-        double maxConfidence = 0.0;
+        int validFrames = 0; double maxConfidence = 0.0;
         for (int i = 1; i < csvLines.length; i++) {
           final parts = csvLines[i].split(',');
           if (parts.length >= 3) {
-            try {
-              final conf = double.tryParse(parts[2]) ?? 0.0;
-              if (conf > 0) validFrames++;
-              if (conf > maxConfidence) maxConfidence = conf;
-            } catch (_) {}
+            final conf = double.tryParse(parts[2]) ?? 0.0;
+            if (conf > 0) validFrames++;
+            if (conf > maxConfidence) maxConfidence = conf;
           }
         }
         debugPrint('[偵測擊球] 📊 骨架有效幀: $validFrames, 最高信心度: ${maxConfidence.toStringAsFixed(3)}');
       } catch (e) {
         debugPrint('[偵測擊球] ❌ CSV 讀取失敗: $e');
       }
-      
-      // 3. 偵測擊球
+
+      // 3. 骨架速度偵測擊球
       debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
       progressNotifier.value = (0.5, '偵測擊球中...');
-      final hits = await SwingImpactDetector.detect(
-        csvPath: csvPath,
-      );
+      final hits = await SwingImpactDetector.detect(csvPath: csvPath);
+      if (cancelToken.isCancelled) return;
       debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
 
       if (!mounted) return;
@@ -1385,8 +1559,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         srcVideoPath: widget.entry.filePath,
         sourceEntry: widget.entry,
         onProgress: (prog) {
-          final percentage = prog.total > 0 
-            ? (prog.current / prog.total) * 100 
+          final percentage = prog.total > 0
+            ? (prog.current / prog.total) * 100
             : 0;
           progressNotifier.value = (
             0.5 + (percentage / 100) * 0.5,
@@ -1395,6 +1569,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         },
       );
 
+      if (cancelToken.isCancelled) return;
       navigator.pop(); // 無論 mounted 與否，一定關閉 Dialog
       if (mounted) setState(() => _isDetecting = false);
 
@@ -1411,6 +1586,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         widget.entry,
         results.map((r) => r.entry).toList(),
       );
+      await AdService.showBallDetectionInterstitial();
       messenger.showSnackBar(
         SnackBar(
           content: Text('已生成 ${results.length} 個擊球片段 ✅\n可對每個切片執行「影片分析」加入骨架與球軌跡'),
@@ -1430,6 +1606,55 @@ class _HistoryTileState extends State<_HistoryTile> {
     } finally {
       progressNotifier.dispose();
     }
+  }
+
+  /// 共用裁切 + 儲存邏輯（V1 後半 / V2 均呼叫）
+  ///
+  /// [baseProgress]：裁切開始時的進度基底（V1=0.5，V2=0.6）
+  Future<void> _clipAndSaveHits({
+    required List<SwingHit> hits,
+    required NavigatorState navigator,
+    required ScaffoldMessengerState messenger,
+    required ValueNotifier<(double, String)> progressNotifier,
+    double baseProgress = 0.5,
+    _CancelToken? cancelToken,
+  }) async {
+    final remaining = 1.0 - baseProgress;
+    final results = await ClipPipelineService.run(
+      hits: hits,
+      srcVideoPath: widget.entry.filePath,
+      sourceEntry: widget.entry,
+      onProgress: (prog) {
+        final pct = prog.total > 0 ? prog.current / prog.total : 0.0;
+        progressNotifier.value = (
+          baseProgress + pct * remaining,
+          '裁切片段中... ${(pct * 100).round()}% (${prog.current}/${prog.total})',
+        );
+      },
+    );
+
+    if (cancelToken?.isCancelled == true) return;
+
+    navigator.pop();
+    if (mounted) setState(() => _isDetecting = false);
+
+    if (results.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('偵測成功，但片段裁切失敗，請重試')),
+      );
+      return;
+    }
+
+    widget.onClipsGenerated?.call(
+      widget.entry,
+      results.map((r) => r.entry).toList(),
+    );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('已生成 ${results.length} 個擊球片段 ✅\n可對每個切片執行「影片分析」加入骨架與球軌跡'),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   /// 執行完整分析（視頻 + 音頻），合併結果
@@ -1464,11 +1689,11 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
 
     // ── 品質選擇對話框（僅短影片需要編碼，長影片直接跳過）────────────
+    // 完整分析固定使用 V1 骨架分析（V1/V2 切換是給「擊球偵測」用的）
     ExportQuality selectedQuality = ExportQuality.standard;
     if (!_isLongVideo && mounted) {
       final skipToday = await _SkipHelper.shouldSkip('combined_analysis');
       if (skipToday) {
-        // 今日已勾選「不再提醒」→ 直接使用上次儲存的品質
         selectedQuality = await _SkipHelper.savedQuality();
       } else {
         final lastQ = await _SkipHelper.savedQuality();
@@ -1478,7 +1703,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           barrierDismissible: true,
           builder: (ctx) => _ExportQualityDialog(initialQuality: lastQ),
         );
-        if (result == null) return; // 使用者取消
+        if (result == null) return;
         selectedQuality = result.quality;
         if (result.skipToday) {
           await _SkipHelper.markSkipToday('combined_analysis');
@@ -1491,10 +1716,10 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     if (!mounted) return;
 
-    // 在第一個 await 之前捕捉 navigator/messenger，確保 Dialog 一定能關閉
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+    final cancelToken = _CancelToken();
 
     showDialog(
       context: context,
@@ -1503,6 +1728,13 @@ class _HistoryTileState extends State<_HistoryTile> {
         title: '🎬 完整分析中',
         progressNotifier: progressNotifier,
         progressColor: Colors.cyan,
+        onCancel: () {
+          cancelToken.cancel();
+          unawaited(_cancelNativeAnalysis());
+          navigator.pop();
+          if (mounted) setState(() => _isAnalyzing = false);
+          messenger.showSnackBar(const SnackBar(content: Text('已取消完整分析')));
+        },
       ),
     );
 
@@ -1526,7 +1758,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (_isLongVideo) {
         // 長影片：先進行基礎分析
         debugPrint('[完整分析] 長影片 ($durationSeconds s)：執行基礎分析');
-        
+
         final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
           videoPath: clipPath,
           sessionDir: sessionDir,
@@ -1536,6 +1768,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           },
         );
 
+        if (cancelToken.isCancelled) return;
         if (basicAnalysis == null) {
           throw '基礎分析失敗';
         }
@@ -1544,18 +1777,20 @@ class _HistoryTileState extends State<_HistoryTile> {
       } else {
         // 短影片：進行完整分析
         debugPrint('[完整分析] 短影片 ($durationSeconds s)：執行完整分析');
-        
+
         final result = await ClipPipelineService.analyze(
           clipPath: clipPath,
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
           hitSec: widget.entry.hitSecond,
           quality: selectedQuality,
+          mode: SkeletonAnalysisMode.v1,   // 完整分析固定使用 V1
           onProgress: (label) {
             progressNotifier.value = (0.35, label);
           },
         );
 
+        if (cancelToken.isCancelled) return;
         if (result == null) {
           throw '視頻分析失敗';
         }
@@ -1568,12 +1803,16 @@ class _HistoryTileState extends State<_HistoryTile> {
         );
       }
 
+      if (cancelToken.isCancelled) return;
+
       // 在 analyze() 之後重新確認 CSV 是否存在（首次分析時由 analyze() 產生）
       final hasCsv = File(csvPath).existsSync();
 
-      // 短影片「完整分析」後，偵測揮桿 8 階段並寫入 phases.json
-      // 長影片由「偵測擊球」生成的切片已在 ClipPipelineService._trimHit 寫入
-      if (!_isLongVideo && _isOriginalVideo && hasCsv) {
+      // 完整分析後（原始影片 or V2 localClip），重新偵測揮桿 8 階段並寫入 phases.json。
+      // 原本限制 _isOriginalVideo，但 V2 切片執行完整分析後 CSV 已重算，
+      // 必須重新偵測才能產出正確的 8 階段資料。
+      // 長影片（isLongVideo）的切片由「偵測擊球」時的 _trimHit 負責寫入。
+      if (!_isLongVideo && hasCsv) {
         try {
           progressNotifier.value = (0.68, '偵測揮桿階段...');
           final phaseHits = await SwingImpactDetector.detect(csvPath: csvPath);
@@ -1581,7 +1820,7 @@ class _HistoryTileState extends State<_HistoryTile> {
             await ClipPipelineService.savePhasesJson(
               sessionDir: sessionDir,
               hit: phaseHits.first,
-              clipActualStartSec: 0.0,
+              clipActualStartSec: 0.0,  // CSV 已是 clip 相對時間
             );
             // 同步更新 hitSecond，供播放器 impact 鑽石顯示
             updatedEntry = updatedEntry.copyWith(
@@ -1596,6 +1835,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
       }
 
+      if (cancelToken.isCancelled) return;
+
       // Stage 2: 音頻分析（70-100%）
       progressNotifier.value = (0.7, '音頻分析中...');
       final audioResult = await _analyzeWavFile(
@@ -1605,6 +1846,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         onProgress:    (progress, message) => progressNotifier.value = (progress, message),
       );
 
+      if (cancelToken.isCancelled) return;
       navigator.pop(); // 無論 mounted 與否，一定關閉 Dialog
       if (mounted) setState(() => _isAnalyzing = false);
 
@@ -1654,6 +1896,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       final audioMsg = audioResult != null
           ? '\n🎵 音頻：${audioResult.feedbackLabel}'
           : '';
+      await AdService.showFullAnalysisInterstitial();
       messenger.showSnackBar(SnackBar(
         content: Text('完整分析完成 ✅$audioMsg'),
         duration: const Duration(seconds: 4),
@@ -1790,6 +2033,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       final videoId    = p.basename(sessionDir);
 
       // ignore: use_build_context_synchronously
+      await AdService.showAiCoachInterstitial();
       var aiCallbackFired = false;
       await AiCoachPage.submitAndPush(
         context:          context,
@@ -1840,7 +2084,49 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
-  /// 測試用：重置分析狀態為 false
+  bool _isDownloading = false;
+
+  /// 下載影片到裝置（顯示版本選單）
+  Future<void> _downloadVideo() async {
+    if (_isDownloading) return;
+    final sessionDir = p.dirname(widget.entry.filePath);
+
+    final chosen = await _showDownloadPicker(context, sessionDir);
+    if (chosen == null || !mounted) return;
+
+    setState(() => _isDownloading = true);
+    try {
+      final videoPath = p.join(sessionDir, chosen.file);
+      final baseName  = (widget.entry.customName?.isNotEmpty == true)
+          ? '${widget.entry.customName!}_${chosen.label}'
+          : '${p.basenameWithoutExtension(widget.entry.filePath)}_${chosen.label}';
+      final result = await VideoExportService.download(videoPath, displayName: baseName);
+      if (!mounted) return;
+      switch (result.status) {
+        case ExportStatus.savedToDownloads:
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('「${chosen.label}」已儲存到下載資料夾 ✅'),
+            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+          ));
+        case ExportStatus.savedToPhotos:
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('「${chosen.label}」已儲存到相機膠卷 ✅'),
+            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+          ));
+        case ExportStatus.sharedViaSheet:
+          break;
+        case ExportStatus.failed:
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('下載失敗：${result.detail}'),
+            backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
+          ));
+      }
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  /// 分享 session
   void _shareSession() {
     ShareUploadDialog.show(
       context,
@@ -2297,6 +2583,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                   case _HistoryMenuAction.share:
                     _shareSession();
                     break;
+                  case _HistoryMenuAction.download:
+                    _downloadVideo();
+                    break;
                   case _HistoryMenuAction.delete:
                     widget.onDelete();
                     break;
@@ -2357,6 +2646,19 @@ class _HistoryTileState extends State<_HistoryTile> {
                     Text('分享連結',
                         style: TextStyle(
                             color: canShare ? null : Colors.grey)),
+                  ]),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.download,
+                  enabled: !_isDownloading,
+                  child: Row(children: [
+                    Icon(Icons.download_rounded,
+                        size: 16,
+                        color: _isDownloading
+                            ? Colors.grey
+                            : const Color(0xFF1E8E5A)),
+                    const SizedBox(width: 8),
+                    Text(_isDownloading ? '下載中...' : '下載影片'),
                   ]),
                 ),
                 const PopupMenuItem<_HistoryMenuAction>(
@@ -2552,10 +2854,53 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     );
   }
 
+  bool _isDownloading = false;
+
+  /// 下載切片影片到裝置（顯示版本選單）
+  Future<void> _downloadVideo() async {
+    if (_isDownloading) return;
+    final sessionDir = p.dirname(widget.clip.filePath);
+
+    final chosen = await _showDownloadPicker(context, sessionDir);
+    if (chosen == null || !mounted) return;
+
+    setState(() => _isDownloading = true);
+    try {
+      final videoPath = p.join(sessionDir, chosen.file);
+      final baseName  = (widget.clip.customName?.isNotEmpty == true)
+          ? '${widget.clip.customName!}_${chosen.label}'
+          : '${p.basenameWithoutExtension(widget.clip.filePath)}_${chosen.label}';
+      final result = await VideoExportService.download(videoPath, displayName: baseName);
+      if (!mounted) return;
+      switch (result.status) {
+        case ExportStatus.savedToDownloads:
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('「${chosen.label}」已儲存到下載資料夾 ✅'),
+            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+          ));
+        case ExportStatus.savedToPhotos:
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('「${chosen.label}」已儲存到相機膠卷 ✅'),
+            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+          ));
+        case ExportStatus.sharedViaSheet:
+          break;
+        case ExportStatus.failed:
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('下載失敗：${result.detail}'),
+            backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
+          ));
+      }
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
   /// 完整分析（短影片）
   Future<void> _runCombinedAnalysis() async {
     if (_isAnalyzing) return;
 
+    // 完整分析固定使用 V1 骨架分析
     ExportQuality selectedQuality = ExportQuality.standard;
     if (mounted) {
       final skipToday = await _SkipHelper.shouldSkip('combined_analysis');
@@ -2584,6 +2929,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+    final cancelToken = _CancelToken();
 
     showDialog(
       context: context,
@@ -2592,6 +2938,13 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         title: '🎬 完整分析中',
         progressNotifier: progressNotifier,
         progressColor: Colors.cyan,
+        onCancel: () {
+          cancelToken.cancel();
+          unawaited(_cancelNativeAnalysis());   // 通知 Kotlin 停止分析迴圈
+          navigator.pop();
+          if (mounted) setState(() => _isAnalyzing = false);
+          messenger.showSnackBar(const SnackBar(content: Text('已取消完整分析')));
+        },
       ),
     );
 
@@ -2612,8 +2965,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         durationSeconds: durationSeconds,
         hitSec: clip.hitSecond,
         quality: selectedQuality,
+        mode: SkeletonAnalysisMode.v1,   // 完整分析固定使用 V1
         onProgress: (label) => progressNotifier.value = (0.35, label),
       );
+      if (cancelToken.isCancelled) return;
       if (result == null) throw '視頻分析失敗';
 
       final silenceTags = result.hasSilence ? ['no_audio'] : null;
@@ -2623,6 +2978,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         audioTags: silenceTags,
       );
 
+      if (cancelToken.isCancelled) return;
+
       progressNotifier.value = (0.7, '音頻分析中...');
       final audioResult = await _analyzeWavFile(
         sessionDir:    sessionDir,
@@ -2631,8 +2988,33 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         onProgress:    (progress, message) => progressNotifier.value = (progress, message),
       );
 
+      if (cancelToken.isCancelled) return;
+
       final csvPathLocal = p.join(sessionDir, 'pose_landmarks.csv');
       final hasCsvLocal  = File(csvPathLocal).existsSync();
+
+      // 完整分析後重新偵測揮桿 8 階段（含 V2 切片完整分析後的情況）
+      if (hasCsvLocal) {
+        try {
+          progressNotifier.value = (0.68, '偵測揮桿階段...');
+          final phaseHits = await SwingImpactDetector.detect(csvPath: csvPathLocal);
+          if (phaseHits.isNotEmpty) {
+            await ClipPipelineService.savePhasesJson(
+              sessionDir: sessionDir,
+              hit: phaseHits.first,
+              clipActualStartSec: 0.0,  // CSV 已是 clip 相對時間
+            );
+            updatedEntry = updatedEntry.copyWith(
+              hitSecond: phaseHits.first.hitSec,
+            );
+            debugPrint('[切片完整分析] ✅ phases.json 寫出 (hit=${phaseHits.first.hitSec.toStringAsFixed(2)}s)');
+          }
+        } catch (e) {
+          debugPrint('[切片完整分析] ⚠️ phases 偵測失敗 (略過): $e');
+        }
+      }
+
+      if (cancelToken.isCancelled) return;
 
       navigator.pop();
       if (mounted) setState(() => _isAnalyzing = false);
@@ -2678,6 +3060,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         );
       }
       final audioMsg = audioResult != null ? '\n🎵 音頻：${audioResult.feedbackLabel}' : '';
+      await AdService.showFullAnalysisInterstitial();
       messenger.showSnackBar(SnackBar(
         content: Text('完整分析完成 ✅$audioMsg'),
         duration: const Duration(seconds: 4),
@@ -2830,6 +3213,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       final videoId    = p.basename(sessionDir);
 
       // ignore: use_build_context_synchronously
+      await AdService.showAiCoachInterstitial();
       var aiCallbackFired = false;
       await AiCoachPage.submitAndPush(
         context:          context,
@@ -3171,6 +3555,9 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     case _ClipMenuAction.share:
                       _share();
                       break;
+                    case _ClipMenuAction.download:
+                      _downloadVideo();
+                      break;
                     case _ClipMenuAction.delete:
                       widget.onDelete?.call();
                       break;
@@ -3196,6 +3583,19 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         style: TextStyle(
                             color:
                                 clip.isAnalyzed ? null : Colors.grey)),
+                  ]),
+                ),
+                PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.download,
+                  enabled: !_isDownloading,
+                  child: Row(children: [
+                    Icon(Icons.download_rounded,
+                        size: 16,
+                        color: _isDownloading
+                            ? Colors.grey
+                            : const Color(0xFF1E8E5A)),
+                    const SizedBox(width: 8),
+                    Text(_isDownloading ? '下載中...' : '下載影片'),
                   ]),
                 ),
                 const PopupMenuItem<_ClipMenuAction>(
@@ -3720,10 +4120,14 @@ class _ConfirmResult {
 }
 
 /// 品質選擇對話框回傳：選取的品質 + 是否今日不再提醒。
+/// 完整分析永遠使用 V1 骨架分析（V1/V2 切換僅供「擊球偵測」使用）。
 class _QualityDialogResult {
   final ExportQuality quality;
   final bool skipToday;
-  const _QualityDialogResult({required this.quality, required this.skipToday});
+  const _QualityDialogResult({
+    required this.quality,
+    required this.skipToday,
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -3830,6 +4234,184 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
 // ────────────────────────────────────────────────────────────────────────────
 // 輸出品質選擇對話框（含「今日不再提醒」）
 // ────────────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────────────
+// 偵測擊球模式選擇對話框（V1 骨架 / V2 音訊）
+// ────────────────────────────────────────────────────────────────────────────
+
+class _DetectionModeResult {
+  final SkeletonAnalysisMode mode;
+  final bool skipToday;
+  const _DetectionModeResult({required this.mode, this.skipToday = false});
+}
+
+class _DetectionModeDialog extends StatefulWidget {
+  const _DetectionModeDialog();
+  @override
+  State<_DetectionModeDialog> createState() => _DetectionModeDialogState();
+}
+
+class _DetectionModeDialogState extends State<_DetectionModeDialog> {
+  SkeletonAnalysisMode _mode = SkeletonAnalysisMode.v1;
+  bool _skipToday = false;
+
+  static const _kGreen  = Color(0xFF1E8E5A);
+  static const _kOrange = Color(0xFFE65100);
+  static const _kBlue   = Color(0xFF1565C0);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+      title: const Row(children: [
+        Icon(Icons.sports_golf_rounded, color: Color(0xFFE65100), size: 22),
+        SizedBox(width: 8),
+        Text('選擇偵測模式', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── 模式卡片 ──
+          _modeCard(
+            mode: SkeletonAnalysisMode.v1,
+            icon: Icons.accessibility_new_rounded,
+            color: _kGreen,
+            title: 'V1 骨架分析',
+            subtitle: '全幀 ML Kit → 依手腕速度偵測',
+            badge: '精準',
+            badgeColor: _kGreen,
+            timeHint: '需 1–3 分鐘',
+          ),
+          const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          _modeCard(
+            mode: SkeletonAnalysisMode.v2,
+            icon: Icons.graphic_eq_rounded,
+            color: _kOrange,
+            title: 'V2 音訊快速偵測',
+            subtitle: '掃描擊球聲波峰值，無需骨架',
+            badge: '快速',
+            badgeColor: _kOrange,
+            timeHint: '數秒內完成',
+          ),
+          const SizedBox(height: 8),
+          _modeCard(
+            mode: SkeletonAnalysisMode.v3,
+            icon: Icons.track_changes_rounded,
+            color: _kBlue,
+            title: 'V3 音訊 + 局部骨架',
+            subtitle: '音訊找候選(±3s)→骨架精確定位→切片(±2.5s)',
+            badge: '均衡',
+            badgeColor: _kBlue,
+            timeHint: '每球約 5–15 秒',
+          ),
+          // ── 今日不再提醒 ──
+          const Divider(height: 16, thickness: 0.8, color: Color(0xFFF0F2F5)),
+          GestureDetector(
+            onTap: () => setState(() => _skipToday = !_skipToday),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(children: [
+                SizedBox(
+                  width: 20, height: 20,
+                  child: Checkbox(
+                    value: _skipToday,
+                    onChanged: (v) => setState(() => _skipToday = v ?? false),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                    activeColor: const Color(0xFF6B7280),
+                    side: const BorderSide(color: Color(0xFFB0B8C1)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text('今日不再提醒', style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280))),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: _mode == SkeletonAnalysisMode.v2 ? _kOrange
+                           : _mode == SkeletonAnalysisMode.v3 ? _kBlue
+                           : _kGreen,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: () => Navigator.of(context).pop(
+            _DetectionModeResult(mode: _mode, skipToday: _skipToday),
+          ),
+          child: const Text('開始偵測'),
+        ),
+      ],
+    );
+  }
+
+  Widget _modeCard({
+    required SkeletonAnalysisMode mode,
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required String badge,
+    required Color badgeColor,
+    required String timeHint,
+  }) {
+    final isOn = _mode == mode;
+    return GestureDetector(
+      onTap: () => setState(() => _mode = mode),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isOn ? color.withValues(alpha: 0.07) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isOn ? color : const Color(0xFFDDE1E7),
+            width: isOn ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(children: [
+          Icon(icon, color: isOn ? color : const Color(0xFFB0B8C1), size: 24),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Text(title, style: TextStyle(
+                  fontSize: 13.5, fontWeight: isOn ? FontWeight.w700 : FontWeight.w500,
+                  color: isOn ? color : const Color(0xFF1A1A2E),
+                )),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: badgeColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(badge, style: TextStyle(fontSize: 10, color: badgeColor, fontWeight: FontWeight.w600)),
+                ),
+              ]),
+              const SizedBox(height: 2),
+              Text(subtitle, style: const TextStyle(fontSize: 11.5, color: Color(0xFF6B7280))),
+            ]),
+          ),
+          Text(timeHint, style: TextStyle(
+            fontSize: 10.5, color: isOn ? color : const Color(0xFFB0B8C1), fontWeight: FontWeight.w500,
+          )),
+        ]),
+      ),
+    );
+  }
+}
 
 /// 在執行完整分析前讓使用者選擇輸出品質模式並確認。
 /// 回傳 [_QualityDialogResult]，使用者取消回傳 null。
@@ -3999,6 +4581,27 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// 取消令牌
+// ────────────────────────────────────────────────────────────────────────────
+
+class _CancelToken {
+  bool _cancelled = false;
+  bool get isCancelled => _cancelled;
+  void cancel() => _cancelled = true;
+}
+
+/// 通知 Kotlin 端停止正在執行的分析工作（姿勢分析 / 骨架渲染）。
+/// 這是 fire-and-forget：不需等待回應，Kotlin 會在下一個幀邊界停止。
+Future<void> _cancelNativeAnalysis() async {
+  try {
+    const _ch = MethodChannel('com.example.golf_score_app/pose_analyzer');
+    await _ch.invokeMethod<void>('cancel');
+  } catch (e) {
+    debugPrint('[Cancel] native cancel failed: $e');
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // 分析進度彈窗（含橫幅廣告）
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -4008,11 +4611,13 @@ class _ProgressWithAdDialog extends StatefulWidget {
   final String title;
   final ValueListenable<(double, String)> progressNotifier;
   final Color progressColor;
+  final VoidCallback? onCancel;
 
   const _ProgressWithAdDialog({
     required this.title,
     required this.progressNotifier,
     required this.progressColor,
+    this.onCancel,
   });
 
   @override
@@ -4096,6 +4701,158 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
               ),
             ),
             const SizedBox(height: 4),
+          ],
+        ),
+        actions: widget.onCancel != null
+            ? [
+                TextButton(
+                  onPressed: widget.onCancel,
+                  child: const Text('取消', style: TextStyle(color: Colors.white54)),
+                ),
+              ]
+            : null,
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 下載版本選擇（共用：HistoryTile + ClipSubCard）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _DlOption {
+  final String file;
+  final String label;
+  final String desc;
+  final IconData icon;
+  final Color color;
+  const _DlOption({
+    required this.file, required this.label,
+    required this.desc, required this.icon, required this.color,
+  });
+}
+
+/// 所有可能的下載選項（依優先顯示順序）
+const _kDlOptions = [
+  _DlOption(
+    file: 'final.mp4', label: '完整分析',
+    desc: '骨架 + 球軌跡 overlay',
+    icon: Icons.sports_golf_rounded, color: Color(0xFF1E8E5A),
+  ),
+  _DlOption(
+    file: 'skeleton.mp4', label: '骨架版',
+    desc: '只含骨架 overlay',
+    icon: Icons.accessibility_new_rounded, color: Color(0xFF7C3AED),
+  ),
+  _DlOption(
+    file: 'clip.mp4', label: '原始切片',
+    desc: '無 overlay 的原始切片',
+    icon: Icons.content_cut_rounded, color: Color(0xFF1565C0),
+  ),
+  _DlOption(
+    file: 'swing.mp4', label: '原始影片',
+    desc: '無任何 overlay',
+    icon: Icons.videocam_rounded, color: Color(0xFF546E7A),
+  ),
+  _DlOption(
+    file: 'swing.mov', label: '原始影片 (MOV)',
+    desc: '原始 MOV 檔',
+    icon: Icons.videocam_rounded, color: Color(0xFF546E7A),
+  ),
+];
+
+/// 顯示下載版本選擇底部選單，回傳使用者選擇的選項或 null（取消）
+Future<_DlOption?> _showDownloadPicker(BuildContext ctx, String sessionDir) {
+  final available = _kDlOptions.where((o) => File(p.join(sessionDir, o.file)).existsSync()).toList();
+  if (available.isEmpty) return Future.value(null);
+
+  // 只有一個選項時直接回傳，不彈選單
+  if (available.length == 1) return Future.value(available.first);
+
+  return showModalBottomSheet<_DlOption>(
+    context: ctx,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (_) => _DownloadVersionPicker(options: available),
+  );
+}
+
+class _DownloadVersionPicker extends StatelessWidget {
+  final List<_DlOption> options;
+  const _DownloadVersionPicker({required this.options});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.download_rounded, color: Color(0xFF1E8E5A), size: 22),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('選擇下載版本',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ...options.map((opt) => _DlOptionTile(
+            option: opt, onTap: () => Navigator.pop(context, opt),
+          )),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _DlOptionTile extends StatelessWidget {
+  final _DlOption option;
+  final VoidCallback onTap;
+  const _DlOptionTile({required this.option, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 42, height: 42,
+              decoration: BoxDecoration(
+                color: option.color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(option.icon, color: option.color, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(option.label,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(option.desc,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFFCCCCCC)),
           ],
         ),
       ),

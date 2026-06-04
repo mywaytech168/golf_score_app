@@ -13,9 +13,12 @@ class PlanProvider with ChangeNotifier {
 
   bool _loading = false;
 
-  PlanStatus get status  => _status;
-  UserPlan   get plan    => _status.plan;
-  bool       get loading => _loading;
+  PlanStatus   get status              => _status;
+  UserPlan     get plan                => _status.plan;
+  bool         get loading             => _loading;
+  DateTime?    get subscriptionExpiry  => _status.subscriptionExpiry;
+  String       get subscriptionStatus  => _status.subscriptionStatus;
+  bool         get isSubscribed        => _status.isSubscriptionActive;
 
   /// 從後端重新拉取方案狀態並通知所有 listener
   Future<void> refresh() async {

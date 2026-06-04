@@ -117,15 +117,17 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
                   userInfo: [NSLocalizedDescriptionKey: "找不到視頻軌道"])
   }
 
-  let composition = AVVideoComposition(propertiesOf: asset)
-  let displayW    = Int(composition.renderSize.width)
-  let displayH    = Int(composition.renderSize.height)
+  // ── coded 空間尺寸（Python 演算法空間，無 rotation 應用）──────
+  let naturalSize = videoTrack.naturalSize          // e.g. (1920, 1080) for portrait recording
+  let codedW      = Int(naturalSize.width)
+  let codedH      = Int(naturalSize.height)
+  let rotation    = btPreferredTransformToRotation(videoTrack.preferredTransform)
   let fps         = Double(max(1, videoTrack.nominalFrameRate))
   let totalFrames = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
 
   // ── 降採樣 2x：處理解析度降為 1/4，速度提升 ~4x ─────────────
-  let procW    = max(1, displayW / 2)
-  let procH    = max(1, displayH / 2)
+  let procW    = max(1, codedW / 2)
+  let procH    = max(1, codedH / 2)
   let pixCount = procW * procH
 
   // 面積門檻對應縮放（半解析度下面積縮 4 倍）
@@ -133,12 +135,12 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
   scaledCfg.areaLo = max(1, config.areaLo / 4)
   scaledCfg.areaHi = max(2, config.areaHi / 4)
 
+  // ── Raw coded 幀（AVAssetReaderTrackOutput，不套用 rotation）──
   let reader = try AVAssetReader(asset: asset)
-  let readerOut = AVAssetReaderVideoCompositionOutput(
-    videoTracks: asset.tracks(withMediaType: .video),
-    videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+  let readerOut = AVAssetReaderTrackOutput(
+    track: videoTrack,
+    outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
   )
-  readerOut.videoComposition = composition
   readerOut.alwaysCopiesSampleData = false
   reader.add(readerOut)
   guard reader.startReading() else {
@@ -176,8 +178,8 @@ private func btExtractBlobs(videoPath: String, config: BlobConfig) throws -> [St
     op: "extractBlobs", progress: 1.0, label: "球體偵測完成",
     current: frameIdx, total: frameIdx)
 
-  // 回傳原始 displayW/H 供 Dart 端座標系對齊
-  return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]
+  // coded 空間座標 + rotation 供 Dart 端 BallTracker 使用
+  return ["fps": fps, "width": codedW, "height": codedH, "rotation": rotation, "frames": frames]
 }
 
 // MARK: - YOLO blob extraction
@@ -189,18 +191,20 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
                   userInfo: [NSLocalizedDescriptionKey: "找不到視頻軌道"])
   }
 
-  let composition = AVVideoComposition(propertiesOf: asset)
-  let displayW    = Int(composition.renderSize.width)
-  let displayH    = Int(composition.renderSize.height)
+  // ── coded 空間尺寸（Python 演算法空間）──────────────────────
+  let naturalSize = videoTrack.naturalSize
+  let codedW      = Int(naturalSize.width)
+  let codedH      = Int(naturalSize.height)
+  let rotation    = btPreferredTransformToRotation(videoTrack.preferredTransform)
   let fps         = Double(max(1, videoTrack.nominalFrameRate))
   let totalFrames = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
 
+  // ── Raw coded 幀 ─────────────────────────────────────────────
   let reader = try AVAssetReader(asset: asset)
-  let readerOut = AVAssetReaderVideoCompositionOutput(
-    videoTracks: asset.tracks(withMediaType: .video),
-    videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+  let readerOut = AVAssetReaderTrackOutput(
+    track: videoTrack,
+    outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
   )
-  readerOut.videoComposition = composition
   readerOut.alwaysCopiesSampleData = false
   reader.add(readerOut)
   guard reader.startReading() else {
@@ -208,9 +212,9 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
                                   userInfo: [NSLocalizedDescriptionKey: "reader 啟動失敗"])
   }
 
-  // ── ROI 追蹤常數（對應 Android BallYoloExtractor）────────────
-  let ROI_RATIO_X:              Float = 0.6519
-  let ROI_RATIO_Y:              Float = 0.78
+  // ── ROI 常數（coded 空間，對應 Python FIXED_ROI_CENTER=(1149,406) / 1920×1080）
+  let ROI_CODED_X:              Float = 1149.0 / 1920.0  // ≈ 0.5984
+  let ROI_CODED_Y:              Float = 406.0  / 1080.0  // ≈ 0.3759
   let MAX_MISS_FRAMES                 = 5
   let MAX_ROI_SHIFT_PRE:        Float = 200
   let MAX_ROI_SHIFT_POST:       Float = 300
@@ -219,9 +223,9 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
   let POST_IMPACT_CHASE_DY:     Float = 150
   let POST_IMPACT_MAX_FRAMES          = 20
 
-  // ── ROI 追蹤狀態 ──────────────────────────────────────────────
-  var roiCx:           Float = Float(displayW) * ROI_RATIO_X
-  var roiCy:           Float = Float(displayH) * ROI_RATIO_Y
+  // ── ROI 追蹤狀態（coded 空間）──────────────────────────────
+  var roiCx:           Float = Float(codedW) * ROI_CODED_X   // ≈ 1149 for 1920
+  var roiCy:           Float = Float(codedH) * ROI_CODED_Y   // ≈ 406  for 1080
   var missCount              = 0
   var lastGoodCx:      Float = -1
   var lastGoodCy:      Float = -1
@@ -234,7 +238,6 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
   while reader.status == .reading {
     guard let sample: CMSampleBuffer = readerOut.copyNextSampleBuffer() else { break }
 
-    // 在 autoreleasepool 內取得偵測結果，ROI 更新在外部進行
     var ptsUs:      Int64 = 0
     var detections: [BallYoloDetector.Detection] = []
     var frameOk = false
@@ -254,9 +257,10 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
       let isPostImpact = hitFrame >= 0 && frameIdx >= hitFrame
       let confThresh   = isPostImpact ? CONF_POST_IMPACT : CONF_PRE_IMPACT
 
+      // YOLO 在 coded 空間執行，ROI 在 coded 空間
       detections = BallYoloDetector.shared.detect(
         bgraBase: rgba, bytesPerRow: bpr,
-        frameW: displayW, frameH: displayH,
+        frameW: codedW, frameH: codedH,
         roiCenterX: Int(roiCx), roiCenterY: Int(roiCy),
         confThreshold: confThresh)
       frameOk = true
@@ -264,7 +268,6 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
 
     guard frameOk else { continue }
 
-    // ── 更新 ROI 追蹤狀態 ────────────────────────────────────
     let isPostImpact = hitFrame >= 0 && frameIdx >= hitFrame
     let maxShift: Float = isPostImpact ? MAX_ROI_SHIFT_POST : MAX_ROI_SHIFT_PRE
 
@@ -279,27 +282,41 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
       missCount = 0; postImpactMisses = 0
     } else {
       missCount += 1
-      // _handleMiss 邏輯
       if isPostImpact {
         postImpactMisses += 1
         if postImpactMisses <= POST_IMPACT_MAX_FRAMES {
-          roiCy -= POST_IMPACT_CHASE_DY  // 每幀向上追蹤飛球
+          // Rotation-aware default: ball flies "upward" in display → different coded axis per rotation
+          //   rot=90 : displayY = codedX  → codedX 減少 → roiCx -= DY
+          //   rot=270: displayY = W-1-codedX → codedX 增加 → roiCx += DY
+          //   rot=180: displayY = H-1-codedY → codedY 增加 → roiCy += DY
+          //   rot=0  : coded = display    → codedY 減少 → roiCy -= DY
           let halfTile = Float(BallYoloDetector.inputSize) / 2
-          roiCx = max(halfTile, min(roiCx, Float(displayW) - halfTile))
-          roiCy = max(halfTile, roiCy)
+          switch rotation {
+          case 90:
+            roiCx -= POST_IMPACT_CHASE_DY
+            roiCx = max(halfTile, min(roiCx, Float(codedW) - halfTile))
+          case 270:
+            roiCx += POST_IMPACT_CHASE_DY
+            roiCx = max(halfTile, min(roiCx, Float(codedW) - halfTile))
+          case 180:
+            roiCy += POST_IMPACT_CHASE_DY
+            roiCy = min(roiCy, Float(codedH) - halfTile)
+          default:
+            roiCy -= POST_IMPACT_CHASE_DY
+            roiCy = max(halfTile, roiCy)
+          }
         }
       } else {
         if missCount >= MAX_MISS_FRAMES {
-          roiCx = lastGoodCx >= 0 ? lastGoodCx : Float(displayW) * ROI_RATIO_X
-          roiCy = lastGoodCy >= 0 ? lastGoodCy : Float(displayH) * ROI_RATIO_Y
+          roiCx = lastGoodCx >= 0 ? lastGoodCx : Float(codedW) * ROI_CODED_X
+          roiCy = lastGoodCy >= 0 ? lastGoodCy : Float(codedH) * ROI_CODED_Y
           missCount = 0
         }
       }
     }
 
-    // ── 組建 entry ────────────────────────────────────────────
+    // 偵測座標已在 coded 空間（BallYoloDetector.detect 回傳 frame-space 座標）
     let blobs: [[String: Any]] = detections.map { d in
-      // YOLO bbox 面積 ÷ 16 正規化為 blob-comparable area（對應 Android）
       let area = max(6, min(150, d.bboxW * d.bboxH / 16))
       return ["cx": d.cx, "cy": d.cy, "area": area, "circ": 1.0,
               "diffMean": Double(d.conf) * 50.0]
@@ -319,7 +336,7 @@ private func btExtractBlobsYolo(videoPath: String, hitSec: Double? = nil) throws
     op: "extractBlobs", progress: 1.0, label: "YOLO偵測完成",
     current: frameIdx, total: frameIdx)
 
-  return ["fps": fps, "width": displayW, "height": displayH, "frames": frames]
+  return ["fps": fps, "width": codedW, "height": codedH, "rotation": rotation, "frames": frames]
 }
 
 // MARK: - Per-frame processing
@@ -558,19 +575,19 @@ private func btRenderOverlay(
   let asset = AVURLAsset(url: URL(fileURLWithPath: inputPath))
   guard let videoTrack = asset.tracks(withMediaType: .video).first else { return false }
 
-  let composition = AVVideoComposition(propertiesOf: asset)
-  let displayW    = Int(composition.renderSize.width)
-  let displayH    = Int(composition.renderSize.height)
-  let fps         = Double(max(1, videoTrack.nominalFrameRate))
-  let totalFrames = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
+  // ── coded 空間尺寸（track points 已在 coded 空間）──────────
+  let naturalSize  = videoTrack.naturalSize
+  let codedW       = Int(naturalSize.width)
+  let codedH       = Int(naturalSize.height)
+  let fps          = Double(max(1, videoTrack.nominalFrameRate))
+  let totalFrames  = max(1, Int(CMTimeGetSeconds(asset.duration) * fps))
 
-  // Reader
+  // ── Reader：raw coded 幀 ──────────────────────────────────
   let reader = try AVAssetReader(asset: asset)
-  let readerOut = AVAssetReaderVideoCompositionOutput(
-    videoTracks: asset.tracks(withMediaType: .video),
-    videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+  let readerOut = AVAssetReaderTrackOutput(
+    track: videoTrack,
+    outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
   )
-  readerOut.videoComposition = composition
   readerOut.alwaysCopiesSampleData = false
   reader.add(readerOut)
   guard reader.startReading() else {
@@ -578,17 +595,17 @@ private func btRenderOverlay(
                                   userInfo: [NSLocalizedDescriptionKey: "reader 啟動失敗"])
   }
 
-  // Writer
+  // ── Writer：輸出 coded 幀 + 保留 rotation metadata ──────
   let outURL = URL(fileURLWithPath: outputPath)
   try? FileManager.default.removeItem(at: outURL)
   try FileManager.default.createDirectory(
     at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
   let writer  = try AVAssetWriter(url: outURL, fileType: .mp4)
-  let bitRate = calcBitRate(w: displayW, h: displayH, fps: fps, quality: quality)
+  let bitRate = calcBitRate(w: codedW, h: codedH, fps: fps, quality: quality)
   let videoSets: [String: Any] = [
     AVVideoCodecKey:  AVVideoCodecType.h264,
-    AVVideoWidthKey:  displayW,
-    AVVideoHeightKey: displayH,
+    AVVideoWidthKey:  codedW,
+    AVVideoHeightKey: codedH,
     AVVideoCompressionPropertiesKey: [
       AVVideoAverageBitRateKey:      bitRate,
       AVVideoProfileLevelKey:        AVVideoProfileLevelH264MainAutoLevel,
@@ -597,12 +614,13 @@ private func btRenderOverlay(
   ]
   let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSets)
   writerInput.expectsMediaDataInRealTime = false
+  writerInput.transform = videoTrack.preferredTransform  // 保留 rotation metadata
   let adaptor = AVAssetWriterInputPixelBufferAdaptor(
     assetWriterInput: writerInput,
     sourcePixelBufferAttributes: [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-      kCVPixelBufferWidthKey  as String: displayW,
-      kCVPixelBufferHeightKey as String: displayH,
+      kCVPixelBufferWidthKey  as String: codedW,
+      kCVPixelBufferHeightKey as String: codedH,
     ]
   )
   writer.add(writerInput)
@@ -631,10 +649,10 @@ private func btRenderOverlay(
     let srcBPR  = CVPixelBufferGetBytesPerRow(srcBuf)
     let dstBPR  = CVPixelBufferGetBytesPerRow(dstBuf)
     if srcBPR == dstBPR {
-      memcpy(dstBase, srcBase, dstBPR * displayH)
+      memcpy(dstBase, srcBase, dstBPR * codedH)
     } else {
       let copyW = min(srcBPR, dstBPR)
-      for row in 0..<displayH {
+      for row in 0..<codedH {
         memcpy(dstBase + row * dstBPR, srcBase + row * srcBPR, copyW)
       }
     }
@@ -644,11 +662,12 @@ private func btRenderOverlay(
     let visiblePts = btBinarySearchLast(pts: pts, upToUs: frameUs)
 
     if !visiblePts.isEmpty,
-       let ctx = btMakeCGContext(base: dstBase, w: displayW, h: displayH, bpr: dstBPR) {
-      // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y axis
-      ctx.translateBy(x: 0, y: CGFloat(displayH))
+       let ctx = btMakeCGContext(base: dstBase, w: codedW, h: codedH, bpr: dstBPR) {
+      // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y
+      ctx.translateBy(x: 0, y: CGFloat(codedH))
       ctx.scaleBy(x: 1, y: -1)
-      btDrawTrajectory(ctx: ctx, pts: visiblePts, roiSize: roiSize, w: displayW, h: displayH)
+      // track points 已在 coded 空間，直接畫在 coded frame 上
+      btDrawTrajectory(ctx: ctx, pts: visiblePts, roiSize: roiSize, w: codedW, h: codedH)
     }
     CVPixelBufferUnlockBaseAddress(dstBuf, [])
 
@@ -739,9 +758,13 @@ private func btDrawTrajectory(
 
   // ROI dashed rectangle + crosshair
   guard roiSize > 0 else { return }
-  let half = CGFloat(roiSize) / 2
-  let rx = CGFloat(last.x) - half, ry = CGFloat(last.y) - half
-  let roiRect = CGRect(x: rx, y: ry, width: CGFloat(roiSize), height: CGFloat(roiSize))
+  let half     = CGFloat(roiSize) / 2
+  // 夾緊到畫面範圍，避免 rect 超出邊界時十字偏移
+  let rxRaw    = CGFloat(last.x) - half
+  let ryRaw    = CGFloat(last.y) - half
+  let rxClamped = max(0, min(rxRaw, CGFloat(w) - CGFloat(roiSize)))
+  let ryClamped = max(0, min(ryRaw, CGFloat(h) - CGFloat(roiSize)))
+  let roiRect   = CGRect(x: rxClamped, y: ryClamped, width: CGFloat(roiSize), height: CGFloat(roiSize))
 
   ctx.setStrokeColor(cyanColor)
   ctx.setLineWidth(1.5)
@@ -749,12 +772,23 @@ private func btDrawTrajectory(
   ctx.stroke(roiRect)
   ctx.setLineDash(phase: 0, lengths: [])
 
-  // Crosshair
+  // 十字以 rect 實際中心為準（rect 被夾緊時中心不等於 last.x/last.y）
   ctx.setLineWidth(1)
-  let cx = CGFloat(last.x), cy = CGFloat(last.y)
-  ctx.move(to: CGPoint(x: rx, y: cy)); ctx.addLine(to: CGPoint(x: rx + CGFloat(roiSize), y: cy))
-  ctx.move(to: CGPoint(x: cx, y: ry)); ctx.addLine(to: CGPoint(x: cx, y: ry + CGFloat(roiSize)))
+  let cx = rxClamped + half, cy = ryClamped + half
+  ctx.move(to: CGPoint(x: rxClamped, y: cy)); ctx.addLine(to: CGPoint(x: rxClamped + CGFloat(roiSize), y: cy))
+  ctx.move(to: CGPoint(x: cx, y: ryClamped)); ctx.addLine(to: CGPoint(x: cx, y: ryClamped + CGFloat(roiSize)))
   ctx.strokePath()
+}
+
+// MARK: - Rotation helpers
+
+/// AVAssetTrack.preferredTransform → rotation angle in degrees (0/90/180/270)
+/// Portrait iPhone recording: b=1, c=-1 → 90°
+private func btPreferredTransformToRotation(_ t: CGAffineTransform) -> Int {
+  if t.a == 0 && t.b == 1  && t.c == -1 && t.d == 0  { return 90  }
+  if t.a == 0 && t.b == -1 && t.c == 1  && t.d == 0  { return 270 }
+  if t.a == -1 && t.b == 0 && t.c == 0  && t.d == -1 { return 180 }
+  return 0
 }
 
 // MARK: - Local CGContext / color helpers

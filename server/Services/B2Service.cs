@@ -178,6 +178,26 @@ namespace UploadServer.Services
             }
         }
 
+        // ── 球軌跡路徑規則 ───────────────────────────────────────────────
+        public static string BallTrajectoryClipKey(string analysisId) =>
+            $"ball_trajectory/{analysisId}/clip.mp4";
+
+        /// <summary>產生球軌跡 clip 上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
+        public string GenerateBallTrajectoryClipUploadUrl(string analysisId, int expiryMinutes = 20)
+        {
+            var key = BallTrajectoryClipKey(analysisId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "video/mp4",
+            };
+            _logger.LogInformation("產生球軌跡 clip PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
         // ── 問題回饋圖片路徑規則 ────────────────────────────────────────
         public static string FeedbackImageKey(string imageId) =>
             $"feedback_images/{imageId}.jpg";

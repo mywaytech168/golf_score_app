@@ -12,6 +12,7 @@ import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/clip_pipeline_service.dart';
+import '../services/shot_sound_service.dart';
 import '../services/realtime_audio_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/swing_impact_detector.dart';
@@ -22,6 +23,9 @@ import 'pose_detector_service.dart';
 import 'pose_frame_model.dart';
 import 'recording_config.dart';
 import 'skeleton_painter.dart';
+
+// 自動下一桿的等待秒數
+const int _autoNextShotDelaySec = 3;
 
 // ── 狀態機 ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +55,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   // ── 服務 ────────────────────────────────────────────────────────
   final _poseService  = PoseDetectorService();
   final _audioService = RealtimeAudioService();
+  final _soundService = ShotSoundService();
   late final LiveSwingDetector _detector;
 
   // ── 錄製路徑 ─────────────────────────────────────────────────────
@@ -93,8 +98,17 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   RecordingConfig _config = RecordingConfig();
   bool _isFrontCamera = false;
 
-  // ── CameraAwesome 錄製狀態（供 timer 觸發停止用）─────────────────
-  VideoRecordingCameraState? _activeRecordingState;
+  // ── CameraAwesome 錄製狀態（P0 fix：用 Completer 確保 startRecording 後才能 stop）
+  Completer<VideoRecordingCameraState>? _recordingStateCompleter;
+
+  // ── 自動偵測高爾夫站姿 ────────────────────────────────────────────
+  VideoCameraState? _idleVideoState;   // builder 傳入的 VideoMode state，供自動觸發用
+  int _golfPostureFrames = 0;          // 連續偵測到站姿的幀數
+  static const int _autoStartFrameThreshold = 15; // ~1.5s @10fps
+
+  // ── 自動下一桿 ────────────────────────────────────────────────────
+  Timer? _autoNextTimer;
+  int _autoNextCountdown = 0;
 
   // ── 動畫 ─────────────────────────────────────────────────────────
   late final AnimationController _pulseCtrl;
@@ -118,13 +132,19 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   @override
   void dispose() {
     _pulseCtrl.dispose();
+    _cancelAllTimers();
+    _poseService.dispose();
+    _audioService.dispose();
+    super.dispose();
+  }
+
+  // P1 fix：集中取消所有 timer
+  void _cancelAllTimers() {
     _elapsedTimer?.cancel();
     _postImpactTimer?.cancel();
     _countdownTick?.cancel();
     _maxDurationTimer?.cancel();
-    _poseService.dispose();
-    _audioService.dispose();
-    super.dispose();
+    _autoNextTimer?.cancel();
   }
 
   Future<void> _loadRoundIndex() async {
@@ -144,6 +164,9 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     _elapsed       = Duration.zero;
     _impactTimeSec = null;
     _poses         = [];
+    _latestEntry   = null;
+    _recordingStateCompleter = null;
+    _golfPostureFrames = 0;
     _detector.reset();
   }
 
@@ -163,6 +186,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
   Future<void> _startShot(VideoCameraState videoState) async {
     _resetShot();
+    // P0 fix：建立 Completer，builder 賦值後才能 stop
+    _recordingStateCompleter = Completer<VideoRecordingCameraState>();
     try { await _audioService.start(); } catch (e) {
       debugPrint('[ShotRecord] 音頻啟動失敗: $e');
     }
@@ -182,14 +207,28 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     setState(() => _state = ShotState.recording);
   }
 
+  // P0 fix：安全停止錄製，等待 Completer 確保 state 已就緒
+  Future<void> _stopRecordingSafely() async {
+    final completer = _recordingStateCompleter;
+    if (completer == null) return;
+    try {
+      final rs = await completer.future.timeout(const Duration(seconds: 3));
+      await rs.stopRecording();
+    } catch (e) {
+      debugPrint('[ShotRecord] stopRecording failed: $e');
+    }
+  }
+
   void _handleImpact(double impactTimeSec) {
     if (_state != ShotState.recording || !mounted) return;
     _maxDurationTimer?.cancel();
     _impactTimeSec = impactTimeSec;
-    const bufferMs = 2500;
+    _soundService.playSwingImpact();
+    // 3200ms = 2500ms 目標後段 + 700ms 補償（Y-LOW 比速度峰值最多晚 ~500ms）
+    const bufferMs = 3200;
     setState(() {
       _state     = ShotState.postImpact;
-      _countdown = bufferMs / 1000.0;
+      _countdown = 2.5; // UI 顯示 2.5s（使用者感知的等待時間）
     });
     _countdownTick = Timer.periodic(const Duration(milliseconds: 100), (t) {
       if (!mounted) { t.cancel(); return; }
@@ -202,43 +241,31 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   }
 
   Future<void> _onPostImpactComplete() async {
-    _countdownTick?.cancel();
-    _elapsedTimer?.cancel();
-    _maxDurationTimer?.cancel();
+    _cancelAllTimers();
     if (!mounted) return;
     setState(() => _state = ShotState.processing);
-    final rs = _activeRecordingState;
-    if (rs != null) await rs.stopRecording();
+    await _stopRecordingSafely();
     await _finishShotRecording();
   }
 
   /// 手動停止 + 儲存（使用者按「停止」或超時保底）
   Future<void> _stopAndProcess({bool isTimeout = false}) async {
     if (_state != ShotState.recording && _state != ShotState.postImpact) return;
-    _postImpactTimer?.cancel();
-    _countdownTick?.cancel();
-    _elapsedTimer?.cancel();
-    _maxDurationTimer?.cancel();
+    _cancelAllTimers();
     if (!mounted) return;
-    // 如果沒有 impact 時間，用錄製長度估算
     if (_impactTimeSec == null) {
       final dur = _elapsed.inMilliseconds / 1000.0;
       _impactTimeSec = (dur - 1.0).clamp(0.5, dur);
     }
     setState(() => _state = ShotState.processing);
-    final rs = _activeRecordingState;
-    if (rs != null) await rs.stopRecording();
+    await _stopRecordingSafely();
     await _finishShotRecording();
   }
 
   /// 取消（丟棄，不儲存）
   Future<void> _cancelShot() async {
-    _postImpactTimer?.cancel();
-    _countdownTick?.cancel();
-    _elapsedTimer?.cancel();
-    _maxDurationTimer?.cancel();
-    final rs = _activeRecordingState;
-    if (rs != null) await rs.stopRecording();
+    _cancelAllTimers();
+    await _stopRecordingSafely();
     await _audioService.stop();
     if (mounted) setState(() { _state = ShotState.idle; _poses = []; });
   }
@@ -282,7 +309,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     // 4. Fallback：用線上偵測器的時間建立最基本的 SwingHit
     if (hits.isEmpty && _impactTimeSec != null) {
       final totalDur = _elapsed.inMilliseconds / 1000.0;
-      hits = [_fallbackHit(_impactTimeSec!, totalDur)];
+      hits = [_fallbackHit(_impactTimeSec!, totalDur, _config.fps.value)];
       debugPrint('[ShotRecord] fallback hit at ${_impactTimeSec}s');
     }
 
@@ -337,15 +364,34 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     } catch (_) {}
 
     if (!mounted) return;
+    _soundService.playRecordingDone();
     setState(() { _latestEntry = clipEntry; _state = ShotState.result; });
     widget.onEntryAdded?.call(clipEntry);
+    _startAutoNextCountdown();
   }
 
-  SwingHit _fallbackHit(double impactSec, double totalDur) {
+  // 自動下一桿：result 頁顯示倒數，時間到自動切回 idle
+  void _startAutoNextCountdown() {
+    _autoNextCountdown = _autoNextShotDelaySec;
+    _autoNextTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      if (_autoNextCountdown <= 1) {
+        t.cancel();
+        if (_state == ShotState.result) {
+          setState(() { _state = ShotState.idle; });
+        }
+      } else {
+        setState(() => _autoNextCountdown--);
+      }
+    });
+  }
+
+  // P1 fix：傳入實際 fps 計算 frame 數
+  SwingHit _fallbackHit(double impactSec, double totalDur, int fps) {
     const half = 2.5;
     return SwingHit(
       hitIndex:   1,
-      hitFrame:   (impactSec * 10).round(),
+      hitFrame:   (impactSec * fps).round(),
       hitSec:     impactSec,
       startSec:   (impactSec - half).clamp(0.0, totalDur),
       endSec:     (impactSec + half).clamp(0.0, totalDur),
@@ -375,6 +421,34 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     );
   }
 
+  // ── 高爾夫站姿（address position）偵測 ───────────────────────────
+  // 條件：
+  //   1. 雙手腕可見（confidence > 0.5）
+  //   2. 手腕中點 Y > 髖部中點 Y（手腕在髖部以下，image coord Y 向下增大）
+  //   3. 雙手腕水平距離 < 肩寬的 45%（雙手並攏）
+  bool _isGolfAddressPosture(List<Pose> poses) {
+    if (poses.isEmpty) return false;
+    final lms = poses.first.landmarks;
+
+    final lw = lms[PoseLandmarkType.leftWrist];
+    final rw = lms[PoseLandmarkType.rightWrist];
+    final lh = lms[PoseLandmarkType.leftHip];
+    final rh = lms[PoseLandmarkType.rightHip];
+    final ls = lms[PoseLandmarkType.leftShoulder];
+    final rs = lms[PoseLandmarkType.rightShoulder];
+
+    if (lw == null || rw == null || lh == null || rh == null ||
+        ls == null || rs == null) return false;
+    if (lw.likelihood < 0.5 || rw.likelihood < 0.5) return false;
+
+    final hipMidY    = (lh.y + rh.y) / 2;
+    final wristMidY  = (lw.y + rw.y) / 2;
+    final shoulderW  = (ls.x - rs.x).abs();
+    final wristDistX = (lw.x - rw.x).abs();
+
+    return wristMidY > hipMidY && wristDistX < shoulderW * 0.45;
+  }
+
   // ── 姿勢偵測 ─────────────────────────────────────────────────────
 
   Future<void> _onImageAnalysis(AnalysisImage image) async {
@@ -399,8 +473,30 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
       setState(() { _poses = poses; _analysisSize = visual; });
 
+      // 自動偵測高爾夫站姿：idle 狀態下持續偵測，累積到閾值後自動開始
+      if (_state == ShotState.idle) {
+        final vs = _idleVideoState;
+        if (vs != null) {
+          if (_isGolfAddressPosture(poses)) {
+            _golfPostureFrames++;
+            if (_golfPostureFrames == 1) {
+              _soundService.playPostureDetected();
+            }
+            if (_golfPostureFrames >= _autoStartFrameThreshold) {
+              _golfPostureFrames = 0;
+              _startShot(vs);
+            }
+          } else {
+            if (_golfPostureFrames > 0) setState(() => _golfPostureFrames = 0);
+          }
+        }
+      }
+
       final isActive = _state == ShotState.recording || _state == ShotState.postImpact;
       if (isActive) {
+        // P0 fix：_csvWriter 可能因 _buildCaptureRequest 尚未完成而為 null，直接跳過
+        final writer = _csvWriter;
+        if (writer == null) return;
         final frame = poses.isNotEmpty
             ? PoseFrameModel.fromPose(
                 frame:        _frameCount,
@@ -412,7 +508,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 isFrontCamera: _isFrontCamera,
               )
             : PoseFrameModel.empty(frame: _frameCount, timeSec: timeSec);
-        _csvWriter?.addFrame(frame);
+        writer.addFrame(frame);
         setState(() => _frameCount++);
 
         // 線上偵測只在 recording 狀態啟用（postImpact 不再偵測）
@@ -470,6 +566,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                     _isFrontCamera ? SensorPosition.front : SensorPosition.back,
                   ),
                   aspectRatio: CameraAspectRatios.ratio_16_9,
+                  zoom: 0.0,
                 ),
                 saveConfig: SaveConfig.video(
                   pathBuilder:  _buildCaptureRequest,
@@ -478,16 +575,20 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 onImageForAnalysis: _onImageAnalysis,
                 imageAnalysisConfig: AnalysisConfig(
                   androidOptions: AndroidAnalysisOptions.nv21(
-                    width: _config.quality == VideoQuality.sd ? 320 : 480,
+                    width: _config.quality == VideoQuality.hd ? 480 : 640,
                   ),
                   maxFramesPerSecond: _config.fps == FrameRate.fps60 ? 15 : 10,
                   autoStart: true,
                 ),
                 builder: (cameraState, preview) {
-                  // 捕獲錄製狀態供 timer 呼叫 stopRecording 用
+                  // P0 fix：透過 Completer 傳遞 VideoRecordingCameraState，
+                  // 確保 stopRecording 呼叫時 state 已就緒
                   cameraState.when(
-                    onVideoRecordingMode: (rs) { _activeRecordingState = rs; },
-                    onVideoMode: (_) {},
+                    onVideoRecordingMode: (rs) {
+                      final c = _recordingStateCompleter;
+                      if (c != null && !c.isCompleted) c.complete(rs);
+                    },
+                    onVideoMode: (vs) { _idleVideoState = vs; },
                   );
 
                   return Stack(
@@ -596,11 +697,32 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       left: 0, right: 0,
       child: Center(
         child: Text(
-          _shotCount > 0 ? '再按一次準備下一桿' : '按下開始，揮桿自動切片',
-          style: const TextStyle(color: Colors.white54, fontSize: 13),
+          _golfPostureFrames > 0
+              ? '偵測到站姿，即將開始…'
+              : (_shotCount > 0 ? '再按一次準備下一桿' : '站好準備，或按下開始'),
+          style: TextStyle(
+            color: _golfPostureFrames > 0 ? Colors.greenAccent : Colors.white54,
+            fontSize: 13,
+          ),
         ),
       ),
     ),
+    if (_golfPostureFrames > 0)
+      Positioned(
+        bottom: 140,
+        left: 0, right: 0,
+        child: Center(
+          child: SizedBox(
+            width: 88, height: 88,
+            child: CircularProgressIndicator(
+              value: _golfPostureFrames / _autoStartFrameThreshold,
+              strokeWidth: 4,
+              color: Colors.greenAccent,
+              backgroundColor: Colors.white24,
+            ),
+          ),
+        ),
+      ),
   ];
 
   // recording：偵測狀態 + 手動停止儲存 + 取消
@@ -805,15 +927,30 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                       ],
                     ),
                   ),
+                // 自動倒數提示
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.timer_rounded, color: Colors.white38, size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$_autoNextCountdown 秒後自動準備下一桿',
+                        style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
                 // 按鈕
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => setState(() {
-                          _state = ShotState.idle;
-                          _poses = [];
-                        }),
+                        onPressed: () {
+                          _autoNextTimer?.cancel();
+                          setState(() { _state = ShotState.idle; });
+                        },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white70,
                           side: const BorderSide(color: Colors.white24),
@@ -821,13 +958,16 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                               borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(vertical: 13),
                         ),
-                        child: const Text('下一桿'),
+                        child: const Text('立即下一桿'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton(
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: () {
+                          _autoNextTimer?.cancel();
+                          Navigator.pop(context);
+                        },
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFF1E8E5A),
                           shape: RoundedRectangleBorder(

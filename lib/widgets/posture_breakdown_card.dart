@@ -52,17 +52,21 @@ class PostureBreakdownCard extends StatelessWidget {
           const SizedBox(height: kSpaceMD),
 
           // ── 2×3 格子（無資料時全格顯示 0） ────────────────────
-          GridView.count(
-            crossAxisCount: 3,
+          GridView.custom(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: kSpaceSM,
-            mainAxisSpacing: kSpaceSM,
-            childAspectRatio: 1.2,
-            children: SwingPosture.allLabels.map((label) {
-              final count = breakdown[label] ?? 0;
-              return _PostureTile(label: label, count: count);
-            }).toList(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: kSpaceSM,
+              mainAxisSpacing: kSpaceSM,
+              mainAxisExtent: 90,
+            ),
+            childrenDelegate: SliverChildListDelegate(
+              SwingPosture.allLabels.map((label) {
+                final count = breakdown[label] ?? 0;
+                return _PostureTile(label: label, count: count);
+              }).toList(),
+            ),
           ),
         ],
       ),
@@ -83,7 +87,7 @@ class _PostureTile extends StatelessWidget {
     final bgColor = color.withAlpha(isPerfect ? 30 : 20);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(kRadiusSM),

@@ -6,26 +6,31 @@ import 'ball_tracker.dart';
 import 'detection_config.dart';  // [新增] 動態配置
 
 /// 幀偵測結果（Kotlin extractBlobs 回傳）
+/// 幀偵測結果（Kotlin extractBlobs 回傳）
+/// width/height = coded 空間尺寸（對應 Python 演算法空間），rotation 供 Dart 計算 coded-space ROI 中心
 class FrameExtractionResult {
   final double fps;
-  final int width;
-  final int height;
+  final int width;    // coded width  (e.g. 1920 for portrait rotation=90)
+  final int height;   // coded height (e.g. 1080 for portrait rotation=90)
+  final int rotation; // 影片 rotation metadata (0 / 90 / 180 / 270)
   final List<FrameBlobs> frames;
 
   const FrameExtractionResult({
     required this.fps,
     required this.width,
     required this.height,
+    required this.rotation,
     required this.frames,
   });
 
   factory FrameExtractionResult._fromMap(Map<Object?, Object?> m) {
     final rawFrames = m['frames'] as List<Object?>;
     return FrameExtractionResult(
-      fps:    (m['fps']    as num).toDouble(),
-      width:  (m['width']  as num).toInt(),
-      height: (m['height'] as num).toInt(),
-      frames: rawFrames
+      fps:      (m['fps']      as num).toDouble(),
+      width:    (m['width']    as num).toInt(),
+      height:   (m['height']   as num).toInt(),
+      rotation: (m['rotation'] as num?)?.toInt() ?? 0,
+      frames:   rawFrames
           .map((f) => FrameBlobs.fromMap(f as Map<Object?, Object?>))
           .toList(),
     );
@@ -155,15 +160,7 @@ class BallTrajectoryService {
     ExportQuality quality = ExportQuality.standard,
   }) async {
     try {
-      // 🔍 DEBUG: 打印即將渲製的軌跡信息
-      debugPrint('[BallTraj] 開始渲製軌跡疊加...');
-      debugPrint('[BallTraj] 軌跡點數: ${trackPts.length}');
-      debugPrint('[BallTraj] ROI 尺寸: $roiSize px');
-      if (trackPts.isNotEmpty) {
-        debugPrint('[BallTraj] 首點: ${trackPts.first}');
-        debugPrint('[BallTraj] 末點: ${trackPts.last}');
-      }
-      
+      debugPrint('[BallTraj] renderOverlay pts=${trackPts.length} roi=$roiSize');
       final ok = await _channel.invokeMethod<bool>(
         'renderOverlay',
         {

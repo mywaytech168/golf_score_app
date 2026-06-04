@@ -70,6 +70,17 @@ namespace UploadServer.Models
         /// <summary>註冊時使用的邀請碼（被邀請方）</summary>
         public string? InvitedByCode { get; set; }
 
+        // ── 訂閱 ──────────────────────────────────────────────────
+
+        /// <summary>訂閱到期時間（UTC）；null = 從未訂閱</summary>
+        public DateTime? SubscriptionExpiry { get; set; }
+
+        /// <summary>訂閱狀態: 'none' | 'active' | 'cancel_pending' | 'expired'</summary>
+        public string SubscriptionStatus { get; set; } = "none";
+
+        /// <summary>原始訂閱交易 ID（Google orderId / Apple originalTransactionId）</summary>
+        public string? SubscriptionOriginalId { get; set; }
+
         // ── 導航屬性 ──────────────────────────────────────────────
 
         public List<UserAuth> UserAuths { get; set; } = new();

@@ -60,9 +60,11 @@ extension UserPlanX on UserPlan {
 class PlanStatus {
   final UserPlan plan;
   final int todayUsed;
-  final int dailyLimit;   // -1 = 無限制
-  final int bonusBalls;   // 額外獎勵球數（看廣告、邀請、回饋、上傳）
-  final bool fromCache;   // true = 後端不可用，來自本地 cache
+  final int dailyLimit;          // -1 = 無限制
+  final int bonusBalls;
+  final bool fromCache;
+  final DateTime? subscriptionExpiry;
+  final String subscriptionStatus; // 'none'|'active'|'cancel_pending'|'expired'
 
   const PlanStatus({
     required this.plan,
@@ -70,7 +72,14 @@ class PlanStatus {
     required this.dailyLimit,
     this.bonusBalls = 0,
     this.fromCache = false,
+    this.subscriptionExpiry,
+    this.subscriptionStatus = 'none',
   });
+
+  bool get isSubscriptionActive =>
+      subscriptionStatus == 'active' &&
+      (subscriptionExpiry == null ||
+          subscriptionExpiry!.isAfter(DateTime.now().toUtc()));
 
   /// 今日總上限（方案球數 + 獎勵球數）；-1 = 無限制
   int get totalLimit => dailyLimit < 0 ? -1 : dailyLimit + bonusBalls;
@@ -105,16 +114,21 @@ class PlanService {
         final todayUsed  = (data['todayUsed']  as int?) ?? 0;
         final limit      = (data['dailyLimit'] as int?) ?? plan.dailyLimit;
         final bonusBalls = (data['bonusBalls'] as int?) ?? 0;
+        final subStatus  = (data['subscriptionStatus'] as String?) ?? 'none';
+        final subExpiry  = data['subscriptionExpiry'] != null
+            ? DateTime.tryParse(data['subscriptionExpiry'] as String)?.toLocal()
+            : null;
 
-        // 同步本地 cache
         await _writeCachedPlan(plan);
 
-        debugPrint('$_tag ✅ 後端: ${plan.label} used=$todayUsed limit=$limit bonus=$bonusBalls');
+        debugPrint('$_tag ✅ 後端: ${plan.label} used=$todayUsed limit=$limit bonus=$bonusBalls subStatus=$subStatus');
         return PlanStatus(
           plan: plan,
           todayUsed: todayUsed,
           dailyLimit: limit,
           bonusBalls: bonusBalls,
+          subscriptionExpiry: subExpiry,
+          subscriptionStatus: subStatus,
         );
       }
     } on UnauthorizedException {
@@ -159,6 +173,31 @@ class PlanService {
       debugPrint('$_tag ❌ 購買方案異常: $e');
       return false;
     }
+  }
+
+  // ── 購買球數 ──────────────────────────────────────────────────
+
+  /// 購買球數包（consumable 內購），回傳新的球數餘額；失敗回傳 null
+  static Future<int?> purchaseBalls(
+    String productId, {
+    required String store,
+    required String purchaseToken,
+  }) async {
+    try {
+      final data = await VideoServerClient.instance.purchaseBalls(
+        productId, store, purchaseToken,
+      );
+      if (data != null) {
+        final newBalance = (data['newBalance'] as int?) ?? 0;
+        debugPrint('$_tag ✅ 購買球包 $productId，新餘額 $newBalance');
+        return newBalance;
+      }
+    } on UnauthorizedException {
+      rethrow;
+    } catch (e) {
+      debugPrint('$_tag ❌ 購買球包異常: $e');
+    }
+    return null;
   }
 
   // ── 設定方案（UI 更新用）──────────────────────────────────────

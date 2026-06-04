@@ -14,6 +14,7 @@ import '../services/chart_data_service.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/swing_impact_detector.dart';
+import '../services/video_export_service.dart';
 import '../theme/app_theme.dart';
 
 /// 錄影詳情頁：顯示聲音峰值、手腕 Y、Speed 三張圖表
@@ -33,6 +34,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
 
   String? _postureAnalysisId;
   bool _isAutoAnalyzing = false;
+  bool _isDownloading   = false;
 
   @override
   void initState() {
@@ -131,6 +133,94 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     return name.length > 24 ? '${name.substring(0, 24)}…' : name;
   }
 
+  // ── 下載影片 ────────────────────────────────────────────────────
+
+  /// 可下載的影片項目定義
+  static const _kDownloadOptions = [
+    _VideoOption(
+      file:  'final.mp4',
+      label: '分析完整版',
+      desc:  '骨架 + 球軌跡',
+      icon:  Icons.sports_golf_rounded,
+    ),
+    _VideoOption(
+      file:  'skeleton.mp4',
+      label: '骨架版',
+      desc:  '只含骨架 overlay',
+      icon:  Icons.accessibility_new_rounded,
+    ),
+    _VideoOption(
+      file:  'swing.mp4',
+      label: '原始影片',
+      desc:  '無任何 overlay',
+      icon:  Icons.videocam_rounded,
+    ),
+    _VideoOption(
+      file:  'swing.mov',
+      label: '原始影片 (MOV)',
+      desc:  '原始 MOV 檔',
+      icon:  Icons.videocam_rounded,
+    ),
+  ];
+
+  /// 顯示下載選單 → 使用者選擇 → 執行下載
+  Future<void> _downloadVideo() async {
+    final sessionDir = p.dirname(widget.entry.filePath);
+
+    // 篩選出實際存在的檔案
+    final available = _kDownloadOptions
+        .where((o) => File(p.join(sessionDir, o.file)).existsSync())
+        .toList();
+
+    if (available.isEmpty) {
+      _showSnack('找不到可下載的影片', isError: true);
+      return;
+    }
+
+    // 彈出選單
+    final chosen = await showModalBottomSheet<_VideoOption>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => _DownloadPicker(options: available),
+    );
+    if (chosen == null || !mounted) return;
+
+    // 執行下載
+    setState(() => _isDownloading = true);
+    try {
+      final videoPath  = p.join(sessionDir, chosen.file);
+      final displayName = '${_title.replaceAll(RegExp(r'[^\w一-龥]'), '_')}_${chosen.label}';
+      final result = await VideoExportService.download(videoPath, displayName: displayName);
+
+      if (!mounted) return;
+      switch (result.status) {
+        case ExportStatus.savedToDownloads:
+          _showSnack('「${chosen.label}」已儲存到下載資料夾 ✅');
+        case ExportStatus.savedToPhotos:
+          _showSnack('「${chosen.label}」已儲存到相機膠卷 ✅');
+        case ExportStatus.sharedViaSheet:
+          _showSnack('已開啟分享 ✅');
+        case ExportStatus.failed:
+          _showSnack('下載失敗：${result.detail}', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  void _showSnack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: isError ? Colors.red[700] : Colors.green[700],
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -141,6 +231,21 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
         elevation: 0,
         title: Text(_title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         actions: [
+          // ── 下載影片 ───────────────────────────────────────
+          if (_isDownloading)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.download_rounded),
+              tooltip: '下載影片',
+              onPressed: _downloadVideo,
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
@@ -885,23 +990,21 @@ class _AudioFeatureGaugeRow extends StatelessWidget {
           }),
         ),
         const SizedBox(width: 8),
-        SizedBox(
-          width: 72,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text(
-                valueText,
-                style: TextStyle(fontSize: 11, color: barColor, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                passed ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                color: barColor,
-                size: 14,
-              ),
-            ],
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              valueText,
+              style: TextStyle(fontSize: 11, color: barColor, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              passed ? Icons.check_circle_rounded : Icons.cancel_rounded,
+              color: barColor,
+              size: 14,
+            ),
+          ],
         ),
       ],
     );
@@ -1259,6 +1362,123 @@ class _PhaseChip extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 下載影片選項資料類
+// ════════════════════════════════════════════════════════════════
+
+class _VideoOption {
+  final String file;
+  final String label;
+  final String desc;
+  final IconData icon;
+
+  const _VideoOption({
+    required this.file,
+    required this.label,
+    required this.desc,
+    required this.icon,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// 下載選擇 Bottom Sheet
+// ════════════════════════════════════════════════════════════════
+
+class _DownloadPicker extends StatelessWidget {
+  final List<_VideoOption> options;
+  const _DownloadPicker({required this.options});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── 標題列 ──────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.download_rounded, color: kPrimaryGreen, size: 22),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    '選擇下載版本',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // ── 選項列表 ──────────────────────────────────────────
+          ...options.map((opt) => _OptionTile(
+            option: opt,
+            onTap: () => Navigator.pop(context, opt),
+          )),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _OptionTile extends StatelessWidget {
+  final _VideoOption option;
+  final VoidCallback onTap;
+  const _OptionTile({required this.option, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            // 圖示
+            Container(
+              width: 42, height: 42,
+              decoration: BoxDecoration(
+                color: kPrimaryGreen.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(option.icon, color: kPrimaryGreen, size: 22),
+            ),
+            const SizedBox(width: 14),
+            // 文字
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    option.label,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    option.desc,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
+                  ),
+                ],
+              ),
+            ),
+            // 箭頭
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFFCCCCCC)),
+          ],
+        ),
       ),
     );
   }

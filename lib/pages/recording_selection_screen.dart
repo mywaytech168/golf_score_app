@@ -113,17 +113,14 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
       final source = await _showIOSSourceSheet();
       if (source == null) return; // 使用者取消
       result = await FilePicker.platform.pickFiles(
-        type: source == _VideoSource.files
-            ? FileType.custom
-            : FileType.video,
-        allowedExtensions: source == _VideoSource.files
-            ? ['mp4', 'mov', 'avi', 'mkv', 'm4v']
-            : null,
+        type: FileType.custom,
+        allowedExtensions: const ['mov', 'm4v'],
         allowMultiple: false,
       );
     } else {
       result = await FilePicker.platform.pickFiles(
-        type: FileType.video,
+        type: FileType.custom,
+        allowedExtensions: const ['mp4', 'mov'],  // MOV 由 VideoTranscoder 自動轉 H.264 MP4
         allowMultiple: false,
       );
     }
@@ -409,7 +406,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                 _buildCard(
                   icon: Icons.folder_open_rounded,
                   title: '選擇本地影片',
-                  subtitle: '從裝置中選擇已有影片（上限 2 分鐘）',
+                  subtitle: '從裝置中選擇已有影片（上限 10 分鐘）',
                   color: const Color(0xFF7C3AED),
                   onTap: _selectLocalVideo,
                 ),

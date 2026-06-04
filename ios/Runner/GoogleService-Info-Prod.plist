@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -7,6 +7,6 @@
 	<key>REVERSED_CLIENT_ID</key>
 	<string>com.googleusercontent.apps.446697241300-2o58ae8nku99m9ojs49upe1srfs6e75c</string>
 	<key>BUNDLE_ID</key>
-	<string>atk.golfscoreapp</string>
+	<string>aethertek.golfscoreapp</string>
 </dict>
 </plist>

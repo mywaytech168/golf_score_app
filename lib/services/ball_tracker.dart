@@ -254,13 +254,13 @@ class BallTracker {
   static const int    _farFewCandsMax    = 3;
   static const int    _farManyCandsStop  = 25;
 
-  // ── ROI（比例化，適應不同手機解析度）───────────────────
-  static const double _fixedRoiCenterRatioX = 0.6519;
-  // ROI_Y: 球在球座上時位於畫面下方約 78%（y≈1498 on 1920px frame）
-  // 舊值 0.5646 → tile y[764,1404]，球實際在 y≈1574 → tile 外！
-  static const double _fixedRoiCenterRatioY = 0.78;
-  static const double _roiFixedSizeRatioW   = 0.3704;
-  static const double _roiFixedSizeRatioH   = 0.2083;
+  // ── ROI（coded 空間比例，對應 Python FIXED_ROI_CENTER=(1149,406) in 1920×1080）──
+  // Python workflow: coded 1920×1080 → FLIP_MODE=5 → algorithm 1920×1080 → FIXED_ROI_CENTER
+  static const double _roiCenterCodedRatioX = 1149.0 / 1920; // ≈ 0.5984
+  static const double _roiCenterCodedRatioY = 406.0  / 1080; // ≈ 0.3759
+  // ROI 半徑：400px ROI in 1920×1080 → radius=200（兩方向相同）
+  static const double _roiSizeCodedRatioW   = 400.0 / 1920;  // → videoW*ratio/2 = 200
+  static const double _roiSizeCodedRatioH   = 400.0 / 1080;  // → videoH*ratio/2 = 200
 
   // miss 分階段 ROI 擴張係數（相對於 roiHalfBase）
   // miss 0      → ×1.0（嚴格）
@@ -279,7 +279,8 @@ class BallTracker {
 
   // ── Tracking 終止 ─────────────────────────────────────
   static const bool   _stopWhenNoCand    = true;
-  static const int    _noCandPatience    = 4;   // 連續 miss 超過此幀數停止
+  static const int    _noCandPatience    = 5;   // 擊球前連續 miss 停止幀數
+  static const int    _noCandPatiencePostImpact = 20; // 擊球後：球速快、常模糊，給更多耐心
   static const int    _tooManyCandsThreshold = 4;
   static const bool   _tooManyUseBlue   = true;
   static const int    _bluePOffset      = -2;
@@ -326,9 +327,9 @@ class BallTracker {
   static const double _tqMinStop   = 18.0;  // 低於此分數強制停止
 
   // ── hitSec 搜尋視窗（幀數為單位，避免 fps 浮動問題）────
-  // 只在擊球前 5 幀到擊球後 20 幀尋找 P0（靜止球不計入）
+  // 只在擊球前 5 幀到擊球後 25 幀尋找 P0（靜止球不計入）
   static const int _hitLeadFrames  = 5;   // hitFrame - 5
-  static const int _hitTrailFrames = 20;  // hitFrame + 20
+  static const int _hitTrailFrames = 25;  // hitFrame + 25（加大 P0 搜尋窗口，對準確率有益）
 
   // ── 執行狀態（每次 track() 重置）────────────────────────
   _TrackState _state         = _TrackState.waitP0;
@@ -344,6 +345,10 @@ class BallTracker {
   double _trackQuality       = _tqInit;
   late Kalman2D _kf;
 
+  // coded-space ROI 中心（由 rotation + ratio 推導，全程在 coded 空間操作）
+  int _roiCenterX = 0;
+  int _roiCenterY = 0;
+
   int _hitWindowStart = 0;
   int _hitWindowEnd   = -1;
   int _hitFrameIdx    = -1; // 擊球幀（用於 post-impact step guard 放寬）
@@ -357,8 +362,9 @@ class BallTracker {
   List<TrackPoint> track({
     required List<FrameBlobs> frames,
     required double fps,
-    required int videoW,
-    required int videoH,
+    required int videoW,   // coded 寬（Python 演算法空間）
+    required int videoH,   // coded 高
+    required int rotation, // 影片 rotation metadata
     double? hitSec,
   }) {
     // 重置所有狀態
@@ -376,18 +382,18 @@ class BallTracker {
     _hitFrameIdx     = -1;
     _kf = Kalman2D(dt: 1.0 / math.max(fps, 1.0));
 
-    final roiHalfW    = videoW * _roiFixedSizeRatioW / 2;
-    final roiHalfH    = videoH * _roiFixedSizeRatioH / 2;
-    final roiHalfBase = math.min(roiHalfW, roiHalfH);
-    final roiCenterX  = (videoW * _fixedRoiCenterRatioX).round();
-    final roiCenterY  = (videoH * _fixedRoiCenterRatioY).round();
-    debugPrint('''[BallTracker.track] 🎬 追蹤初始化
-  • 視頻解析度: $videoW×$videoH
-  • ROI 中心: ($roiCenterX, $roiCenterY)
-  • ROI 半徑: ${roiHalfBase.toStringAsFixed(1)} px
-  • hitSec: ${hitSec?.toStringAsFixed(2) ?? 'null'}
-  • 總幀數: ${frames.length}
-  • 分階段 hardMax: E=$_stepAbsHardMaxEarly / S=$_stepAbsHardMaxStable / M=$_stepAbsHardMaxMiss
+    // ── coded-space ROI（Python FIXED_ROI_CENTER=(1149,406) in 1920×1080）──
+    // 直接用 coded 比例乘以 videoW/videoH，無需 rotation 轉換
+    final roiHalfBase = math.min(
+        videoW * _roiSizeCodedRatioW / 2,   // = 200 for videoW=1920
+        videoH * _roiSizeCodedRatioH / 2,   // = 200 for videoH=1080
+    );
+    _roiCenterX = (videoW * _roiCenterCodedRatioX).round();  // = 1149 for 1920
+    _roiCenterY = (videoH * _roiCenterCodedRatioY).round();  // = 406  for 1080
+    debugPrint('''[BallTracker.track] 🎬 追蹤初始化（coded 空間 / Python 流程）
+  • coded: $videoW×$videoH  rot=$rotation°
+  • ROI 中心: ($_roiCenterX, $_roiCenterY)  半徑: ${roiHalfBase.toStringAsFixed(1)} px
+  • hitSec: ${hitSec?.toStringAsFixed(2) ?? 'null'}  總幀數: ${frames.length}
 ''');
 
     // 計算擊球幀視窗（以幀數為單位）
@@ -416,22 +422,20 @@ class BallTracker {
 
       // ── ROI 空間篩選 ─────────────────────────────────
       final roiFiltered = _applyRoiFilter(
-          frame.blobs, videoW, videoH, roiHalfBase, bluePred);
+          frame.blobs, roiHalfBase, bluePred);
 
       // ── 動態門檻篩選 ─────────────────────────────────
       final pIndex = math.max(_trackPts.length - 1, 0);
       final filtered = _applyDynamicFilter(
           roiFiltered, pIndex, _noCandCount, _areaEma);
 
-      _processFrame(fi, frame.ptsUs, filtered, videoW, videoH, bluePred);
+      _processFrame(fi, frame.ptsUs, filtered, bluePred);
 
       if (_state == _TrackState.stopped) break; // 停止後跳出循環
     }
 
-    // 輸出 raw 與 smooth 雙軌
-    final rawPts = List<TrackPoint>.unmodifiable(_trackPts);
     final smoothed = _smoothTrackPts(_trackPts);
-    debugPrint('[BallTracker] ✅ 追蹤完成: ${rawPts.length} 點 → smooth');
+    debugPrint('[BallTracker] ✅ 追蹤完成: ${_trackPts.length} 點 → smooth');
     return List.unmodifiable(smoothed);
   }
 
@@ -585,7 +589,6 @@ class BallTracker {
 
   List<BlobData> _applyRoiFilter(
     List<BlobData> blobs,
-    int w, int h,
     double roiHalfBase,
     (double, double)? bluePred,
   ) {
@@ -593,13 +596,12 @@ class BallTracker {
 
     switch (_state) {
       case _TrackState.waitP0:
-        final cx = (w * _fixedRoiCenterRatioX).round();
-        final cy = (h * _fixedRoiCenterRatioY).round();
+        // coded-space ROI 中心（由 track() 初始化時計算並存入 _roiCenterX/Y）
         final filtered = blobs
-            .where((b) => _dist(b.cx, b.cy, cx, cy) <= roiHalfBase)
+            .where((b) => _dist(b.cx, b.cy, _roiCenterX, _roiCenterY) <= roiHalfBase)
             .toList();
         if (blobs.isNotEmpty && blobs.length <= 15) {
-          debugPrint('[ROI.waitP0] 中心($cx,$cy) r=${roiHalfBase.toStringAsFixed(0)}'
+          debugPrint('[ROI.waitP0] 中心($_roiCenterX,$_roiCenterY) r=${roiHalfBase.toStringAsFixed(0)}'
               ' | ${blobs.length}→${filtered.length}');
         }
         return filtered;
@@ -651,16 +653,17 @@ class BallTracker {
   // ══════════════════════════════════════════════════════════
 
   void _processFrame(
-    int frameIdx, int ptsUs, List<BlobData> blobs, int w, int h,
+    int frameIdx, int ptsUs, List<BlobData> blobs,
     (double, double)? bluePred,
   ) {
     switch (_state) {
       case _TrackState.waitP0:
-        _handleWaitP0(frameIdx, ptsUs, blobs, w, h);
+        _handleWaitP0(frameIdx, ptsUs, blobs);
       case _TrackState.waitP1:
         _handleWaitP1(frameIdx, ptsUs, blobs);
       case _TrackState.tracking:
-        _handleTracking(frameIdx, ptsUs, blobs, bluePred!);
+        if (bluePred == null) return; // KF 未初始化，跳過（理論上不應發生）
+        _handleTracking(frameIdx, ptsUs, blobs, bluePred);
       case _TrackState.stopped:
         break;
     }
@@ -670,9 +673,7 @@ class BallTracker {
   // waitP0
   // ══════════════════════════════════════════════════════════
 
-  void _handleWaitP0(
-    int frameIdx, int ptsUs, List<BlobData> blobs, int w, int h,
-  ) {
+  void _handleWaitP0(int frameIdx, int ptsUs, List<BlobData> blobs) {
     if (frameIdx < _hitWindowStart) return;
     if (_hitWindowEnd >= 0 && frameIdx > _hitWindowEnd) {
       _state = _TrackState.stopped;
@@ -691,10 +692,9 @@ class BallTracker {
     debugPrint('[waitP0.handle] frame=$frameIdx blobs=${blobs.length} '
         '${blobs.map((b) => "(${b.cx},${b.cy},a=${b.area})").join(",")}');
 
-    final roiX = (w * _fixedRoiCenterRatioX).round();
-    final roiY = (h * _fixedRoiCenterRatioY).round();
     final best = blobs.reduce((a, b) =>
-        _dist2(a.cx, a.cy, roiX, roiY) <= _dist2(b.cx, b.cy, roiX, roiY)
+        _dist2(a.cx, a.cy, _roiCenterX, _roiCenterY) <=
+            _dist2(b.cx, b.cy, _roiCenterX, _roiCenterY)
             ? a : b);
 
     _trackPts.add(TrackPoint(
@@ -772,12 +772,27 @@ class BallTracker {
     // ── 完全沒候選 ──────────────────────────────────────
     if (blobs.isEmpty) {
       _noCandCount++;
-      _trackQuality += _tqMiss;
+      final isPostImpact = _hitFrameIdx >= 0 && frameIdx >= _hitFrameIdx;
+      // 擊球後 miss 扣分減半：Kalman 點補充了軌跡，懲罰不應和完全失蹤一樣重
+      _trackQuality += isPostImpact ? (_tqMiss * 0.5) : _tqMiss;
+
+      // 擊球後：YOLO 常因高速模糊 miss，用 Kalman 預測點填補軌跡間隙
+      if (isPostImpact && _kf.initialized) {
+        final (kx, ky) = bluePred;
+        _trackPts.add(TrackPoint(
+          x: kx.round(), y: ky.round(),
+          rawX: kx.round(), rawY: ky.round(),
+          frameIdx: frameIdx, ptsUs: ptsUs,
+        ));
+        debugPrint('[tracking] post-impact miss → Kalman pt (${kx.round()},${ky.round()}) frame=$frameIdx miss=$_noCandCount');
+      }
+
       _checkQualityStop(frameIdx);
+      final patience = isPostImpact ? _noCandPatiencePostImpact : _noCandPatience;
       if (_state != _TrackState.stopped &&
           _stopWhenNoCand &&
-          _noCandCount > _noCandPatience) {
-        debugPrint('[tracking] miss patience exceeded @ frame $frameIdx, stop');
+          _noCandCount > patience) {
+        debugPrint('[tracking] miss patience exceeded @ frame $frameIdx (post=$isPostImpact), stop');
         _state = _TrackState.stopped;
       }
       return;

@@ -1,170 +1,218 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 /// 廣告服務 - 管理所有廣告操作
 class AdService {
-  static const String testDeviceId = 'YOUR_TEST_DEVICE_ID';
-  
-  // AdMob App IDs - 使用測試 IDs 進行測試
-  // 生產環境請替換為真實 IDs：https://admob.google.com
-  static const String androidAppId = 'ca-app-pub-3940256099942544~3347511713'; // Google 官方測試 App ID
-  static const String iosAppId = 'ca-app-pub-3940256099942544~1458002754'; // Google 官方測試 App ID
-  
-  // 廣告單元 IDs - 測試用 IDs
-  static const String interstitialAdUnitId = 'ca-app-pub-3940256099942544/1033173712'; // 測試插頁廣告
-  static const String rewardedAdUnitId = 'ca-app-pub-3940256099942544/5224354917'; // 測試獎勵廣告
-  static const String bannerAdUnitId = 'ca-app-pub-3940256099942544/6300978111'; // 測試橫幅廣告
-  
-  static late InterstitialAd _interstitialAd;
-  static late RewardedAd _rewardedAd;
+  // ── 橫幅廣告 ──────────────────────────────────────────────────
+  static String get bannerAdUnitId {
+    if (kDebugMode) {
+      return Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/6300978111'
+          : 'ca-app-pub-3940256099942544/2934735716';
+    }
+    return Platform.isAndroid
+        ? 'ca-app-pub-6355169055224194/YOUR_ANDROID_BANNER_ID'
+        : 'ca-app-pub-6355169055224194/YOUR_IOS_BANNER_ID';
+  }
 
-  static bool _isInterstitialAdReady = false;
-  static bool _isRewardedAdReady = false;
-  
+  // ── 插頁廣告單元 IDs ──────────────────────────────────────────
+  static String get _interstitialAiCoachId => Platform.isAndroid
+      ? 'ca-app-pub-6355169055224194/3885339495'
+      : 'ca-app-pub-6355169055224194/2105353968';
+
+  static String get _interstitialBallDetectionId => Platform.isAndroid
+      ? 'ca-app-pub-6355169055224194/7194029113'
+      : 'ca-app-pub-6355169055224194/8479190620';
+
+  static String get _interstitialFullAnalysisId => Platform.isAndroid
+      ? 'ca-app-pub-6355169055224194/3254784102'
+      : 'ca-app-pub-6355169055224194/5853027286';
+
+  // ── 獎勵廣告單元 IDs ──────────────────────────────────────────
+  static String get _rewardedAiCoachId => Platform.isAndroid
+      ? 'ca-app-pub-6355169055224194/5486351308'
+      : 'ca-app-pub-6355169055224194/9600700602';
+
+  static String _resolveInterstitialId(String productionId) {
+    if (kDebugMode) {
+      return Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/1033173712'
+          : 'ca-app-pub-3940256099942544/4411468910';
+    }
+    return productionId;
+  }
+
+  static String _resolveRewardedId(String productionId) {
+    if (kDebugMode) {
+      return Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/5224354917'
+          : 'ca-app-pub-3940256099942544/1712485313';
+    }
+    return productionId;
+  }
+
+  // ── 廣告實例 ──────────────────────────────────────────────────
+  static InterstitialAd? _aiCoachAd;
+  static InterstitialAd? _ballDetectionAd;
+  static InterstitialAd? _fullAnalysisAd;
+  static RewardedAd?     _rewardedAiCoachAd;
+
   /// 初始化 Google Mobile Ads
   static Future<void> initialize() async {
     await MobileAds.instance.initialize();
+    await Future.wait([
+      loadAiCoachInterstitial(),
+      loadBallDetectionInterstitial(),
+      loadFullAnalysisInterstitial(),
+      loadRewardedAiCoach(),
+    ]);
   }
-  
-  /// 加載插頁廣告（全屏廣告）
-  static Future<void> loadInterstitialAd() async {
+
+  // ── 載入方法 ──────────────────────────────────────────────────
+
+  static Future<void> loadAiCoachInterstitial() async {
     await InterstitialAd.load(
-      adUnitId: interstitialAdUnitId,
+      adUnitId: _resolveInterstitialId(_interstitialAiCoachId),
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
-          _interstitialAd = ad;
-          _isInterstitialAdReady = true;
-          
-          // 設置廣告關閉回調
-          _interstitialAd.fullScreenContentCallback = FullScreenContentCallback(
-            onAdDismissedFullScreenContent: (ad) {
-              _isInterstitialAdReady = false;
-              ad.dispose();
-              // 加載下一個廣告
-              loadInterstitialAd();
-            },
-            onAdFailedToShowFullScreenContent: (ad, error) {
-              _isInterstitialAdReady = false;
-              ad.dispose();
-              // 加載下一個廣告
-              loadInterstitialAd();
-            },
+          _aiCoachAd = ad;
+          ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (ad) { ad.dispose(); _aiCoachAd = null; loadAiCoachInterstitial(); },
+            onAdFailedToShowFullScreenContent: (ad, _) { ad.dispose(); _aiCoachAd = null; loadAiCoachInterstitial(); },
           );
         },
-        onAdFailedToLoad: (LoadAdError error) {
-          _isInterstitialAdReady = false;
-          debugPrint('插頁廣告加載失敗: $error');
-          // 重試加載
-          Future.delayed(const Duration(seconds: 5), () {
-            loadInterstitialAd();
-          });
+        onAdFailedToLoad: (e) {
+          debugPrint('[AdService] AI Coach 插頁廣告載入失敗: $e');
+          Future.delayed(const Duration(seconds: 30), loadAiCoachInterstitial);
         },
       ),
     );
   }
-  
-  /// 加載獎勵廣告（看完廣告後能玩遊戲）
-  static Future<void> loadRewardedAd() async {
+
+  static Future<void> loadBallDetectionInterstitial() async {
+    await InterstitialAd.load(
+      adUnitId: _resolveInterstitialId(_interstitialBallDetectionId),
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _ballDetectionAd = ad;
+          ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (ad) { ad.dispose(); _ballDetectionAd = null; loadBallDetectionInterstitial(); },
+            onAdFailedToShowFullScreenContent: (ad, _) { ad.dispose(); _ballDetectionAd = null; loadBallDetectionInterstitial(); },
+          );
+        },
+        onAdFailedToLoad: (e) {
+          debugPrint('[AdService] 偵測擊球插頁廣告載入失敗: $e');
+          Future.delayed(const Duration(seconds: 30), loadBallDetectionInterstitial);
+        },
+      ),
+    );
+  }
+
+  static Future<void> loadFullAnalysisInterstitial() async {
+    await InterstitialAd.load(
+      adUnitId: _resolveInterstitialId(_interstitialFullAnalysisId),
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _fullAnalysisAd = ad;
+          ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (ad) { ad.dispose(); _fullAnalysisAd = null; loadFullAnalysisInterstitial(); },
+            onAdFailedToShowFullScreenContent: (ad, _) { ad.dispose(); _fullAnalysisAd = null; loadFullAnalysisInterstitial(); },
+          );
+        },
+        onAdFailedToLoad: (e) {
+          debugPrint('[AdService] 完整分析插頁廣告載入失敗: $e');
+          Future.delayed(const Duration(seconds: 30), loadFullAnalysisInterstitial);
+        },
+      ),
+    );
+  }
+
+  static Future<void> loadRewardedAiCoach() async {
     await RewardedAd.load(
-      adUnitId: rewardedAdUnitId,
+      adUnitId: _resolveRewardedId(_rewardedAiCoachId),
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
-          _rewardedAd = ad;
-          _isRewardedAdReady = true;
-          
-          // 設置廣告關閉回調
-          _rewardedAd.fullScreenContentCallback = FullScreenContentCallback(
-            onAdDismissedFullScreenContent: (ad) {
-              _isRewardedAdReady = false;
-              ad.dispose();
-              // 加載下一個廣告
-              loadRewardedAd();
-            },
-            onAdFailedToShowFullScreenContent: (ad, error) {
-              _isRewardedAdReady = false;
-              ad.dispose();
-              // 加載下一個廣告
-              loadRewardedAd();
-            },
+          _rewardedAiCoachAd = ad;
+          ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (ad) { ad.dispose(); _rewardedAiCoachAd = null; loadRewardedAiCoach(); },
+            onAdFailedToShowFullScreenContent: (ad, _) { ad.dispose(); _rewardedAiCoachAd = null; loadRewardedAiCoach(); },
           );
         },
-        onAdFailedToLoad: (LoadAdError error) {
-          _isRewardedAdReady = false;
-          debugPrint('獎勵廣告加載失敗: $error');
-          // 重試加載
-          Future.delayed(const Duration(seconds: 5), () {
-            loadRewardedAd();
-          });
+        onAdFailedToLoad: (e) {
+          debugPrint('[AdService] AI Coach 獎勵廣告載入失敗: $e');
+          Future.delayed(const Duration(seconds: 30), loadRewardedAiCoach);
         },
       ),
     );
   }
-  
-  /// 顯示插頁廣告
-  static Future<void> showInterstitialAd() async {
-    if (_isInterstitialAdReady) {
-      await _interstitialAd.show();
+
+  // ── 顯示方法 ──────────────────────────────────────────────────
+
+  /// 顯示 AI Coach 插頁廣告（分析完成後呼叫）
+  static Future<void> showAiCoachInterstitial() async {
+    if (_aiCoachAd != null) {
+      await _aiCoachAd!.show();
     } else {
-      debugPrint('插頁廣告還未準備好');
-      loadInterstitialAd();
+      debugPrint('[AdService] AI Coach 插頁廣告尚未就緒');
+      loadAiCoachInterstitial();
     }
   }
-  
-  /// 顯示獎勵廣告並返回是否看完
-  static Future<bool> showRewardedAd() async {
-    if (_isRewardedAdReady) {
+
+  /// 顯示偵測擊球插頁廣告
+  static Future<void> showBallDetectionInterstitial() async {
+    if (_ballDetectionAd != null) {
+      await _ballDetectionAd!.show();
+    } else {
+      debugPrint('[AdService] 偵測擊球插頁廣告尚未就緒');
+      loadBallDetectionInterstitial();
+    }
+  }
+
+  /// 顯示完整分析插頁廣告
+  static Future<void> showFullAnalysisInterstitial() async {
+    if (_fullAnalysisAd != null) {
+      await _fullAnalysisAd!.show();
+    } else {
+      debugPrint('[AdService] 完整分析插頁廣告尚未就緒');
+      loadFullAnalysisInterstitial();
+    }
+  }
+
+  /// 顯示獎勵廣告，返回是否看完
+  static Future<bool> showRewardedAiCoach() async {
+    if (_rewardedAiCoachAd != null) {
       bool rewarded = false;
-      
       try {
-        await _rewardedAd.show(
-          onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
+        await _rewardedAiCoachAd!.show(
+          onUserEarnedReward: (_, reward) {
             rewarded = true;
-            debugPrint('用戶獲得獎勵: ${reward.amount} ${reward.type}');
+            debugPrint('[AdService] 用戶獲得獎勵: ${reward.amount} ${reward.type}');
           },
         );
+        await Future.delayed(const Duration(milliseconds: 500));
       } catch (e) {
-        debugPrint('顯示廣告時出錯: $e');
-        return true; // 如果廣告顯示失敗，允許用戶繼續
+        debugPrint('[AdService] 顯示獎勵廣告出錯: $e');
+        return true;
       }
-      
-      // 廣告顯示後，等待一小段時間確保 onUserEarnedReward 被觸發
-      await Future.delayed(const Duration(milliseconds: 500));
-      
       return rewarded;
     } else {
-      debugPrint('⚠️ [AdService] 獎勵廣告尚未就緒');
-      loadRewardedAd();
-      return kDebugMode; // debug 模式仍允許測試；production 需真正看完廣告
+      debugPrint('[AdService] AI Coach 獎勵廣告尚未就緒');
+      loadRewardedAiCoach();
+      return kDebugMode;
     }
   }
-  
-  /// 創建橫幅廣告
-  static BannerAd createBannerAd() {
-    return BannerAd(
-      adUnitId: bannerAdUnitId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (ad) {
-          debugPrint('橫幅廣告已加載');
-        },
-        onAdFailedToLoad: (ad, error) {
-          debugPrint('橫幅廣告加載失敗: $error');
-          ad.dispose();
-        },
-      ),
-    )..load();
-  }
-  
+
   /// 清理資源
   static Future<void> dispose() async {
-    if (_isInterstitialAdReady) {
-      await _interstitialAd.dispose();
-    }
-    if (_isRewardedAdReady) {
-      await _rewardedAd.dispose();
-    }
+    await _aiCoachAd?.dispose();
+    await _ballDetectionAd?.dispose();
+    await _fullAnalysisAd?.dispose();
+    await _rewardedAiCoachAd?.dispose();
   }
 }

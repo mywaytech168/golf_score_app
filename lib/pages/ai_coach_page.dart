@@ -274,14 +274,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
         backgroundColor: kPrimaryDark,
         foregroundColor: Colors.white,
         elevation: 0,
-        actions: [
-          if (widget.videoId != null && widget.clipPath != null)
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded),
-              tooltip: '重新分析',
-              onPressed: _reanalyze,
-            ),
-        ],
+        actions: const [],
       ),
       body: _buildBody(),
     );

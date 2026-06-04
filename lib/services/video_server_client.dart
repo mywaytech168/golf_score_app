@@ -1,4 +1,4 @@
-import 'package:http/http.dart' as http;
+﻿import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -317,6 +317,50 @@ class VideoServerClient {
       if (e is UnauthorizedException) rethrow;
       debugPrint('❌ 購買方案異常: $e');
       return false;
+    }
+  }
+
+  /// 購買球數包（consumable 內購）
+  ///
+  /// [productId] - 'golf_balls_1' | 'golf_balls_5' | 'golf_balls_10' | 'golf_balls_50' | 'golf_balls_100'
+  /// [store]     - 'google_play' | 'app_store'
+  Future<Map<String, dynamic>?> purchaseBalls(
+    String productId,
+    String store,
+    String purchaseToken, {
+    bool isRetry = false,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final url = Uri.parse('$_baseUrl/api/user/balls/purchase');
+
+      debugPrint('⚾ 購買球包 → productId=$productId store=$store');
+      final response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode({
+          'productId': productId,
+          'store': store,
+          'purchaseToken': purchaseToken,
+        }),
+      );
+      debugPrint('📥 Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 401 && !isRetry) {
+        final ok = await _tryRefreshToken();
+        if (ok) return purchaseBalls(productId, store, purchaseToken, isRetry: true);
+        throw UnauthorizedException('購買球包失敗: 401');
+      } else {
+        debugPrint('❌ 購買球包失敗: ${response.statusCode} ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 購買球包異常: $e');
+      return null;
     }
   }
 

@@ -1,11 +1,11 @@
-﻿import 'dart:convert';
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
-import 'package:pay/pay.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/plan_provider.dart';
+import '../services/in_app_purchase_service.dart';
 import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
@@ -100,6 +100,32 @@ const _features = <_FeatureRow>[
 ];
 
 // ════════════════════════════════════════════════════════════════
+// 球數包資料
+// ════════════════════════════════════════════════════════════════
+
+class _BallPack {
+  final String productId;
+  final int balls;
+  final String price;      // fallback hardcode price
+  final String? badge;
+
+  const _BallPack({
+    required this.productId,
+    required this.balls,
+    required this.price,
+    this.badge,
+  });
+}
+
+const _ballPacks = <_BallPack>[
+  _BallPack(productId: 'golf_balls_1',   balls: 1,   price: 'NT\$30'),
+  _BallPack(productId: 'golf_balls_5',   balls: 5,   price: 'NT\$120'),
+  _BallPack(productId: 'golf_balls_10',  balls: 10,  price: 'NT\$199',  badge: '熱門'),
+  _BallPack(productId: 'golf_balls_50',  balls: 50,  price: 'NT\$799',  badge: '划算'),
+  _BallPack(productId: 'golf_balls_100', balls: 100, price: 'NT\$1,290', badge: '最優惠'),
+];
+
+// ════════════════════════════════════════════════════════════════
 // 主頁面
 // ════════════════════════════════════════════════════════════════
 
@@ -136,6 +162,8 @@ class _UpgradePageState extends State<UpgradePage> {
                   _FeatureTable(highlighted: _selected),
                   const SizedBox(height: 28),
                   _CtaButton(plan: _selected, currentPlan: currentPlan, onTap: () => _onUpgrade(context)),
+                  const SizedBox(height: 32),
+                  _BallShopSection(onBuy: (pack) => _onBuyBalls(context, pack)),
                   const SizedBox(height: 40),
                 ],
               ),
@@ -143,6 +171,17 @@ class _UpgradePageState extends State<UpgradePage> {
           ),
         ],
       ),
+    );
+  }
+
+  void _onBuyBalls(BuildContext context, _BallPack pack) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _BallBuySheet(pack: pack),
     );
   }
 
@@ -626,108 +665,79 @@ class _PaySheet extends StatefulWidget {
 }
 
 class _PaySheetState extends State<_PaySheet> {
-  PaymentConfiguration? _payConfig;
-  bool _configError = false;
+  bool _loading = false;
+  // 從 Store 動態取得的商品（含正確貨幣價格）
+  ProductDetails? _productDetails;
+  bool _queryingProduct = true;
 
-  bool get _isIOS => Platform.isIOS;
+  String get _productId => switch (widget.plan) {
+    _Plan.pro   => 'golf_pro_monthly',
+    _Plan.elite => 'golf_elite_monthly',
+    _Plan.free  => '',
+  };
 
   @override
   void initState() {
     super.initState();
-    final asset = _isIOS
-        ? 'pay/apple_pay_config.json'
-        : 'pay/google_pay_config.json';
-    PaymentConfiguration.fromAsset(asset).then((cfg) {
-      if (mounted) setState(() => _payConfig = cfg);
-    }).catchError((_) {
-      if (mounted) setState(() => _configError = true);
-    });
+    _queryProduct();
   }
 
-  String get _priceAmount {
-    switch (widget.plan) {
-      case _Plan.pro:   return '299.00';
-      case _Plan.elite: return '599.00';
-      default:          return '0.00';
+  /// 開啟 sheet 時就先 query，取得含當地貨幣的正確價格
+  Future<void> _queryProduct() async {
+    setState(() => _queryingProduct = true);
+    try {
+      final available = await InAppPurchase.instance.isAvailable();
+      if (!available || !mounted) {
+        setState(() => _queryingProduct = false);
+        return;
+      }
+      final response = await InAppPurchase.instance.queryProductDetails({_productId});
+      if (mounted) {
+        setState(() {
+          _productDetails = response.productDetails.isNotEmpty
+              ? response.productDetails.first
+              : null;
+          _queryingProduct = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _queryingProduct = false);
     }
   }
 
-  List<PaymentItem> get _paymentItems => [
-    PaymentItem(
-      label: 'TekSwing ${widget.plan.label} 方案',
-      amount: _priceAmount,
-      status: PaymentItemStatus.final_price,
-    ),
-  ];
-
-  Future<void> _onGooglePayResult(Map<String, dynamic> result) async {
-    debugPrint('[GooglePay] result: $result');
-    if (!mounted) return;
-    Navigator.of(context).pop();
-    final tokenData = result['paymentMethodData']?['tokenizationData'];
-    final token = tokenData?['token'] as String? ?? jsonEncode(result);
-    await _purchaseWithToken('google_pay', token);
-  }
-
-  void _onGooglePayError(Object? error) {
-    debugPrint('[GooglePay] error: $error');
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Google Pay 發生錯誤：$error')),
-    );
-  }
-
-  Future<void> _onApplePayResult(Map<String, dynamic> result) async {
-    debugPrint('[ApplePay] result: $result');
-    if (!mounted) return;
-    Navigator.of(context).pop();
-    final token = jsonEncode(result);
-    await _purchaseWithToken('apple_pay', token);
-  }
-
-  void _onApplePayError(Object? error) {
-    debugPrint('[ApplePay] error: $error');
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Apple Pay 發生錯誤：$error')),
-    );
-  }
-
-  /// 送後端驗證並升級（真實付款路徑）
-  Future<void> _purchaseWithToken(String store, String token) async {
-    final userPlan = switch (widget.plan) {
-      _Plan.free  => UserPlan.free,
-      _Plan.pro   => UserPlan.pro,
-      _Plan.elite => UserPlan.elite,
-    };
-    final ok = await PlanService.purchasePlan(userPlan, store: store, purchaseToken: token);
-    if (!mounted) return;
-    if (ok) {
-      // 即時更新全域方案狀態（首頁、球數、本頁面）
-      await context.read<PlanProvider>().refresh();
+  Future<void> _subscribe() async {
+    if (_loading || _productDetails == null) return;
+    setState(() => _loading = true);
+    try {
+      final param = PurchaseParam(productDetails: _productDetails!);
+      await InAppPurchase.instance.buyNonConsumable(purchaseParam: param);
+      // 購買結果由 InAppPurchaseService 的 purchaseStream 處理
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
       if (!mounted) return;
-      _showSuccess(switch (store) {
-        'google_pay' => 'Google Pay',
-        'apple_pay'  => 'Apple Pay',
-        _            => store,
-      });
-    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).upgradePaymentFailed)),
+        SnackBar(content: Text('訂閱失敗：$e')),
       );
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// 顯示的價格：優先用 Store 回傳的本地貨幣，fallback 用 hardcode
+  String get _displayPrice {
+    if (_productDetails != null) return _productDetails!.price;
+    return '${widget.plan.price}${widget.plan.period}';
   }
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 標頭
             Row(
               children: [
                 Icon(Icons.workspace_premium_rounded, color: widget.plan.primaryColor, size: 24),
@@ -737,188 +747,327 @@ class _PaySheetState extends State<_PaySheet> {
                   children: [
                     Text(AppLocalizations.of(context).upgradeSubscribePlan(widget.plan.label),
                         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-                    Text('${widget.plan.price}${widget.plan.period}',
-                        style: TextStyle(fontSize: 13, color: widget.plan.primaryColor, fontWeight: FontWeight.w600)),
+                    if (_queryingProduct)
+                      const SizedBox(
+                        width: 60, height: 14,
+                        child: LinearProgressIndicator(minHeight: 2),
+                      )
+                    else
+                      Text(
+                        _displayPrice,
+                        style: TextStyle(fontSize: 13, color: widget.plan.primaryColor, fontWeight: FontWeight.w600),
+                      ),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 16),
             const Divider(),
-            const SizedBox(height: 8),
-            Text(AppLocalizations.of(context).upgradeSelectPayment, style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500)),
             const SizedBox(height: 12),
-
-            if (_payConfig != null) ...[
-              if (_isIOS)
-                _ApplePayRow(
-                  config: _payConfig!,
-                  paymentItems: _paymentItems,
-                  onPaymentResult: _onApplePayResult,
-                  onError: _onApplePayError,
-                )
-              else
-                _GooglePayRow(
-                  config: _payConfig!,
-                  paymentItems: _paymentItems,
-                  onPaymentResult: _onGooglePayResult,
-                  onError: _onGooglePayError,
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: (_loading || _queryingProduct || _productDetails == null) ? null : _subscribe,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: widget.plan.primaryColor,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey[300],
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-            ] else if (_configError)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  _isIOS
-                      ? AppLocalizations.of(context).upgradeApplePayFailed
-                      : AppLocalizations.of(context).upgradeGooglePayFailed,
-                  style: const TextStyle(color: Colors.red, fontSize: 13),
-                ),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+                child: _loading
+                    ? const SizedBox(width: 22, height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : _queryingProduct
+                        ? const SizedBox(width: 22, height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : _productDetails == null
+                            ? const Text('商品載入失敗，請稍後再試',
+                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500))
+                            : Text(
+                                Platform.isIOS ? 'App Store 訂閱' : 'Google Play 訂閱',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
               ),
-            const SizedBox(height: 4),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                '訂閱後可隨時在 ${Platform.isIOS ? "App Store" : "Google Play"} 管理或取消',
+                style: const TextStyle(fontSize: 11, color: Colors.black45),
+                textAlign: TextAlign.center,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  void _showSuccess(String method) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(children: [
-          Icon(Icons.check_circle_rounded, color: widget.plan.primaryColor),
-          const SizedBox(width: 8),
-          Text(AppLocalizations.of(context).upgradeSuccessMsg),
-        ]),
-        content: Text('已透過 $method 升級為 ${widget.plan.label} 方案。\n感謝您的支持！'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(AppLocalizations.of(context).commonOk, style: TextStyle(color: widget.plan.primaryColor)),
+// ════════════════════════════════════════════════════════════════
+// 球數商店區塊
+// ════════════════════════════════════════════════════════════════
+
+class _BallShopSection extends StatelessWidget {
+  final void Function(_BallPack pack) onBuy;
+  const _BallShopSection({required this.onBuy});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.sports_golf_rounded, size: 18, color: kPrimaryGreen),
+                const SizedBox(width: 6),
+                Text(
+                  '單買球數',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey[800]),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5EE),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: kPrimaryGreen.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text('不限時間使用', style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
           ),
+          ...(_ballPacks.map((pack) => _BallPackTile(pack: pack, onTap: () => onBuy(pack)))),
         ],
       ),
     );
   }
 }
 
-// ════════════════════════════════════════════════════════════════
-// Apple Pay 按鈕列
-// ════════════════════════════════════════════════════════════════
-
-class _ApplePayRow extends StatelessWidget {
-  final PaymentConfiguration config;
-  final List<PaymentItem> paymentItems;
-  final void Function(Map<String, dynamic>) onPaymentResult;
-  final void Function(Object?) onError;
-
-  const _ApplePayRow({
-    required this.config,
-    required this.paymentItems,
-    required this.onPaymentResult,
-    required this.onError,
-  });
+class _BallPackTile extends StatelessWidget {
+  final _BallPack pack;
+  final VoidCallback onTap;
+  const _BallPackTile({required this.pack, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                // 球圖示
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5EE),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.sports_golf_rounded, color: kPrimaryGreen, size: 22),
+                ),
+                const SizedBox(width: 14),
+                // 球數 + badge
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            '${pack.balls} 球',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF1A3A2A)),
+                          ),
+                          if (pack.badge != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(pack.badge!, style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '永久有效，隨時使用',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                ),
+                // 價格 + 購買按鈕
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      pack.price,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kPrimaryGreen),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: kPrimaryGreen,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text('購買', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            child: const Icon(Icons.apple_rounded, color: Colors.black87, size: 24),
           ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Text('Apple Pay', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
-          ),
-          SizedBox(
-            height: 44,
-            child: ApplePayButton(
-              paymentConfiguration: config,
-              paymentItems: paymentItems,
-              style: ApplePayButtonStyle.black,
-              type: ApplePayButtonType.buy,
-              cornerRadius: 10,
-              onPaymentResult: onPaymentResult,
-              onError: onError,
-              loadingIndicator: const SizedBox(
-                width: 80, height: 44,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// Google Pay 按鈕列
+// 球數購買底頁
 // ════════════════════════════════════════════════════════════════
 
-class _GooglePayRow extends StatelessWidget {
-  final PaymentConfiguration config;
-  final List<PaymentItem> paymentItems;
-  final void Function(Map<String, dynamic>) onPaymentResult;
-  final void Function(Object?) onError;
+class _BallBuySheet extends StatefulWidget {
+  final _BallPack pack;
+  const _BallBuySheet({required this.pack});
 
-  const _GooglePayRow({
-    required this.config,
-    required this.paymentItems,
-    required this.onPaymentResult,
-    required this.onError,
-  });
+  @override
+  State<_BallBuySheet> createState() => _BallBuySheetState();
+}
+
+class _BallBuySheetState extends State<_BallBuySheet> {
+  bool _loading = false;
+  ProductDetails? _productDetails;
+  bool _queryingProduct = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _queryProduct();
+  }
+
+  Future<void> _queryProduct() async {
+    setState(() => _queryingProduct = true);
+    try {
+      final available = await InAppPurchase.instance.isAvailable();
+      if (!available || !mounted) {
+        setState(() => _queryingProduct = false);
+        return;
+      }
+      final response = await InAppPurchase.instance.queryProductDetails({widget.pack.productId});
+      if (mounted) {
+        setState(() {
+          _productDetails = response.productDetails.isNotEmpty ? response.productDetails.first : null;
+          _queryingProduct = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _queryingProduct = false);
+    }
+  }
+
+  Future<void> _buy() async {
+    if (_loading || _productDetails == null) return;
+    setState(() => _loading = true);
+    try {
+      await InAppPurchaseService.instance.buyBallPack(_productDetails!);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('購買失敗：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String get _displayPrice {
+    if (_productDetails != null) return _productDetails!.price;
+    return widget.pack.price;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          // 左側圖示（仿 _payOptionMock 風格）
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFF4285F4).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.sports_golf_rounded, color: kPrimaryGreen, size: 24),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('購買 ${widget.pack.balls} 球',
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    if (_queryingProduct)
+                      const SizedBox(width: 60, height: 14, child: LinearProgressIndicator(minHeight: 2))
+                    else
+                      Text(_displayPrice,
+                          style: const TextStyle(fontSize: 13, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ],
             ),
-            child: const Icon(Icons.phone_android_rounded, color: Color(0xFF4285F4), size: 22),
-          ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Text('Google Pay', style: TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
-          ),
-          // 官方 Google Pay 按鈕
-          SizedBox(
-            height: 44,
-            child: GooglePayButton(
-              paymentConfiguration: config,
-              paymentItems: paymentItems,
-              type: GooglePayButtonType.pay,
-              theme: GooglePayButtonTheme.dark,
-              cornerRadius: 10,
-              onPaymentResult: onPaymentResult,
-              onError: onError,
-              loadingIndicator: const SizedBox(
-                width: 80, height: 44,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            const SizedBox(height: 10),
+            Text(
+              '球數永久有效，不限時間使用。用完每日配額後自動消耗。',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: (_loading || _queryingProduct || _productDetails == null) ? null : _buy,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimaryGreen,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey[300],
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: _loading || _queryingProduct
+                    ? const SizedBox(width: 22, height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : _productDetails == null
+                        ? const Text('商品載入失敗，請稍後再試', style: TextStyle(fontSize: 14))
+                        : Text(
+                            Platform.isIOS ? 'App Store 購買' : 'Google Play 購買',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

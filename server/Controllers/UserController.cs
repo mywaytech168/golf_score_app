@@ -104,6 +104,22 @@ namespace UploadServer.Controllers
             return Ok(new { data = result });
         }
 
+        /// <summary>
+        /// POST /api/user/balls/purchase — 購買球數包（consumable 內購）
+        /// Body: { "productId": "golf_balls_10", "store": "google_play|app_store", "purchaseToken": "..." }
+        /// </summary>
+        [HttpPost("balls/purchase")]
+        public async Task<IActionResult> PurchaseBalls([FromBody] PurchaseBallsRequest req)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.PurchaseBallsAsync(userId, req);
+            return result.Success
+                ? Ok(new { data = result })
+                : BadRequest(new { message = result.Message });
+        }
+
         // ════════════════════════════════════════════════════════════════
         // 獎勵
         // ════════════════════════════════════════════════════════════════

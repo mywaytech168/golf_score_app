@@ -2,7 +2,6 @@ import 'package:camerawesome/pigeon.dart';
 
 /// 影片畫質（對應 camerawesome VideoRecordingQuality）
 enum VideoQuality {
-  sd(VideoRecordingQuality.sd,   '480p'),
   hd(VideoRecordingQuality.hd,   '720p'),
   fhd(VideoRecordingQuality.fhd, '1080p');
 

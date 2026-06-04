@@ -71,6 +71,7 @@ namespace UploadServer.Constants
         public const string Upload   = "upload";
         public const string Analysis = "analysis";
         public const string Manual   = "manual";
+        public const string Purchase = "purchase";
     }
 
     public static class PurchaseStatus

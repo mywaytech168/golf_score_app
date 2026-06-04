@@ -1,140 +1,217 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
-/// 應用內購買服務（Google Play 和 Apple App Store）
+import 'plan_service.dart';
+import 'video_server_client.dart';
+
+// ── 商品 ID 對照 ────────────────────────────────────────────────
+
+const _kProMonthly   = 'golf_pro_monthly';
+const _kEliteMonthly = 'golf_elite_monthly';
+
+// 球數包（consumable）
+const _kBalls1   = 'golf_balls_1';
+const _kBalls5   = 'golf_balls_5';
+const _kBalls10  = 'golf_balls_10';
+const _kBalls50  = 'golf_balls_50';
+const _kBalls100 = 'golf_balls_100';
+
+const _kBallPackIds = {_kBalls1, _kBalls5, _kBalls10, _kBalls50, _kBalls100};
+
+const _kProductIds = {_kProMonthly, _kEliteMonthly, ..._kBallPackIds};
+
+// ── 事件通知 ────────────────────────────────────────────────────
+
+enum IapEvent { success, error, canceled, pending }
+
+class IapResult {
+  final IapEvent event;
+  final UserPlan? plan;
+  final String? message;
+  const IapResult(this.event, {this.plan, this.message});
+}
+
+// ════════════════════════════════════════════════════════════════
+// InAppPurchaseService
+// ════════════════════════════════════════════════════════════════
+
+/// Singleton service 管理訂閱的購買流程。
+///
+/// 使用方式：
+/// 1. main() 呼叫 [InAppPurchaseService.instance.init()]
+/// 2. 監聽 [results] stream 取得購買結果
+/// 3. 購買完成後呼叫 [PlanProvider.refresh()] 更新 UI
 class InAppPurchaseService {
-  static const String _noAdProductId = 'golf_no_ads_premium';
-  
-  /// 初始化應用內購買服務
-  static Future<void> initialize() async {
-    debugPrint('🛒 [應用內購買] 初始化服務...');
-    
-    final available = await InAppPurchase.instance.isAvailable();
+  InAppPurchaseService._();
+  static final InAppPurchaseService instance = InAppPurchaseService._();
+
+  final _iap = InAppPurchase.instance;
+
+  StreamSubscription<List<PurchaseDetails>>? _subscription;
+  final _resultController = StreamController<IapResult>.broadcast();
+
+  Stream<IapResult> get results => _resultController.stream;
+
+  bool _initialized = false;
+
+  // ── 初始化 ──────────────────────────────────────────────────
+
+  Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
+
+    final available = await _iap.isAvailable();
     if (!available) {
-      debugPrint('❌ [應用內購買] 設備不支持應用內購買');
+      debugPrint('[IAP] Store 不可用');
       return;
     }
-    
-    debugPrint('✅ [應用內購買] 服務初始化成功');
+
+    _subscription = _iap.purchaseStream.listen(
+      _handlePurchaseUpdates,
+      onError: (e) => debugPrint('[IAP] stream error: $e'),
+    );
+
+    debugPrint('[IAP] 初始化完成');
   }
 
-  /// 查詢產品信息
-  Future<ProductDetails?> getProductDetails() async {
-    try {
-      debugPrint('🛒 [應用內購買] 查詢產品信息: $_noAdProductId');
-      
-      final ProductDetailsResponse response = await InAppPurchase.instance.queryProductDetails({_noAdProductId});
-      
-      if (response.notFoundIDs.isNotEmpty) {
-        debugPrint('❌ [應用內購買] 找不到產品: ${response.notFoundIDs}');
-        return null;
+  void dispose() {
+    _subscription?.cancel();
+    _resultController.close();
+  }
+
+  // ── 查詢商品 ────────────────────────────────────────────────
+
+  Future<List<ProductDetails>> queryProducts() async {
+    final response = await _iap.queryProductDetails(_kProductIds);
+    if (response.notFoundIDs.isNotEmpty) {
+      debugPrint('[IAP] 找不到商品: ${response.notFoundIDs}');
+    }
+    return response.productDetails;
+  }
+
+  // ── 發起訂閱 ────────────────────────────────────────────────
+
+  Future<void> subscribe(ProductDetails product) async {
+    final param = PurchaseParam(productDetails: product);
+    await _iap.buyNonConsumable(purchaseParam: param);
+  }
+
+  // ── 購買球包（consumable）──────────────────────────────────
+
+  Future<void> buyBallPack(ProductDetails product) async {
+    final param = PurchaseParam(productDetails: product);
+    await _iap.buyConsumable(purchaseParam: param);
+  }
+
+  // ── 恢復購買 ────────────────────────────────────────────────
+
+  Future<void> restorePurchases() async {
+    await _iap.restorePurchases();
+  }
+
+  // ── 購買事件處理 ────────────────────────────────────────────
+
+  Future<void> _handlePurchaseUpdates(List<PurchaseDetails> purchases) async {
+    for (final purchase in purchases) {
+      switch (purchase.status) {
+        case PurchaseStatus.purchased:
+        case PurchaseStatus.restored:
+          await _onPurchasedOrRestored(purchase);
+        case PurchaseStatus.pending:
+          _resultController.add(
+            const IapResult(IapEvent.pending, message: '付款處理中，完成後將自動升級'));
+        case PurchaseStatus.error:
+          debugPrint('[IAP] 錯誤: ${purchase.error}');
+          _resultController.add(
+            IapResult(IapEvent.error, message: purchase.error?.message));
+          await _safeComplete(purchase);
+        case PurchaseStatus.canceled:
+          _resultController.add(const IapResult(IapEvent.canceled));
       }
-      
-      if (response.productDetails.isEmpty) {
-        debugPrint('❌ [應用內購買] 沒有可用的產品');
-        return null;
-      }
-      
-      final product = response.productDetails.first;
-      debugPrint('✅ [應用內購買] 產品名稱: ${product.title}');
-      debugPrint('✅ [應用內購買] 產品價格: ${product.price}');
-      debugPrint('✅ [應用內購買] 產品描述: ${product.description}');
-      
-      return product;
-    } catch (e) {
-      debugPrint('❌ [應用內購買] 查詢產品出錯: $e');
-      return null;
     }
   }
 
-  /// 購買無廣告版本
-  Future<bool> purchasePremium() async {
+  Future<void> _onPurchasedOrRestored(PurchaseDetails purchase) async {
+    final store   = Platform.isIOS ? 'app_store' : 'google_play';
+    final token   = purchase.verificationData.serverVerificationData;
+    final product = purchase.productID;
+
+    debugPrint('[IAP] 購買成功 store=$store product=$product');
+
+    if (_kBallPackIds.contains(product)) {
+      await _handleBallPackPurchase(purchase, store, token, product);
+    } else {
+      await _handleSubscriptionPurchase(purchase, store, token, product);
+    }
+  }
+
+  Future<void> _handleBallPackPurchase(
+      PurchaseDetails purchase, String store, String token, String product) async {
     try {
-      debugPrint('🛒 [應用內購買] 開始購買無廣告版本...');
-      
-      final product = await getProductDetails();
-      if (product == null) {
-        debugPrint('❌ [應用內購買] 無法獲取產品信息');
-        return false;
-      }
-      
-      final PurchaseParam purchaseParam = PurchaseParam(productDetails: product);
-      
-      debugPrint('🛒 [應用內購買] 發起購買流程...');
-      await InAppPurchase.instance.buyConsumable(
-        purchaseParam: purchaseParam,
-        autoConsume: true, // 自動消費此次購買
+      final newBalance = await PlanService.purchaseBalls(
+        product,
+        store: store,
+        purchaseToken: token,
       );
-      
-      debugPrint('🛒 [應用內購買] 購買流程已發起，等待用戶完成...');
-      return true;
-    } catch (e) {
-      debugPrint('❌ [應用內購買] 購買出錯: $e');
-      return false;
-    }
-  }
-
-  /// 恢復購買（用於用戶已購買但需要重新激活權益）
-  Future<bool> restorePurchases() async {
-    try {
-      debugPrint('🛒 [應用內購買] 恢復之前的購買...');
-      
-      await InAppPurchase.instance.restorePurchases();
-      
-      debugPrint('✅ [應用內購買] 購買已恢復');
-      return true;
-    } catch (e) {
-      debugPrint('❌ [應用內購買] 恢復購買出錯: $e');
-      return false;
-    }
-  }
-
-  /// 監聽購買更新
-  Stream<List<PurchaseDetails>> purchaseUpdated() {
-    debugPrint('🛒 [應用內購買] 開始監聽購買更新...');
-    
-    return InAppPurchase.instance.purchaseStream;
-  }
-
-  /// 驗證並完成購買
-  static Future<void> verifyAndCompletePurchase(PurchaseDetails purchase) async {
-    try {
-      if (purchase.status == PurchaseStatus.purchased) {
-        debugPrint('✅ [應用內購買] 購買成功 - 交易ID: ${purchase.purchaseID}');
-        
-        // 驗證購買收據（在生產環境應驗證 purchase.verificationData.serverVerificationData）
-        if (purchase.verificationData.serverVerificationData.isNotEmpty) {
-          debugPrint('✅ [應用內購買] 收據已驗證');
-        }
-        
-        // 標記購買為已完成
-        if (!purchase.pendingCompletePurchase) {
-          await InAppPurchase.instance.completePurchase(purchase);
-        }
-      } else if (purchase.status == PurchaseStatus.error) {
-        debugPrint('❌ [應用內購買] 購買失敗: ${purchase.error}');
-      } else if (purchase.status == PurchaseStatus.canceled) {
-        debugPrint('⚠️ [應用內購買] 用戶取消了購買');
-      } else if (purchase.status == PurchaseStatus.pending) {
-        debugPrint('⏳ [應用內購買] 購買待處理中...');
+      await _safeComplete(purchase);
+      if (newBalance != null) {
+        _resultController.add(IapResult(IapEvent.success, message: 'balls:$newBalance'));
+        debugPrint('[IAP] 球包購買成功，新餘額 $newBalance');
+      } else {
+        _resultController.add(const IapResult(IapEvent.error, message: '球包驗證失敗，請聯絡客服'));
       }
+    } on UnauthorizedException {
+      debugPrint('[IAP] 未授權，Token 已過期');
+      rethrow;
     } catch (e) {
-      debugPrint('❌ [應用內購買] 驗證購買出錯: $e');
+      debugPrint('[IAP] 球包驗證異常: $e');
+      _resultController.add(IapResult(IapEvent.error, message: '網路錯誤，請稍後再試'));
     }
   }
 
-  /// 調試方法 - 模擬購買成功
-  static Future<void> debugSimulatePurchaseSuccess({
-    required Function() onSuccess,
-  }) async {
-    debugPrint('🛒 [應用內購買] 調試模式 - 模擬購買成功');
-    
-    await Future.delayed(const Duration(seconds: 2));
-    onSuccess();
-    
-    debugPrint('✅ [應用內購買] 模擬購買完成');
+  Future<void> _handleSubscriptionPurchase(
+      PurchaseDetails purchase, String store, String token, String product) async {
+    final plan = _planFromProductId(product);
+    try {
+      final ok = await PlanService.purchasePlan(
+        plan,
+        store: store,
+        purchaseToken: token,
+        productId: product,
+      );
+      if (ok) {
+        await _safeComplete(purchase);
+        _resultController.add(IapResult(IapEvent.success, plan: plan));
+        debugPrint('[IAP] 後端驗證成功，方案已升級至 ${plan.label}');
+      } else {
+        await _safeComplete(purchase);
+        _resultController.add(
+          const IapResult(IapEvent.error, message: '訂閱驗證失敗，請稍後使用「恢復購買」重試'));
+      }
+    } on UnauthorizedException {
+      debugPrint('[IAP] 未授權，Token 已過期');
+      rethrow;
+    } catch (e) {
+      debugPrint('[IAP] 後端驗證異常: $e');
+      _resultController.add(IapResult(IapEvent.error, message: '網路錯誤，請稍後再試'));
+    }
   }
 
-  /// 獲取產品 ID
-  static String get noAdProductId => _noAdProductId;
+  Future<void> _safeComplete(PurchaseDetails purchase) async {
+    if (purchase.pendingCompletePurchase) {
+      try {
+        await _iap.completePurchase(purchase);
+      } catch (e) {
+        debugPrint('[IAP] completePurchase 失敗: $e');
+      }
+    }
+  }
+
+  UserPlan _planFromProductId(String productId) {
+    if (productId == _kEliteMonthly) return UserPlan.elite;
+    return UserPlan.pro;
+  }
 }

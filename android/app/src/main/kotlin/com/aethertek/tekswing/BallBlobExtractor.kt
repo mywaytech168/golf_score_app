@@ -1,4 +1,4 @@
-package com.example.golf_score_app
+﻿package com.aethertek.tekswing
 
 import android.media.Image
 import android.media.MediaCodec
@@ -6,7 +6,6 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
 import java.io.File
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -52,6 +51,11 @@ class BallBlobExtractor {
         private const val CIRC_MIN_DEFAULT   = 0.30       // 最低圓度
         private const val MORPH_K            = 3          // 形態開運算 kernel 尺寸
     }
+
+    // ── 類別層級可重用緩衝區（避免每幀 4×w×h ByteArray/BooleanArray GC）──
+    // 由 NativeLib.blobDiffAndMorphOpen 寫入；BFS 直接從這裡讀取。
+    private var nativeDiffBuf   = ByteArray(0)   // |cur-prev| 差值
+    private var nativeOpenedBuf = ByteArray(0)   // 0/1，形態開運算結果
 
     // ────────────────────────────────────────────────────────────
     // 動態檢測配置
@@ -217,21 +221,9 @@ class BallBlobExtractor {
                         emptyList()
                     }
 
-                    // 只對 blob 重心做座標轉換（O(numBlobs)，遠比逐像素旋轉快）
-                    val blobs: List<Map<String, Any>> = if (rotation == 0) codedBlobs else {
-                        codedBlobs.map { b ->
-                            val (dx, dy) = codedToDisplay(
-                                b["cx"] as Int, b["cy"] as Int, videoW, videoH, rotation
-                            )
-                            mapOf(
-                                "cx"       to dx,
-                                "cy"       to dy,
-                                "area"     to b["area"]!!,
-                                "circ"     to b["circ"]!!,
-                                "diffMean" to b["diffMean"]!!,
-                            )
-                        }
-                    }
+                    // blob 座標保持在 coded 空間（與 Python FLIP_MODE=5 後的演算法空間一致）
+                    // 不做 codedToDisplay 轉換；Dart 追蹤層與 TrajectoryOverlayRenderer 均在 coded 空間操作
+                    val blobs = codedBlobs
 
                     frameList.add(mapOf(
                         "ptsUs" to pts,
@@ -265,25 +257,12 @@ class BallBlobExtractor {
         onProgress?.invoke("extractBlobs", 1.0, "球追蹤分析完成", frameCount, frameCount)
 
         return mapOf(
-            "fps"    to fps,
-            "width"  to displayW,
-            "height" to displayH,
-            "frames" to frameList,
+            "fps"      to fps,
+            "width"    to videoW,    // coded 寬（與 Python 演算法空間一致）
+            "height"   to videoH,    // coded 高
+            "rotation" to rotation,  // 供 Dart 計算 coded-space ROI 中心
+            "frames"   to frameList,
         )
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // Blob 座標轉換（coded-space → display-space）
-    // ────────────────────────────────────────────────────────────
-
-    /** 將單一像素座標從 coded-space 轉換到 display-space。 */
-    private fun codedToDisplay(
-        cx: Int, cy: Int, w: Int, h: Int, rotation: Int,
-    ): Pair<Int, Int> = when (rotation) {
-        90  -> Pair(h - 1 - cy, cx)           // displayW=h, displayH=w
-        270 -> Pair(cy, w - 1 - cx)            // displayW=h, displayH=w
-        180 -> Pair(w - 1 - cx, h - 1 - cy)
-        else -> Pair(cx, cy)
     }
 
     // ────────────────────────────────────────────────────────────
@@ -295,51 +274,46 @@ class BallBlobExtractor {
         w: Int, h: Int, stride: Int,
         config: DetectionConfig = DetectionConfig(),
     ): List<Map<String, Any>> {
+        val N = w * h
 
-        // 1. 幀差 + 二值化
-        //    同時保留每像素差值（供 diffMean 計算）
-        val diff   = ByteArray(w * h)
-        val binary = BooleanArray(w * h)
-        for (j in 0 until h) {
-            for (i in 0 until w) {
-                val d = abs(
-                    (cur[j * stride + i].toInt() and 0xFF) -
-                    (prev[j * stride + i].toInt() and 0xFF)
-                )
-                diff[j * w + i]   = d.toByte()
-                binary[j * w + i] = d >= config.diffThresh  // ← 使用動態參數
-            }
-        }
+        // ── Step 1+2：Native C 幀差+二值化+形態開運算 ──────────────
+        // 原：4 × ByteArray/BooleanArray(w*h) per frame + 2 × O(w*h*9) JVM 迴圈
+        // 現：零 GC 分配（重用類別欄位），C 迴圈 ~10× 加速
+        if (nativeDiffBuf.size < N)   nativeDiffBuf   = ByteArray(N)
+        if (nativeOpenedBuf.size < N) nativeOpenedBuf = ByteArray(N)
 
-        // 2. 形態學開運算 3×3（侵蝕 → 膨脹）
-        val opened = morphOpen(binary, w, h, MORPH_K)
+        NativeLib.blobDiffAndMorphOpen(
+            cur, prev, w, h, stride,
+            config.diffThresh,
+            nativeDiffBuf, nativeOpenedBuf,
+        )
 
-        // 3. BFS 連通域（4-連通）
-        val visited = BooleanArray(w * h)
+        // ── Step 3：BFS 連通域（4-連通），使用 nativeOpenedBuf (0/1) ──
+        val visited = BooleanArray(N)
         val blobs   = mutableListOf<Map<String, Any>>()
         val queue   = ArrayDeque<Int>(256)
 
-        for (start in 0 until w * h) {
-            if (!opened[start] || visited[start]) continue
+        for (start in 0 until N) {
+            if (nativeOpenedBuf[start] == 0.toByte() || visited[start]) continue
 
             queue.clear()
             queue.add(start)
             visited[start] = true
 
-            var sumX      = 0L
-            var sumY      = 0L
-            var area      = 0
-            var perim     = 0
-            var diffSum   = 0L   // 用於 diffMean
+            var sumX    = 0L
+            var sumY    = 0L
+            var area    = 0
+            var perim   = 0
+            var diffSum = 0L
 
             while (queue.isNotEmpty()) {
-                val idx  = queue.removeFirst()
-                val px   = idx % w
-                val py   = idx / w
-                sumX    += px
-                sumY    += py
+                val idx = queue.removeFirst()
+                val px  = idx % w
+                val py  = idx / w
+                sumX   += px
+                sumY   += py
                 area++
-                diffSum += diff[idx].toInt() and 0xFF
+                diffSum += nativeDiffBuf[idx].toInt() and 0xFF
 
                 var isBorder = false
                 val ns = intArrayOf(
@@ -349,68 +323,29 @@ class BallBlobExtractor {
                     if (py < h - 1) idx + w else -1,
                 )
                 for (n in ns) {
-                    if (n < 0 || !opened[n]) { isBorder = true; continue }
+                    if (n < 0 || nativeOpenedBuf[n] == 0.toByte()) { isBorder = true; continue }
                     if (!visited[n]) { visited[n] = true; queue.add(n) }
                 }
                 if (isBorder) perim++
             }
 
-            // 面積篩選（使用動態參數）
             if (area !in config.areaLo..config.areaHi) continue
 
-            // 圓度
             val circ = if (perim < 1) 0.0
                        else 4.0 * Math.PI * area / (perim.toDouble() * perim)
-            if (circ < config.circMin) continue  // ← 使用動態參數
-
-            val cx       = (sumX / area).toInt()
-            val cy       = (sumY / area).toInt()
-            val diffMean = diffSum.toDouble() / area
+            if (circ < config.circMin) continue
 
             blobs.add(mapOf(
-                "cx"       to cx,
-                "cy"       to cy,
+                "cx"       to (sumX / area).toInt(),
+                "cy"       to (sumY / area).toInt(),
                 "area"     to area,
                 "circ"     to circ,
-                "diffMean" to diffMean,
+                "diffMean" to diffSum.toDouble() / area,
             ))
         }
 
         return blobs
     }
 
-    // ────────────────────────────────────────────────────────────
-    // 形態學開運算（侵蝕 + 膨脹）
-    // ────────────────────────────────────────────────────────────
-
-    private fun morphOpen(binary: BooleanArray, w: Int, h: Int, k: Int): BooleanArray {
-        val r = k / 2
-        // 侵蝕
-        val eroded = BooleanArray(w * h)
-        for (j in r until h - r) {
-            for (i in r until w - r) {
-                var all = true
-                outer@ for (dj in -r..r) {
-                    for (di in -r..r) {
-                        if (!binary[(j + dj) * w + (i + di)]) { all = false; break@outer }
-                    }
-                }
-                eroded[j * w + i] = all
-            }
-        }
-        // 膨脹
-        val dilated = BooleanArray(w * h)
-        for (j in r until h - r) {
-            for (i in r until w - r) {
-                var any = false
-                outer@ for (dj in -r..r) {
-                    for (di in -r..r) {
-                        if (eroded[(j + dj) * w + (i + di)]) { any = true; break@outer }
-                    }
-                }
-                dilated[j * w + i] = any
-            }
-        }
-        return dilated
-    }
+    // ── morphOpen 已移至 NativeLib.blobDiffAndMorphOpen（C 實作）──
 }

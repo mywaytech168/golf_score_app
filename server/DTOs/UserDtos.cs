@@ -9,7 +9,11 @@ namespace UploadServer.DTOs
         string Plan,
         int DailyLimit,
         int TodayUsed,
-        int BonusBalls
+        int BonusBalls,
+        /// <summary>訂閱到期時間（UTC ISO8601），null = 免費或未訂閱</summary>
+        DateTime? SubscriptionExpiry = null,
+        /// <summary>"none" | "active" | "cancel_pending" | "expired"</summary>
+        string SubscriptionStatus = "none"
     );
 
     /// <summary>PUT /api/user/plan 請求</summary>
@@ -86,6 +90,16 @@ namespace UploadServer.DTOs
     /// <summary>POST /api/user/plan/purchase 回應</summary>
     public record PurchasePlanResponse(bool Success, string Message, string? Plan);
 
+    /// <summary>
+    /// POST /api/user/balls/purchase 請求
+    /// productId: "golf_balls_1" | "golf_balls_5" | "golf_balls_10" | "golf_balls_50" | "golf_balls_100"
+    /// store: "google_play" | "app_store"
+    /// </summary>
+    public record PurchaseBallsRequest(string ProductId, string Store, string PurchaseToken);
+
+    /// <summary>POST /api/user/balls/purchase 回應</summary>
+    public record PurchaseBallsResponse(bool Success, string Message, int BallsAdded, int NewBalance);
+
     // ════════════════════════════════════════════════════════════════
     // 使用紀錄
     // ════════════════════════════════════════════════════════════════
@@ -143,5 +157,55 @@ namespace UploadServer.DTOs
     public record InvitedFriendsResponse(
         int Total,
         List<InvitedFriendDto> Friends
+    );
+
+    // ════════════════════════════════════════════════════════════════
+    // Webhook — Google Play RTDN
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>Google Pub/Sub push 包裝</summary>
+    public record GooglePubSubPush(GooglePubSubMessage Message, string Subscription);
+    public record GooglePubSubMessage(string Data, string MessageId, string PublishTime);
+
+    /// <summary>Google DeveloperNotification（解 base64 後）</summary>
+    public record GoogleDeveloperNotification(
+        string Version,
+        string PackageName,
+        string EventTimeMillis,
+        GoogleSubscriptionNotification? SubscriptionNotification
+    );
+    public record GoogleSubscriptionNotification(
+        string Version,
+        int NotificationType,
+        string PurchaseToken,
+        string SubscriptionId
+    );
+
+    // ════════════════════════════════════════════════════════════════
+    // Webhook — Apple Server Notifications V2
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>Apple Server Notification V2 外層</summary>
+    public record AppleNotificationBody(string SignedPayload);
+
+    /// <summary>JWS Payload 解碼後（只取需要的欄位）</summary>
+    public record AppleJwsPayload(
+        string NotificationType,
+        string? Subtype,
+        AppleJwsData Data
+    );
+    public record AppleJwsData(
+        string SignedTransactionInfo,
+        string? SignedRenewalInfo,
+        string Environment
+    );
+
+    /// <summary>signedTransactionInfo 解碼後</summary>
+    public record AppleTransactionInfo(
+        string OriginalTransactionId,
+        string ProductId,
+        long ExpiresDateMs,
+        long? RevocationDateMs,
+        string? RevocationReason
     );
 }

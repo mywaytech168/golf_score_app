@@ -37,6 +37,9 @@ import UIKit
       // ── 影片轉檔（匯入時統一轉為標準 MP4）──────────────────
       registerVideoTranscoderChannel(messenger: m)
 
+      // ── 影片匯出（下載 / 存到相機膠卷）──────────────────
+      registerVideoExportChannel(messenger: m)
+
       // ── Stub channels（iOS 尚未實作）────────────────────────
       setupStubChannel(name: "volume_button_channel", messenger: m)
     }

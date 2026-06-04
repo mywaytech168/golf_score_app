@@ -41,15 +41,9 @@ class PurchaseService {
     try {
       debugPrint('� [購買] 開始綠界 ECPay 支付流程...');
       
-      final success = await InAppPurchaseService().purchasePremium();
-
-      if (success) {
-        debugPrint('✅ [購買] 購買流程已啟動');
-        return true;
-      } else {
-        debugPrint('❌ [購買] 購買流程啟動失敗');
-        return false;
-      }
+      await InAppPurchaseService.instance.queryProducts();
+      debugPrint('✅ [購買] 購買流程已啟動');
+      return true;
     } catch (e) {
       debugPrint('❌ [購買] 購買流程異常: $e');
       return false;
@@ -61,15 +55,9 @@ class PurchaseService {
     try {
       debugPrint('🛒 [購買] 恢復之前的購買...');
       
-      final success = await InAppPurchaseService().restorePurchases();
-
-      if (success) {
-        debugPrint('✅ [購買] 購買已恢復');
-        return true;
-      } else {
-        debugPrint('❌ [購買] 恢復購買失敗');
-        return false;
-      }
+      await InAppPurchaseService.instance.restorePurchases();
+      debugPrint('✅ [購買] 恢復購買已觸發');
+      return true;
     } catch (e) {
       debugPrint('❌ [購買] 恢復購買異常: $e');
       return false;

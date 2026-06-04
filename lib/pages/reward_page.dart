@@ -408,7 +408,7 @@ class _WatchAdCardState extends State<_WatchAdCard> {
   Future<void> _onTap() async {
     setState(() => _busy = true);
     try {
-      final rewarded = await AdService.showRewardedAd();
+      final rewarded = await AdService.showRewardedAiCoach();
       if (!rewarded) {
         widget.onError('請看完廣告才能獲得獎勵');
         return;

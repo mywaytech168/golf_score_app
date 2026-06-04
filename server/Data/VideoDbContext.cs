@@ -18,6 +18,7 @@ namespace UploadServer.Data
         public DbSet<ShareLink> ShareLinks { get; set; }
         public DbSet<UserFeedback> UserFeedbacks { get; set; }
         public DbSet<AiCoachAnalysis> AiCoachAnalyses { get; set; }
+        public DbSet<BallTrajectoryAnalysis> BallTrajectoryAnalyses { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<AppVersion> AppVersions { get; set; }
         public DbSet<Announcement> Announcements { get; set; }
@@ -115,6 +116,19 @@ namespace UploadServer.Data
                 entity.Property(e => e.InvitedByCode)
                     .HasColumnName("invited_by_code")
                     .HasMaxLength(16);
+
+                entity.Property(e => e.SubscriptionExpiry)
+                    .HasColumnName("subscription_expiry")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.SubscriptionStatus)
+                    .HasColumnName("subscription_status")
+                    .HasMaxLength(20)
+                    .HasDefaultValue("none");
+
+                entity.Property(e => e.SubscriptionOriginalId)
+                    .HasColumnName("subscription_original_id")
+                    .HasMaxLength(255);
 
                 entity.HasIndex(e => e.Username).IsUnique().HasDatabaseName("uk_username");
                 entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("uk_email");
@@ -388,6 +402,17 @@ namespace UploadServer.Data
                 entity.Property(e => e.VerifiedAt)
                     .HasColumnName("verified_at")
                     .HasColumnType("datetime");
+
+                entity.Property(e => e.OriginalTransactionId)
+                    .HasColumnName("original_transaction_id")
+                    .HasMaxLength(255);
+
+                entity.Property(e => e.ExpiresAt)
+                    .HasColumnName("expires_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.IsAutoRenewing)
+                    .HasColumnName("is_auto_renewing");
 
                 entity.HasIndex(e => e.UserId).HasDatabaseName("idx_pr_user_id");
                 entity.HasIndex(e => e.Status).HasDatabaseName("idx_pr_status");
@@ -770,6 +795,45 @@ namespace UploadServer.Data
                 entity.HasIndex(e => e.IsActive).HasDatabaseName("idx_ann_is_active");
                 entity.HasIndex(e => e.PublishedAt).HasDatabaseName("idx_ann_published_at");
                 entity.HasIndex(e => e.ExpiresAt).HasDatabaseName("idx_ann_expires_at");
+            });
+
+            // ============================================================
+            // BallTrajectoryAnalysis
+            // ============================================================
+            modelBuilder.Entity<BallTrajectoryAnalysis>(entity =>
+            {
+                entity.ToTable("ball_trajectory_analyses");
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)         .HasColumnName("id")         .HasMaxLength(36).IsRequired();
+                entity.Property(e => e.UserId)     .HasColumnName("user_id")    .HasMaxLength(36).IsRequired();
+                entity.Property(e => e.VideoId)    .HasColumnName("video_id")   .HasMaxLength(255);
+                entity.Property(e => e.Status)     .HasColumnName("status")     .HasMaxLength(50).HasDefaultValue("pending");
+                entity.Property(e => e.ClipB2Path) .HasColumnName("clip_b2_path").HasMaxLength(512);
+                entity.Property(e => e.HitSec)     .HasColumnName("hit_sec");
+                entity.Property(e => e.FlipMode)   .HasColumnName("flip_mode")  .HasDefaultValue(0);
+                entity.Property(e => e.RoiCxRatio) .HasColumnName("roi_cx_ratio");
+                entity.Property(e => e.RoiCyRatio) .HasColumnName("roi_cy_ratio");
+                entity.Property(e => e.RoiRadius)  .HasColumnName("roi_radius") .HasDefaultValue(200);
+                entity.Property(e => e.TrackPtsJson).HasColumnName("track_pts_json").HasColumnType("MEDIUMTEXT");
+                entity.Property(e => e.VideoFps)   .HasColumnName("video_fps");
+                entity.Property(e => e.VideoWidth) .HasColumnName("video_width");
+                entity.Property(e => e.VideoHeight).HasColumnName("video_height");
+                entity.Property(e => e.VideoRotation).HasColumnName("video_rotation");
+                entity.Property(e => e.ErrorMessage).HasColumnName("error_message").HasMaxLength(1024);
+                entity.Property(e => e.RetryCount) .HasColumnName("retry_count").HasDefaultValue(0);
+                entity.Property(e => e.CreatedAt)  .HasColumnName("created_at").HasColumnType("datetime");
+                entity.Property(e => e.CompletedAt).HasColumnName("completed_at").HasColumnType("datetime");
+
+                entity.HasOne(e => e.User).WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .HasConstraintName("fk_btraj_user")
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasIndex(e => e.UserId)  .HasDatabaseName("idx_btraj_user_id");
+                entity.HasIndex(e => e.VideoId) .HasDatabaseName("idx_btraj_video_id");
+                entity.HasIndex(e => e.Status)  .HasDatabaseName("idx_btraj_status");
+                entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_btraj_created_at");
             });
         }
     }

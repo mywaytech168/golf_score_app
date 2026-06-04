@@ -1,4 +1,4 @@
-"""
+﻿"""
 MeshFlow Stabilize with Audio V2 - 改進版 API Server
 
 改進內容:
@@ -266,6 +266,7 @@ from functions.audio_scoring import AudioScoringConfig, run_audio_scoring
 from functions.openpose_analysis import MediaPoseConfig, run_openpose_analysis
 from functions.ball_tracking import BallTrackingConfig, run_ball_tracking
 from functions.meshflow_stabilize_cython import MeshFlowStabilizerCython  # ✅ Cython 加速版本
+from functions.ball_trajectory_worker import extract_trajectory
 from services.task_queue import get_task_queue
 
 # 初始化任務隊列 (單例)
@@ -487,6 +488,54 @@ def process_meshflow():
     except Exception as e:
         logger.error(f"管道執行失敗: {str(e)}", exc_info=True)
         raise ProcessingException(f"管道執行失敗: {str(e)}")
+
+# ============================================================================
+# 球軌跡追蹤端點
+# ============================================================================
+
+@app.route('/api/ball-trajectory', methods=['POST'])
+@handle_exceptions
+def ball_trajectory():
+    """
+    球軌跡追蹤端點。
+
+    Request JSON:
+      {
+        "video_path": "/tmp/clip.mp4",       # 必填：影片絕對路徑
+        "hit_sec":    2.5,                   # 選填：擊球秒數（null = 全影片搜尋）
+        "flip_mode":  0,                     # 選填：翻轉模式（0 = Android coded-space）
+        "roi_cx_ratio": 0.5984,              # 選填：ROI 中心 X 比例
+        "roi_cy_ratio": 0.3759,              # 選填：ROI 中心 Y 比例
+        "roi_radius":   200                  # 選填：ROI 半徑（px）
+      }
+
+    Response JSON:
+      {
+        "track_pts": [{"x":int,"y":int,"frame_idx":int,"pts_us":int}, ...],
+        "fps": float,
+        "width": int,
+        "height": int,
+        "rotation": int
+      }
+    """
+    data = request.get_json(force=True)
+    if not data or 'video_path' not in data:
+        return jsonify({"error": "缺少 video_path 欄位"}), 400
+
+    video_path = data['video_path']
+    if not os.path.exists(video_path):
+        return jsonify({"error": f"影片不存在: {video_path}"}), 400
+
+    result = extract_trajectory(
+        video_path   = video_path,
+        hit_sec      = data.get('hit_sec'),
+        flip_mode    = int(data.get('flip_mode',    0)),
+        roi_cx_ratio = float(data.get('roi_cx_ratio', 1149/1920)),
+        roi_cy_ratio = float(data.get('roi_cy_ratio', 406/1080)),
+        roi_radius   = int(data.get('roi_radius',   200)),
+    )
+    return jsonify(result), 200
+
 
 # ============================================================================
 # 9️⃣ 健康檢查端點

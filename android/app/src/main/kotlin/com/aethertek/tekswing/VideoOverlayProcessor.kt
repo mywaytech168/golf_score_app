@@ -1,4 +1,4 @@
-﻿package com.example.golf_score_app
+﻿package com.aethertek.tekswing
 
 import android.content.Context
 import java.io.File

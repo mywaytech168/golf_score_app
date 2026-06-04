@@ -23,6 +23,11 @@ class SwingHit {
   final double followThroughSec; // ⑦ 送桿
   final double finishSec;        // ⑧ 收桿（速度歸零後的靜止位置）
 
+  /// V3 專用：局部骨架 JSON（transient，不序列化到 hits.json）。
+  /// 已包含此 hit ±3s 窗口的骨架資料，供 ClipPipelineService 直接寫成
+  /// clip 目錄的 pose_landmarks.csv，避免重新跑骨架分析。
+  final String? skeletonJson;
+
   const SwingHit({
     required this.hitIndex,
     required this.hitFrame,
@@ -40,6 +45,7 @@ class SwingHit {
     this.downswingSec = 0.0,
     this.followThroughSec = 0.0,
     this.finishSec = 0.0,
+    this.skeletonJson,
   });
 
   Map<String, dynamic> toJson() => {

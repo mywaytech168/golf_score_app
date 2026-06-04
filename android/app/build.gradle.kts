@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
     // ---------- 套用 Kotlin 外掛 ----------
     // 改用完整外掛識別名稱，確保沿用 settings.gradle.kts 中宣告的 2.0.21 版本
@@ -14,7 +14,7 @@ tasks.withType(JavaCompile::class).configureEach {
 }
 
 android {
-    namespace = "com.example.golf_score_app"
+    namespace = "com.aethertek.tekswing"
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
@@ -36,21 +36,45 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.golf_score_app"
+        applicationId = "com.aethertek.tekswing"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        // ✅ JNI：只打包用到的 ABI，避免 APK 增大
+        // arm64-v8a  = 絕大多數現代 Android 裝置（有 NEON SIMD）
+        // x86_64     = 模擬器
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+        }
+    }
+
+    // ✅ golf_native.so：YUV→NV12 + composite overlay 的 C 加速實作
+    externalNativeBuild {
+        cmake {
+            path = file("CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildFeatures {
         buildConfig = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("tekswing.jks")
+            storePassword = System.getenv("STORE_PASSWORD") ?: ""
+            keyAlias = "tekswing"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
-          getByName("release") {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(

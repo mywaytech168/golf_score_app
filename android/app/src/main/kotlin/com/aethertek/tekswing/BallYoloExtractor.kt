@@ -1,4 +1,4 @@
-package com.example.golf_score_app
+﻿package com.aethertek.tekswing
 
 import android.content.res.AssetManager
 import android.media.MediaCodec
@@ -37,11 +37,10 @@ class BallYoloExtractor(assetManager: AssetManager) {
     companion object {
         private const val TAG = "BallYoloExtractor"
 
-        // 預設 ROI 中心（相對比例），與 Dart BallTracker 一致
-        // ROI_RATIO_Y: 球在球座上時位於畫面下方約 78%（y≈1498 on 1920px frame）
-        // 舊值 0.5646 → tile y[764,1404]，球在 y≈1574 → tile 外面！
-        private const val ROI_RATIO_X  = 0.6519f
-        private const val ROI_RATIO_Y  = 0.78f
+        // ROI 中心比例（coded 空間，對應 Python FIXED_ROI_CENTER=(1149,406) in 1920×1080）
+        // Python workflow: coded 1920×1080 → FLIP_MODE=5(CCW) → algorithm 1920×1080 → FIXED_ROI_CENTER
+        private const val ROI_CODED_X  = 1149f / 1920f  // ≈ 0.5984
+        private const val ROI_CODED_Y  = 406f  / 1080f  // ≈ 0.3759
 
         // 連續 miss 超過此幀數後重置 ROI 至預設位置（僅用於擊球前）
         private const val MAX_MISS_FRAMES = 5
@@ -55,11 +54,18 @@ class BallYoloExtractor(assetManager: AssetManager) {
         private const val CONF_PRE_IMPACT  = 0.25f
         private const val CONF_POST_IMPACT = 0.05f
 
+        // tile 邊緣排除距離：擊球前 20f（適中），擊球後 8f（球靠近 tile 邊緣仍可偵測）
+        private const val TILE_MARGIN_PRE  = 20f
+        private const val TILE_MARGIN_POST = 8f
+
         // ── 擊球後 ROI 速度追蹤（post-impact velocity chase）──────
         // 使用最近偵測到的速度向量預測下一幀 ROI 位置，而非固定上移
         // 若尚無速度向量，預設向上 POST_IMPACT_CHASE_DY_DEFAULT px
         private const val POST_IMPACT_CHASE_DY_DEFAULT = 150f  // 無速度時的預設向上量（px）
-        private const val POST_IMPACT_MAX_FRAMES = 20          // 最多追蹤 20 幀（≈0.67s @30fps）
+        private const val POST_IMPACT_MAX_FRAMES = 35          // 最多追蹤 35 幀（≈1.17s @30fps）
+
+        // 擊球後 miss 超過此幀數時，在速度預測位置額外執行第二次推論（雙 ROI 搜尋）
+        private const val DUAL_ROI_MISS_THRESHOLD = 2
     }
 
     private val detector = BallYoloDetector(assetManager)
@@ -70,7 +76,7 @@ class BallYoloExtractor(assetManager: AssetManager) {
     private var vRawBuf = ByteArray(0)
 
     // ── ROI 追蹤狀態 ────────────────────────────────────────────
-    private var roiCx             = -1f   // frame 座標，-1 表示尚未初始化
+    private var roiCx             = -1f   // coded 空間座標，-1 表示尚未初始化
     private var roiCy             = -1f
     private var missCount         = 0     // 目前連續 miss 幀數
     private var lastGoodCx        = -1f   // 最後一次可信偵測的球位置（miss reset 時優先回到此位置）
@@ -81,6 +87,33 @@ class BallYoloExtractor(assetManager: AssetManager) {
     private var chaseVelY         = -POST_IMPACT_CHASE_DY_DEFAULT  // 預設向上
     private var prevDetCx         = -1f   // 上一次成功偵測的位置（用於計算速度）
     private var prevDetCy         = -1f
+    private var prevDetFrame      = -1    // 上一次成功偵測的幀號（用於 frameGap 修正速度）
+
+    // ── 目前 extract() 的影片參數（供 _handleMiss 使用）────────
+    private var _videoW    = 0
+    private var _videoH    = 0
+    private var _rotation  = 0
+    private var _hasVelocity = false  // 至少計算過一次速度向量（第 2 次偵測後）
+
+    /** coded 空間 ROI 中心（Python FIXED_ROI_CENTER=(1149,406) in 1920×1080）*/
+    private fun _defaultRoiInCodedSpace(): Pair<Float, Float> =
+        Pair(_videoW * ROI_CODED_X, _videoH * ROI_CODED_Y)
+
+    /**
+     * 擊球後 ROI 預設追蹤方向（rotation-aware）。
+     *
+     * 球飛出後 displayY 減少（螢幕向上），依不同 rotation 對應不同 coded 方向：
+     *   rot=90 : displayY = codedX  → codedX 減少 → velX = -DEFAULT
+     *   rot=270: displayY = W-1-codedX → codedX 增加 → velX = +DEFAULT
+     *   rot=180: displayY = H-1-codedY → codedY 增加 → velY = +DEFAULT
+     *   rot=0  : coded = display     → codedY 減少 → velY = -DEFAULT
+     */
+    private fun _defaultChaseVel(): Pair<Float, Float> = when (_rotation) {
+        90  -> Pair(-POST_IMPACT_CHASE_DY_DEFAULT, 0f)
+        270 -> Pair(+POST_IMPACT_CHASE_DY_DEFAULT, 0f)
+        180 -> Pair(0f, +POST_IMPACT_CHASE_DY_DEFAULT)
+        else -> Pair(0f, -POST_IMPACT_CHASE_DY_DEFAULT)
+    }
     /** true 代表模型已成功載入。 */
     fun tryLoadModel(): Boolean = detector.tryLoad()
 
@@ -103,10 +136,11 @@ class BallYoloExtractor(assetManager: AssetManager) {
         lastGoodCx       = -1f
         lastGoodCy       = -1f
         postImpactMisses = 0
-        chaseVelX        = 0f
-        chaseVelY        = -POST_IMPACT_CHASE_DY_DEFAULT
         prevDetCx        = -1f
         prevDetCy        = -1f
+        prevDetFrame     = -1
+        _hasVelocity     = false
+        // chaseVel 先暫設 0，extract() 讀到 rotation 後立即修正
 
         if (!java.io.File(inputPath).exists()) {
             Log.w(TAG, "File not found: $inputPath")
@@ -152,6 +186,15 @@ class BallYoloExtractor(assetManager: AssetManager) {
 
         val displayW = if (rotation == 90 || rotation == 270) videoH else videoW
         val displayH = if (rotation == 90 || rotation == 270) videoW else videoH
+
+        // 儲存影片參數供 _handleMiss / _defaultRoiInCodedSpace 使用
+        _videoW   = videoW
+        _videoH   = videoH
+        _rotation = rotation
+        // rotation-aware 預設追蹤方向（第一次 post-impact miss 未建立速度時使用）
+        val (defVx, defVy) = _defaultChaseVel()
+        chaseVelX = defVx
+        chaseVelY = defVy
 
         // 計算擊球幀（-1 表示未知）
         val hitFrame = if (hitSec != null && fps > 0) (hitSec * fps).toInt() else -1
@@ -214,105 +257,105 @@ class BallYoloExtractor(assetManager: AssetManager) {
                     val vNeed = vBufRaw.remaining(); if (vRawBuf.size < vNeed) vRawBuf = ByteArray(vNeed); vBufRaw.get(vRawBuf, 0, vNeed)
                     val yRaw = yRawBuf; val uRaw = uRawBuf; val vRaw = vRawBuf
 
-                    // ── 首幀初始化 ROI ──────────────────────────
+                    // ── 首幀初始化 ROI（coded 空間，無需 rotation 轉換）──────
                     if (roiCx < 0f) {
-                        roiCx = videoW * ROI_RATIO_X
-                        roiCy = videoH * ROI_RATIO_Y
-                        Log.d(TAG, "ROI init: (${roiCx.toInt()}, ${roiCy.toInt()}) " +
-                            "from ratios ($ROI_RATIO_X, $ROI_RATIO_Y) frame=${videoW}x${videoH}")
+                        val (cx, cy) = _defaultRoiInCodedSpace()
+                        roiCx = cx; roiCy = cy
+                        Log.d(TAG, "ROI init: coded=(${roiCx.toInt()},${roiCy.toInt()}) " +
+                            "ratios=(${ROI_CODED_X},${ROI_CODED_Y}) frame=${videoW}x${videoH}")
                     }
 
                     // ── 依擊球位置決定動態參數 ──────────────────────
                     val isPostImpact = hitFrame >= 0 && frameCount >= hitFrame
                     val maxShift     = if (isPostImpact) MAX_ROI_SHIFT_POST else MAX_ROI_SHIFT_PRE
                     val confThresh   = if (isPostImpact) CONF_POST_IMPACT  else CONF_PRE_IMPACT
+                    val tileMargin   = if (isPostImpact) TILE_MARGIN_POST  else TILE_MARGIN_PRE
 
                     // ── YOLO 推論（ROI crop，RGB 輸入）───────────
-                    val codedDets = detector.detect(
+                    val halfTile = BallYoloDetector.INPUT_SIZE / 2f
+                    var codedDets = detector.detect(
                         yRaw, yPlane.rowStride,
                         uRaw, uPlane.rowStride, uPlane.pixelStride,
                         vRaw, vPlane.rowStride, vPlane.pixelStride,
                         videoW, videoH,
                         roiCx.toInt(), roiCy.toInt(),
                         confThreshold = confThresh,
+                        tileEdgeMargin = tileMargin,
                     )
 
-                    // ── 更新 ROI 追蹤狀態 ────────────────────────
-                    if (codedDets.isNotEmpty()) {
-                        // 選最高 confidence 的偵測，但限制移動距離（防止跳至誤偵測）
-                        // 先找距目前 ROI 最近且在 maxShift 範圍內的偵測
-                        val nearby = codedDets.filter { d ->
-                            val dx = d[0] - roiCx; val dy = d[1] - roiCy
-                            kotlin.math.sqrt((dx * dx + dy * dy).toDouble()) <= maxShift
-                        }
-                        if (nearby.isNotEmpty()) {
-                            // 在 ROI 範圍內，取最高 confidence
-                            val best = nearby.maxByOrNull { it[4] }!!
-                            // 更新速度向量（由前一次偵測位置計算）
-                            if (prevDetCx >= 0f) {
-                                val vx = best[0] - prevDetCx
-                                val vy = best[1] - prevDetCy
-                                // 用 EMA 平滑速度（避免單幀跳點影響），限制在合理範圍
-                                chaseVelX = chaseVelX * 0.4f + vx * 0.6f
-                                chaseVelY = chaseVelY * 0.4f + vy * 0.6f
-                                chaseVelX = chaseVelX.coerceIn(-400f, 400f)
-                                chaseVelY = chaseVelY.coerceIn(-400f, 100f) // 高爾夫球向上為主，限制向下
+                    // ── 擊球後雙 ROI 搜尋：主 ROI 無近距離偵測時，在速度預測位置額外推論 ──
+                    // 當球速較快，主 ROI（上幀位置）可能已追不上球；
+                    // 用已估算的速度向量預測新位置，再跑一次推論，以預測位置為基準做距離過濾。
+                    // miss=1 時就立即啟動（原 DUAL_ROI_MISS_THRESHOLD=2 太慢）。
+                    var dualRoiBest: FloatArray? = null
+                    if (isPostImpact && postImpactMisses >= 1) {
+                        val predCx = (roiCx + chaseVelX).coerceIn(halfTile, videoW - halfTile)
+                        val predCy = (roiCy + chaseVelY).coerceIn(halfTile, videoH - halfTile)
+                        // 僅在預測位置與主 ROI 有明顯差距時才多跑一次（避免重複）
+                        val roiDist = sqrt(((predCx - roiCx) * (predCx - roiCx) +
+                                           (predCy - roiCy) * (predCy - roiCy)).toDouble()).toFloat()
+                        if (roiDist >= 30f) {
+                            val predDets = detector.detect(
+                                yRaw, yPlane.rowStride,
+                                uRaw, uPlane.rowStride, uPlane.pixelStride,
+                                vRaw, vPlane.rowStride, vPlane.pixelStride,
+                                videoW, videoH,
+                                predCx.toInt(), predCy.toInt(),
+                                confThreshold = confThresh,
+                                tileEdgeMargin = tileMargin,
+                            )
+                            // 以預測位置為基準過濾（獨立於主 ROI 的 maxShift）
+                            val predNearby = predDets.filter { d ->
+                                val dx = d[0] - predCx; val dy = d[1] - predCy
+                                sqrt((dx * dx + dy * dy).toDouble()) <= MAX_ROI_SHIFT_POST
                             }
-                            prevDetCx        = best[0]
-                            prevDetCy        = best[1]
-                            roiCx            = best[0]
-                            roiCy            = best[1]
-                            lastGoodCx       = best[0]  // 記錄最後可信球位
-                            lastGoodCy       = best[1]
-                            missCount        = 0
-                            postImpactMisses = 0         // 找到球：重置速度追蹤計數
-                        } else {
-                            // 所有偵測都超出 maxShift（可能都是誤偵測），不更新 ROI
-                            missCount++
-                            _handleMiss(frameCount, isPostImpact, videoW, videoH)
+                            if (predNearby.isNotEmpty()) {
+                                dualRoiBest = predNearby.maxByOrNull { it[4] }
+                                Log.d(TAG, "dual-ROI hit frame=$frameCount pred=(${predCx.toInt()},${predCy.toInt()}) +${predNearby.size} dets")
+                            }
                         }
+                    }
+
+                    // ── 更新 ROI 追蹤狀態，決定最終有效偵測列表 ────────
+                    // 用 finalDets 代替覆寫 codedDets，保持原始 YOLO 輸出不變（log 更準確）
+                    val finalDets: List<FloatArray>
+                    val nearby = codedDets.filter { d ->
+                        val dx = d[0] - roiCx; val dy = d[1] - roiCy
+                        kotlin.math.sqrt((dx * dx + dy * dy).toDouble()) <= maxShift
+                    }
+                    if (nearby.isNotEmpty()) {
+                        val best = nearby.maxByOrNull { it[4] }!!
+                        _applyDetection(best, frameCount)
+                        finalDets = listOf(best)
+                    } else if (dualRoiBest != null) {
+                        // 主 ROI 全部超出 maxShift 或無偵測，但雙 ROI 命中
+                        _applyDetection(dualRoiBest, frameCount)
+                        finalDets = listOf(dualRoiBest)
                     } else {
                         missCount++
                         _handleMiss(frameCount, isPostImpact, videoW, videoH)
+                        finalDets = emptyList()
                     }
 
                     // [DEBUG] 每 30 幀 log 一次偵測結果
                     if (frameCount % 30 == 0) {
                         Log.d(TAG, "[YOLO] frame=$frameCount roi=(${roiCx.toInt()},${roiCy.toInt()}) " +
-                            "dets=${codedDets.size} miss=$missCount " +
-                            codedDets.take(3).joinToString { d ->
+                            "rawDets=${codedDets.size} final=${finalDets.size} miss=$missCount " +
+                            finalDets.take(3).joinToString { d ->
                                 "(cx=${d[0].toInt()},cy=${d[1].toInt()},conf=${"%.2f".format(d[4])})"
                             })
                     }
 
-                    // 轉換到 display-space
-                    val blobs: List<Map<String, Any>> = if (rotation == 0) {
-                        codedDets.map { d ->
-                            mapOf(
-                                "cx"       to d[0].toInt(),
-                                "cy"       to d[1].toInt(),
-                                // YOLO bbox 面積 ÷ 16 正規化為 blob-comparable area（6..150）
-                                // BallTracker _areaHiBase=150 以 blob pixel-count 為基準；
-                                // YOLO bbox 通常比 blob 大 ~16x（全球 vs 像素差遮罩），故除以 16
-                                "area"     to ((d[2] * d[3] / 16f).toInt()).coerceIn(6, 150),
-                                "circ"     to 1.0,
-                                "diffMean" to (d[4] * 50.0).toDouble(),
-                            )
-                        }
-                    } else {
-                        codedDets.map { d ->
-                            val (dx, dy) = codedToDisplay(d[0].toInt(), d[1].toInt(), videoW, videoH, rotation)
-                            mapOf(
-                                "cx"       to dx,
-                                "cy"       to dy,
-                                // YOLO bbox 面積 ÷ 16 正規化為 blob-comparable area（6..150）
-                                // BallTracker _areaHiBase=150 以 blob pixel-count 為基準；
-                                // YOLO bbox 通常比 blob 大 ~16x（全球 vs 像素差遮罩），故除以 16
-                                "area"     to ((d[2] * d[3] / 16f).toInt()).coerceIn(6, 150),
-                                "circ"     to 1.0,
-                                "diffMean" to (d[4] * 50.0).toDouble(),
-                            )
-                        }
+                    // coded-space 座標（與 Python FLIP_MODE=5 後的演算法空間一致，不做 codedToDisplay 轉換）
+                    val blobs: List<Map<String, Any>> = finalDets.map { d ->
+                        mapOf(
+                            "cx"       to d[0].toInt(),
+                            "cy"       to d[1].toInt(),
+                            // YOLO bbox 面積 ÷ 16 正規化為 blob-comparable area（6..150）
+                            "area"     to ((d[2] * d[3] / 16f).toInt()).coerceIn(6, 150),
+                            "circ"     to 1.0,
+                            "diffMean" to (d[4] * 50.0).toDouble(),
+                        )
                     }
 
                     frameList.add(mapOf("ptsUs" to pts, "blobs" to blobs))
@@ -349,10 +392,11 @@ class BallYoloExtractor(assetManager: AssetManager) {
         onProgress?.invoke("extractBlobs", 1.0, "球追蹤分析完成 [YOLOv8]", frameCount, frameCount)
 
         return mapOf(
-            "fps"    to fps,
-            "width"  to displayW,
-            "height" to displayH,
-            "frames" to frameList,
+            "fps"      to fps,
+            "width"    to videoW,    // coded 寬（與 Python 演算法空間一致）
+            "height"   to videoH,    // coded 高
+            "rotation" to rotation,  // 供 Dart 計算 coded-space ROI 中心
+            "frames"   to frameList,
         )
     }
 
@@ -373,15 +417,16 @@ class BallYoloExtractor(assetManager: AssetManager) {
             postImpactMisses++
             if (postImpactMisses <= POST_IMPACT_MAX_FRAMES) {
                 val prevCx = roiCx; val prevCy = roiCy
-                val effectiveVx = if (chaseVelX != 0f || chaseVelY != -POST_IMPACT_CHASE_DY_DEFAULT) {
-                    chaseVelX  // 已有真實速度向量
+                // _hasVelocity=true 表示已有從實際偵測計算的速度；否則用 rotation-aware 預設方向
+                val effectiveVx: Float
+                val effectiveVy: Float
+                if (_hasVelocity) {
+                    effectiveVx = chaseVelX
+                    effectiveVy = chaseVelY
                 } else {
-                    0f         // 無速度資料時不做水平移動
-                }
-                val effectiveVy = if (chaseVelX != 0f || chaseVelY != -POST_IMPACT_CHASE_DY_DEFAULT) {
-                    chaseVelY  // 已有真實速度向量
-                } else {
-                    -POST_IMPACT_CHASE_DY_DEFAULT  // 預設向上
+                    val (defVx, defVy) = _defaultChaseVel()
+                    effectiveVx = defVx
+                    effectiveVy = defVy
                 }
                 roiCx += effectiveVx
                 roiCy += effectiveVy
@@ -406,8 +451,8 @@ class BallYoloExtractor(assetManager: AssetManager) {
                         "(${prevCx.toInt()},${prevCy.toInt()}) → " +
                         "(${roiCx.toInt()},${roiCy.toInt()})")
                 } else {
-                    roiCx = videoW * ROI_RATIO_X
-                    roiCy = videoH * ROI_RATIO_Y
+                    val (cx, cy) = _defaultRoiInCodedSpace()
+                    roiCx = cx; roiCy = cy
                     Log.d(TAG, "ROI reset after $MAX_MISS_FRAMES misses (no lastGood): " +
                         "(${prevCx.toInt()},${prevCy.toInt()}) → " +
                         "(${roiCx.toInt()},${roiCy.toInt()})")
@@ -419,12 +464,34 @@ class BallYoloExtractor(assetManager: AssetManager) {
 
     // ────────────────────────────────────────────────────────────
 
-    private fun codedToDisplay(
-        cx: Int, cy: Int, w: Int, h: Int, rotation: Int,
-    ): Pair<Int, Int> = when (rotation) {
-        90  -> Pair(h - 1 - cy, cx)
-        270 -> Pair(cy, w - 1 - cx)
-        180 -> Pair(w - 1 - cx, h - 1 - cy)
-        else -> Pair(cx, cy)
+    /**
+     * 成功偵測到球時統一更新 ROI 追蹤狀態。
+     * 抽出為獨立函數，供主 ROI 和雙 ROI 路徑共用。
+     *
+     * [frameCount] 用於計算幀間距（frameGap）以修正速度估算：
+     * 若中間有 miss 幀，位移應除以 frameGap 才是每幀速度，
+     * 否則 miss N 幀後第一個偵測的速度會被高估 N 倍。
+     */
+    private fun _applyDetection(det: FloatArray, frameCount: Int) {
+        if (prevDetCx >= 0f && prevDetFrame >= 0) {
+            val frameGap = (frameCount - prevDetFrame).coerceAtLeast(1).toFloat()
+            val vx = (det[0] - prevDetCx) / frameGap
+            val vy = (det[1] - prevDetCy) / frameGap
+            chaseVelX = chaseVelX * 0.5f + vx * 0.5f
+            chaseVelY = chaseVelY * 0.5f + vy * 0.5f
+            chaseVelX = chaseVelX.coerceIn(-400f, 400f)
+            chaseVelY = chaseVelY.coerceIn(-400f, 100f)
+            _hasVelocity = true  // 第 2 次偵測後才有真實速度
+        }
+        prevDetCx        = det[0]
+        prevDetCy        = det[1]
+        prevDetFrame     = frameCount
+        roiCx            = det[0]
+        roiCy            = det[1]
+        lastGoodCx       = det[0]
+        lastGoodCy       = det[1]
+        missCount        = 0
+        postImpactMisses = 0
     }
+
 }

@@ -30,6 +30,15 @@ namespace UploadServer.Models
 
         public DateTime? VerifiedAt { get; set; }
 
+        /// <summary>原始訂閱交易 ID（Google orderId / Apple originalTransactionId），用於關聯 renewal</summary>
+        public string? OriginalTransactionId { get; set; }
+
+        /// <summary>此次訂閱到期時間（UTC）</summary>
+        public DateTime? ExpiresAt { get; set; }
+
+        /// <summary>是否仍在自動續費</summary>
+        public bool? IsAutoRenewing { get; set; }
+
         // ── 導航屬性 ──────────────────────────────────────────────
 
         public User User { get; set; }

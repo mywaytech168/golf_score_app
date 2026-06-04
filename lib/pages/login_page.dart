@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -46,7 +46,6 @@ class _LoginPageState extends State<LoginPage> {
   bool _isConfirmObscure = true;
   bool _isLoading = false;
   bool _isGoogleSigningIn = false;
-  bool _hasRequestedInitialPermissions = false;
 
   // ── Dev 小幫手（debug only）──────────────────────────────────
   int _devTapCount = 0;
@@ -59,13 +58,8 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _blePermissions = _buildRequiredPermissions();
-    _permissionStatuses = {
-      for (final p in _blePermissions.keys) p: PermissionStatus.denied,
-    };
+    _permissionStatuses = {};
     _loadRememberedCredentials();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _triggerInitialPermissionRequest();
-    });
   }
 
   @override
@@ -344,24 +338,6 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── 權限 ────────────────────────────────────────────────────
 
-  Future<void> _triggerInitialPermissionRequest() async {
-    if (_hasRequestedInitialPermissions) return;
-    _hasRequestedInitialPermissions = true;
-    if (Platform.isIOS) return;
-
-    await _requestBlePermissions(showDeniedDialog: false);
-    if (mounted && !_arePermissionsAllGranted) {
-      final l10n = AppLocalizations.of(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(l10n.permBluetooth),
-          duration: const Duration(seconds: 4),
-          action: SnackBarAction(label: l10n.permStatusTitle, onPressed: _showPermissionStatusDialog),
-        ),
-      );
-    }
-  }
-
   void _showPermissionStatusDialog() {
     final l10n = AppLocalizations.of(context);
     final statusText = _permissionStatuses.entries
@@ -436,10 +412,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isGranted(PermissionStatus? s) =>
       s != null && (s.isGranted || s == PermissionStatus.limited || s == PermissionStatus.provisional);
 
-  // Permission keys only — labels are resolved at render time via _permLabel()
-  Map<Permission, String> _buildRequiredPermissions() => {
-    Permission.locationWhenInUse: 'location',
-  };
+  Map<Permission, String> _buildRequiredPermissions() => {};
 
   String _permLabel(Permission perm, AppLocalizations l10n) {
     if (perm == Permission.locationWhenInUse) return l10n.permLocation;

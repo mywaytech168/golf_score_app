@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 /// App 配置管理
 /// 根據環境自動選擇不同的設定

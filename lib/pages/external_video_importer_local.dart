@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../models/recording_history_entry.dart';
+import '../services/analysis_progress_service.dart';
 
 /// 外部影片導入工具：只複製影片、驗證時長、建立歷史紀錄
 /// 
@@ -48,24 +49,40 @@ class ExternalVideoImporter {
       final sessionDir = p.join(appDir.path, 'golf_recordings', sessionId);
       await Directory(sessionDir).create(recursive: true);
 
-      // 複製/轉檔影片
-      // iOS / Android：重新編碼為標準 MP4（H.264 + AAC + faststart），確保相容性
-      //   - iOS：AVAssetExportSession → 原生 H.264
-      //   - Android：VideoTranscoder Surface pipeline → H.264，bitrate ≤ 12 Mbps
-      //     若來源已是標準 H.264（bitrate < 20 Mbps），直接複製（快速路徑）
-      // 其他平台（Desktop）：直接複製
-      final videoPath = p.join(sessionDir, 'swing.mp4');
-      if (Platform.isIOS || Platform.isAndroid) {
-        onProgress?.call(0.0, '轉檔中...');
-        const _channel = MethodChannel('com.example.golf_score_app/video_transcoder');
-        final transcoded = await _channel.invokeMethod<String>(
-          'transcodeToMp4',
-          {'srcPath': sourcePath, 'dstPath': videoPath},
-        );
-        if (transcoded == null) {
-          throw Exception('transcodeToMp4 未回傳路徑');
+      // iOS：直接複製 .mov，不轉檔（iOS 原生支援，轉檔太慢）
+      // Android：轉檔為標準 MP4（H.264 + AAC）
+      // 其他平台：直接複製
+      final String videoPath;
+      if (Platform.isIOS) {
+        videoPath = p.join(sessionDir, 'swing.mov');
+        onProgress?.call(0.0, '複製影片中...');
+        await File(sourcePath).copy(videoPath);
+      } else if (Platform.isAndroid) {
+        videoPath = p.join(sessionDir, 'swing.mp4');
+        onProgress?.call(0.0, '轉檔準備中...');
+
+        // 監聽 Kotlin sendProgress("transcode") → EventChannel → 更新進度 Dialog
+        final progressSvc = AnalysisProgressService.instance;
+        void _onTranscodeProgress() {
+          if (progressSvc.currentOp == 'transcode') {
+            final (prog, label) = progressSvc.progress.value;
+            onProgress?.call(prog, label);
+          }
+        }
+        progressSvc.progress.addListener(_onTranscodeProgress);
+
+        try {
+          const _channel = MethodChannel('com.example.golf_score_app/video_transcoder');
+          final transcoded = await _channel.invokeMethod<String>(
+            'transcodeToMp4',
+            {'srcPath': sourcePath, 'dstPath': videoPath},
+          );
+          if (transcoded == null) throw Exception('transcodeToMp4 未回傳路徑');
+        } finally {
+          progressSvc.progress.removeListener(_onTranscodeProgress);
         }
       } else {
+        videoPath = p.join(sessionDir, 'swing.mp4');
         onProgress?.call(0.0, '複製影片中...');
         await File(sourcePath).copy(videoPath);
       }

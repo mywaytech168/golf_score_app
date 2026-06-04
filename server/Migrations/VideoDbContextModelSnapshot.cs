@@ -29,6 +29,15 @@ namespace UploadServer.Migrations
                         .HasColumnType("varchar(36)")
                         .HasColumnName("id");
 
+                    b.Property<string>("AudioAnalysisJson")
+                        .HasColumnType("LONGTEXT")
+                        .HasColumnName("audio_analysis_json");
+
+                    b.Property<string>("AudioB2Path")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)")
+                        .HasColumnName("audio_b2_path");
+
                     b.Property<string>("ClipB2Path")
                         .HasMaxLength(512)
                         .HasColumnType("varchar(512)")
@@ -55,6 +64,12 @@ namespace UploadServer.Migrations
                     b.Property<int?>("InputTokens")
                         .HasColumnType("int");
 
+                    b.Property<int>("KeyframeCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("keyframe_count");
+
                     b.Property<string>("Mode")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -67,29 +82,6 @@ namespace UploadServer.Migrations
 
                     b.Property<int?>("OutputTokens")
                         .HasColumnType("int");
-
-                    b.Property<string>("AudioAnalysisJson")
-                        .HasColumnType("LONGTEXT")
-                        .HasColumnName("audio_analysis_json");
-
-                    b.Property<string>("AudioB2Path")
-                        .HasMaxLength(512)
-                        .HasColumnType("varchar(512)")
-                        .HasColumnName("audio_b2_path");
-
-                    b.Property<int?>("V2Fps")
-                        .HasColumnType("int")
-                        .HasColumnName("v2_fps");
-
-                    b.Property<string>("V2Resolution")
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
-                        .HasColumnName("v2_resolution");
-
-                    b.Property<int>("KeyframeCount")
-                        .HasColumnType("int")
-                        .HasDefaultValue(0)
-                        .HasColumnName("keyframe_count");
 
                     b.Property<string>("PhaseTimestampsJson")
                         .HasColumnType("TEXT")
@@ -134,6 +126,15 @@ namespace UploadServer.Migrations
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
                         .HasColumnName("user_id");
+
+                    b.Property<int?>("V2Fps")
+                        .HasColumnType("int")
+                        .HasColumnName("v2_fps");
+
+                    b.Property<string>("V2Resolution")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("v2_resolution");
 
                     b.Property<string>("VideoId")
                         .HasMaxLength(36)
@@ -384,6 +385,117 @@ namespace UploadServer.Migrations
                     b.ToTable("ball_records", (string)null);
                 });
 
+            modelBuilder.Entity("UploadServer.Models.BallTrajectoryAnalysis", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(36)
+                        .HasColumnType("varchar(36)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ClipB2Path")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)")
+                        .HasColumnName("clip_b2_path");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("varchar(1024)")
+                        .HasColumnName("error_message");
+
+                    b.Property<int>("FlipMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("flip_mode");
+
+                    b.Property<double?>("HitSec")
+                        .HasColumnType("double")
+                        .HasColumnName("hit_sec");
+
+                    b.Property<int>("RetryCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("retry_count");
+
+                    b.Property<double>("RoiCxRatio")
+                        .HasColumnType("double")
+                        .HasColumnName("roi_cx_ratio");
+
+                    b.Property<double>("RoiCyRatio")
+                        .HasColumnType("double")
+                        .HasColumnName("roi_cy_ratio");
+
+                    b.Property<int>("RoiRadius")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(200)
+                        .HasColumnName("roi_radius");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasDefaultValue("pending")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TrackPtsJson")
+                        .HasColumnType("MEDIUMTEXT")
+                        .HasColumnName("track_pts_json");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(36)
+                        .HasColumnType("varchar(36)")
+                        .HasColumnName("user_id");
+
+                    b.Property<double?>("VideoFps")
+                        .HasColumnType("double")
+                        .HasColumnName("video_fps");
+
+                    b.Property<int?>("VideoHeight")
+                        .HasColumnType("int")
+                        .HasColumnName("video_height");
+
+                    b.Property<string>("VideoId")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("video_id");
+
+                    b.Property<int?>("VideoRotation")
+                        .HasColumnType("int")
+                        .HasColumnName("video_rotation");
+
+                    b.Property<int?>("VideoWidth")
+                        .HasColumnType("int")
+                        .HasColumnName("video_width");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("idx_btraj_created_at");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("idx_btraj_status");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_btraj_user_id");
+
+                    b.HasIndex("VideoId")
+                        .HasDatabaseName("idx_btraj_video_id");
+
+                    b.ToTable("ball_trajectory_analyses", (string)null);
+                });
+
             modelBuilder.Entity("UploadServer.Models.InviteRecord", b =>
                 {
                     b.Property<string>("Id")
@@ -487,6 +599,19 @@ namespace UploadServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime")
                         .HasColumnName("created_at");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("datetime")
+                        .HasColumnName("expires_at");
+
+                    b.Property<bool?>("IsAutoRenewing")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_auto_renewing");
+
+                    b.Property<string>("OriginalTransactionId")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("original_transaction_id");
 
                     b.Property<string>("Plan")
                         .IsRequired()
@@ -693,6 +818,23 @@ namespace UploadServer.Migrations
                         .HasDefaultValue("active")
                         .HasColumnName("status");
 
+                    b.Property<DateTime?>("SubscriptionExpiry")
+                        .HasColumnType("datetime")
+                        .HasColumnName("subscription_expiry");
+
+                    b.Property<string>("SubscriptionOriginalId")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("subscription_original_id");
+
+                    b.Property<string>("SubscriptionStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("none")
+                        .HasColumnName("subscription_status");
+
                     b.Property<int>("TodayUsed")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -876,6 +1018,18 @@ namespace UploadServer.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UploadServer.Models.BallTrajectoryAnalysis", b =>
+                {
+                    b.HasOne("UploadServer.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_btraj_user");
 
                     b.Navigation("User");
                 });

@@ -156,6 +156,7 @@ class _RecordScreenState extends State<RecordScreen> {
       _isFrontCamera ? SensorPosition.front : SensorPosition.back,
     ),
     aspectRatio: CameraAspectRatios.ratio_16_9,
+    zoom: 0.0,
   );
 
   Widget _buildCameraUI() {
@@ -170,7 +171,7 @@ class _RecordScreenState extends State<RecordScreen> {
         onImageForAnalysis: _onImageAnalysis,
         imageAnalysisConfig: AnalysisConfig(
           androidOptions: AndroidAnalysisOptions.nv21(
-            width: _config.quality == VideoQuality.sd ? 320 : 480,
+            width: _config.quality == VideoQuality.hd ? 480 : 640,
           ),
           maxFramesPerSecond: _config.fps == FrameRate.fps60 ? 15 : 10,
           autoStart: true,
