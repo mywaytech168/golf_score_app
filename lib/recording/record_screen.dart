@@ -70,6 +70,14 @@ class _RecordScreenState extends State<RecordScreen> {
   // 錄製設定
   RecordingConfig _config = RecordingConfig();
 
+  // 縮放
+  double _currentZoom = 0.0;
+  double _baseZoom    = 0.0;
+  CameraState? _cameraState;
+
+  // 相機硬體比例
+  double _hardwareRatio = 9 / 16;
+
   @override
   void initState() {
     super.initState();
@@ -163,6 +171,7 @@ class _RecordScreenState extends State<RecordScreen> {
     final cameraWidget = KeyedSubtree(
       key: ValueKey('${_config.cameraKey}_$_isFrontCamera'),
       child: CameraAwesomeBuilder.custom(
+        previewFit: CameraPreviewFit.contain,
         sensorConfig: _buildSensorConfig(),
         saveConfig: SaveConfig.video(
           pathBuilder: _buildCaptureRequest,
@@ -171,12 +180,23 @@ class _RecordScreenState extends State<RecordScreen> {
         onImageForAnalysis: _onImageAnalysis,
         imageAnalysisConfig: AnalysisConfig(
           androidOptions: AndroidAnalysisOptions.nv21(
-            width: _config.quality == VideoQuality.hd ? 480 : 640,
+            width: _config.quality == VideoQuality.hd ? 640 : 960,
           ),
           maxFramesPerSecond: _config.fps == FrameRate.fps60 ? 15 : 10,
           autoStart: true,
         ),
         builder: (state, preview) {
+          _cameraState = state;
+          final pw = preview.nativePreviewSize.width;
+          final ph = preview.nativePreviewSize.height;
+          if (pw > 0 && ph > 0) {
+            final ratio = pw < ph ? pw / ph : ph / pw;
+            if ((ratio - _hardwareRatio).abs() > 0.001) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _hardwareRatio = ratio);
+              });
+            }
+          }
           return Stack(
             fit: StackFit.expand,
             children: [
@@ -245,6 +265,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   ),
                 ),
               ),
+              _ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
             ],
           );
         },
@@ -256,11 +277,26 @@ class _RecordScreenState extends State<RecordScreen> {
       color: Colors.black,
       child: Center(
         child: AspectRatio(
-          aspectRatio: 9 / 16,
-          child: cameraWidget,
-        ),
-      ),
-    );
+          aspectRatio: _hardwareRatio,
+          child: ClipRect(
+          child: GestureDetector(
+            onScaleStart: (_) => _baseZoom = _currentZoom,
+            onScaleUpdate: (d) {
+              if (d.pointerCount < 2) return;
+              final z = (_baseZoom + (d.scale - 1.0) * 0.6).clamp(0.0, 1.0);
+              _setZoom(z);
+            },
+            child: cameraWidget,
+          ),          // GestureDetector
+        ),            // ClipRect
+      ),              // AspectRatio
+    ),                // Center
+  );                  // Container
+  }
+
+  void _setZoom(double value) {
+    setState(() => _currentZoom = value);
+    _cameraState?.sensorConfig.setZoom(value);
   }
 
   // ─── 錄影控制 ─────────────────────────────────────────────────────────────
@@ -722,3 +758,53 @@ class _RecordingBadge extends StatelessWidget {
     );
   }
 }
+
+// ── 縮放滑桿（右側垂直）────────────────────────────────────────────────────────
+
+class _ZoomSlider extends StatelessWidget {
+  final double zoom;
+  final ValueChanged<double> onChanged;
+  const _ZoomSlider({required this.zoom, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (zoom * 100).round();
+    return Positioned(
+      left: 8,
+      top: 0,
+      bottom: 110,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '${pct}%',
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                ),
+                child: Slider(
+                  value: zoom,
+                  min: 0.0,
+                  max: 1.0,
+                  onChanged: onChanged,
+                  activeColor: Colors.white,
+                  inactiveColor: Colors.white24,
+                ),
+              ),
+            ),
+          ),
+          const Icon(Icons.zoom_in_rounded, color: Colors.white54, size: 18),
+        ],
+      ),
+    );
+  }
+}
+

@@ -58,6 +58,13 @@ class MainActivity: FlutterActivity() {
     private val ballTrajExecutor = Executors.newSingleThreadExecutor()
     private val frameExtractorExecutor = Executors.newSingleThreadExecutor()
     private val transcoderExecutor = Executors.newSingleThreadExecutor()
+
+    // SAF 資料夾選擇：儲存待處理的 MethodChannel.Result，等 Activity result 回來再 resolve
+    @Volatile private var pendingFolderResult: io.flutter.plugin.common.MethodChannel.Result? = null
+    @Volatile private var pendingFolderSrc: String? = null
+    @Volatile private var pendingFolderFileName: String? = null
+    private val REQUEST_FOLDER_PICK = 1001
+
     private val golfAnalysisExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
 
@@ -98,6 +105,31 @@ class MainActivity: FlutterActivity() {
             .setDetectorMode(PoseDetectorOptions.STREAM_MODE)  // 連續模式，適合視頻分析
             .build()
         PoseDetection.getClient(options)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_FOLDER_PICK) return
+
+        val result   = pendingFolderResult   ?: return
+        val src      = pendingFolderSrc      ?: return
+        val fileName = pendingFolderFileName ?: return
+        pendingFolderResult = null; pendingFolderSrc = null; pendingFolderFileName = null
+
+        if (resultCode != RESULT_OK || data?.data == null) {
+            result.error("cancelled", "使用者取消選擇資料夾", null); return
+        }
+        val treeUri = data.data!!
+        transcoderExecutor.execute {
+            try {
+                val savedUri = saveToPickedFolder(treeUri, src, fileName)
+                runOnUiThread { result.success(savedUri) }
+            } catch (e: Exception) {
+                Log.e(logTag, "[pickFolderAndSave] 失敗: ${e.message}", e)
+                runOnUiThread { result.error("save_failed", e.message, null) }
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -302,20 +334,39 @@ class MainActivity: FlutterActivity() {
         // ── 影片匯出到 Downloads ────────────────────────────────────
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.golf_score_app/video_export")
             .setMethodCallHandler { call, result ->
-                if (call.method != "saveToDownloads") { result.notImplemented(); return@setMethodCallHandler }
                 val srcPath  = call.argument<String>("srcPath")
                 val fileName = call.argument<String>("fileName")
-                if (srcPath.isNullOrBlank() || fileName.isNullOrBlank()) {
-                    result.error("invalid_args", "缺少 srcPath / fileName", null); return@setMethodCallHandler
-                }
-                transcoderExecutor.execute {
-                    try {
-                        val savedPath = saveVideoToDownloads(srcPath, fileName)
-                        runOnUiThread { result.success(savedPath) }
-                    } catch (e: Exception) {
-                        Log.e(logTag, "saveToDownloads 失敗: ${e.message}", e)
-                        runOnUiThread { result.error("save_failed", e.message, null) }
+                when (call.method) {
+                    "saveToDownloads" -> {
+                        if (srcPath.isNullOrBlank() || fileName.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 srcPath / fileName", null); return@setMethodCallHandler
+                        }
+                        transcoderExecutor.execute {
+                            try {
+                                val savedPath = saveVideoToDownloads(srcPath, fileName)
+                                runOnUiThread { result.success(savedPath) }
+                            } catch (e: Exception) {
+                                Log.e(logTag, "saveToDownloads 失敗: ${e.message}", e)
+                                runOnUiThread { result.error("save_failed", e.message, null) }
+                            }
+                        }
                     }
+                    "pickFolderAndSave" -> {
+                        if (srcPath.isNullOrBlank() || fileName.isNullOrBlank()) {
+                            result.error("invalid_args", "缺少 srcPath / fileName", null); return@setMethodCallHandler
+                        }
+                        pendingFolderResult   = result
+                        pendingFolderSrc      = srcPath
+                        pendingFolderFileName = fileName
+                        runOnUiThread {
+                            @Suppress("DEPRECATION")
+                            startActivityForResult(
+                                Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),
+                                REQUEST_FOLDER_PICK
+                            )
+                        }
+                    }
+                    else -> result.notImplemented()
                 }
             }
 
@@ -1162,6 +1213,7 @@ class MainActivity: FlutterActivity() {
         var inputEos = false
         val rightYList     = mutableListOf<Pair<Long, Float>>()  // (timeMs, Y display)
         val rightXList     = mutableListOf<Float>()              // X display（與 rightYList 等長）
+        val skeletonFrames = mutableListOf<Map<String, Any>>()   // 完整骨架資料（供 CSV 寫出）
         var frameCount     = 0
         var analyzedFrames = 0
 
@@ -1248,16 +1300,32 @@ class MainActivity: FlutterActivity() {
                                 com.google.android.gms.tasks.Tasks.await(localDetector.process(inputImage))
                             }.getOrNull()
 
-                            val rw = pose?.allPoseLandmarks
-                                ?.firstOrNull { it.landmarkType == 16 }
+                            val landmarks = pose?.allPoseLandmarks ?: emptyList()
+                            val rw = landmarks.firstOrNull { it.landmarkType == 16 }
                             if (rw != null && rw.inFrameLikelihood >= 0.3f) {
                                 // 還原到顯示座標（scale 反向）
                                 val yDisplay = rw.position.y / scale
-                                // 同時存 X，用來計算幀間速度
                                 val xDisplay = rw.position.x / scale
                                 rightYList.add(ptsUs / 1000L to yDisplay)
                                 rightXList.add(xDisplay)
                             }
+
+                            // 收集完整骨架資料（供 ClipPipelineService 寫成 pose_landmarks.csv）
+                            if (landmarks.isNotEmpty()) {
+                                val lmList = landmarks.map { lm ->
+                                    mapOf(
+                                        "type"  to lm.landmarkType,
+                                        "x"     to lm.position.x / scale,
+                                        "y"     to lm.position.y / scale,
+                                        "z"     to runCatching { lm.position3D.z }.getOrDefault(0f),
+                                        "vis"   to lm.inFrameLikelihood,
+                                        "xNorm" to if (displayW > 0) (lm.position.x / scale) / displayW else 0f,
+                                        "yNorm" to if (displayH > 0) (lm.position.y / scale) / displayH else 0f,
+                                    )
+                                }
+                                skeletonFrames.add(mapOf("timeMs" to ptsUs / 1000L, "landmarks" to lmList))
+                            }
+
                             analyzedFrames++
                         } finally {
                             image.close()
@@ -1266,7 +1334,7 @@ class MainActivity: FlutterActivity() {
                     frameCount++
 
                     val prog = 0.05 + (frameCount.toDouble() / estFrames).coerceIn(0.0, 0.95) * 0.90
-                    sendProgress("golfAnalysis", prog, "V3 骨架分析 $analyzedFrames 幀")
+                    sendProgress("golfAnalysis", prog, "V3 骨架分析 ${(prog * 100).toInt()}%")
                 }
 
                 decoder.releaseOutputBuffer(outIdx, false)
@@ -1356,13 +1424,29 @@ class MainActivity: FlutterActivity() {
         }
 
         sendProgress("golfAnalysis", 1.0, "V3 分析完成 (${rightYList.size} 幀有效)")
-        Log.i(logTag, "[GolfAnalysis.V3] ✅ impactMs=$impactMs FAST=${fastMs}ms speed=${fastSpeed.toInt()}px/fr ySpan=${ySpan.toInt()}px candidate=${candidateMs}ms 偏移=${impactMs - candidateMs}ms")
+        Log.i(logTag, "[GolfAnalysis.V3] ✅ impactMs=$impactMs FAST=${fastMs}ms speed=${fastSpeed.toInt()}px/fr ySpan=${ySpan.toInt()}px candidate=${candidateMs}ms 偏移=${impactMs - candidateMs}ms skeletonFrames=${skeletonFrames.size}")
+
+        val skeletonJson = org.json.JSONArray(skeletonFrames.map { frame ->
+            @Suppress("UNCHECKED_CAST")
+            val lms = frame["landmarks"] as List<Map<String, Any>>
+            org.json.JSONObject().apply {
+                put("timeMs", frame["timeMs"])
+                put("landmarks", org.json.JSONArray(lms.map { lm ->
+                    org.json.JSONObject().apply {
+                        put("type",  lm["type"])
+                        put("x",     lm["x"]); put("y", lm["y"]); put("z", lm["z"])
+                        put("vis",   lm["vis"])
+                        put("xNorm", lm["xNorm"]); put("yNorm", lm["yNorm"])
+                    }
+                }))
+            }
+        }).toString()
 
         return mapOf(
             "impactTimeMs" to impactMs,
             "audioPeakMs"  to candidateMs,
             "hasAudio"     to true,
-            "skeletonJson" to "[]",
+            "skeletonJson" to skeletonJson,
             "frameCount"   to analyzedFrames,
             "videoPath"    to videoPath,
         )
@@ -2228,5 +2312,28 @@ class MainActivity: FlutterActivity() {
             Log.i(logTag, "[saveToDownloads] ✅ 舊版: ${dst.absolutePath}")
             dst.absolutePath
         }
+    }
+
+    /**
+     * 將 [srcPath] 的影片寫入使用者透過 SAF 選取的資料夾，回傳儲存位置 URI 字串。
+     */
+    @Throws(Exception::class)
+    private fun saveToPickedFolder(treeUri: android.net.Uri, srcPath: String, fileName: String): String {
+        val src      = java.io.File(srcPath)
+        require(src.exists()) { "來源檔案不存在: $srcPath" }
+        val mime     = if (fileName.lowercase().endsWith(".mov")) "video/quicktime" else "video/mp4"
+        val resolver = applicationContext.contentResolver
+
+        val treeDoc  = androidx.documentfile.provider.DocumentFile.fromTreeUri(applicationContext, treeUri)
+            ?: throw Exception("無法存取選取的資料夾")
+        val newDoc   = treeDoc.createFile(mime, fileName)
+            ?: throw Exception("無法在選取資料夾建立檔案")
+
+        resolver.openOutputStream(newDoc.uri)?.use { out ->
+            src.inputStream().use { it.copyTo(out) }
+        } ?: throw Exception("無法開啟輸出串流")
+
+        Log.i(logTag, "[pickFolderAndSave] ✅ 儲存到: ${newDoc.uri}")
+        return newDoc.uri.toString()
     }
 }

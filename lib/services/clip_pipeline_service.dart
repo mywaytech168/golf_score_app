@@ -13,6 +13,7 @@ import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
 import '../recording/pose_csv_writer.dart';
 import 'analysis_progress_service.dart';
+import 'audio_extraction_service.dart';
 import 'ball_detection_prefs.dart';
 import 'ball_tracker.dart';
 import 'ball_trajectory_service.dart';
@@ -95,8 +96,16 @@ class ClipPipelineService {
     final srcCsvPath    = p.join(srcSessionDir, 'pose_landmarks.csv');
     // 優先使用 audio.wav（VideoAnalysisService 從影片提取），
     // 若不存在則退回 audio.pcm（原始錄製的即時 float32 PCM）
+    // 若兩者都不存在（V2/V3 跳過全片分析），從影片提取 audio.wav
     final srcWavPath = p.join(srcSessionDir, 'audio.wav');
     final srcPcmPath = p.join(srcSessionDir, 'audio.pcm');
+    if (!await File(srcWavPath).exists() && !await File(srcPcmPath).exists()) {
+      debugPrint('[Pipeline.run] audio.wav/pcm 不存在，從影片提取...');
+      await AudioExtractionService.extractAudioFromVideo(
+        videoPath: srcVideoPath,
+        outputWavPath: srcWavPath,
+      );
+    }
     final srcAudioPath = await File(srcWavPath).exists() ? srcWavPath : srcPcmPath;
 
     final results = <ClipResult>[];

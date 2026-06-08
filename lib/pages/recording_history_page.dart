@@ -1328,12 +1328,14 @@ class _HistoryTileState extends State<_HistoryTile> {
         final totalDur = widget.entry.durationSeconds.toDouble();
         final v2Hits = peakMs.map((ms) {
           final hitSec = ms / 1000.0;
+          final (s2, e2) = SwingImpactDetector.calculateClipBoundaries(
+            hitSec: hitSec, totalDurationSec: totalDur);
           return SwingHit(
             hitIndex:   peakMs.indexOf(ms) + 1,
             hitFrame:   (hitSec * 30).round(),
             hitSec:     hitSec,
-            startSec:   (hitSec - 2.5).clamp(0.0, totalDur),
-            endSec:     (hitSec + 2.5).clamp(0.0, totalDur),
+            startSec:   s2,
+            endSec:     e2,
             speedValue: 0.0,
             audioValue: 1.0,
           );
@@ -1430,12 +1432,14 @@ class _HistoryTileState extends State<_HistoryTile> {
           debugPrint('[偵測擊球 V3] hit ${i+1}: audioPeak=${peak}ms → impact=${hitMs}ms '
               '(精修 ${hitMs - peak}ms)');
 
+          final (s3, e3) = SwingImpactDetector.calculateClipBoundaries(
+            hitSec: hitSec, totalDurationSec: totalDur);
           v3Hits.add(SwingHit(
             hitIndex:     i + 1,
             hitFrame:     (hitSec * 30).round(),
             hitSec:       hitSec,
-            startSec:     (hitSec - 2.5).clamp(0.0, totalDur),
-            endSec:       (hitSec + 2.5).clamp(0.0, totalDur),
+            startSec:     s3,
+            endSec:       e3,
             speedValue:   0.0,
             audioValue:   1.0,
             skeletonJson: result.skeletonJson, // V3 局部骨架，直接寫入 clip CSV
@@ -2086,7 +2090,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   bool _isDownloading = false;
 
-  /// 下載影片到裝置（顯示版本選單）
+  /// 下載影片到裝置（顯示版本選單 + 儲存位置選擇）
   Future<void> _downloadVideo() async {
     if (_isDownloading) return;
     final sessionDir = p.dirname(widget.entry.filePath);
@@ -2094,35 +2098,47 @@ class _HistoryTileState extends State<_HistoryTile> {
     final chosen = await _showDownloadPicker(context, sessionDir);
     if (chosen == null || !mounted) return;
 
+    // 選擇儲存位置：下載資料夾 or 自選資料夾
+    final toFolder = await _showSaveLocationPicker(context);
+    if (toFolder == null || !mounted) return;
+
     setState(() => _isDownloading = true);
     try {
       final videoPath = p.join(sessionDir, chosen.file);
       final baseName  = (widget.entry.customName?.isNotEmpty == true)
           ? '${widget.entry.customName!}_${chosen.label}'
           : '${p.basenameWithoutExtension(widget.entry.filePath)}_${chosen.label}';
-      final result = await VideoExportService.download(videoPath, displayName: baseName);
+      final result = toFolder
+          ? await VideoExportService.downloadToFolder(videoPath, displayName: baseName)
+          : await VideoExportService.download(videoPath, displayName: baseName);
       if (!mounted) return;
-      switch (result.status) {
-        case ExportStatus.savedToDownloads:
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('「${chosen.label}」已儲存到下載資料夾 ✅'),
-            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-          ));
-        case ExportStatus.savedToPhotos:
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('「${chosen.label}」已儲存到相機膠卷 ✅'),
-            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-          ));
-        case ExportStatus.sharedViaSheet:
-          break;
-        case ExportStatus.failed:
+      _showDownloadResultSnackBar(result, chosen.label);
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  void _showDownloadResultSnackBar(ExportResult result, String label) {
+    switch (result.status) {
+      case ExportStatus.savedToDownloads:
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('「$label」已儲存 ✅'),
+          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+        ));
+      case ExportStatus.savedToPhotos:
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('「$label」已儲存到相機膠卷 ✅'),
+          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+        ));
+      case ExportStatus.sharedViaSheet:
+        break;
+      case ExportStatus.failed:
+        if (result.detail != 'cancelled') {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('下載失敗：${result.detail}'),
             backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
           ));
-      }
-    } finally {
-      if (mounted) setState(() => _isDownloading = false);
+        }
     }
   }
 
@@ -2864,35 +2880,46 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     final chosen = await _showDownloadPicker(context, sessionDir);
     if (chosen == null || !mounted) return;
 
+    final toFolder = await _showSaveLocationPicker(context);
+    if (toFolder == null || !mounted) return;
+
     setState(() => _isDownloading = true);
     try {
       final videoPath = p.join(sessionDir, chosen.file);
       final baseName  = (widget.clip.customName?.isNotEmpty == true)
           ? '${widget.clip.customName!}_${chosen.label}'
           : '${p.basenameWithoutExtension(widget.clip.filePath)}_${chosen.label}';
-      final result = await VideoExportService.download(videoPath, displayName: baseName);
+      final result = toFolder
+          ? await VideoExportService.downloadToFolder(videoPath, displayName: baseName)
+          : await VideoExportService.download(videoPath, displayName: baseName);
       if (!mounted) return;
-      switch (result.status) {
-        case ExportStatus.savedToDownloads:
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('「${chosen.label}」已儲存到下載資料夾 ✅'),
-            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-          ));
-        case ExportStatus.savedToPhotos:
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('「${chosen.label}」已儲存到相機膠卷 ✅'),
-            backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-          ));
-        case ExportStatus.sharedViaSheet:
-          break;
-        case ExportStatus.failed:
+      _showClipDownloadResultSnackBar(result, chosen.label);
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  void _showClipDownloadResultSnackBar(ExportResult result, String label) {
+    switch (result.status) {
+      case ExportStatus.savedToDownloads:
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('「$label」已儲存 ✅'),
+          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+        ));
+      case ExportStatus.savedToPhotos:
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('「$label」已儲存到相機膠卷 ✅'),
+          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+        ));
+      case ExportStatus.sharedViaSheet:
+        break;
+      case ExportStatus.failed:
+        if (result.detail != 'cancelled') {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('下載失敗：${result.detail}'),
             backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
           ));
-      }
-    } finally {
-      if (mounted) setState(() => _isDownloading = false);
+        }
     }
   }
 
@@ -4762,6 +4789,44 @@ const _kDlOptions = [
 ];
 
 /// 顯示下載版本選擇底部選單，回傳使用者選擇的選項或 null（取消）
+/// 顯示儲存位置選擇：下載資料夾 or 自選資料夾。
+/// 回傳 true = 自選資料夾，false = 下載資料夾，null = 取消。
+Future<bool?> _showSaveLocationPicker(BuildContext ctx) {
+  return showModalBottomSheet<bool>(
+    context: ctx,
+    backgroundColor: const Color(0xFF1E1E2E),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (_) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(width: 40, height: 4,
+            decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          const Text('選擇儲存位置', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.download, color: Colors.white70),
+            title: const Text('下載資料夾', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('儲存到系統預設下載位置', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            onTap: () => Navigator.pop(ctx, false),
+          ),
+          ListTile(
+            leading: const Icon(Icons.folder_open, color: Colors.white70),
+            title: const Text('選擇資料夾', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('自訂儲存位置', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            onTap: () => Navigator.pop(ctx, true),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+}
+
 Future<_DlOption?> _showDownloadPicker(BuildContext ctx, String sessionDir) {
   final available = _kDlOptions.where((o) => File(p.join(sessionDir, o.file)).existsSync()).toList();
   if (available.isEmpty) return Future.value(null);

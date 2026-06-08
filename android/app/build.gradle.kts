@@ -40,9 +40,9 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 35
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
         // ✅ JNI：只打包用到的 ABI，避免 APK 增大
         // arm64-v8a  = 絕大多數現代 Android 裝置（有 NEON SIMD）
         // x86_64     = 模擬器
@@ -75,8 +75,8 @@ android {
     buildTypes {
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -124,4 +124,7 @@ dependencies {
 
     // ✅ TFLite Android API（YOLOv8 球偵測，Kotlin 側推論）
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
+
+    // SAF DocumentFile（資料夾選擇寫檔）
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

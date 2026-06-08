@@ -11,6 +11,8 @@ import android.util.Log
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 
 /**
@@ -53,13 +55,16 @@ class VideoTrimmer(private val context: android.content.Context) {
 
         Thread {
             try {
-                // ⚡ 主路徑：raw mux（快速，100-300ms/clip）
-                //   GOP 較長時 clip 可能略長（從 I-frame 起），
-                //   player 會自動 seek 到 hitSecond-2.5 讓使用者看到正確窗口。
-                // trimWithSurface（精確 5 秒）已保留作可選精確路徑，
-                //   但 decode+encode 需 3-5s/clip，多 hit 時顯著拖慢偵測流程。
-                val baseMs = trimWithMuxer(srcPath, dstPath, startMs, endMs)
-                result.success(mapOf("ok" to true, "baseTimeMs" to baseMs))
+                // 主路徑：trimWithSurface（decode+encode，精確 5 秒）
+                // fallback：trimWithMuxer（raw mux，從 I-frame 開始，clip 可能較長）
+                val surfaceMs = trimWithSurface(srcPath, dstPath, startMs, endMs)
+                if (surfaceMs != null) {
+                    result.success(mapOf("ok" to true, "baseTimeMs" to surfaceMs))
+                } else {
+                    Log.w(TAG, "trimWithSurface 失敗，fallback to trimWithMuxer")
+                    val baseMs = trimWithMuxer(srcPath, dstPath, startMs, endMs)
+                    result.success(mapOf("ok" to true, "baseTimeMs" to baseMs))
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "trim failed", e)
                 result.error("trim_error", e.message, null)
@@ -262,7 +267,7 @@ class VideoTrimmer(private val context: android.content.Context) {
                         if (!muxStarted) {
                             videoMuxTrack = muxer.addTrack(encoder.outputFormat)
                             if (audioExtractor != null) {
-                                val aFmt = audioExtractor.getTrackFormat(0)
+                                val aFmt = audioExtractor.getTrackFormat(audioIdx)
                                 audioMuxTrack = runCatching { muxer.addTrack(aFmt) }.getOrElse { -1 }
                             }
                             muxer.start()
@@ -271,7 +276,11 @@ class VideoTrimmer(private val context: android.content.Context) {
                         }
                     }
                     encIdx >= 0 -> {
-                        val encPts = bufInfo.presentationTimeUs
+                        // 部分硬體 encoder 透過 Surface 輸入時，presentationTimeUs 實際上是
+                        // releaseOutputBuffer 傳入的 nanoseconds 值（未除以 1000）。
+                        // 判斷依據：正常 µs 值不應超過 ~1000 秒（1e12 µs）。
+                        val rawPts = bufInfo.presentationTimeUs
+                        val encPts = if (rawPts > 1_000_000_000_000L) rawPts / 1000L else rawPts
 
                         if (muxStarted && bufInfo.size > 0 && videoMuxTrack >= 0 &&
                             bufInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 &&
@@ -363,6 +372,7 @@ class VideoTrimmer(private val context: android.content.Context) {
 
         val sizeKb = File(dstPath).length() / 1024
         Log.d(TAG, "[Surface] ✅ 完成 → $dstPath (${sizeKb}KB) startMs=$startMs")
+        applyFastStart(dstPath)
         return startMs   // clip 精確從 startMs 開始 → actualBaseMs = startMs
     }
 
@@ -464,10 +474,180 @@ class VideoTrimmer(private val context: android.content.Context) {
             muxer.stop()
             val actualBaseMs = if (baseTimeUs == Long.MIN_VALUE) startMs else baseTimeUs / 1000L
             Log.d(TAG, "[Mux] done → $dstPath  baseMs=$actualBaseMs")
+            applyFastStart(dstPath)
             return actualBaseMs
         } finally {
             runCatching { muxer.release() }
             runCatching { extractor.release() }
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // FastStart：將 MP4 moov atom 移到檔案最前面
+    //
+    // Android MediaMuxer 永遠把 moov 寫在 mdat 後面（檔尾）。
+    // OpenCV/FFmpeg 開始讀 mdat 時還沒解析到 avcC（在 moov 內），導致：
+    //   "non-existing PPS 1 referenced / decode_slice_header error / no frame!"
+    // 把 moov 搬到前面後，FFmpeg 第一時間就能讀到 SPS/PPS，錯誤消失。
+    //
+    // 演算法：
+    //   1. 掃描頂層 box：找 ftyp / moov / mdat
+    //   2. moov 已在 mdat 前 → 直接返回（已是 faststart）
+    //   3. 將 moov 讀入記憶體，修正 stco/co64 的 chunk offset（+delta）
+    //   4. 寫出新檔：ftyp → moov（已修正）→ mdat + 其餘 box
+    //   5. 原子性替換原檔
+    // ──────────────────────────────────────────────────────────────────────
+
+    private fun applyFastStart(path: String) {
+        val srcFile = File(path)
+        val tmpFile = File("$path.fstmp")
+        try {
+            data class Box(val type: String, val offset: Long, val size: Long)
+
+            RandomAccessFile(srcFile, "r").use { raf ->
+                val fileLen = raf.length()
+                val boxes = mutableListOf<Box>()
+                var pos = 0L
+
+                // 掃描頂層 box
+                while (pos + 8 <= fileLen) {
+                    raf.seek(pos)
+                    val sizeField = raf.readInt().toLong() and 0xFFFFFFFFL
+                    val typeBytes = ByteArray(4).also { raf.readFully(it) }
+                    val type = String(typeBytes, Charsets.ISO_8859_1)
+                    val boxSize: Long = when (sizeField) {
+                        0L -> fileLen - pos
+                        1L -> if (pos + 16 <= fileLen) raf.readLong() else break
+                        else -> sizeField
+                    }
+                    if (boxSize < 8 || pos + boxSize > fileLen + 1) break
+                    boxes.add(Box(type, pos, boxSize))
+                    pos += boxSize
+                }
+
+                val ftypBox = boxes.firstOrNull { it.type == "ftyp" }
+                val moovBox = boxes.firstOrNull { it.type == "moov" } ?: return
+                val mdatBox = boxes.firstOrNull { it.type == "mdat" } ?: return
+
+                // moov 已在 mdat 前 → 不需要搬移
+                if (moovBox.offset <= mdatBox.offset) {
+                    Log.d(TAG, "[FastStart] moov 已在前面，跳過")
+                    return
+                }
+
+                // moov 太大（> 64 MB）→ 跳過，避免 OOM
+                if (moovBox.size > 64L * 1024 * 1024) {
+                    Log.w(TAG, "[FastStart] moov 過大（${moovBox.size / 1024}KB），跳過")
+                    return
+                }
+
+                // 讀取 moov 到記憶體
+                val moovBytes = ByteArray(moovBox.size.toInt())
+                raf.seek(moovBox.offset)
+                raf.readFully(moovBytes)
+
+                // 計算 moov 搬到前面後，mdat 的位移量
+                val newMdatOffset = (ftypBox?.let { it.offset + it.size } ?: 0L) + moovBox.size
+                val delta = newMdatOffset - mdatBox.offset
+                Log.d(TAG, "[FastStart] oldMdat=${mdatBox.offset} newMdat=$newMdatOffset delta=$delta")
+
+                // 修正 moov 內所有 stco / co64 的 chunk offset
+                patchChunkOffsets(moovBytes, 8, moovBytes.size, delta)
+
+                // 寫出新檔
+                FileOutputStream(tmpFile).buffered(256 * 1024).use { out ->
+                    val copyBuf = ByteArray(256 * 1024)
+
+                    fun copyBox(box: Box) {
+                        raf.seek(box.offset)
+                        var remaining = box.size
+                        while (remaining > 0) {
+                            val n = minOf(remaining, copyBuf.size.toLong()).toInt()
+                            raf.readFully(copyBuf, 0, n)
+                            out.write(copyBuf, 0, n)
+                            remaining -= n
+                        }
+                    }
+
+                    if (ftypBox != null) copyBox(ftypBox)
+                    out.write(moovBytes)   // 已修正 offset 的 moov
+                    for (box in boxes.sortedBy { it.offset }) {
+                        if (box.type == "ftyp" || box.type == "moov") continue
+                        copyBox(box)
+                    }
+                }
+            }
+
+            // 原子性替換
+            if (!srcFile.delete()) throw RuntimeException("無法刪除原檔")
+            if (!tmpFile.renameTo(srcFile)) throw RuntimeException("無法重新命名暫存檔")
+            Log.d(TAG, "[FastStart] ✅ moov 搬到最前面")
+
+        } catch (e: Exception) {
+            Log.w(TAG, "[FastStart] 失敗（忽略，影片仍可用）: $e")
+            runCatching { tmpFile.delete() }
+        }
+    }
+
+    /** 遞迴走訪 box 樹，找到 stco / co64 並修正 chunk offset。 */
+    private fun patchChunkOffsets(data: ByteArray, start: Int, end: Int, delta: Long) {
+        var pos = start
+        while (pos + 8 <= end) {
+            val sizeField = boxInt32(data, pos).toLong() and 0xFFFFFFFFL
+            val type = String(data, pos + 4, 4, Charsets.ISO_8859_1)
+            val (boxSize, hdrSize) = when (sizeField) {
+                0L   -> Pair((end - pos).toLong(), 8)
+                1L   -> if (pos + 16 <= end) Pair(boxInt64(data, pos + 8), 16) else return
+                else -> Pair(sizeField, 8)
+            }
+            if (boxSize < 8 || pos + boxSize > end) return
+
+            val bodyStart = pos + hdrSize
+            val bodyEnd   = (pos + boxSize).toInt().coerceAtMost(end)
+
+            when (type) {
+                "stco" -> {
+                    // FullBox header: version(1) + flags(3) = 4 bytes, then entry_count(4)
+                    if (bodyEnd - bodyStart < 8) { pos += boxSize.toInt(); continue }
+                    val count = boxInt32(data, bodyStart + 4)
+                    for (i in 0 until count) {
+                        val off = bodyStart + 8 + i * 4
+                        if (off + 4 > bodyEnd) break
+                        val newVal = ((boxInt32(data, off).toLong() and 0xFFFFFFFFL) + delta).toInt()
+                        putInt32(data, off, newVal)
+                    }
+                }
+                "co64" -> {
+                    if (bodyEnd - bodyStart < 8) { pos += boxSize.toInt(); continue }
+                    val count = boxInt32(data, bodyStart + 4)
+                    for (i in 0 until count) {
+                        val off = bodyStart + 8 + i * 8
+                        if (off + 8 > bodyEnd) break
+                        putInt64(data, off, boxInt64(data, off) + delta)
+                    }
+                }
+                // 遞迴走訪容器 box
+                "moov", "trak", "mdia", "minf", "stbl", "udta", "meta", "ilst", "dinf" ->
+                    patchChunkOffsets(data, bodyStart, bodyEnd, delta)
+            }
+
+            pos += boxSize.toInt()
+        }
+    }
+
+    private fun boxInt32(d: ByteArray, o: Int): Int =
+        ((d[o].toInt() and 0xFF) shl 24) or ((d[o+1].toInt() and 0xFF) shl 16) or
+        ((d[o+2].toInt() and 0xFF) shl 8)  or  (d[o+3].toInt() and 0xFF)
+
+    private fun putInt32(d: ByteArray, o: Int, v: Int) {
+        d[o]   = (v ushr 24).toByte(); d[o+1] = (v ushr 16).toByte()
+        d[o+2] = (v ushr  8).toByte(); d[o+3] = v.toByte()
+    }
+
+    private fun boxInt64(d: ByteArray, o: Int): Long =
+        (boxInt32(d, o).toLong() shl 32) or (boxInt32(d, o + 4).toLong() and 0xFFFFFFFFL)
+
+    private fun putInt64(d: ByteArray, o: Int, v: Long) {
+        putInt32(d, o, (v ushr 32).toInt()); putInt32(d, o + 4, v.toInt())
     }
 }

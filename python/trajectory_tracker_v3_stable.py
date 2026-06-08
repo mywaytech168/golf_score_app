@@ -14,9 +14,9 @@ from datetime import datetime
 # Batch / input
 # ============================================================
 BATCH_MODE = False
-INPUT_DIR = r"Y:\Software Engineering\Project\Golf\Test_data\hit_catch\V1"
-BATCH_OUTPUT_DIR = r""
-VIDEO_PATH = r"hit_003.mp4"
+INPUT_DIR = r"C:\Users\user\Downloads\demo video"
+BATCH_OUTPUT_DIR = r"C:\Users\user\Downloads\demo video"
+VIDEO_PATH = r"hit_001.mp4"
 AUTO_DISABLE_UI_IN_BATCH = True
 
 # ============================================================
@@ -86,11 +86,19 @@ Y_MAX_STEP = 80
 # New optimization switches (requested)
 # ============================================================
 FIXED_ROI_MODE = True
+
+# Ratio-based ROI — calibrated on 1920×1080 (after FLIP_MODE=5 on 1080×1920 source)
+# These replace the old hardcoded FIXED_ROI_CENTER / ROI_FIXED_SIZE.
+# At runtime get_scaled_roi_by_frame() converts them to pixel coords for any resolution.
+FIXED_ROI_CENTER_RATIO = (1084 / 1920, 376 / 1080)   # (cx/W, cy/H)
+ROI_SIZE_RATIO_BY_HEIGHT = 400 / 1080                  # roi_size / H
+
+# Keep these as fallback defaults (overwritten at runtime by get_scaled_roi_by_frame)
 FIXED_ROI_CENTER = (1084, 376)
+ROI_FIXED_SIZE = 400
 
 # 1) ROI center tracks latest valid point, size fixed (no shrinking)
 ROI_CENTER_LOCK_TO_LAST = True
-ROI_FIXED_SIZE = 400
 
 # 2) Stop tracking when no diff candidate
 STOP_WHEN_NO_CAND_IN_TRACK = True
@@ -159,6 +167,15 @@ def apply_out_rotate(frame: np.ndarray, mode: int) -> np.ndarray:
     if mode == 6:
         return cv2.rotate(frame, cv2.ROTATE_180)
     return frame
+
+
+def get_scaled_roi_by_frame(frame: np.ndarray):
+    """Return (center_xy, roi_size) scaled to the given (already-flipped) frame."""
+    h, w = frame.shape[:2]
+    cx = int(round(w * FIXED_ROI_CENTER_RATIO[0]))
+    cy = int(round(h * FIXED_ROI_CENTER_RATIO[1]))
+    roi_size = int(round(h * ROI_SIZE_RATIO_BY_HEIGHT))
+    return (cx, cy), roi_size
 
 
 def preprocess_gray(gray: np.ndarray) -> np.ndarray:
@@ -433,9 +450,19 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
     writer = None
     out_path = OUT_VIDEO_PATH
 
+    # Compute ratio-scaled ROI from the first flipped frame so any resolution works
+    roi_fixed_size_runtime = ROI_FIXED_SIZE
     if FIXED_ROI_MODE:
-        roi_center = tuple(map(int, FIXED_ROI_CENTER))
-        print("FIXED ROI center:", roi_center)
+        ret_peek, frame0_peek = cap.read()
+        if ret_peek:
+            frame_peek = apply_flip(frame0_peek, FLIP_MODE)
+            roi_center, roi_fixed_size_runtime = get_scaled_roi_by_frame(frame_peek)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            print(f"Scaled FIXED ROI center: {roi_center}  size: {roi_fixed_size_runtime}  "
+                  f"(frame {frame_peek.shape[1]}×{frame_peek.shape[0]})")
+        else:
+            roi_center = tuple(map(int, FIXED_ROI_CENTER))
+            print("FIXED ROI center (fallback):", roi_center)
 
     while True:
         ret, frame0 = cap.read()
@@ -522,7 +549,7 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
         # Recovery: when misses occur, temporarily expand ROI and use Kalman-predicted center.
         if state in (STATE_WAIT_P0, STATE_WAIT_P1):
             cx, cy = roi_center
-            roi_size = ROI_FIXED_SIZE
+            roi_size = roi_fixed_size_runtime
         else:
             if kf.initialized:
                 # Predict first so current frame uses freshest expected location.
@@ -550,7 +577,7 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
                 cx, cy = int(round(roi_center_smooth[0])), int(round(roi_center_smooth[1]))
             roi_size = min(
                 RECOVERY_ROI_MAX,
-                int(ROI_FIXED_SIZE + no_cand_count * RECOVERY_ROI_GROW_PER_MISS),
+                int(roi_fixed_size_runtime + no_cand_count * RECOVERY_ROI_GROW_PER_MISS),
             )
 
         p_index = max(len(track_pts) - 1, 0)

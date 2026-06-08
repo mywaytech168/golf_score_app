@@ -20,7 +20,7 @@ enum FrameRate {
   const FrameRate(this.value, this.label);
 }
 
-/// 錄製設定（固定 16:9 直式）
+/// 錄製設定（16:9 直式，輸出 1920×1080 / 1280×720）
 class RecordingConfig {
   VideoQuality quality;
   FrameRate fps;

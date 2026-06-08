@@ -94,6 +94,14 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   Size _analysisSize = Size.zero;
   bool _showSkeleton = true;
 
+  // ── 縮放 ─────────────────────────────────────────────────────────
+  double _currentZoom = 0.0;
+  double _baseZoom    = 0.0;
+  CameraState? _cameraState;
+
+  // ── 相機硬體比例（從 AnalysisPreview 取得，確保 preview == 錄製範圍）──
+  double _hardwareRatio = 9 / 16; // 預設值，相機就緒後更新
+
   // ── 設定 ─────────────────────────────────────────────────────────
   RecordingConfig _config = RecordingConfig();
   bool _isFrontCamera = false;
@@ -101,10 +109,18 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   // ── CameraAwesome 錄製狀態（P0 fix：用 Completer 確保 startRecording 後才能 stop）
   Completer<VideoRecordingCameraState>? _recordingStateCompleter;
 
+  // 進入畫面後自動開始，僅觸發一次
+  bool _autoStarted = false;
+
   // ── 自動偵測高爾夫站姿 ────────────────────────────────────────────
-  VideoCameraState? _idleVideoState;   // builder 傳入的 VideoMode state，供自動觸發用
   int _golfPostureFrames = 0;          // 連續偵測到站姿的幀數
-  static const int _autoStartFrameThreshold = 15; // ~1.5s @10fps
+  bool _calibrationDone   = false;     // 校準 3s 是否完成
+  bool _addressConfirmed  = false;     // 準備站姿是否已確認
+  static const double _autoStartDurationSec = 1.5; // 需持續偵測到站姿的秒數
+  static const double _calibrationSec = 3.0;
+  // 根據實際分析 FPS 動態計算門檻（30fps相機→10fps分析, 60fps相機→15fps分析）
+  int get _autoStartFrameThreshold =>
+      (_autoStartDurationSec * (_config.fps == FrameRate.fps60 ? 15 : 10)).round();
 
   // ── 自動下一桿 ────────────────────────────────────────────────────
   Timer? _autoNextTimer;
@@ -166,7 +182,9 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     _poses         = [];
     _latestEntry   = null;
     _recordingStateCompleter = null;
-    _golfPostureFrames = 0;
+    _golfPostureFrames  = 0;
+    _calibrationDone    = false;
+    _addressConfirmed   = false;
     _detector.reset();
   }
 
@@ -221,6 +239,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
   void _handleImpact(double impactTimeSec) {
     if (_state != ShotState.recording || !mounted) return;
+    if (!_addressConfirmed) return;
     _maxDurationTimer?.cancel();
     _impactTimeSec = impactTimeSec;
     _soundService.playSwingImpact();
@@ -267,7 +286,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     _cancelAllTimers();
     await _stopRecordingSafely();
     await _audioService.stop();
-    if (mounted) setState(() { _state = ShotState.idle; _poses = []; });
+    if (mounted) setState(() { _state = ShotState.idle; _poses = []; _autoStarted = false; });
   }
 
   // ── 錄製完成後處理 ────────────────────────────────────────────────
@@ -315,7 +334,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
     if (hits.isEmpty) {
       _showError('未偵測到揮桿，請重試');
-      if (mounted) setState(() => _state = ShotState.idle);
+      if (mounted) setState(() { _state = ShotState.idle; _autoStarted = false; });
       return;
     }
 
@@ -343,7 +362,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
     if (results.isEmpty) {
       _showError('切片失敗，請重試');
-      if (mounted) setState(() => _state = ShotState.idle);
+      if (mounted) setState(() { _state = ShotState.idle; _autoStarted = false; });
       return;
     }
 
@@ -378,7 +397,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       if (_autoNextCountdown <= 1) {
         t.cancel();
         if (_state == ShotState.result) {
-          setState(() { _state = ShotState.idle; });
+          setState(() { _state = ShotState.idle; _autoStarted = false; });
         }
       } else {
         setState(() => _autoNextCountdown--);
@@ -388,13 +407,14 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
   // P1 fix：傳入實際 fps 計算 frame 數
   SwingHit _fallbackHit(double impactSec, double totalDur, int fps) {
-    const half = 2.5;
+    final (s, e) = SwingImpactDetector.calculateClipBoundaries(
+      hitSec: impactSec, totalDurationSec: totalDur);
     return SwingHit(
       hitIndex:   1,
       hitFrame:   (impactSec * fps).round(),
       hitSec:     impactSec,
-      startSec:   (impactSec - half).clamp(0.0, totalDur),
-      endSec:     (impactSec + half).clamp(0.0, totalDur),
+      startSec:   s,
+      endSec:     e,
       speedValue: 0.0,
       audioValue: 0.0,
     );
@@ -473,25 +493,6 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
       setState(() { _poses = poses; _analysisSize = visual; });
 
-      // 自動偵測高爾夫站姿：idle 狀態下持續偵測，累積到閾值後自動開始
-      if (_state == ShotState.idle) {
-        final vs = _idleVideoState;
-        if (vs != null) {
-          if (_isGolfAddressPosture(poses)) {
-            _golfPostureFrames++;
-            if (_golfPostureFrames == 1) {
-              _soundService.playPostureDetected();
-            }
-            if (_golfPostureFrames >= _autoStartFrameThreshold) {
-              _golfPostureFrames = 0;
-              _startShot(vs);
-            }
-          } else {
-            if (_golfPostureFrames > 0) setState(() => _golfPostureFrames = 0);
-          }
-        }
-      }
-
       final isActive = _state == ShotState.recording || _state == ShotState.postImpact;
       if (isActive) {
         // P0 fix：_csvWriter 可能因 _buildCaptureRequest 尚未完成而為 null，直接跳過
@@ -511,9 +512,33 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         writer.addFrame(frame);
         setState(() => _frameCount++);
 
-        // 線上偵測只在 recording 狀態啟用（postImpact 不再偵測）
         if (_state == ShotState.recording) {
+          // 偵測器全程 feed（校準期收集基線；_handleImpact 內有 _addressConfirmed gate）
           _detector.feed(poses, timeSec);
+
+          // 階段一：校準期（3s）
+          if (!_calibrationDone) {
+            if (timeSec >= _calibrationSec) {
+              setState(() => _calibrationDone = true);
+            }
+            return;
+          }
+
+          // 階段二：偵測準備站姿
+          if (!_addressConfirmed) {
+            if (_isGolfAddressPosture(poses)) {
+              _golfPostureFrames++;
+              if (_golfPostureFrames == 1) {
+                _soundService.playPostureDetected();
+              }
+              if (_golfPostureFrames >= _autoStartFrameThreshold) {
+                setState(() { _addressConfirmed = true; _golfPostureFrames = 0; });
+              }
+            } else {
+              if (_golfPostureFrames > 0) setState(() => _golfPostureFrames = 0);
+            }
+          }
+          // 階段三（_addressConfirmed == true）：偵測器已在 feed，_handleImpact 自動解鎖
         }
       }
     } catch (e) {
@@ -557,10 +582,19 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         color: Colors.black,
         child: Center(
           child: AspectRatio(
-            aspectRatio: 9 / 16,
-            child: KeyedSubtree(
+            aspectRatio: _hardwareRatio,
+            child: ClipRect(
+            child: GestureDetector(
+              onScaleStart: (_) => _baseZoom = _currentZoom,
+              onScaleUpdate: (d) {
+                if (d.pointerCount < 2) return;
+                final z = (_baseZoom + (d.scale - 1.0) * 0.6).clamp(0.0, 1.0);
+                _setZoom(z);
+              },
+              child: KeyedSubtree(
               key: ValueKey('${_config.cameraKey}_$_isFrontCamera'),
               child: CameraAwesomeBuilder.custom(
+                previewFit: CameraPreviewFit.contain,
                 sensorConfig: SensorConfig.single(
                   sensor: Sensor.position(
                     _isFrontCamera ? SensorPosition.front : SensorPosition.back,
@@ -575,7 +609,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 onImageForAnalysis: _onImageAnalysis,
                 imageAnalysisConfig: AnalysisConfig(
                   androidOptions: AndroidAnalysisOptions.nv21(
-                    width: _config.quality == VideoQuality.hd ? 480 : 640,
+                    width: _config.quality == VideoQuality.hd ? 640 : 960,
                   ),
                   maxFramesPerSecond: _config.fps == FrameRate.fps60 ? 15 : 10,
                   autoStart: true,
@@ -583,12 +617,31 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 builder: (cameraState, preview) {
                   // P0 fix：透過 Completer 傳遞 VideoRecordingCameraState，
                   // 確保 stopRecording 呼叫時 state 已就緒
+                  _cameraState = cameraState;
+                  // 從硬體 preview 尺寸計算實際比例（確保 preview == 錄製範圍）
+                  final pw = preview.nativePreviewSize.width;
+                  final ph = preview.nativePreviewSize.height;
+                  if (pw > 0 && ph > 0) {
+                    final ratio = pw < ph ? pw / ph : ph / pw; // 永遠取直式比例
+                    if ((ratio - _hardwareRatio).abs() > 0.001) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) setState(() => _hardwareRatio = ratio);
+                      });
+                    }
+                  }
                   cameraState.when(
                     onVideoRecordingMode: (rs) {
                       final c = _recordingStateCompleter;
                       if (c != null && !c.isCompleted) c.complete(rs);
                     },
-                    onVideoMode: (vs) { _idleVideoState = vs; },
+                    onVideoMode: (vs) {
+                      if (!_autoStarted && _state == ShotState.idle) {
+                        _autoStarted = true;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted && _state == ShotState.idle) _startShot(vs);
+                        });
+                      }
+                    },
                   );
 
                   return Stack(
@@ -607,15 +660,23 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                         ),
                       // 狀態覆蓋層
                       ..._buildOverlay(cameraState),
+                      _ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
                     ],
                   );
                 },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+              ),              // CameraAwesomeBuilder
+            ),                // KeyedSubtree
+          ),                  // GestureDetector
+        ),                    // ClipRect
+      ),                      // AspectRatio
+    ),                        // Center
+  ),                          // Container
+);                            // Scaffold
+  }
+
+  void _setZoom(double value) {
+    setState(() => _currentZoom = value);
+    _cameraState?.sensorConfig.setZoom(value);
   }
 
   // ── 各狀態的覆蓋層 ────────────────────────────────────────────────
@@ -697,38 +758,18 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       left: 0, right: 0,
       child: Center(
         child: Text(
-          _golfPostureFrames > 0
-              ? '偵測到站姿，即將開始…'
-              : (_shotCount > 0 ? '再按一次準備下一桿' : '站好準備，或按下開始'),
-          style: TextStyle(
-            color: _golfPostureFrames > 0 ? Colors.greenAccent : Colors.white54,
-            fontSize: 13,
-          ),
+          _shotCount > 0 ? '再按一次準備下一桿' : '按下開始',
+          style: const TextStyle(color: Colors.white54, fontSize: 13),
         ),
       ),
     ),
-    if (_golfPostureFrames > 0)
-      Positioned(
-        bottom: 140,
-        left: 0, right: 0,
-        child: Center(
-          child: SizedBox(
-            width: 88, height: 88,
-            child: CircularProgressIndicator(
-              value: _golfPostureFrames / _autoStartFrameThreshold,
-              strokeWidth: 4,
-              color: Colors.greenAccent,
-              backgroundColor: Colors.white24,
-            ),
-          ),
-        ),
-      ),
   ];
 
   // recording：偵測狀態 + 手動停止儲存 + 取消
   List<Widget> _recordingOverlay() {
-    final isListening = _detector.state == SwingDetectState.listening ||
-        _detector.state == SwingDetectState.triggered;
+    final isListening = _addressConfirmed &&
+        (_detector.state == SwingDetectState.listening ||
+         _detector.state == SwingDetectState.triggered);
     final remainSec = _maxRecordingSec - _elapsed.inSeconds;
     return [
       Positioned(
@@ -739,6 +780,41 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         top: 16, left: 16,
         child: _DetectBadge(isListening: isListening, elapsed: _elapsed),
       ),
+      // 階段提示（校準 / 等待站姿 / 偵測中）
+      Positioned(
+        top: 56, left: 0, right: 0,
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: !_calibrationDone
+                ? _PhaseBadge(key: const ValueKey('cal'), text: '校準中…', color: Colors.white38)
+                : !_addressConfirmed
+                    ? _PhaseBadge(
+                        key: const ValueKey('addr'),
+                        text: _golfPostureFrames > 0 ? '偵測到站姿…' : '請站好準備姿勢',
+                        color: _golfPostureFrames > 0 ? Colors.greenAccent : Colors.white70,
+                      )
+                    : _PhaseBadge(key: const ValueKey('swing'), text: '偵測揮桿中', color: Colors.greenAccent),
+          ),
+        ),
+      ),
+      if (!_calibrationDone || (!_addressConfirmed && _golfPostureFrames > 0))
+        Positioned(
+          bottom: 140, left: 0, right: 0,
+          child: Center(
+            child: SizedBox(
+              width: 72, height: 72,
+              child: CircularProgressIndicator(
+                value: !_calibrationDone
+                    ? (_elapsed.inMilliseconds / 1000.0 / _calibrationSec).clamp(0.0, 1.0)
+                    : _golfPostureFrames / _autoStartFrameThreshold,
+                strokeWidth: 4,
+                color: !_calibrationDone ? Colors.white54 : Colors.greenAccent,
+                backgroundColor: Colors.white24,
+              ),
+            ),
+          ),
+        ),
       // 保底倒數提示（剩 10 秒以內才顯示）
       if (remainSec <= 10 && remainSec > 0)
         Positioned(
@@ -949,7 +1025,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                       child: OutlinedButton(
                         onPressed: () {
                           _autoNextTimer?.cancel();
-                          setState(() { _state = ShotState.idle; });
+                          setState(() { _state = ShotState.idle; _autoStarted = false; });
                         },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white70,
@@ -1166,7 +1242,7 @@ class _DetectBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text  = isListening ? '偵測中' : '校準中 ${elapsed.inSeconds}s';
+    final text  = isListening ? '揮桿偵測中' : '等待中';
     final color = isListening ? Colors.greenAccent : Colors.amber;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1187,6 +1263,22 @@ class _DetectBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PhaseBadge extends StatelessWidget {
+  final String text;
+  final Color color;
+  const _PhaseBadge({super.key, required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    decoration: BoxDecoration(
+      color: Colors.black54,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(text, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w500)),
+  );
 }
 
 class _ShotSettingChip extends StatelessWidget {
@@ -1220,4 +1312,53 @@ class _ShotSettingChip extends StatelessWidget {
       ),
     ),
   );
+}
+
+// ── 縮放滑桿（右側垂直）────────────────────────────────────────────────────────
+
+class _ZoomSlider extends StatelessWidget {
+  final double zoom;
+  final ValueChanged<double> onChanged;
+  const _ZoomSlider({required this.zoom, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (zoom * 100).round();
+    return Positioned(
+      left: 8,
+      top: 0,
+      bottom: 110,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '${pct}%',
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: RotatedBox(
+              quarterTurns: 3,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                ),
+                child: Slider(
+                  value: zoom,
+                  min: 0.0,
+                  max: 1.0,
+                  onChanged: onChanged,
+                  activeColor: Colors.white,
+                  inactiveColor: Colors.white24,
+                ),
+              ),
+            ),
+          ),
+          const Icon(Icons.zoom_in_rounded, color: Colors.white54, size: 18),
+        ],
+      ),
+    );
+  }
 }

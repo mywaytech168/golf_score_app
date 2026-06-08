@@ -34,7 +34,7 @@ class VideoExportService {
 
   // ────────────────────────────────────────────────────────────
 
-  /// 下載影片到裝置
+  /// 下載影片到裝置（固定下載資料夾）
   ///   [videoPath]  : 要下載的影片完整路徑
   ///   [displayName]: 儲存時顯示的檔名（不含副檔名）
   static Future<ExportResult> download(
@@ -56,6 +56,43 @@ class VideoExportService {
       return _saveToPhotosIOS(videoPath, fileName);
     } else {
       return _shareViaSheet(videoPath, fileName);
+    }
+  }
+
+  /// 讓使用者選擇資料夾後下載影片（Android SAF，iOS fallback 到下載）
+  static Future<ExportResult> downloadToFolder(
+    String videoPath, {
+    String? displayName,
+  }) async {
+    final file = File(videoPath);
+    if (!file.existsSync()) {
+      return ExportResult._(ExportStatus.failed, '影片檔案不存在');
+    }
+    final ext      = p.extension(videoPath).toLowerCase();
+    final base     = displayName ?? _defaultName(videoPath);
+    final fileName = '$base$ext';
+
+    if (Platform.isAndroid) {
+      try {
+        final savedUri = await _channel.invokeMethod<String>(
+          'pickFolderAndSave',
+          {'srcPath': videoPath, 'fileName': fileName},
+        );
+        if (savedUri != null && savedUri.isNotEmpty) {
+          debugPrint('[VideoExport] ✅ 選擇資料夾儲存: $savedUri');
+          return ExportResult._(ExportStatus.savedToDownloads, savedUri);
+        }
+        return ExportResult._(ExportStatus.failed, '儲存失敗');
+      } on PlatformException catch (e) {
+        if (e.code == 'cancelled') {
+          return ExportResult._(ExportStatus.failed, 'cancelled');
+        }
+        debugPrint('[VideoExport] ❌ pickFolderAndSave 失敗: ${e.message}，fallback');
+        return _shareViaSheet(videoPath, fileName);
+      }
+    } else {
+      // iOS / 其他平台：fallback 到固定下載
+      return download(videoPath, displayName: displayName);
     }
   }
 

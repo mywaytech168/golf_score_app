@@ -13,26 +13,24 @@ class ShotSoundService {
   final _player = AssetsAudioPlayer.newPlayer();
   bool _disposed = false;
 
-  static const _asset = 'assets/sounds/1.mp3';
-  static const _beepGap = Duration(milliseconds: 130);
+  static const _assetPosture = 'assets/sounds/dragon-studio-ding-sfx-472366.mp3';
+  static const _assetImpact  = 'assets/sounds/kakaist-camera-shutter-314056.mp3';
+  static const _assetDone    = 'assets/sounds/soundshelfstudio-ui-success-chime-513565.mp3';
 
-  Future<void> playPostureDetected() => _beeps(1);
-  Future<void> playSwingImpact()      => _beeps(2);
-  Future<void> playRecordingDone()    => _beeps(3);
+  Future<void> playPostureDetected() => _play(_assetPosture);
+  Future<void> playSwingImpact()      => _play(_assetImpact);
+  Future<void> playRecordingDone()    => _play(_assetDone);
 
-  Future<void> _beeps(int count) async {
+  Future<void> _play(String asset) async {
     if (_disposed) return;
-    for (int i = 0; i < count; i++) {
-      if (i > 0) await Future.delayed(_beepGap);
-      try {
-        await _player.open(
-          Audio(_asset),
-          autoStart: true,
-          showNotification: false,
-          respectSilentMode: false,
-        );
-      } catch (_) {}
-    }
+    try {
+      await _player.open(
+        Audio(asset),
+        autoStart: true,
+        showNotification: false,
+        respectSilentMode: false,
+      );
+    } catch (_) {}
   }
 
   void dispose() {
