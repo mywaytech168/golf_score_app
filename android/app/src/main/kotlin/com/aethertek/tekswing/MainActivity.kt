@@ -30,13 +30,6 @@ import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-// ✅ Google ML Kit Pose Detection 相關導入
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.pose.Pose
-import com.google.mlkit.vision.pose.PoseDetection
-import com.google.mlkit.vision.pose.PoseDetector
-import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "volume_button_channel"
@@ -99,14 +92,6 @@ class MainActivity: FlutterActivity() {
         BallYoloExtractor(applicationContext.assets).also { it.tryLoadModel() }
     }
     
-    // ✅ ML Kit Pose Detector (延遲初始化)
-    private val poseDetector: PoseDetector by lazy {
-        val options = PoseDetectorOptions.Builder()
-            .setDetectorMode(PoseDetectorOptions.STREAM_MODE)  // 連續模式，適合視頻分析
-            .build()
-        PoseDetection.getClient(options)
-    }
-
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -132,8 +117,18 @@ class MainActivity: FlutterActivity() {
         }
     }
 
+    // 獨立 Camera2 channel：低解析度分析幀 + 錄製控制
+    private var cameraRecorderChannel: CameraRecorderChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // ── Camera2 錄製 + 分析 Channel ────────────────────────────
+        cameraRecorderChannel = CameraRecorderChannel(
+            this,
+            flutterEngine.renderer,                      // TextureRegistry
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
 
         // ── 分析進度 EventChannel ────────────────────────────────
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, PROGRESS_CHANNEL)
@@ -980,148 +975,29 @@ class MainActivity: FlutterActivity() {
         Log.i(logTag, "[GolfAnalysis] 音訊峰值: ${audioPeakMs}ms")
 
         val hasAudio = audioPeakMs >= 0L
-        // 若無音訊，改為分析影片中段作為候選擊球點
-        val candidateMs: Long = if (hasAudio) audioPeakMs else {
-            val durationMs = android.media.MediaMetadataRetriever().use { mmr ->
+        // 無音訊時取影片中段作為 impactTimeMs
+        val impactTimeMs: Long = if (hasAudio) audioPeakMs else {
+            android.media.MediaMetadataRetriever().use { mmr ->
                 mmr.setDataSource(videoPath)
                 mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 5000L
-            }
-            durationMs / 2
+            } / 2
         }
 
-        // Step 2：在 [candidateMs - windowMs, candidateMs + windowMs] 範圍內用 ML Kit 逐幀驗證
-        sendProgress("golfAnalysis", 0.15, "骨架局部分析中…")
+        // V2 = 純音訊分析，不做骨架偵測
+        sendProgress("golfAnalysis", 1.0, "音訊分析完成")
+        Log.i(logTag, "[GolfAnalysis] V2 完成: impactMs=$impactTimeMs hasAudio=$hasAudio")
 
-        val startMs = (candidateMs - windowMs).coerceAtLeast(0L)
-        val endMs   = candidateMs + windowMs
-
-        // 取得影片 fps 與旋轉
-        val retriever = android.media.MediaMetadataRetriever()
-        retriever.setDataSource(videoPath)
-        val rotation = retriever.extractMetadata(
-            android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
-        )?.toIntOrNull() ?: 0
-        val durationMs = retriever.extractMetadata(
-            android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
-        )?.toLongOrNull() ?: 10000L
-        retriever.release()
-
-        // 以每 33ms 為步長（≈30fps）採樣窗口內的幀
-        val frameStepMs = 33L
-        val skeletonFrames = mutableListOf<Map<String, Any>>()
-
-        val localDetector = PoseDetection.getClient(
-            PoseDetectorOptions.Builder()
-                .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
-                .build()
-        )
-
-        // ── 空間裁切參數 ────────────────────────────────────────────────
-        // 高爾夫球員通常站在畫面正中央，裁出中央 cropRatio 寬度送給 ML Kit，
-        // 減少 ML Kit GPU 搬運量，速度提升約 40%（1080p → 540p 等效）。
-        // cropOffsetXPx 記錄左側切掉了多少像素，用於事後座標還原。
-        // 由第一幀的實際 bitmap 尺寸動態決定，初始值 0（待第一幀後設置）。
-        val cropRatio   = 0.50f   // 保留中央 50% 寬度
-        var cropOffsetXPx = 0f    // 裁切左邊緣（display px），第一幀後確定
-        var fullFrameW    = 0     // 原始幀寬（display px），第一幀後確定
-
-        try {
-            var timeMs = startMs
-            var frameIdx = 0
-            val totalFrames = ((endMs - startMs) / frameStepMs).toInt().coerceAtLeast(1)
-
-            while (timeMs <= endMs && timeMs <= durationMs) {
-                val fullBmp = extractFrameBitmapAt(videoPath, timeMs, maxWidth, rotation)
-                if (fullBmp != null) {
-                    // 第一幀：計算裁切參數（之後每幀相同）
-                    if (frameIdx == 0) {
-                        fullFrameW    = fullBmp.width
-                        val cropW     = (fullBmp.width  * cropRatio).toInt().coerceAtLeast(1)
-                        cropOffsetXPx = (fullBmp.width  * (1f - cropRatio) / 2f)
-                        Log.i(logTag, "[GolfAnalysis] 空間裁切: ${fullBmp.width}x${fullBmp.height} → cropW=$cropW offsetX=$cropOffsetXPx")
-                    }
-
-                    // 裁切：只保留中央 cropRatio 寬度，全高保留
-                    val cropLeft  = cropOffsetXPx.toInt().coerceIn(0, fullBmp.width - 1)
-                    val cropW     = (fullBmp.width * cropRatio).toInt().coerceIn(1, fullBmp.width - cropLeft)
-                    val croppedBmp = android.graphics.Bitmap.createBitmap(
-                        fullBmp, cropLeft, 0, cropW, fullBmp.height
-                    )
-                    fullBmp.recycle()
-
-                    val croppedH   = croppedBmp.height
-                    val inputImage = com.google.mlkit.vision.common.InputImage.fromBitmap(croppedBmp, 0)
-                    val pose = runCatching {
-                        com.google.android.gms.tasks.Tasks.await(localDetector.process(inputImage))
-                    }.getOrNull()
-                    croppedBmp.recycle()
-
-                    val landmarks = pose?.allPoseLandmarks ?: emptyList()
-                    if (landmarks.isNotEmpty()) {
-                        val lmList = landmarks.map { lm ->
-                            // ── 座標還原：把裁切小圖的 x 加回左側 offset，對齊原始畫面 ──
-                            val restoredX = lm.position.x + cropOffsetXPx
-                            mapOf(
-                                "type"  to lm.landmarkType,
-                                "x"     to restoredX,
-                                "y"     to lm.position.y,
-                                "z"     to runCatching { lm.position3D.z }.getOrDefault(0f),
-                                "vis"   to lm.inFrameLikelihood,
-                                // norm 座標相對於原始全幅尺寸，Flutter 繪圖直接使用
-                                "xNorm" to if (fullFrameW > 0) restoredX / fullFrameW.toFloat() else 0f,
-                                "yNorm" to if (croppedH  > 0) lm.position.y / croppedH.toFloat() else 0f,
-                            )
-                        }
-                        skeletonFrames.add(mapOf("timeMs" to timeMs, "landmarks" to lmList))
-                    }
-                }
-
-                val prog = 0.15 + (frameIdx.toDouble() / totalFrames) * 0.80
-                sendProgress("golfAnalysis", prog, "骨架局部分析 ${frameIdx + 1}/$totalFrames")
-                timeMs += frameStepMs
-                frameIdx++
-            }
-        } finally {
-            runCatching { localDetector.close() }
+        if (!hasAudio) {
+            Log.w(logTag, "[GolfAnalysis] V2 無音訊軌，以影片中段為 impactTimeMs")
         }
-
-        if (skeletonFrames.isEmpty()) {
-            Log.w(logTag, "[GolfAnalysis] 窗口內未偵測到骨架")
-            return null
-        }
-
-        // Step 3：精算擊球幀（選 visibility 最高的幀）
-        val bestFrame = skeletonFrames.maxByOrNull { frame ->
-            @Suppress("UNCHECKED_CAST")
-            val lms = frame["landmarks"] as List<Map<String, Any>>
-            lms.sumOf { (it["vis"] as? Float)?.toDouble() ?: 0.0 }
-        }
-        val exactImpactMs = (bestFrame?.get("timeMs") as? Long) ?: candidateMs
-
-        val skeletonJson = org.json.JSONArray(skeletonFrames.map { frame ->
-            @Suppress("UNCHECKED_CAST")
-            val lms = frame["landmarks"] as List<Map<String, Any>>
-            org.json.JSONObject().apply {
-                put("timeMs", frame["timeMs"])
-                put("landmarks", org.json.JSONArray(lms.map { lm ->
-                    org.json.JSONObject().apply {
-                        put("type", lm["type"]); put("x", lm["x"]); put("y", lm["y"])
-                        put("z", lm["z"]); put("vis", lm["vis"])
-                    }
-                }))
-            }
-        }).toString()
-
-        sendProgress("golfAnalysis", 1.0, "分析完成")
-        Log.i(logTag, "[GolfAnalysis] 完成: impactMs=$exactImpactMs, frames=${skeletonFrames.size}, hasAudio=$hasAudio")
 
         return mapOf(
-            "impactTimeMs"  to exactImpactMs,
+            "impactTimeMs"  to impactTimeMs,
             "audioPeakMs"   to audioPeakMs,
             "hasAudio"      to hasAudio,
-            "skeletonJson"  to skeletonJson,
-            "frameCount"    to skeletonFrames.size,
+            "skeletonJson"  to "[]",
+            "frameCount"    to 0,
             "videoPath"     to videoPath,
         )
     }
@@ -1202,12 +1078,12 @@ class MainActivity: FlutterActivity() {
         decoder.configure(inputFormat, null, null, 0)
         decoder.start()
 
-        // ── ML Kit 骨架偵測器 ─────────────────────────────────────────
-        val localDetector = PoseDetection.getClient(
-            PoseDetectorOptions.Builder()
-                .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
-                .build()
-        )
+        // ── MediaPipe 骨架偵測器 ──────────────────────────────────────
+        val mpAnalyzerV3 = MediaPipeVideoAnalyzer(this)
+        if (!mpAnalyzerV3.setup()) {
+            extractor.release()
+            Log.e(logTag, "[GolfAnalysis.V3] MediaPipe 初始化失敗"); return null
+        }
 
         val bufInfo  = android.media.MediaCodec.BufferInfo()
         var inputEos = false
@@ -1267,7 +1143,7 @@ class MainActivity: FlutterActivity() {
                     val image = runCatching { decoder.getOutputImage(outIdx) }.getOrNull()
                     if (image != null) {
                         try {
-                            // YUV → NV21（供 ML Kit InputImage.fromByteArray）
+                            // YUV → NV21（供 nv21ToBitmap → MediaPipe）
                             val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
                             val yStride = yP.rowStride; val uvStride = uP.rowStride
                             val uvPixelStride = uP.pixelStride
@@ -1292,35 +1168,33 @@ class MainActivity: FlutterActivity() {
                                 videoW, videoH, rotation, displayW, displayH, targetW, targetH, nv21Buf,
                             )
 
-                            val inputImage = InputImage.fromByteArray(
-                                nv21Buf, targetW, targetH, 0,
-                                InputImage.IMAGE_FORMAT_NV21
-                            )
-                            val pose = runCatching {
-                                com.google.android.gms.tasks.Tasks.await(localDetector.process(inputImage))
-                            }.getOrNull()
+                            // NV21（已旋轉至直式）→ Bitmap → MediaPipe
+                            val bmp = nv21ToBitmap(nv21Buf, targetW, targetH)
+                            val mpLms = try { mpAnalyzerV3.detect(bmp) } finally { bmp.recycle() }
 
-                            val landmarks = pose?.allPoseLandmarks ?: emptyList()
-                            val rw = landmarks.firstOrNull { it.landmarkType == 16 }
-                            if (rw != null && rw.inFrameLikelihood >= 0.3f) {
-                                // 還原到顯示座標（scale 反向）
-                                val yDisplay = rw.position.y / scale
-                                val xDisplay = rw.position.x / scale
-                                rightYList.add(ptsUs / 1000L to yDisplay)
-                                rightXList.add(xDisplay)
+                            // MediaPipe 回傳歸一化 [0,1]，相對於 targetW×targetH（已含旋轉+縮放）
+                            // 因此 xNorm = xDisplay/displayW，yNorm = yDisplay/displayH（直接可用）
+                            val rw = mpLms.getOrNull(16)
+                            if (rw != null && (rw["vis"] as? Double ?: 0.0) >= 0.3) {
+                                val xDisplay = (rw["x"] as Double) * displayW
+                                val yDisplay = (rw["y"] as Double) * displayH
+                                rightYList.add(ptsUs / 1000L to yDisplay.toFloat())
+                                rightXList.add(xDisplay.toFloat())
                             }
 
                             // 收集完整骨架資料（供 ClipPipelineService 寫成 pose_landmarks.csv）
-                            if (landmarks.isNotEmpty()) {
-                                val lmList = landmarks.map { lm ->
+                            if (mpLms.isNotEmpty()) {
+                                val lmList = mpLms.mapIndexed { idx, lm ->
+                                    val xNorm = lm["x"] as? Double ?: 0.0
+                                    val yNorm = lm["y"] as? Double ?: 0.0
                                     mapOf(
-                                        "type"  to lm.landmarkType,
-                                        "x"     to lm.position.x / scale,
-                                        "y"     to lm.position.y / scale,
-                                        "z"     to runCatching { lm.position3D.z }.getOrDefault(0f),
-                                        "vis"   to lm.inFrameLikelihood,
-                                        "xNorm" to if (displayW > 0) (lm.position.x / scale) / displayW else 0f,
-                                        "yNorm" to if (displayH > 0) (lm.position.y / scale) / displayH else 0f,
+                                        "type"  to idx,
+                                        "x"     to (xNorm * displayW).toFloat(),
+                                        "y"     to (yNorm * displayH).toFloat(),
+                                        "z"     to (lm["z"] as? Double ?: 0.0).toFloat(),
+                                        "vis"   to (lm["vis"] as? Double ?: 0.0).toFloat(),
+                                        "xNorm" to xNorm.toFloat(),
+                                        "yNorm" to yNorm.toFloat(),
                                     )
                                 }
                                 skeletonFrames.add(mapOf("timeMs" to ptsUs / 1000L, "landmarks" to lmList))
@@ -1343,7 +1217,7 @@ class MainActivity: FlutterActivity() {
         } finally {
             runCatching { decoder.stop(); decoder.release() }
             runCatching { extractor.release() }
-            runCatching { localDetector.close() }
+            runCatching { mpAnalyzerV3.close() }
         }
 
         // ── 過濾驗證 + 精確 impact 偵測 ──────────────────────────────────────────
@@ -1497,7 +1371,7 @@ class MainActivity: FlutterActivity() {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var csvWriter: java.io.Writer? = null          // ② BufferedWriter（改宣告型態）
-        var localDetector: com.google.mlkit.vision.pose.PoseDetector? = null
+        val mediaPipeAnalyzer = MediaPipeVideoAnalyzer(this)
         var inferThread: Thread? = null                // ① 推論執行緒（在 finally 中 join）
 
         try {
@@ -1555,13 +1429,11 @@ class MainActivity: FlutterActivity() {
             codec.configure(videoFormat, null, null, 0)
             codec.start()
 
-            // SINGLE_IMAGE_MODE：每幀獨立推理，不觸發 PoseMiniBenchmarkWorker
-            // （STREAM_MODE 會在背景啟動 benchmark worker，已知在 beta 版本有 JNI crash 問題）
-            localDetector = PoseDetection.getClient(
-                PoseDetectorOptions.Builder()
-                    .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
-                    .build()
-            )
+            // MediaPipe IMAGE 模式：每幀同步推理，取代 ML Kit PoseDetector
+            if (!mediaPipeAnalyzer.setup()) {
+                Log.e(logTag, "[PoseAnalyzer] MediaPipe 初始化失敗，分析中止")
+                return null
+            }
 
             // CSV 標頭（格式與 PoseFrameModel.toCsvRow 完全對齊：6 值/關鍵點）
             val csvFile = java.io.File(outputCsvPath)
@@ -1576,7 +1448,7 @@ class MainActivity: FlutterActivity() {
 
             val bufferInfo   = MediaCodec.BufferInfo()
             var decodedFrames = 0
-            val mlKitFailures = java.util.concurrent.atomic.AtomicInteger(0)
+            val inferFailures = java.util.concurrent.atomic.AtomicInteger(0)
 
             val frameIntervalUs  = 1_000_000L / actualVideoFps
             var nextSampleUs     = 0L
@@ -1586,14 +1458,10 @@ class MainActivity: FlutterActivity() {
 
             Log.i(logTag, "[PoseAnalyzer] 🎬 採樣配置: fps=$actualVideoFps interval=${frameIntervalUs}µs")
 
-            // ── ① 並行 Pipeline：解碼執行緒 + ML Kit 推論執行緒 ────────────
-            // 原本：[解碼 F1]──[ML Kit F1 (80ms)]──[解碼 F2]──[ML Kit F2]──...
-            // 現在：[解碼 F1]──[解碼 F2]──[解碼 F3]──...
-            //                  └──[ML Kit F1]──[ML Kit F2]──...
-            // 預期：GPU 推論與硬體解碼重疊，整體時間縮短 40-60%
-            //
-            // 佇列容量 = 2：解碼最多超前 2 幀，超出則阻塞（back-pressure）
-            // 解碼器通常有 4-8 個 output buffer，hold 2 個不會造成 stall
+            // ── ① 並行 Pipeline：解碼執行緒 + MediaPipe 推論執行緒 ─────────
+            // [解碼 F1]──[解碼 F2]──[解碼 F3]──...
+            //                  └──[MediaPipe F1]──[MediaPipe F2]──...
+            // 佇列容量 = 3：解碼最多超前 3 幀（back-pressure）
 
             data class FramePacket(
                 val image: android.media.Image?,   // null=無影像（getOutputImage 失敗）或 EOS
@@ -1624,20 +1492,19 @@ class MainActivity: FlutterActivity() {
             // 推論執行緒的獨立狀態（僅在此執行緒存取，無需同步）
             var inferFrameCount = 0
             var poseUpdateId    = 0
-            var lastLandmarks: List<com.google.mlkit.vision.pose.PoseLandmark>? = null
-            // ③④ 預分配 StringBuilder 與 landmark 陣列，避免每幀分配
+            var lastMpLandmarks: List<Map<String, Any>>? = null
+            // 預分配 StringBuilder，避免每幀分配
             val rowSb        = StringBuilder(512)
-            val lmByType     = arrayOfNulls<com.google.mlkit.vision.pose.PoseLandmark>(33)
             val localCodec   = codec  // 捕捉 non-null 參照供推論執行緒使用
-            // NV21 縮圖路徑的可重用緩衝區（僅 needsScale=true 時使用）
+            // NV21 轉換緩衝區（含旋轉 + 縮放，兩條路徑共用）
             var yBufInfer    = ByteArray(0)
             var uBufInfer    = ByteArray(0)
             var vBufInfer    = ByteArray(0)
-            val scaledNv21   = if (needsScale) ByteArray(scaledW * scaledH * 3 / 2) else ByteArray(0)
+            val nv21OutBuf   = ByteArray(scaledW * scaledH * 3 / 2)
 
             val sw = System.currentTimeMillis()
 
-            // ── 啟動 ML Kit 推論執行緒 ─────────────────────────────────────
+            // ── 啟動 MediaPipe 推論執行緒 ──────────────────────────────────
             inferThread = Thread({
                 try {
                     while (true) {
@@ -1645,96 +1512,61 @@ class MainActivity: FlutterActivity() {
                         if (pkt.isEos) break
 
                         try {
-                            // ── ML Kit 推論：依 needsScale 選擇輸入路徑 ─────────────
-                            val pose: com.google.mlkit.vision.pose.Pose? = pkt.image?.let { img ->
-                                val inputImage: InputImage = if (needsScale) {
-                                    // 縮圖路徑：C 做 YUV→NV21 + rotation + 降解析度
-                                    // 輸出 scaledW×scaledH NV21，省 ML Kit GPU 前處理
-                                    val yP = img.planes[0]; val uP = img.planes[1]; val vP = img.planes[2]
-                                    val yS = yP.rowStride; val uvS = uP.rowStride; val uvPx = uP.pixelStride
-                                    val yN = yP.buffer.remaining()
-                                    val uN = uP.buffer.remaining()
-                                    val vN = vP.buffer.remaining()
-                                    if (yBufInfer.size < yN) yBufInfer = ByteArray(yN)
-                                    if (uBufInfer.size < uN) uBufInfer = ByteArray(uN)
-                                    if (vBufInfer.size < vN) vBufInfer = ByteArray(vN)
-                                    yP.buffer.get(yBufInfer, 0, yN)
-                                    uP.buffer.get(uBufInfer, 0, uN)
-                                    vP.buffer.get(vBufInfer, 0, vN)
-
-                                    NativeLib.yuvToNv21(
-                                        yBufInfer, uBufInfer, vBufInfer,
-                                        yS, uvS, uvPx,
-                                        codedW, codedH, rotation,
-                                        displayW, displayH, scaledW, scaledH,
-                                        scaledNv21,
-                                    )
-                                    // rotation=0：C 已完成旋轉，ML Kit 不再旋轉
-                                    InputImage.fromByteArray(
-                                        scaledNv21, scaledW, scaledH,
-                                        0, InputImage.IMAGE_FORMAT_NV21,
-                                    )
-                                } else {
-                                    // 原路徑：zero-copy，720p 及以下直接傳
-                                    InputImage.fromMediaImage(img, rotation)
-                                }
+                            // ── YUV → NV21（含旋轉＋縮放）→ Bitmap → MediaPipe ──────
+                            val mpLandmarks: List<Map<String, Any>> = pkt.image?.let { img ->
+                                val bufs = imageToNv21Scaled(
+                                    img, codedW, codedH, rotation,
+                                    scaledW, scaledH, nv21OutBuf,
+                                    yBufInfer, uBufInfer, vBufInfer,
+                                )
+                                yBufInfer = bufs[0]; uBufInfer = bufs[1]; vBufInfer = bufs[2]
+                                val bmp = nv21ToBitmap(nv21OutBuf, scaledW, scaledH)
                                 try {
-                                    Tasks.await(localDetector!!.process(inputImage))
+                                    mediaPipeAnalyzer.detect(bmp)
                                 } catch (e: Exception) {
-                                    mlKitFailures.incrementAndGet()
-                                    Log.w(logTag, "[PoseAnalyzer] ML Kit fail #${pkt.frameIdx}: ${e.message}")
-                                    null
+                                    inferFailures.incrementAndGet()
+                                    Log.w(logTag, "[PoseAnalyzer] MediaPipe fail #${pkt.frameIdx}: ${e.message}")
+                                    emptyList()
+                                } finally {
+                                    bmp.recycle()
                                 }
-                            }
+                            } ?: emptyList()
 
-                            val landmarks = pose?.allPoseLandmarks ?: emptyList()
-
-                            // poseUpdateId 追蹤
-                            if (landmarks.isNotEmpty()) {
-                                val prev = lastLandmarks
-                                val changed = prev == null || prev.size != landmarks.size ||
-                                    landmarks.zip(prev).any { (a, b) ->
-                                        kotlin.math.abs(a.position.x - b.position.x) > 0.5f ||
-                                        kotlin.math.abs(a.position.y - b.position.y) > 0.5f
+                            // poseUpdateId 追蹤（以歸一化座標差異判斷）
+                            if (mpLandmarks.isNotEmpty()) {
+                                val prev = lastMpLandmarks
+                                val changed = prev == null || prev.size != mpLandmarks.size ||
+                                    mpLandmarks.zip(prev).any { (a, b) ->
+                                        val ax = a["x"] as? Double ?: 0.0
+                                        val bx = b["x"] as? Double ?: 0.0
+                                        val ay = a["y"] as? Double ?: 0.0
+                                        val by_ = b["y"] as? Double ?: 0.0
+                                        kotlin.math.abs(ax - bx) > 0.002 || kotlin.math.abs(ay - by_) > 0.002
                                     }
                                 if (changed) poseUpdateId++
-                                lastLandmarks = landmarks
+                                lastMpLandmarks = mpLandmarks
                             }
 
-                            // ③ arrayOfNulls 取代 associateBy
-                            lmByType.fill(null)
-                            for (lm in landmarks) lmByType[lm.landmarkType] = lm
-
-                            // ── 座標正規化（縮圖路徑下，ML Kit 回傳的 xPx 在 scaledW 空間）──
-                            // effectiveW/H：ML Kit 實際看到的影像寬高
-                            //   needsScale=false → effectiveW=displayW，行為與原本完全相同
-                            //   needsScale=true  → effectiveW=scaledW
-                            //     xNorm = xPx / scaledW = xDisplayPx / displayW ✓（比例不變）
-                            //     xPx_csv = xPx * displayW / scaledW（還原到 display 像素）✓
-                            val effW = scaledW.toFloat()   // = displayW when !needsScale
-                            val effH = scaledH.toFloat()
-                            val scaleUpX = if (needsScale) displayW / effW else 1f
-                            val scaleUpY = if (needsScale) displayH / effH else 1f
-
-                            // ④ 重用 StringBuilder
+                            // CSV 行（格式與 ML Kit 路徑完全相同：xNorm,yNorm,z,vis,xPx,yPx）
                             val timeSec = pkt.ptsUs / 1_000_000.0
                             rowSb.clear()
                             rowSb.append(pkt.frameIdx).append(',')
                                  .append(timeSec).append(',')
                                  .append(poseUpdateId)
-                            if (landmarks.isNotEmpty()) {
+                            if (mpLandmarks.isNotEmpty()) {
                                 for (i in 0..32) {
-                                    val lm = lmByType[i]
+                                    val lm = mpLandmarks.getOrNull(i)
                                     if (lm != null) {
-                                        val xPx = lm.position.x   // ML Kit space
-                                        val yPx = lm.position.y
-                                        val z   = try { lm.position3D.z } catch (_: Throwable) { 0f }
-                                        rowSb.append(',').append(xPx / effW)          // xNorm
-                                             .append(',').append(yPx / effH)          // yNorm
+                                        val xNorm = lm["x"] as? Double ?: Double.NaN
+                                        val yNorm = lm["y"] as? Double ?: Double.NaN
+                                        val z     = lm["z"] as? Double ?: Double.NaN
+                                        val vis   = lm["vis"] as? Double ?: 0.0
+                                        rowSb.append(',').append(xNorm)
+                                             .append(',').append(yNorm)
                                              .append(',').append(z)
-                                             .append(',').append(lm.inFrameLikelihood)
-                                             .append(',').append(xPx * scaleUpX)      // xPx（display 空間）
-                                             .append(',').append(yPx * scaleUpY)      // yPx（display 空間）
+                                             .append(',').append(vis)
+                                             .append(',').append(if (xNorm.isNaN()) "NaN" else xNorm * displayW)
+                                             .append(',').append(if (yNorm.isNaN()) "NaN" else yNorm * displayH)
                                     } else {
                                         rowSb.append(",NaN,NaN,NaN,0.0,NaN,NaN")
                                     }
@@ -1835,13 +1667,13 @@ class MainActivity: FlutterActivity() {
             csvWriter!!.flush()
             val elapsedMs   = System.currentTimeMillis() - sw
             val throughput  = if (elapsedMs > 0) "%.1f".format(inferFrameCount * 1000.0 / elapsedMs) else "N/A"
-            val mlKitFail   = mlKitFailures.get()
-            Log.i(logTag, "[PoseAnalyzer] 📊 處理完成（並行 Pipeline）:")
+            val failCount   = inferFailures.get()
+            Log.i(logTag, "[PoseAnalyzer] 📊 處理完成（MediaPipe 並行 Pipeline）:")
             Log.i(logTag, "[PoseAnalyzer]   總解碼幀: $decodedFrames，已採樣: $inferFrameCount，預期: $expectedFrames")
             Log.i(logTag, "[PoseAnalyzer]   採樣率: ${(inferFrameCount * 100.0 / maxOf(1, decodedFrames)).toInt()}%")
-            Log.i(logTag, "[PoseAnalyzer] done: $inferFrameCount frames, ${elapsedMs}ms, ${throughput}fps, mlkit_fail=$mlKitFail → $outputCsvPath")
+            Log.i(logTag, "[PoseAnalyzer] done: $inferFrameCount frames, ${elapsedMs}ms, ${throughput}fps, mediapipe_fail=$failCount → $outputCsvPath")
             sendProgress("analyzePose", 1.0, "骨架分析完成", inferFrameCount, inferFrameCount)
-            if (mlKitFail > 0) Log.w(logTag, "[PoseAnalyzer] mlkit_fail=$mlKitFail frames")
+            if (failCount > 0) Log.w(logTag, "[PoseAnalyzer] mediapipe_fail=$failCount frames")
             if (inferFrameCount < expectedFrames * 0.8) {
                 Log.w(logTag, "[PoseAnalyzer] ⚠️ 幀數異常: 只採樣 ${(inferFrameCount * 100.0 / maxOf(1, expectedFrames)).toInt()}% (decoded=$decodedFrames expected=$expectedFrames)")
             }
@@ -1863,11 +1695,21 @@ class MainActivity: FlutterActivity() {
                     }
                 }
             }
-            runCatching { localDetector?.close() }
+            runCatching { mediaPipeAnalyzer.close() }
             runCatching { csvWriter?.close() }
             runCatching { codec?.stop(); codec?.release() }
             runCatching { extractor.release() }
         }
+    }
+
+    /** NV21 ByteArray → Bitmap（JPEG 中轉，處理旋轉後的直式影像）。*/
+    private fun nv21ToBitmap(nv21: ByteArray, w: Int, h: Int): Bitmap {
+        val yuvImg = android.graphics.YuvImage(nv21, android.graphics.ImageFormat.NV21, w, h, null)
+        val out = java.io.ByteArrayOutputStream()
+        yuvImg.compressToJpeg(android.graphics.Rect(0, 0, w, h), 88, out)
+        val bytes = out.toByteArray()
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     }
 
     // YUV420 Image → NV21（含旋轉 + nearest-neighbor downscale）
@@ -1926,75 +1768,6 @@ class MainActivity: FlutterActivity() {
         return arrayOf(yBuf, uBuf, vBuf)
     }
     
-    // ML Kit 骨架檢測
-    // ✅ ML Kit 骨架檢測 - 完整實現
-    private fun detectPoseWithMLKit(bitmap: Bitmap): List<FloatArray>? {
-        return try {
-            Log.d(logTag, "[MLKit] 檢測骨架: ${bitmap.width}x${bitmap.height}")
-            
-            // 建立 InputImage (ML Kit 需要的格式)
-            val inputImage = InputImage.fromBitmap(bitmap, 0)
-            
-            // 執行骨架檢測 (同步操作，在背景線程執行)
-            val pose: Pose = Tasks.await(poseDetector.process(inputImage))
-            
-            // 轉換為 FloatArray 列表
-            val landmarks = pose.allPoseLandmarks.map { landmark ->
-                // 嘗試獲取 z 值，如果不可用則使用 0
-                val zValue = try {
-                    val zField = landmark.javaClass.getDeclaredField("z")
-                    zField.isAccessible = true
-                    zField.getFloat(landmark)
-                } catch (e: Exception) {
-                    Log.d(logTag, "[MLKit] z 屬性不可用: ${e.message}")
-                    0f
-                }
-                
-                floatArrayOf(
-                    landmark.position.x,
-                    landmark.position.y,
-                    zValue,
-                    landmark.inFrameLikelihood
-                )
-            }
-            
-            Log.d(logTag, "[MLKit] 回傳 ${landmarks.size} 個關鍵點")
-            landmarks
-            
-        } catch (e: Exception) {
-            Log.e(logTag, "[MLKit] 檢測例外: ${e.message}", e)
-            null
-        }
-    }
-    
-    // 比較兩個骨架是否相同（容差：1.0 像素）
-    private fun isSamePose(pose1: List<FloatArray>, pose2: List<FloatArray>): Boolean {
-        if (pose1.size != pose2.size) return false
-        
-        // 只比較有效的關鍵點（inFrameLikelihood > 0.1）
-        var validCount = 0
-        var changeCount = 0
-        
-        for (i in pose1.indices) {
-            val confidence1 = if (pose1[i].size > 3) pose1[i][3] else 0.5f
-            val confidence2 = if (pose2[i].size > 3) pose2[i][3] else 0.5f
-            
-            if (confidence1 > 0.1f && confidence2 > 0.1f) {
-                val dx = pose1[i][0] - pose2[i][0]
-                val dy = pose1[i][1] - pose2[i][1]
-                val distance = kotlin.math.sqrt(dx * dx + dy * dy)
-                
-                validCount++
-                if (distance > 1.0f) {  // 容差 1.0 像素
-                    changeCount++
-                }
-            }
-        }
-        
-        // 如果超過 50% 的有效關鍵點改變了位置，則認為姿態變化了
-        return if (validCount > 0) changeCount.toFloat() / validCount > 0.5f else false
-    }
-
     // ✅ 方案 A: MediaExtractor + MediaCodec 精確幀提取 (改進版)
     private fun extractFrameWithMediaCodec(videoPath: String, timeMs: Long, maxWidth: Int): Bitmap? {
         val extractor = MediaExtractor()

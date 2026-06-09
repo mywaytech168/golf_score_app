@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:app_tracking_transparency/app_tracking_transparency.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -35,22 +38,53 @@ Future<void> main() async {
 
   MediaKit.ensureInitialized();
   AnalysisProgressService.instance.start();
-  await MobileAds.instance.initialize();
-  await InAppPurchaseService.instance.init();
-  final purchaseService = PurchaseService();
-  await purchaseService.initialize();
-  final adManager = DailyAdManager();
-  await adManager.initialize();
+
+  // 只有「載入語系」是進入畫面前的必要步驟，且加上 timeout 避免儲存層卡住白屏。
+  final localeProvider = LocaleProvider();
+  try {
+    await localeProvider.loadSavedLocale().timeout(const Duration(seconds: 3));
+  } catch (e) {
+    debugPrint('⚠️ [App] 載入語系逾時/失敗，使用預設語系: $e');
+  }
+
+  // 廣告 / 內購 / 每日廣告等初始化不該阻塞首屏，改為背景執行。
+  // 弱訊號或商店服務無回應時，App 仍能立即進入並正常錄製。
+  unawaited(_initServicesInBackground());
+
+  runApp(MyApp(localeProvider: localeProvider));
+}
+
+/// 背景初始化非首屏關鍵服務。任何單項失敗都不影響 App 進入。
+Future<void> _initServicesInBackground() async {
+  Future<void> guard(String name, Future<void> Function() task) async {
+    try {
+      await task().timeout(const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint('⚠️ [App] 初始化 $name 失敗: $e');
+    }
+  }
+
+  // iOS：在初始化廣告前先請求 App Tracking Transparency 授權（Apple 5.1.2 要求）。
+  // 使用者未允許時 IDFA 會回傳全零，AdMob 自動改投放非個人化廣告，全功能仍可使用。
+  if (Platform.isIOS) {
+    await guard('ATT', () async {
+      final status =
+          await AppTrackingTransparency.trackingAuthorizationStatus;
+      if (status == TrackingStatus.notDetermined) {
+        await AppTrackingTransparency.requestTrackingAuthorization();
+      }
+    });
+  }
+
+  await guard('MobileAds', () => MobileAds.instance.initialize());
+  await guard('InAppPurchase', () => InAppPurchaseService.instance.init());
+  await guard('PurchaseService', () => PurchaseService().initialize());
+  await guard('DailyAdManager', () => DailyAdManager().initialize());
+
   unawaited(AdService.loadAiCoachInterstitial());
   unawaited(AdService.loadBallDetectionInterstitial());
   unawaited(AdService.loadFullAnalysisInterstitial());
   unawaited(AdService.loadRewardedAiCoach());
-
-  // Load saved locale before running the app
-  final localeProvider = LocaleProvider();
-  await localeProvider.loadSavedLocale();
-
-  runApp(MyApp(localeProvider: localeProvider));
 }
 
 class MyApp extends StatefulWidget {
@@ -62,13 +96,14 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<void>? _sessionExpiredSub;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // 當 refresh token 也失效時，自動跳轉登入頁
     _sessionExpiredSub = sessionExpiredStream.stream.listen((_) {
       debugPrint('⚠️ [App] Session 過期，跳轉登入頁');
@@ -80,7 +115,16 @@ class _MyAppState extends State<MyApp> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // 回前景時補發先前扣款成功但驗證失敗的交易（網路恢復情境）。
+      unawaited(InAppPurchaseService.instance.retryPendingVerifications());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sessionExpiredSub?.cancel();
     super.dispose();
   }
@@ -162,11 +206,17 @@ enum _StartupState { showTerms, showLogin, showHome }
 
 /// 屏蔽系统噪音日志
 void _filterSystemLogs() {
+  // Release 版本完全靜音 debugPrint，避免洩漏 API 結構/狀態碼並減少效能開銷。
+  if (kReleaseMode) {
+    debugPrint = (String? message, {int? wrapWidth}) {};
+    return;
+  }
+
   // 重定向 debugPrint 来过滤日志
   final originalDebugPrint = debugPrint;
   debugPrint = (String? message, {int? wrapWidth}) {
     if (message == null) return;
-    
+
     // 屏蔽的日志关键词
     final blocklist = [
       'hiddenapi',

@@ -18,6 +18,7 @@ import 'ball_detection_prefs.dart';
 import 'ball_tracker.dart';
 import 'ball_trajectory_service.dart';
 import 'golf_analysis_service.dart';
+import 'golfer_mask.dart';
 import 'server_ball_trajectory_service.dart';
 import 'skeleton_overlay_service.dart';
 import 'video_analysis_service.dart';
@@ -142,11 +143,18 @@ class ClipPipelineService {
     await Directory(sessionDir).create(recursive: true);
 
     final clipPath = p.join(sessionDir, 'clip.mp4');
+    // 根據 recordedAspectRatio 決定目標尺寸
+    // 格式：'16x9_hd', '16x9_fhd', '4x3_hd', '4x3_fhd', '4x3_sd'
+    // 舊格式相容：'hd', 'fhd'
+    final (tw, th) = _targetSize(sourceEntry.recordedAspectRatio);
     final trimResult = await VideoClipService.trimClip(
-      srcPath: srcVideoPath,
-      dstPath: clipPath,
-      startSec: hit.startSec,
-      endSec: hit.endSec,
+      srcPath:        srcVideoPath,
+      dstPath:        clipPath,
+      startSec:       hit.startSec,
+      endSec:         hit.endSec,
+      targetWidth:    tw,
+      targetHeight:   th,
+      flipHorizontal: sourceEntry.isFrontCamera, // 前鏡頭水平翻轉
     );
     if (trimResult == null) {
       debugPrint('[Pipeline] hit ${hit.hitIndex} → ❌ 裁切失敗');
@@ -159,42 +167,49 @@ class ClipPipelineService {
     // 縮圖定位到擊球瞬間，使用多策略 fallback 處理 HEVC/MOV 相容性
     String? thumbPath;
     final thumbOutPath = p.join(sessionDir, 'thumbnail.jpg');
+    final trimmedFile = File(trimmed);
+    final trimmedSize = await trimmedFile.exists() ? await trimmedFile.length() : 0;
     final hitInClipMs = ((hit.hitSec - clipActualStartSec) * 1000).round().clamp(0, 999999);
     final timeCandidates = {hitInClipMs, 0, 1000}.toList();
-    for (final timeMs in timeCandidates) {
-      try {
-        final path = await vt.VideoThumbnail.thumbnailFile(
-          video: trimmed,
-          thumbnailPath: thumbOutPath,
-          imageFormat: vt.ImageFormat.JPEG,
-          maxHeight: 256,
-          timeMs: timeMs,
-          quality: 75,
-        );
-        if (path != null && path.isNotEmpty) {
-          thumbPath = path;
-          break;
+    // 過小的 clip 跳過縮圖產生，避免 MediaMetadataRetriever crash
+    if (trimmedSize >= 100 * 1024) {
+      for (final timeMs in timeCandidates) {
+        try {
+          final path = await vt.VideoThumbnail.thumbnailFile(
+            video: trimmed,
+            thumbnailPath: thumbOutPath,
+            imageFormat: vt.ImageFormat.JPEG,
+            maxHeight: 256,
+            timeMs: timeMs,
+            quality: 75,
+          );
+          if (path != null && path.isNotEmpty) {
+            thumbPath = path;
+            break;
+          }
+        } catch (e) {
+          debugPrint('[Pipeline] hit ${hit.hitIndex} → 縮圖 ${timeMs}ms 失敗: $e');
         }
-      } catch (e) {
-        debugPrint('[Pipeline] hit ${hit.hitIndex} → 縮圖 ${timeMs}ms 失敗: $e');
       }
-    }
-    if (thumbPath == null) {
-      try {
-        final bytes = await vt.VideoThumbnail.thumbnailData(
-          video: trimmed,
-          imageFormat: vt.ImageFormat.JPEG,
-          maxHeight: 256,
-          timeMs: 0,
-          quality: 75,
-        );
-        if (bytes != null && bytes.isNotEmpty) {
-          await File(thumbOutPath).writeAsBytes(bytes);
-          thumbPath = thumbOutPath;
+      if (thumbPath == null) {
+        try {
+          final bytes = await vt.VideoThumbnail.thumbnailData(
+            video: trimmed,
+            imageFormat: vt.ImageFormat.JPEG,
+            maxHeight: 256,
+            timeMs: 0,
+            quality: 75,
+          );
+          if (bytes != null && bytes.isNotEmpty) {
+            await File(thumbOutPath).writeAsBytes(bytes);
+            thumbPath = thumbOutPath;
+          }
+        } catch (e) {
+          debugPrint('[Pipeline] hit ${hit.hitIndex} → thumbnailData 失敗: $e');
         }
-      } catch (e) {
-        debugPrint('[Pipeline] hit ${hit.hitIndex} → thumbnailData 失敗: $e');
       }
+    } else {
+      debugPrint('[Pipeline] hit ${hit.hitIndex} → 縮圖跳過: clip 太小 ${trimmedSize}B');
     }
 
     // 從原始 CSV 擷取此球的骨架資料，存入 clip session 目錄
@@ -579,6 +594,20 @@ class ClipPipelineService {
               'fps=${extraction.fps.toStringAsFixed(1)}，'
               '${extraction.width}×${extraction.height}');
 
+          // 自動球員遮罩：從本 clip 的 pose CSV(擊球幀)算出球員 bbox(coded 空間),
+          // 排除落在身體/球桿上的 blob，避免軌跡飛到人身上。拿不到 pose 時為 null(不遮罩)。
+          List<int>? golferBox;
+          if (hitSec != null) {
+            final poseCsvPath = p.join(p.dirname(clipPath), 'pose_landmarks.csv');
+            golferBox = await GolferMask.codedBoxFromPoseCsv(
+              csvPath:  poseCsvPath,
+              hitSec:   hitSec,
+              codedW:   extraction.width,
+              codedH:   extraction.height,
+              rotation: extraction.rotation,
+            );
+          }
+
           final tracker = BallTracker();
           trackPts = tracker.track(
             frames:   extraction.frames,
@@ -587,6 +616,7 @@ class ClipPipelineService {
             videoH:   extraction.height,
             rotation: extraction.rotation,
             hitSec:   hitSec,
+            golferBox: golferBox,
           );
           debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點'
               ' (成功率 ${extraction.frames.isEmpty ? 0 : (trackPts.length * 100 ~/ extraction.frames.length)}%)');
@@ -943,7 +973,6 @@ class ClipPipelineService {
       videoPath: clipPath,
       searchStartMs: searchStartMs,
       searchEndMs: searchEndMs,
-      windowMs: 1000,
     );
 
     if (result == null) {
@@ -962,5 +991,26 @@ class ClipPipelineService {
       impactTimeMs: result.impactTimeMs,
       skeletonJson: result.skeletonJson,
     );
+  }
+
+  /// recordedAspectRatio 字串 → (targetWidth, targetHeight)（直式 portrait）
+  ///
+  /// 新格式：'16x9_hd', '16x9_fhd', '4x3_hd', '4x3_fhd', '4x3_sd', '16x9_sd'
+  /// 舊格式（相容）：'hd', 'fhd'
+  static (int, int) _targetSize(String? ratio) {
+    if (ratio == null) return (720, 1280);
+    final r = ratio.toLowerCase();
+
+    // 4:3 系列
+    if (r.contains('4x3')) {
+      if (r.contains('fhd')) return (1080, 1440);
+      if (r.contains('sd'))  return (480,  640);
+      return (720, 960);   // hd
+    }
+
+    // 16:9 系列（預設）
+    if (r.contains('fhd') || r == 'fhd') return (1080, 1920);
+    if (r.contains('sd'))                 return (480,  854);
+    return (720, 1280);    // hd 或 '16x9_hd' 或舊 'hd'
   }
 }

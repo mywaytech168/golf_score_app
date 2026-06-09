@@ -38,6 +38,52 @@ class VideoServerClient {
   Future<bool> _tryRefreshToken() =>
       AuthTokenStorage.instance.tryRefreshToken();
 
+  /// 預設請求逾時時間。山區/弱訊號時避免無限等待造成 UI 卡死。
+  static const Duration _defaultTimeout = Duration(seconds: 15);
+
+  /// 統一的 HTTP 送出函式。
+  ///
+  /// - 一律套用 [_defaultTimeout]（弱訊號保護）。
+  /// - [auth] 為 true 時帶上 Bearer token，並在收到 401 時自動刷新 token 重試一次；
+  ///   刷新失敗則拋出 [UnauthorizedException]。
+  /// - 回傳原始 [http.Response]，由呼叫端依需求解析 body / 狀態碼。
+  Future<http.Response> _send(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    bool auth = true,
+    Duration? timeout,
+  }) async {
+    final url = Uri.parse('$_baseUrl$path');
+    final encoded = body == null ? null : jsonEncode(body);
+
+    Future<http.Response> once() async {
+      final headers = auth
+          ? await _getAuthHeaders()
+          : {'Content-Type': 'application/json'};
+      final req = switch (method) {
+        'GET' => http.get(url, headers: headers),
+        'POST' => http.post(url, headers: headers, body: encoded),
+        'PATCH' => http.patch(url, headers: headers, body: encoded),
+        'PUT' => http.put(url, headers: headers, body: encoded),
+        'DELETE' => http.delete(url, headers: headers, body: encoded),
+        _ => throw ArgumentError('不支援的 method: $method'),
+      };
+      return req.timeout(timeout ?? _defaultTimeout);
+    }
+
+    var res = await once();
+    if (auth && res.statusCode == 401) {
+      final ok = await _tryRefreshToken();
+      if (!ok) throw UnauthorizedException('$method $path: 401');
+      res = await once();
+      if (res.statusCode == 401) {
+        throw UnauthorizedException('$method $path: 401 (刷新後仍失敗)');
+      }
+    }
+    return res;
+  }
+
   // ============================================================
   // 版本檢查（不需要登入 Token）
   // ============================================================
@@ -63,12 +109,12 @@ class VideoServerClient {
     required String version,
   }) async {
     try {
-      final url = Uri.parse(
-          '$_baseUrl/api/app/version?platform=$platform&version=$version');
-      debugPrint('🔄 版本檢查 → $url');
-      final response = await http
-          .get(url, headers: {'Content-Type': 'application/json'})
-          .timeout(const Duration(seconds: 8));
+      final response = await _send(
+        'GET',
+        '/api/app/version?platform=$platform&version=$version',
+        auth: false,
+        timeout: const Duration(seconds: 8),
+      );
       debugPrint('📥 版本檢查回應: ${response.statusCode}');
 
       if (response.statusCode == 200) {
@@ -92,12 +138,11 @@ class VideoServerClient {
     required String password,
   }) async {
     try {
-      final url = Uri.parse('$_baseUrl/api/auth/login');
-      debugPrint('🔑 本地登入 → $url');
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'username': username, 'password': password}),
+      final response = await _send(
+        'POST',
+        '/api/auth/login',
+        auth: false,
+        body: {'username': username, 'password': password},
       );
 
       debugPrint('📥 Response: ${response.statusCode}');
@@ -145,20 +190,18 @@ class VideoServerClient {
     String? inviteCode,
   }) async {
     try {
-      final url = Uri.parse('$_baseUrl/api/auth/register');
-      debugPrint('📝 本地註冊 → $url');
-      final body = <String, dynamic>{
-        'username': username,
-        'email': email,
-        'password': password,
-        'displayName': displayName,
-        if (inviteCode != null && inviteCode.isNotEmpty)
-          'inviteCode': inviteCode.toUpperCase(),
-      };
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
+      final response = await _send(
+        'POST',
+        '/api/auth/register',
+        auth: false,
+        body: {
+          'username': username,
+          'email': email,
+          'password': password,
+          'displayName': displayName,
+          if (inviteCode != null && inviteCode.isNotEmpty)
+            'inviteCode': inviteCode.toUpperCase(),
+        },
       );
 
       debugPrint('📥 Response: ${response.statusCode}');
@@ -181,10 +224,11 @@ class VideoServerClient {
   /// 忘記密碼：請求寄送 6 位驗證碼
   Future<Map<String, dynamic>> forgotPassword(String email) async {
     try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/forgot-password'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
+      final response = await _send(
+        'POST',
+        '/api/auth/forgot-password',
+        auth: false,
+        body: {'email': email},
       );
       if (response.statusCode == 200) return jsonDecode(response.body);
       final err = jsonDecode(response.body);
@@ -201,14 +245,15 @@ class VideoServerClient {
     required String newPassword,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/reset-password'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final response = await _send(
+        'POST',
+        '/api/auth/reset-password',
+        auth: false,
+        body: {
           'email': email,
           'code': code,
           'newPassword': newPassword,
-        }),
+        },
       );
       if (response.statusCode == 200) return jsonDecode(response.body);
       final err = jsonDecode(response.body);
@@ -221,10 +266,11 @@ class VideoServerClient {
   /// 刷新 Token
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/refresh-token'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'refreshToken': refreshToken}),
+      final response = await _send(
+        'POST',
+        '/api/auth/refresh-token',
+        auth: false,
+        body: {'refreshToken': refreshToken},
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -248,21 +294,13 @@ class VideoServerClient {
   /// ```
   Future<Map<String, dynamic>?> getPlanStatus({bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/plan');
-
-      debugPrint('📋 取得方案狀態 → $url');
-      final response = await http.get(url, headers: headers);
+      final response = await _send('GET', '/api/user/plan');
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         // 支援 { data: {...} } 或直接回傳欄位
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getPlanStatus(isRetry: true);
-        throw UnauthorizedException('取得方案失敗: 401');
       } else {
         debugPrint('❌ 取得方案失敗: ${response.statusCode}');
         return null;
@@ -277,7 +315,7 @@ class VideoServerClient {
   /// 付款後向後端驗證並升級方案
   ///
   /// [plan]          - 'pro' | 'elite'
-  /// [store]         - 'google_pay' | 'google_play' | 'app_store'
+  /// [store]         - 'google_play' | 'app_store'
   /// [purchaseToken] - Google Pay token / Play purchase token / App Store receipt
   Future<bool> purchasePlan(
     String plan,
@@ -287,28 +325,21 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/plan/purchase');
-
       debugPrint('💳 購買方案 → plan=$plan store=$store');
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode({
+      final response = await _send(
+        'POST',
+        '/api/user/plan/purchase',
+        body: {
           'plan': plan,
           'store': store,
           'purchaseToken': purchaseToken,
           if (productId != null) 'productId': productId,
-        }),
+        },
       );
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         return true;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return purchasePlan(plan, store, purchaseToken, productId: productId, isRetry: true);
-        throw UnauthorizedException('購買方案失敗: 401');
       } else {
         debugPrint('❌ 購買方案失敗: ${response.statusCode} ${response.body}');
         return false;
@@ -331,28 +362,21 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/balls/purchase');
-
       debugPrint('⚾ 購買球包 → productId=$productId store=$store');
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode({
+      final response = await _send(
+        'POST',
+        '/api/user/balls/purchase',
+        body: {
           'productId': productId,
           'store': store,
           'purchaseToken': purchaseToken,
-        }),
+        },
       );
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return purchaseBalls(productId, store, purchaseToken, isRetry: true);
-        throw UnauthorizedException('購買球包失敗: 401');
       } else {
         debugPrint('❌ 購買球包失敗: ${response.statusCode} ${response.body}');
         return null;
@@ -378,19 +402,12 @@ class VideoServerClient {
   /// ```
   Future<Map<String, dynamic>?> getRewardStatus({bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/rewards');
-      debugPrint('🎁 取得獎勵狀態 → $url');
-      final response = await http.get(url, headers: headers);
+      final response = await _send('GET', '/api/user/rewards');
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getRewardStatus(isRetry: true);
-        throw UnauthorizedException('取得獎勵失敗: 401');
       } else {
         debugPrint('❌ 取得獎勵失敗: ${response.statusCode}');
         return null;
@@ -407,19 +424,12 @@ class VideoServerClient {
   /// 回傳格式：`{ "balls": 1, "adClaimedToday": 3 }`
   Future<Map<String, dynamic>?> claimAdReward({bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/rewards/ad');
-      debugPrint('📺 認領廣告獎勵 → $url');
-      final response = await http.post(url, headers: headers);
+      final response = await _send('POST', '/api/user/rewards/ad');
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return claimAdReward(isRetry: true);
-        throw UnauthorizedException('廣告獎勵失敗: 401');
       } else {
         debugPrint('❌ 廣告獎勵失敗: ${response.statusCode}');
         return null;
@@ -442,17 +452,12 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/analysis/history?page=$page&pageSize=$pageSize');
-      final response = await http.get(url, headers: headers);
+      final response = await _send('GET',
+          '/api/user/analysis/history?page=$page&pageSize=$pageSize');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getAnalysisHistory(page: page, pageSize: pageSize, isRetry: true);
-        throw UnauthorizedException('分析紀錄失敗: 401');
       }
       return null;
     } catch (e) {
@@ -469,17 +474,12 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/balls/history?page=$page&pageSize=$pageSize');
-      final response = await http.get(url, headers: headers);
+      final response = await _send('GET',
+          '/api/user/balls/history?page=$page&pageSize=$pageSize');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getBallsHistory(page: page, pageSize: pageSize, isRetry: true);
-        throw UnauthorizedException('球數紀錄失敗: 401');
       }
       return null;
     } catch (e) {
@@ -500,19 +500,12 @@ class VideoServerClient {
   /// ```
   Future<Map<String, dynamic>?> getInvitedFriends({bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/invite/friends');
-      debugPrint('👥 取得邀請好友列表 → $url');
-      final response = await http.get(url, headers: headers);
+      final response = await _send('GET', '/api/user/invite/friends');
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getInvitedFriends(isRetry: true);
-        throw UnauthorizedException('取得邀請好友失敗: 401');
       } else {
         debugPrint('❌ 取得邀請好友失敗: ${response.statusCode}');
         return null;
@@ -527,20 +520,13 @@ class VideoServerClient {
   /// 取得使用者邀請碼
   Future<String?> getInviteCode({bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/invite-code');
-      debugPrint('🔗 取得邀請碼 → $url');
-      final response = await http.get(url, headers: headers);
+      final response = await _send('GET', '/api/user/invite-code');
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         final data = (json['data'] as Map<String, dynamic>?) ?? json;
         return data['code'] as String?;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getInviteCode(isRetry: true);
-        throw UnauthorizedException('取得邀請碼失敗: 401');
       } else {
         debugPrint('❌ 取得邀請碼失敗: ${response.statusCode}');
         return null;
@@ -561,17 +547,11 @@ class VideoServerClient {
   /// 回傳格式：`{ "id", "username", "email", "displayName", "googleLinked": bool }`
   Future<Map<String, dynamic>?> getMe({bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http
-          .get(Uri.parse('$_baseUrl/api/user/me'), headers: headers)
-          .timeout(const Duration(seconds: 8));
+      final response = await _send('GET', '/api/user/me',
+          timeout: const Duration(seconds: 8));
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return getMe(isRetry: true);
-        throw UnauthorizedException('getMe 失敗: 401');
       }
       return null;
     } catch (e) {
@@ -586,18 +566,9 @@ class VideoServerClient {
   /// 端點：PATCH /api/user/me  body: `{ "displayName": "..." }`
   Future<bool> updateProfileName(String displayName, {bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.patch(
-        Uri.parse('$_baseUrl/api/user/me'),
-        headers: headers,
-        body: jsonEncode({'displayName': displayName.trim()}),
-      );
+      final response = await _send('PATCH', '/api/user/me',
+          body: {'displayName': displayName.trim()});
       if (response.statusCode == 200) return true;
-      if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return updateProfileName(displayName, isRetry: true);
-        throw UnauthorizedException('updateProfileName 失敗: 401');
-      }
       debugPrint('❌ updateProfileName: ${response.statusCode}');
       return false;
     } catch (e) {
@@ -617,22 +588,16 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/change-password'),
-        headers: headers,
-        body: jsonEncode({
+      final response = await _send(
+        'POST',
+        '/api/auth/change-password',
+        body: {
           'currentPassword': currentPassword,
           'newPassword': newPassword,
-        }),
+        },
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
-      }
-      if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return changePassword(currentPassword: currentPassword, newPassword: newPassword, isRetry: true);
-        throw UnauthorizedException('changePassword 失敗: 401');
       }
       final err = jsonDecode(response.body) as Map<String, dynamic>;
       return {'success': false, 'message': err['message'] ?? '修改失敗 (${response.statusCode})'};
@@ -642,23 +607,33 @@ class VideoServerClient {
     }
   }
 
+  /// 永久刪除目前登入的帳號及其資料（App Store / Google Play 強制要求）。
+  ///
+  /// 端點：DELETE /api/user/me
+  /// 回傳格式：`{ "success": true }`，刪除成功回傳 true。
+  Future<bool> deleteAccount({bool isRetry = false}) async {
+    try {
+      final response = await _send('DELETE', '/api/user/me');
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return true;
+      }
+      debugPrint('❌ deleteAccount: ${response.statusCode}');
+      return false;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ deleteAccount 異常: $e');
+      return false;
+    }
+  }
+
   /// 綁定 Google 帳號（idToken from google_sign_in）
   ///
   /// 端點：POST /api/auth/google/link  body: `{ "idToken": "..." }`
   Future<Map<String, dynamic>> linkGoogleAccount(String idToken, {bool isRetry = false}) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_baseUrl/api/auth/google/link'),
-        headers: headers,
-        body: jsonEncode({'idToken': idToken}),
-      );
+      final response = await _send('POST', '/api/auth/google/link',
+          body: {'idToken': idToken});
       if (response.statusCode == 200) return jsonDecode(response.body);
-      if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return linkGoogleAccount(idToken, isRetry: true);
-        throw UnauthorizedException('linkGoogle 失敗: 401');
-      }
       final err = jsonDecode(response.body) as Map<String, dynamic>;
       return {'success': false, 'message': err['message'] ?? '綁定失敗 (${response.statusCode})'};
     } catch (e) {
@@ -675,14 +650,9 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/invite/apply');
-      debugPrint('🎟️ 套用邀請碼 → $url code=$inviteCode');
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode({'inviteCode': inviteCode.toUpperCase()}),
-      );
+      debugPrint('🎟️ 套用邀請碼 → code=$inviteCode');
+      final response = await _send('POST', '/api/user/invite/apply',
+          body: {'inviteCode': inviteCode.toUpperCase()});
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
@@ -691,10 +661,6 @@ class VideoServerClient {
       } else if (response.statusCode == 400) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return {'success': false, 'message': json['message'] ?? '邀請碼無效'};
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return applyInviteCode(inviteCode, isRetry: true);
-        throw UnauthorizedException('套用邀請碼失敗: 401');
       } else {
         debugPrint('❌ 套用邀請碼失敗: ${response.statusCode}');
         return null;
@@ -711,9 +677,8 @@ class VideoServerClient {
   /// 回傳格式：`{ "uploadUrl": "...", "imageId": "..." }`
   Future<Map<String, dynamic>?> getFeedbackImageUploadUrl() async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/rewards/feedback/image-upload-url');
-      final response = await http.get(url, headers: headers);
+      final response = await _send(
+          'GET', '/api/user/rewards/feedback/image-upload-url');
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return json['data'] as Map<String, dynamic>?;
@@ -737,33 +702,22 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/rewards/feedback');
-      debugPrint('💬 提交回饋 → $url');
-      final body = <String, dynamic>{
-        'type': type,
-        'text': text,
-        if (videoId != null) 'videoId': videoId,
-        if (imageB2Key != null) 'imageB2Key': imageB2Key,
-      };
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode(body),
+      debugPrint('💬 提交回饋');
+      final response = await _send(
+        'POST',
+        '/api/user/rewards/feedback',
+        body: {
+          'type': type,
+          'text': text,
+          if (videoId != null) 'videoId': videoId,
+          if (imageB2Key != null) 'imageB2Key': imageB2Key,
+        },
       );
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) {
-          return submitFeedback(
-              type: type, text: text,
-              videoId: videoId, imageB2Key: imageB2Key, isRetry: true);
-        }
-        throw UnauthorizedException('提交回饋失敗: 401');
       } else {
         debugPrint('❌ 提交回饋失敗: ${response.statusCode}');
         return null;
@@ -784,23 +738,14 @@ class VideoServerClient {
     bool isRetry = false,
   }) async {
     try {
-      final headers = await _getAuthHeaders();
-      final url = Uri.parse('$_baseUrl/api/user/rewards/upload');
-      debugPrint('☁️ 上傳資料獎勵 → $url (${sessions.length} 筆)');
-      final response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode({'sessions': sessions}),
-      );
+      debugPrint('☁️ 上傳資料獎勵 (${sessions.length} 筆)');
+      final response = await _send('POST', '/api/user/rewards/upload',
+          body: {'sessions': sessions});
       debugPrint('📥 Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
-      } else if (response.statusCode == 401 && !isRetry) {
-        final ok = await _tryRefreshToken();
-        if (ok) return claimUploadReward(sessions: sessions, isRetry: true);
-        throw UnauthorizedException('上傳獎勵失敗: 401');
       } else {
         debugPrint('❌ 上傳獎勵失敗: ${response.statusCode}');
         return null;

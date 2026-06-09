@@ -40,11 +40,14 @@ class VideoTrimmer(private val context: android.content.Context) {
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         if (call.method != "trim") { result.notImplemented(); return }
 
-        val args    = call.arguments as? Map<*, *>
-        val srcPath = args?.get("srcPath") as? String
-        val dstPath = args?.get("dstPath") as? String
-        val startMs = (args?.get("startMs") as? Number)?.toLong() ?: 0L
-        val endMs   = (args?.get("endMs")   as? Number)?.toLong()
+        val args         = call.arguments as? Map<*, *>
+        val srcPath        = args?.get("srcPath") as? String
+        val dstPath        = args?.get("dstPath") as? String
+        val startMs        = (args?.get("startMs")      as? Number)?.toLong() ?: 0L
+        val endMs          = (args?.get("endMs")        as? Number)?.toLong()
+        val targetWidth    = (args?.get("targetWidth")  as? Number)?.toInt()
+        val targetHeight   = (args?.get("targetHeight") as? Number)?.toInt()
+        val flipHorizontal = (args?.get("flipHorizontal") as? Boolean) ?: false
 
         if (srcPath.isNullOrBlank() || dstPath.isNullOrBlank() || endMs == null) {
             result.error("invalid_args", "缺少 srcPath / dstPath / startMs / endMs", null); return
@@ -57,7 +60,7 @@ class VideoTrimmer(private val context: android.content.Context) {
             try {
                 // 主路徑：trimWithSurface（decode+encode，精確 5 秒）
                 // fallback：trimWithMuxer（raw mux，從 I-frame 開始，clip 可能較長）
-                val surfaceMs = trimWithSurface(srcPath, dstPath, startMs, endMs)
+                val surfaceMs = trimWithSurface(srcPath, dstPath, startMs, endMs, targetWidth, targetHeight, flipHorizontal)
                 if (surfaceMs != null) {
                     result.success(mapOf("ok" to true, "baseTimeMs" to surfaceMs))
                 } else {
@@ -81,7 +84,9 @@ class VideoTrimmer(private val context: android.content.Context) {
      * 輸出 clip PTS 從 0 開始，時長 = endMs - startMs（通常 5 秒）。
      * 回傳 startMs（= clip 的原始起始時間）；失敗回傳 null。
      */
-    private fun trimWithSurface(srcPath: String, dstPath: String, startMs: Long, endMs: Long): Long? {
+    private fun trimWithSurface(srcPath: String, dstPath: String, startMs: Long, endMs: Long,
+                               targetWidth: Int? = null, targetHeight: Int? = null,
+                               flipHorizontal: Boolean = false): Long? {
         val startUs = startMs * 1000L
         val endUs   = endMs   * 1000L
         Log.d(TAG, "[Surface] trimWithSurface start=$startMs end=$endMs")
@@ -134,14 +139,38 @@ class VideoTrimmer(private val context: android.content.Context) {
         }.takeIf { it > 0 } ?: (width * height * fps / 10)
         val outBitrate = srcBitrate.coerceIn(2_000_000, 20_000_000)
 
-        Log.d(TAG, "[Surface] ${width}x${height} fps=$fps rot=$rotation br=${outBitrate/1_000_000}Mbps")
+        // ① 先計算 display 尺寸（套用 rotation 後的顯示方向）
+        val hasRotation = rotation == 90 || rotation == 270
+        val (dispW, dispH) = if (hasRotation) Pair(height, width) else Pair(width, height)
+
+        // ② 目標輸出尺寸（Encoder 設定）
+        //   - EGL 路徑（needEgl=true）：encoder 必須設成旋轉後的直式尺寸（如 720×1280）
+        //     若 target 有傳入：直接使用（ClipPipeline 傳入直式）；
+        //     否則用 dispW×dispH（display 尺寸，已考量旋轉），確保 encoder 不是橫式
+        //   - 直接 Surface 路徑：沿用來源橫式尺寸，靠 orientationHint 告知播放器旋轉
+        //   ★ 必須先算 dispW/dispH，再算 encWidth/encHeight，最後算 needEgl/needResize
+        val encWidthRaw  = targetWidth  ?: dispW
+        val encHeightRaw = targetHeight ?: dispH
+
+        // ③ 確認是否需要 EGL
+        val needResize = (dispW != encWidthRaw || dispH != encHeightRaw)
+        val needEgl    = hasRotation || needResize
+        val encWidth   = encWidthRaw
+        val encHeight  = encHeightRaw
+
+        Log.d(TAG, "[Surface] src=${width}x${height} disp=${dispW}x${dispH} enc=${encWidth}x${encHeight} " +
+                   "fps=$fps rot=$rotation needEgl=${needEgl}(rot=$hasRotation,resize=$needResize) br=${outBitrate/1_000_000}Mbps")
 
         // ── 建立 Encoder ──────────────────────────────────────────────────
-        val encFmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
+        val encFmt = MediaFormat.createVideoFormat("video/avc", encWidth, encHeight).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE,      outBitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE,    fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)  // I-frame 每秒
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)  // I-frame 每秒，提升切片對齊機率
+            // ★ 每個 IDR 幀前內嵌 SPS/PPS（解碼密碼本）：
+            //   確保每個切片開頭的關鍵幀可獨立解碼，防止播放器在第 2+ 個切片
+            //   因缺少 SPS/PPS 而出現綠屏或卡死。(API 29+ 正式常數相同字串)
+            setInteger("prepend-sps-pps-to-idr-keyframes", 1)
         }
         val encoder = try {
             MediaCodec.createEncoderByType("video/avc")
@@ -153,21 +182,50 @@ class VideoTrimmer(private val context: android.content.Context) {
         val inputSurface = encoder.createInputSurface()
         encoder.start()
 
-        // ── 建立 Decoder（輸出到 Encoder Surface）────────────────────────
+        // ── EGL processor（尺寸不符時，在 decoder → encoder 間做 rotate+scale）
+        val eglProc: EglSurfaceProcessor? = if (needEgl) {
+            try {
+                EglSurfaceProcessor(inputSurface).also { it.setup(width, height) }
+            } catch (e: Exception) {
+                Log.w(TAG, "[Surface] EGL setup 失敗，fallback 直接 Surface: $e")
+                null
+            }
+        } else null
+
+        // decoder 的輸出 Surface：有 EGL 時用 EglSurfaceProcessor.decoderSurface，否則直接用 encoder inputSurface
+        val decoderOutputSurface = eglProc?.decoderSurface ?: inputSurface
+
+        // ── 建立 Decoder（輸出到 Encoder Surface 或 EGL SurfaceTexture）───
         val decoder = try {
             MediaCodec.createDecoderByType(srcMime)
         } catch (e: Exception) {
             Log.e(TAG, "[Surface] 無法建立 decoder: $e")
+            eglProc?.release()
             encoder.stop(); encoder.release(); inputSurface.release()
             srcExtractor.release(); return null
         }
-        decoder.configure(vFmt, inputSurface, null, 0)
+        decoder.configure(vFmt, decoderOutputSurface, null, 0)
         decoder.start()
 
         // ── Muxer ────────────────────────────────────────────────────────
         File(dstPath).parentFile?.mkdirs()
         val muxer = MediaMuxer(dstPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        if (rotation != 0) muxer.setOrientationHint(rotation)
+
+        // ★ orientation hint 依據「實際使用的路徑」決定，而非意圖（needEgl）：
+        //
+        //   eglProc != null（EGL 路徑成功）：
+        //     - EGL 已將 rotation bake 進 pixels（encoder 輸出已是直式）
+        //     - 輸出尺寸 encWidth×encHeight 已是直式（如 720×1280）
+        //     - 必須設 hint = 0，否則播放器再轉 90° → 影片旋轉 +90° 疊加 BUG
+        //
+        //   eglProc == null（EGL setup 失敗或不需要，直接 Surface 路徑）：
+        //     - decoder 直接輸出原始橫式幀到 encoder
+        //     - 輸出仍是橫式（如 1920×1080），需要 hint = rotation 讓播放器旋轉
+        //     - 不設 hint 或 hint=0 會讓播放器顯示橫式影片（BUG）
+        val hintForMuxer = if (eglProc != null) 0 else rotation
+        muxer.setOrientationHint(hintForMuxer)
+        Log.d(TAG, "[Surface] muxer orientationHint=$hintForMuxer " +
+                   "(eglProc=${eglProc != null}, srcRotation=$rotation, enc=${encWidth}x${encHeight})")
 
         // 先加入音訊 track（需在 muxer.start() 前完成）
         var videoMuxTrack = -1; var audioMuxTrack = -1; var muxStarted = false
@@ -225,18 +283,39 @@ class VideoTrimmer(private val context: android.content.Context) {
                         outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED  -> Unit
                         outIdx >= 0 -> {
                             val pts = bufInfo.presentationTimeUs
+                            val isCodecConfig = bufInfo.flags and
+                                MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
 
                             when {
+                                isCodecConfig -> {
+                                    // SPS/PPS config frame：消耗但不渲染
+                                    decoder.releaseOutputBuffer(outIdx, false)
+                                }
                                 pts < startUs -> {
-                                    // 丟棄：pre-start 幀，解碼但不渲染到 encoder surface
+                                    // pre-start catch-up：解碼但不渲染到 encoder surface
                                     // （需要解碼才能維護 decoder 參考幀緩衝）
                                     decoder.releaseOutputBuffer(outIdx, false)
                                 }
-                                pts < endUs && bufInfo.size > 0 -> {
-                                    // 渲染到 Encoder Surface（pts 轉 ns）
-                                    // 第一幀不需 requestSyncFrame：encoder 從未見過任何幀，
-                                    // 自動以 I-frame 開始。
-                                    decoder.releaseOutputBuffer(outIdx, pts * 1000L)
+                                pts < endUs -> {
+                                    // ★ 移除 `bufInfo.size > 0` 判斷：
+                                    //   Surface 模式的 MediaCodec decoder 在 Snapdragon 等硬體上
+                                    //   bufInfo.size 永遠為 0（frame 送到 SurfaceTexture，不在 ByteBuffer）
+                                    //   加上此判斷會導致 startMs>0 的所有幀被誤判為「無效」→ 10KB 空影片
+                                    val outPtsUs = pts - startUs   // clip 內相對 PTS
+                                    if (eglProc != null) {
+                                        // EGL 路徑：渲染到 SurfaceTexture，再由 shader 旋轉+縮放到 encoder
+                                        decoder.releaseOutputBuffer(outIdx, true)  // render=true
+                                        eglProc.awaitAndRender(
+                                            rotationDeg     = rotation,
+                                            dstWidth        = encWidth,
+                                            dstHeight       = encHeight,
+                                            ptsUs           = outPtsUs,
+                                            flipHorizontal  = flipHorizontal
+                                        )
+                                    } else {
+                                        // 直接 Surface 路徑（尺寸相符時）
+                                        decoder.releaseOutputBuffer(outIdx, pts * 1000L)
+                                    }
                                 }
                                 else -> {
                                     // 超過 endUs → 不渲染，並發送 EOS 給 encoder
@@ -277,16 +356,41 @@ class VideoTrimmer(private val context: android.content.Context) {
                     }
                     encIdx >= 0 -> {
                         // 部分硬體 encoder 透過 Surface 輸入時，presentationTimeUs 實際上是
-                        // releaseOutputBuffer 傳入的 nanoseconds 值（未除以 1000）。
+                        // eglPresentationTimeANDROID 傳入的 nanoseconds 值（未除以 1000）。
                         // 判斷依據：正常 µs 值不應超過 ~1000 秒（1e12 µs）。
                         val rawPts = bufInfo.presentationTimeUs
                         val encPts = if (rawPts > 1_000_000_000_000L) rawPts / 1000L else rawPts
 
+                        // ★ PTS 路徑修正：
+                        //
+                        //   EGL 路徑（eglProc != null）：
+                        //     awaitAndRender 傳入 ptsUs = pts - startUs（已歸零）
+                        //     → encoder 輸出 encPts ≈ 0~clip長度（相對值）
+                        //     → clipPts = encPts（直接使用，不再扣 startUs）
+                        //     → 舊邏輯 encPts - startUs = 相對值 - 大數 → 負 PTS！
+                        //     → 舊篩選器 encPts >= startUs 對相對值永遠 FALSE → IDR 被丟！→ 綠屏！
+                        //
+                        //   直接 Surface 路徑（eglProc == null）：
+                        //     releaseOutputBuffer(outIdx, pts * 1000L)（絕對 nanoseconds）
+                        //     → encPts ≈ pts（絕對 µs）
+                        //     → clipPts = encPts - startUs（歸零為相對值）
+                        //     → 篩選器 encPts >= startUs 正確過濾 pre-start 殘留
+                        val clipPts: Long
+                        val shouldWrite: Boolean
+                        if (eglProc != null) {
+                            // EGL：PTS 已是 0-based，直接使用
+                            clipPts = encPts
+                            shouldWrite = clipPts >= 0L   // 防止任何非預期的負值
+                        } else {
+                            // 直接路徑：PTS 是絕對值，需扣 startUs
+                            clipPts = encPts - startUs
+                            shouldWrite = clipPts >= 0L   // 過濾 pre-start 殘留幀
+                        }
+
                         if (muxStarted && bufInfo.size > 0 && videoMuxTrack >= 0 &&
                             bufInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 &&
-                            encPts >= startUs) {   // drop 任何仍在 startUs 前的殘留幀
-                            // 重置 PTS：clip 從 0 開始
-                            bufInfo.presentationTimeUs = encPts - startUs
+                            shouldWrite) {
+                            bufInfo.presentationTimeUs = clipPts
                             val buf = encoder.getOutputBuffer(encIdx)!!
                             muxer.writeSampleData(videoMuxTrack, buf, bufInfo)
                         }
@@ -353,6 +457,7 @@ class VideoTrimmer(private val context: android.content.Context) {
             runCatching { if (muxStarted) muxer.stop() }
             runCatching { muxer.release() }
             runCatching { decoder.stop(); decoder.release() }
+            runCatching { eglProc?.release() }
             runCatching { encoder.stop(); encoder.release() }
             runCatching { inputSurface.release() }
             runCatching { srcExtractor.release() }
@@ -365,6 +470,7 @@ class VideoTrimmer(private val context: android.content.Context) {
         runCatching { if (muxStarted) muxer.stop() }
         runCatching { muxer.release() }
         runCatching { decoder.stop(); decoder.release() }
+        runCatching { eglProc?.release() }
         runCatching { encoder.stop(); encoder.release() }
         runCatching { inputSurface.release() }
         runCatching { srcExtractor.release() }

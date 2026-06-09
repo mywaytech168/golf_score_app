@@ -152,7 +152,7 @@ class PlanService {
 
   /// 付款後向後端驗證並升級方案
   ///
-  /// [store]         - 'google_pay' | 'google_play' | 'app_store'
+  /// [store]         - 'google_play' | 'app_store'
   /// [purchaseToken] - 對應 store 的 token / receipt
   static Future<bool> purchasePlan(
     UserPlan plan, {

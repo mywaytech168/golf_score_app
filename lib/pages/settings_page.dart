@@ -1,11 +1,12 @@
 ﻿import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image/image.dart' as img;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +21,7 @@ import '../services/video_server_client.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/update_dialog.dart';
 import 'login_page.dart';
+import 'terms_of_service_page.dart';
 import 'upgrade_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
@@ -50,6 +52,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _googleLinked = false;
   ExportQuality _quality = ExportQuality.standard;  BallDetectionMode _ballMode = BallDetectionMode.original;  bool _isLoadingProfile = true;
   bool _isCheckingUpdate = false;
+  String _appVersion = '';
 
   @override
   void initState() {
@@ -63,6 +66,12 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _displayName = provider.displayName;
     });
+
+    // 1b. App 版本（常駐顯示）
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) setState(() => _appVersion = 'v${info.version} (${info.buildNumber})');
+    } catch (_) {}
 
     // 2. 上次選的輸出品質
     _quality = await _SkipHelperQuality.savedQuality();
@@ -547,6 +556,122 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ── 刪除帳號 ───────────────────────────────────────────────────
+  Future<void> _deleteAccount() async {
+    final l = AppLocalizations.of(context);
+
+    // 第一段確認：說明後果。
+    final confirm1 = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(l.settingsDeleteAccount,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: Text(l.settingsDeleteAccountWarning),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l.commonCancel,
+                style: const TextStyle(color: Color(0xFF6B7280))),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l.commonContinue),
+          ),
+        ],
+      ),
+    );
+    if (confirm1 != true || !mounted) return;
+
+    // 第二段確認：輸入 DELETE 防止誤觸。
+    final controller = TextEditingController();
+    final confirm2 = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final canDelete = controller.text.trim().toUpperCase() == 'DELETE';
+          return AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(l.settingsDeleteAccountConfirmTitle,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(l.settingsDeleteAccountConfirmHint),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    hintText: 'DELETE',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setLocal(() {}),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(l.commonCancel,
+                    style: const TextStyle(color: Color(0xFF6B7280))),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: canDelete ? Colors.red : Colors.grey,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: canDelete ? () => Navigator.pop(ctx, true) : null,
+                child: Text(l.settingsDeleteAccount),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (confirm2 != true || !mounted) return;
+
+    // 執行刪除（顯示阻塞 loading）。
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    bool ok = false;
+    try {
+      ok = await VideoServerClient.instance.deleteAccount();
+    } on UnauthorizedException {
+      ok = false;
+    } catch (_) {
+      ok = false;
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop(); // 關閉 loading
+
+    if (!ok) {
+      _showSnack(l.settingsDeleteAccountFailed, isError: true);
+      return;
+    }
+
+    // 刪除成功：清除本地憑證並回登入頁。
+    await AuthTokenStorage.instance.clearTokens();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
+
   // ── 檢查更新 ──────────────────────────────────────────────────
   Future<void> _checkUpdate() async {
     if (_isCheckingUpdate) return;
@@ -698,6 +823,30 @@ class _SettingsPageState extends State<SettingsPage> {
                 : null,
             onTap: _isCheckingUpdate ? null : _checkUpdate,
           ),
+          _SettingsTile(
+            icon: Icons.privacy_tip_outlined,
+            iconColor: const Color(0xFF607D8B),
+            title: l.settingsPrivacyPolicy,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TermsViewPage()),
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.info_outline_rounded,
+            iconColor: const Color(0xFF9AA6B2),
+            title: l.settingsVersion,
+            subtitle: _appVersion.isEmpty ? null : _appVersion,
+            trailing: _appVersion.isEmpty
+                ? const SizedBox.shrink()
+                : const Icon(Icons.copy_rounded, color: Color(0xFFB0B8C1), size: 16),
+            onTap: _appVersion.isEmpty
+                ? null
+                : () async {
+                    await Clipboard.setData(ClipboardData(text: _appVersion));
+                    if (mounted) _showSnack(l.settingsVersionCopied);
+                  },
+          ),
           const SizedBox(height: 28),
           // ── 登出按鈕 ────────────────────────────────────────
           Padding(
@@ -712,6 +861,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               onPressed: _logout,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // ── 刪除帳號（雙平台強制要求）────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextButton.icon(
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: Text(l.settingsDeleteAccount),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF9AA6B2),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              onPressed: _deleteAccount,
             ),
           ),
           const SizedBox(height: 40),

@@ -1,9 +1,9 @@
-import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
+import 'pose_result.dart';
 
 class PoseFrameModel {
   final int frame;
   final double timeSec;
-  final int poseUpdateId;  // ✅ 追踪骨架是否實際更新
+  final int poseUpdateId;
   final List<LandmarkData> landmarks;
 
   PoseFrameModel({
@@ -13,36 +13,30 @@ class PoseFrameModel {
     required this.landmarks,
   });
 
-  factory PoseFrameModel.fromPose({
+  /// 從 MediaPipe NativePoseResult 建立（歸一化座標 → 像素座標反算）
+  factory PoseFrameModel.fromNative({
     required int frame,
     required double timeSec,
     required int poseUpdateId,
-    required Pose pose,
+    required NativePoseResult pose,
     required double imgWidth,
     required double imgHeight,
     bool isFrontCamera = false,
   }) {
     final lms = List<LandmarkData>.generate(33, (i) {
-      final type = PoseLandmarkType.values[i];
-      final lm = pose.landmarks[type];
-      if (lm == null) return LandmarkData.empty();
-      // 錄製影片不鏡像（MIRROR_MODE_OFF），CSV 直接使用 ML Kit 原始座標
-      // SkeletonPainter 在預覽時負責 X 翻轉以對齊鏡像預覽
-      final rawX = lm.x;
+      if (i >= pose.landmarks.length) return LandmarkData.empty();
+      final lm = pose.landmarks[i];
       return LandmarkData(
-        xNorm: rawX / imgWidth,
-        yNorm: lm.y / imgHeight,
-        z: lm.z,
-        visibility: lm.likelihood,
-        xPx: rawX,
-        yPx: lm.y,
+        xNorm:      lm.x,
+        yNorm:      lm.y,
+        z:          lm.z,
+        visibility: lm.visibility,
+        xPx:        lm.x * imgWidth,
+        yPx:        lm.y * imgHeight,
       );
     });
     return PoseFrameModel(
-      frame: frame,
-      timeSec: timeSec,
-      poseUpdateId: poseUpdateId,
-      landmarks: lms,
+      frame: frame, timeSec: timeSec, poseUpdateId: poseUpdateId, landmarks: lms,
     );
   }
 
@@ -50,25 +44,24 @@ class PoseFrameModel {
     required int frame,
     required double timeSec,
     int poseUpdateId = 0,
-  }) {
-    return PoseFrameModel(
-      frame: frame,
-      timeSec: timeSec,
-      poseUpdateId: poseUpdateId,
-      landmarks: List.generate(33, (_) => LandmarkData.empty()),
-    );
-  }
+  }) =>
+      PoseFrameModel(
+        frame: frame,
+        timeSec: timeSec,
+        poseUpdateId: poseUpdateId,
+        landmarks: List.generate(33, (_) => LandmarkData.empty()),
+      );
 
   List<dynamic> toCsvRow() {
     final row = <dynamic>[frame, timeSec.toStringAsFixed(6), poseUpdateId];
     for (final lm in landmarks) {
       row.addAll([
-        lm.xNorm.isNaN ? 0.0 : lm.xNorm,  // ✅ 用 0.0 代替空字符串，保持 CSV 完整性
-        lm.yNorm.isNaN ? 0.0 : lm.yNorm,
-        lm.z.isNaN ? 0.0 : lm.z,
+        lm.xNorm.isNaN     ? 0.0 : lm.xNorm,
+        lm.yNorm.isNaN     ? 0.0 : lm.yNorm,
+        lm.z.isNaN         ? 0.0 : lm.z,
         lm.visibility,
-        lm.xPx.isNaN ? 0.0 : lm.xPx,
-        lm.yPx.isNaN ? 0.0 : lm.yPx,
+        lm.xPx.isNaN       ? 0.0 : lm.xPx,
+        lm.yPx.isNaN       ? 0.0 : lm.yPx,
       ]);
     }
     return row;
@@ -86,11 +79,7 @@ class LandmarkData {
     required this.yPx,
   });
   factory LandmarkData.empty() => const LandmarkData(
-    xNorm: double.nan,
-    yNorm: double.nan,
-    z: double.nan,
-    visibility: 0.0,
-    xPx: double.nan,
-    yPx: double.nan,
+    xNorm: double.nan, yNorm: double.nan, z: double.nan,
+    visibility: 0.0, xPx: double.nan, yPx: double.nan,
   );
 }

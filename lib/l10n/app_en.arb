@@ -223,6 +223,10 @@
   "settingsSectionGeneral": "General",
   "settingsLanguage": "Language",
   "settingsCheckUpdate": "Check for Updates",
+  "settingsPrivacyPolicy": "Terms & Privacy Policy",
+  "settingsVersion": "Version",
+  "settingsPrivacyOpenFailed": "Unable to open the privacy policy page, please try again later",
+  "settingsVersionCopied": "Version copied",
   "settingsAlreadyLatest": "Already on latest version v{version}",
   "@settingsAlreadyLatest": {
     "placeholders": { "version": {"type": "String"} }
@@ -230,6 +234,12 @@
   "settingsUpdateCheckFailed": "Update check failed, please try again later",
   "settingsConfirmLogout": "Confirm Logout?",
   "settingsLogoutWarning": "You'll need to sign in again to use cloud features.",
+  "commonContinue": "Continue",
+  "settingsDeleteAccount": "Delete Account",
+  "settingsDeleteAccountWarning": "Deleting your account permanently removes your profile, subscription and analysis history. This cannot be undone. It does not automatically refund any purchase — please cancel subscriptions separately in the App Store / Google Play. Continue?",
+  "settingsDeleteAccountConfirmTitle": "Final Confirmation",
+  "settingsDeleteAccountConfirmHint": "Type \"DELETE\" to confirm permanent account deletion.",
+  "settingsDeleteAccountFailed": "Failed to delete account. Please try again later or contact support.",
   "settingsNameUpdated": "Name updated",
   "settingsPickFromGallery": "Choose from Gallery",
   "settingsRemoveAvatar": "Remove Avatar",

@@ -1156,6 +1156,30 @@ abstract class AppLocalizations {
   /// **'Check for Updates'**
   String get settingsCheckUpdate;
 
+  /// No description provided for @settingsPrivacyPolicy.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms & Privacy Policy'**
+  String get settingsPrivacyPolicy;
+
+  /// No description provided for @settingsVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Version'**
+  String get settingsVersion;
+
+  /// No description provided for @settingsPrivacyOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to open the privacy policy page, please try again later'**
+  String get settingsPrivacyOpenFailed;
+
+  /// No description provided for @settingsVersionCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Version copied'**
+  String get settingsVersionCopied;
+
   /// No description provided for @settingsAlreadyLatest.
   ///
   /// In en, this message translates to:
@@ -1179,6 +1203,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You\'ll need to sign in again to use cloud features.'**
   String get settingsLogoutWarning;
+
+  /// No description provided for @commonContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get commonContinue;
+
+  /// No description provided for @settingsDeleteAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Account'**
+  String get settingsDeleteAccount;
+
+  /// No description provided for @settingsDeleteAccountWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleting your account permanently removes your profile, subscription and analysis history. This cannot be undone. It does not automatically refund any purchase — please cancel subscriptions separately in the App Store / Google Play. Continue?'**
+  String get settingsDeleteAccountWarning;
+
+  /// No description provided for @settingsDeleteAccountConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Final Confirmation'**
+  String get settingsDeleteAccountConfirmTitle;
+
+  /// No description provided for @settingsDeleteAccountConfirmHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Type \"DELETE\" to confirm permanent account deletion.'**
+  String get settingsDeleteAccountConfirmHint;
+
+  /// No description provided for @settingsDeleteAccountFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to delete account. Please try again later or contact support.'**
+  String get settingsDeleteAccountFailed;
 
   /// No description provided for @settingsNameUpdated.
   ///

@@ -23,7 +23,7 @@ class RecordingHistoryStorage {
   static const String _folderName  = 'golf_recordings';
   static const String _legacyJson  = 'recording_history.json';
   static const String _dbName      = 'recording_history.db';
-  static const int    _dbVersion   = 6;
+  static const int    _dbVersion   = 7;
   static const String _table       = 'recordings';
 
   Database? _db;
@@ -75,7 +75,9 @@ class RecordingHistoryStorage {
             postureAnalysisId   TEXT,
             audioPassCount      INTEGER,
             audioPasses         TEXT,
-            audioFeatureValues  TEXT
+            audioFeatureValues  TEXT,
+            practiceSuggestions TEXT,
+            nextTrainingGoal    TEXT
           )
         ''');
         // 索引加速常用排序/篩選
@@ -99,6 +101,10 @@ class RecordingHistoryStorage {
         }
         if (oldVersion < 6) {
           await db.execute('ALTER TABLE $_table ADD COLUMN geminiPostureLabel TEXT');
+        }
+        if (oldVersion < 7) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN practiceSuggestions TEXT');
+          await db.execute('ALTER TABLE $_table ADD COLUMN nextTrainingGoal TEXT');
         }
       },
     );
@@ -288,6 +294,10 @@ class RecordingHistoryStorage {
     'audioPassCount':      e.audioPassCount,
     'audioPasses':         e.audioPasses != null ? jsonEncode(e.audioPasses) : null,
     'audioFeatureValues':  e.audioFeatureValues != null ? jsonEncode(e.audioFeatureValues) : null,
+    'practiceSuggestions': e.practiceSuggestions != null
+        ? jsonEncode(e.practiceSuggestions!.map((s) => s.toJson()).toList())
+        : null,
+    'nextTrainingGoal':    e.nextTrainingGoal,
   };
 
   static RecordingHistoryEntry _fromRow(Map<String, dynamic> row) {
@@ -330,6 +340,21 @@ class RecordingHistoryStorage {
       } catch (_) {}
     }
 
+    List<PracticeSuggestionItem>? practiceSuggestions;
+    final rawSuggestions = row['practiceSuggestions'] as String?;
+    if (rawSuggestions != null && rawSuggestions.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawSuggestions);
+        if (decoded is List) {
+          practiceSuggestions = decoded
+              .whereType<Map>()
+              .map((e) => PracticeSuggestionItem.fromJson(
+                  e.map((k, v) => MapEntry(k.toString(), v))))
+              .toList();
+        }
+      } catch (_) {}
+    }
+
     final rawThumb = (row['thumbnailPath'] as String?)?.trim();
 
     return RecordingHistoryEntry(
@@ -366,6 +391,8 @@ class RecordingHistoryStorage {
       swingPostureLabel:    row['swingPostureLabel']             as String?,
       geminiPostureLabel:   row['geminiPostureLabel']            as String?,
       postureAnalysisId:    row['postureAnalysisId']             as String?,
+      practiceSuggestions:  practiceSuggestions,
+      nextTrainingGoal:     row['nextTrainingGoal']              as String?,
     );
   }
 }

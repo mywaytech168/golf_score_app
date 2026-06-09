@@ -196,6 +196,10 @@
   "settingsSectionGeneral": "通用",
   "settingsLanguage": "语言 / Language",
   "settingsCheckUpdate": "检查更新",
+  "settingsPrivacyPolicy": "用户条款与隐私政策",
+  "settingsVersion": "版本",
+  "settingsPrivacyOpenFailed": "无法开启隐私政策页面，请稍后再试",
+  "settingsVersionCopied": "已复制版本",
   "settingsAlreadyLatest": "已是最新版本 v{version}",
   "@settingsAlreadyLatest": {
     "placeholders": { "version": {"type": "String"} }
@@ -203,6 +207,12 @@
   "settingsUpdateCheckFailed": "检查更新失败，请稍后重试",
   "settingsConfirmLogout": "确定退出？",
   "settingsLogoutWarning": "退出后需重新登录才能使用云端功能。",
+  "commonContinue": "继续",
+  "settingsDeleteAccount": "删除帐号",
+  "settingsDeleteAccountWarning": "删除帐号将永久移除你的个人资料、订阅与分析记录，且无法复原。此操作不会自动退款，订阅请另于 App Store／Google Play 取消。确定要继续吗？",
+  "settingsDeleteAccountConfirmTitle": "最后确认",
+  "settingsDeleteAccountConfirmHint": "请输入「DELETE」以确认永久删除帐号。",
+  "settingsDeleteAccountFailed": "删除帐号失败，请稍后再试或联系客服。",
   "settingsNameUpdated": "名称已更新",
   "settingsPickFromGallery": "从相册选择",
   "settingsRemoveAvatar": "移除头像",

@@ -195,6 +195,10 @@
   "settingsSectionGeneral": "一般",
   "settingsLanguage": "語言 / Language",
   "settingsCheckUpdate": "檢查更新",
+  "settingsPrivacyPolicy": "使用者條款與隱私政策",
+  "settingsVersion": "版本",
+  "settingsPrivacyOpenFailed": "無法開啟隱私政策頁面，請稍後再試",
+  "settingsVersionCopied": "已複製版本",
   "settingsAlreadyLatest": "已是最新版本 v{version}",
   "@settingsAlreadyLatest": {
     "placeholders": { "version": {"type": "String"} }
@@ -202,6 +206,12 @@
   "settingsUpdateCheckFailed": "檢查更新失敗，請稍後再試",
   "settingsConfirmLogout": "確定登出？",
   "settingsLogoutWarning": "登出後需重新登入才能使用雲端功能。",
+  "commonContinue": "繼續",
+  "settingsDeleteAccount": "刪除帳號",
+  "settingsDeleteAccountWarning": "刪除帳號將永久移除你的個人資料、訂閱與分析紀錄，且無法復原。此操作不會自動退款，訂閱請另於 App Store／Google Play 取消。確定要繼續嗎？",
+  "settingsDeleteAccountConfirmTitle": "最後確認",
+  "settingsDeleteAccountConfirmHint": "請輸入「DELETE」以確認永久刪除帳號。",
+  "settingsDeleteAccountFailed": "刪除帳號失敗，請稍後再試或聯絡客服。",
   "settingsNameUpdated": "名稱已更新",
   "settingsPickFromGallery": "從相簿選擇",
   "settingsRemoveAvatar": "移除大頭貼",

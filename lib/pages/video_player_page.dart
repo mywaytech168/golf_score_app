@@ -9,6 +9,8 @@ import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
 import '../models/swing_posture.dart';
+import '../recording/pose_csv_loader.dart';
+import '../recording/skeleton_painter.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
@@ -60,6 +62,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 揮桿 8 階段關鍵禎
   // key = phase key (e.g. 'address'), value = seconds in clip
   Map<String, double>? _phases;
+
+  // 骨架疊圖（取代燒錄 skeleton.mp4）：CSV 為 clip 相對時間，offset=0 直接用 position 取樣
+  PoseTrack? _skeletonTrack;
+  bool _skeletonLoading = false;
+  bool get _onSkeletonTab =>
+      _activeTabs[_tabController.index].type == 'skeleton';
 
   // 甜蜜點特效動畫（僅分析 Tab）
   late final AnimationController _impactAnim;
@@ -330,10 +338,33 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     _switchTo(path);
   }
 
+  /// 骨架：不再切換到燒錄的 skeleton.mp4，改在乾淨 clip 上即時疊 CustomPainter。
+  /// （燒錄管道仍保留給「匯出帶骨架影片」使用。）
   void _viewSkeleton() {
-    final path = '${_sessionDir}skeleton.mp4';
-    if (!File(path).existsSync()) { _showSnack('骨架影片不存在'); return; }
-    _switchTo(path);
+    // base 影片必須是 clip 相對時間（與 pose_landmarks.csv 對齊），不可用完整 swing.mp4
+    final clip = '${_sessionDir}clip.mp4';
+    final basePath = File(clip).existsSync() ? clip : widget.videoPath;
+    if (!File(basePath).existsSync()) { _showSnack('影片不存在'); return; }
+    _switchTo(basePath);
+    _ensureSkeletonTrack();
+  }
+
+  Future<void> _ensureSkeletonTrack() async {
+    if (_skeletonTrack != null || _skeletonLoading) return;
+    final csvPath = '${_sessionDir}pose_landmarks.csv';
+    if (!File(csvPath).existsSync()) {
+      _showSnack('骨架資料不存在');
+      return;
+    }
+    setState(() => _skeletonLoading = true);
+    try {
+      final track = await PoseTrack.load(csvPath);
+      if (mounted) setState(() => _skeletonTrack = track);
+    } catch (e) {
+      debugPrint('[VideoPlayer] 骨架 CSV 載入失敗: $e');
+    } finally {
+      if (mounted) setState(() => _skeletonLoading = false);
+    }
   }
 
   void _viewAnalyzed() {
@@ -422,6 +453,22 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         child: Stack(
           children: [
             VideoPlayer(ctrl),
+            // 骨架疊圖：依播放位置即時取樣 CSV（offset=0，CSV 為 clip 相對時間）
+            if (_onSkeletonTab && _skeletonTrack != null)
+              Positioned.fill(
+                child: Builder(builder: (_) {
+                  final pose = _skeletonTrack!
+                      .sampleAt(ctrl.value.position.inMilliseconds / 1000.0);
+                  if (pose == null) return const SizedBox.shrink();
+                  return CustomPaint(painter: SkeletonPainter(pose: pose));
+                }),
+              ),
+            if (_onSkeletonTab && _skeletonLoading)
+              const Positioned.fill(
+                child: Center(
+                  child: CircularProgressIndicator(color: Colors.white54),
+                ),
+              ),
             if (showEffects) ...[
               // 擊球光圈
               Positioned.fill(
@@ -851,9 +898,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(label,
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.white70)),
+                      Expanded(
+                        child: Text(label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.white70)),
+                      ),
+                      const SizedBox(width: 8),
                       Text(
                         '${(score * 100).toStringAsFixed(0)}%',
                         style: TextStyle(

@@ -560,6 +560,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsCheckUpdate => 'Check for Updates';
 
   @override
+  String get settingsPrivacyPolicy => 'Terms & Privacy Policy';
+
+  @override
+  String get settingsVersion => 'Version';
+
+  @override
+  String get settingsPrivacyOpenFailed =>
+      'Unable to open the privacy policy page, please try again later';
+
+  @override
+  String get settingsVersionCopied => 'Version copied';
+
+  @override
   String settingsAlreadyLatest(String version) {
     return 'Already on latest version v$version';
   }
@@ -574,6 +587,27 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsLogoutWarning =>
       'You\'ll need to sign in again to use cloud features.';
+
+  @override
+  String get commonContinue => 'Continue';
+
+  @override
+  String get settingsDeleteAccount => 'Delete Account';
+
+  @override
+  String get settingsDeleteAccountWarning =>
+      'Deleting your account permanently removes your profile, subscription and analysis history. This cannot be undone. It does not automatically refund any purchase — please cancel subscriptions separately in the App Store / Google Play. Continue?';
+
+  @override
+  String get settingsDeleteAccountConfirmTitle => 'Final Confirmation';
+
+  @override
+  String get settingsDeleteAccountConfirmHint =>
+      'Type \"DELETE\" to confirm permanent account deletion.';
+
+  @override
+  String get settingsDeleteAccountFailed =>
+      'Failed to delete account. Please try again later or contact support.';
 
   @override
   String get settingsNameUpdated => 'Name updated';

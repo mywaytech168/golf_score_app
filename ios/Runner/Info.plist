@@ -55,6 +55,8 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>允許後，我們會用此識別碼提供更相關的廣告。你仍可在不允許的情況下使用所有功能。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>需要使用相機來錄製高爾夫揮桿影片。</string>
 	<key>NSMicrophoneUsageDescription</key>

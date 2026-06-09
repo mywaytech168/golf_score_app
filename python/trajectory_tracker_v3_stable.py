@@ -1,5 +1,6 @@
 ﻿# ============================================================
 # Stable Profile (2026-03-31)
+# Modified 2026-06-08: fix false P0/P1 init and Kalman ROI tracking.
 # This file freezes the currently validated trajectory settings.
 # ============================================================
 
@@ -10,13 +11,15 @@ from typing import Tuple, List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 
+SCRIPT_VERSION = "FIXED_P0P1_KALMAN_ROI_V2_20260608"
+
 # ============================================================
 # Batch / input
 # ============================================================
 BATCH_MODE = False
 INPUT_DIR = r"C:\Users\user\Downloads\demo video"
 BATCH_OUTPUT_DIR = r"C:\Users\user\Downloads\demo video"
-VIDEO_PATH = r"hit_001.mp4"
+VIDEO_PATH = r"C:\Users\user\Downloads\demo video\hit_005.mp4"
 AUTO_DISABLE_UI_IN_BATCH = True
 
 # ============================================================
@@ -51,15 +54,28 @@ SHOW_MAIN = True
 SHOW_DEBUG_ROI = True
 
 DETECT_CFG_BASE = dict(
-    area_range=(6, 150),
-    circ_thresh=0.60,
-    diff_thresh=16,
+    # p0 真球在 hit_001 約 area=160；原本 hi=150 會直接被濾掉。
+    area_range=(6, 260),
+    circ_thresh=0.55,
+    diff_thresh=14,
     show_debug=True,
     debug_prefix="DEBUG",
 )
 
 MIN_DX = 3
+
+# 不要從第 1 幀開始抓，避免桿子/背景壓縮雜訊被當成 p0。
+# hit_001 的有效擊球約在 frame 70~75；其他影片可依擊球時間調整。
+MIN_START_FRAME = 65
 WAIT_MAX_FRAMES = 180
+
+# P0 / P1 初始化過濾：P1 必須是明顯位移後的球，不能再選回同一個殘影。
+P0_MAX_DIST_FROM_ROI_CENTER = 320.0
+P1_MIN_DIST = 35.0
+P1_MAX_DIST = 380.0
+P1_MIN_LEFT = 25.0
+P1_REQUIRE_LEFT = True
+P1_FALLBACK_ALLOW_ANY_DIRECTION = True
 DRAW_CAND_STATS = True
 CAND_TEXT_SCALE = 0.42
 CAND_TEXT_THICKNESS = 1
@@ -74,7 +90,7 @@ ROI_CFG = dict(
 
 CFG_SPEED = 0.4
 DIFF_MIN = 9
-CIRC_MIN = 0.60
+CIRC_MIN = 0.45
 AREA_LO_MIN = 6
 
 USE_Y_DIRECTION = True
@@ -98,7 +114,7 @@ FIXED_ROI_CENTER = (1084, 376)
 ROI_FIXED_SIZE = 400
 
 # 1) ROI center tracks latest valid point, size fixed (no shrinking)
-ROI_CENTER_LOCK_TO_LAST = True
+ROI_CENTER_LOCK_TO_LAST = False
 
 # 2) Stop tracking when no diff candidate
 STOP_WHEN_NO_CAND_IN_TRACK = True
@@ -108,16 +124,16 @@ NO_CAND_PATIENCE = 4
 # enlarge ROI and use predicted center for a few missing frames.
 RECOVERY_USE_KALMAN_CENTER_ON_MISS = True
 RECOVERY_ROI_GROW_PER_MISS = 35
-RECOVERY_ROI_MAX = 420
+RECOVERY_ROI_MAX = 520
 
 # 3) Disable forced-left rule; use step-distance sanity check
 USE_LEFT_RULE = False
 USE_STEP_DIST_GUARD = True
 STEP_EMA_ALPHA = 0.25
 STEP_GROWTH_FACTOR = 1.9
-STEP_ABS_MAX = 140.0
-STEP_ABS_HARD_MAX = 130.0
-PRED_DIST_HARD_MAX = 170.0
+STEP_ABS_MAX = 240.0
+STEP_ABS_HARD_MAX = 260.0
+PRED_DIST_HARD_MAX = 220.0
 OUTLIER_STRIKES_TO_FREEZE = 8
 
 # 4) Far-ball adaptive detection
@@ -405,6 +421,63 @@ def draw_traj_overlay_only(
     return cv2.addWeighted(overlay, alpha, base_bgr, 1.0 - alpha, 0)
 
 
+
+
+def candidate_score_for_p0(c: Dict[str, Any], roi_center_xy: Tuple[int, int]) -> float:
+    """P0：偏好靠近 ROI 中心、圓度好、diff 強、面積合理的候選。"""
+    pt = np.array(c["pt"], dtype=np.float32)
+    rc = np.array(roi_center_xy, dtype=np.float32)
+    dist = float(np.linalg.norm(pt - rc))
+
+    # 距離太遠通常是背景或桿子邊緣。
+    if dist > P0_MAX_DIST_FROM_ROI_CENTER:
+        return -1e9
+
+    area = float(c.get("area", 0.0))
+    circ = float(c.get("circ", 0.0))
+    diff = float(c.get("diff", 0.0))
+
+    # 面積在 60~190 對 hit_001 的球比較合理；超出仍可接受但降分。
+    area_bonus = min(area, 190.0) * 0.25
+    return diff * 1.2 + circ * 80.0 + area_bonus - dist * 0.18
+
+
+def filter_p1_candidates(p0: Tuple[int, int], cand_stats_glb: List[Dict[str, Any]], require_left: bool) -> List[Dict[str, Any]]:
+    """P1：必須和 P0 有明顯位移；預設要求往左，避免選回同一個點。"""
+    valid: List[Dict[str, Any]] = []
+    for c in cand_stats_glb:
+        pt = c["pt"]
+        dx = float(pt[0] - p0[0])
+        dy = float(pt[1] - p0[1])
+        dist = float(np.hypot(dx, dy))
+
+        if dist < P1_MIN_DIST:
+            continue
+        if dist > P1_MAX_DIST:
+            continue
+        if require_left and dx > -P1_MIN_LEFT:
+            continue
+        valid.append(c)
+    return valid
+
+
+def candidate_score_for_p1(p0: Tuple[int, int], c: Dict[str, Any]) -> float:
+    """P1：偏好真正飛出去的亮圓點，不偏好離 p0 最近。"""
+    pt = c["pt"]
+    dx = float(pt[0] - p0[0])
+    dy = float(pt[1] - p0[1])
+    dist = float(np.hypot(dx, dy))
+    left_bonus = max(0.0, -dx) * 0.35
+    area = float(c.get("area", 0.0))
+    circ = float(c.get("circ", 0.0))
+    diff = float(c.get("diff", 0.0))
+
+    # 太近不可能是 P1；太遠也可能是背景，所以 dist 只給適度 bonus。
+    dist_bonus = min(dist, 220.0) * 0.10
+    area_bonus = min(area, 180.0) * 0.20
+    return diff * 1.2 + circ * 80.0 + area_bonus + left_bonus + dist_bonus
+
+
 STATE_WAIT_P0 = 0
 STATE_WAIT_P1 = 1
 STATE_TRACKING = 2
@@ -415,6 +488,8 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
     global clicked_point
 
     print("\n" + "=" * 80)
+    print(f"SCRIPT_VERSION={SCRIPT_VERSION}")
+    print(f"MIN_START_FRAME={MIN_START_FRAME}, P1_MIN_DIST={P1_MIN_DIST}, P1_REQUIRE_LEFT={P1_REQUIRE_LEFT}, ROI_CENTER_LOCK_TO_LAST={ROI_CENTER_LOCK_TO_LAST}")
     print("Process:", video_path)
 
     cap = cv2.VideoCapture(video_path)
@@ -557,13 +632,15 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
                 this_blue_xy = np.array(kf.pos(), dtype=np.float32)
                 blue_hist.append(this_blue_xy.copy())
 
-            use_pred_center = (
+            # 追蹤階段優先用 Kalman 預測中心。
+            # 原本一直鎖 last point，球速快時 ROI 會落後，下一幀容易完全沒有 candidate。
+            if this_blue_xy is not None and not ROI_CENTER_LOCK_TO_LAST:
+                cx, cy = int(round(this_blue_xy[0])), int(round(this_blue_xy[1]))
+            elif (
                 RECOVERY_USE_KALMAN_CENTER_ON_MISS
                 and no_cand_count > 0
                 and this_blue_xy is not None
-            )
-
-            if use_pred_center:
+            ):
                 cx, cy = int(round(this_blue_xy[0])), int(round(this_blue_xy[1]))
             elif ROI_CENTER_LOCK_TO_LAST and len(track_pts) > 0:
                 cx, cy = track_pts[-1]
@@ -608,15 +685,26 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
 
         if state == STATE_WAIT_P0:
             wait_frames += 1
-            if cand_stats_glb:
-                rc = np.array(roi_center, dtype=np.float32)
-                best = min(cand_stats_glb, key=lambda c: np.linalg.norm(np.array(c["pt"], dtype=np.float32) - rc))
-                p0 = best["pt"]
-                track_pts = [p0]
-                state = STATE_WAIT_P1
-                wait_frames = 0
-                p0_frame_idx = frame_idx
-                print(f"Captured p0={p0}")
+
+            # 先等到可能擊球的時間點，避免前段桿子/背景雜訊被抓成 p0。
+            if frame_idx < MIN_START_FRAME:
+                pass
+            elif cand_stats_glb:
+                scored = [(candidate_score_for_p0(c, roi_center), c) for c in cand_stats_glb]
+                scored = [(s, c) for s, c in scored if s > -1e8]
+
+                if scored:
+                    best_score, best = max(scored, key=lambda x: x[0])
+                    p0 = best["pt"]
+                    track_pts = [p0]
+                    state = STATE_WAIT_P1
+                    wait_frames = 0
+                    p0_frame_idx = frame_idx
+                    print(
+                        f"Captured p0={p0} "
+                        f"frame={frame_idx} area={best['area']:.1f} "
+                        f"circ={best['circ']:.2f} diff={best['diff']:.1f} score={best_score:.1f}"
+                    )
             elif wait_frames >= WAIT_MAX_FRAMES:
                 print("Timeout waiting p0")
 
@@ -635,28 +723,42 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
 
             if cand_stats_glb:
                 p0 = track_pts[0]
-                if USE_LEFT_RULE:
-                    valid = [c for c in cand_stats_glb if c["pt"][0] < p0[0] - MIN_DX]
-                else:
-                    valid = list(cand_stats_glb)
+
+                # 優先使用「往左飛」的 P1。若沒有，才退回任意方向但仍要求明顯位移。
+                valid = filter_p1_candidates(p0, cand_stats_glb, require_left=P1_REQUIRE_LEFT)
+                if (not valid) and P1_FALLBACK_ALLOW_ANY_DIRECTION:
+                    valid = filter_p1_candidates(p0, cand_stats_glb, require_left=False)
 
                 if valid:
-                    p0v = np.array(p0, dtype=np.float32)
-                    best = min(valid, key=lambda c: np.linalg.norm(np.array(c["pt"], dtype=np.float32) - p0v))
+                    best = max(valid, key=lambda c: candidate_score_for_p1(p0, c))
                     p1 = best["pt"]
-                    track_pts.append(p1)
 
-                    kf.initialize_from_two_points(p0, p1)
-                    p0_frame_idx = None
-                    state = STATE_TRACKING
-                    roi_center_smooth = np.array(p1, dtype=np.float32)
+                    # 安全保護：P1 不可等於 P0，也不可太近，否則 Kalman 會得到 0 速度。
+                    p01_dist = float(np.linalg.norm(np.array(p1, dtype=np.float32) - np.array(p0, dtype=np.float32)))
+                    if p01_dist < P1_MIN_DIST:
+                        print(f"Reject p1 too close: p0={p0}, p1={p1}, dist={p01_dist:.1f}")
+                    else:
+                        track_pts.append(p1)
 
-                    step_mode_active = bool(STEP_MODE_AFTER_P1)
-                    blue_hist.clear()
-                    no_cand_count = 0
-                    step_ema = None
-                    outlier_strikes = 0
-                    print("Enter TRACKING")
+                        kf.initialize_from_two_points(p0, p1)
+                        p0_frame_idx = None
+                        state = STATE_TRACKING
+                        roi_center_smooth = np.array(p1, dtype=np.float32)
+
+                        # 用第一段位移初始化 step_ema，避免之後高速球被 STEP guard 擋掉。
+                        step_ema = p01_dist
+
+                        step_mode_active = bool(STEP_MODE_AFTER_P1)
+                        blue_hist.clear()
+                        no_cand_count = 0
+                        outlier_strikes = 0
+                        area_ema = float(best.get("area", 0.0)) if float(best.get("area", 0.0)) > 0 else None
+                        print(
+                            f"Captured p1={p1} frame={frame_idx} "
+                            f"dist={p01_dist:.1f} area={best['area']:.1f} "
+                            f"circ={best['circ']:.2f} diff={best['diff']:.1f}"
+                        )
+                        print("Enter TRACKING")
 
             elif wait_frames >= WAIT_MAX_FRAMES:
                 print("Timeout waiting p1")
@@ -797,6 +899,9 @@ def process_one_video(video_path: str, out_dir: Optional[str]) -> Optional[str]:
                     break
 
         prev_gray = gray
+
+    if track_pts:
+        print(f"Track points: {len(track_pts)}  first={track_pts[0]}  last={track_pts[-1]}")
 
     cap.release()
     if writer is not None:

@@ -22,13 +22,19 @@ class VideoClipService {
     required String dstPath,
     required double startSec,
     required double endSec,
+    int  targetWidth    = 720,   // 直式 HD 預設 720x1280
+    int  targetHeight   = 1280,
+    bool flipHorizontal = false, // 前鏡頭水平翻轉
   }) async {
     try {
       final res = await _channel.invokeMethod<Map>('trim', {
-        'srcPath': srcPath,
-        'dstPath': dstPath,
-        'startMs': (startSec * 1000).round(),
-        'endMs': (endSec * 1000).round(),
+        'srcPath':        srcPath,
+        'dstPath':        dstPath,
+        'startMs':        (startSec * 1000).round(),
+        'endMs':          (endSec   * 1000).round(),
+        'targetWidth':    targetWidth,
+        'targetHeight':   targetHeight,
+        'flipHorizontal': flipHorizontal,
       });
       if (res == null || res['ok'] != true) return null;
       final baseTimeMs = (res['baseTimeMs'] as num?)?.toDouble() ?? (startSec * 1000);

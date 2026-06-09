@@ -132,6 +132,32 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 取得「目前建議」：歷史中最近一筆且含訓練建議的紀錄
+  RecordingHistoryEntry? get _currentSuggestionEntry {
+    RecordingHistoryEntry? best;
+    for (final e in _recordingHistory) {
+      final s = e.practiceSuggestions;
+      if (s == null || s.isEmpty) continue;
+      if (best == null || e.sortTime.isAfter(best.sortTime)) best = e;
+    }
+    return best;
+  }
+
+  /// 勾選 / 取消勾選某則訓練建議，並寫回資料庫
+  Future<void> _toggleSuggestion(
+      RecordingHistoryEntry entry, int index, bool done) async {
+    final list = List<PracticeSuggestionItem>.from(entry.practiceSuggestions!);
+    if (index < 0 || index >= list.length) return;
+    list[index] = list[index].copyWith(done: done);
+    final updated = entry.copyWith(practiceSuggestions: list);
+    setState(() {
+      final i =
+          _recordingHistory.indexWhere((e) => e.filePath == entry.filePath);
+      if (i >= 0) _recordingHistory[i] = updated;
+    });
+    await RecordingHistoryStorage.instance.upsertEntry(updated);
+  }
+
   Future<void> _loadInitialHistory() async {
     final entries = await RecordingHistoryStorage.instance.loadHistory();
     final regenerated = await _cleanInvalidThumbnails(entries);
@@ -154,6 +180,19 @@ class _HomePageState extends State<HomePage> {
     final updated = <RecordingHistoryEntry>[];
     var hasChanges = false;
     for (final entry in entries) {
+      // 跳過 pre-warm session（pw_ 前綴），這些資料夾是相機預熱用，不應出現在歷史
+      final folderName = p.basename(p.dirname(entry.filePath));
+      if (folderName.startsWith('pw_')) {
+        // 將這筆標記為無縮圖（不產生）
+        if (entry.thumbnailPath != null) {
+          updated.add(entry.copyWith(thumbnailPath: null));
+          hasChanges = true;
+        } else {
+          updated.add(entry);
+        }
+        continue;
+      }
+
       var thumbnailPath = entry.thumbnailPath;
       final missing = thumbnailPath == null ||
           thumbnailPath.isEmpty ||
@@ -171,8 +210,11 @@ class _HomePageState extends State<HomePage> {
 
   /// 嘗試重新生成縮圖，支援 HEVC/MOV fallback。失敗回傳 null。
   static Future<String?> _tryRegenThumbnail(String videoPath) async {
-    if (!await File(videoPath).exists()) return null;
-    final outPath = p.join(File(videoPath).parent.path, 'thumbnail.jpg');
+    final file = File(videoPath);
+    if (!await file.exists()) return null;
+    // 過小的檔案（< 100KB）通常是空白或損壞的影片，直接跳過
+    if (await file.length() < 100 * 1024) return null;
+    final outPath = p.join(file.parent.path, 'thumbnail.jpg');
     for (final timeMs in [0, 1000, 3000]) {
       try {
         final path = await vt.VideoThumbnail.thumbnailFile(
@@ -254,6 +296,13 @@ class _HomePageState extends State<HomePage> {
                               PostureBreakdownCard(
                                 breakdown: today?.postureBreakdown ?? {},
                                 title: AppLocalizations.of(context).homeTodayPosture,
+                              ),
+                            ],
+                            if (_currentSuggestionEntry != null) ...[
+                              const SizedBox(height: kSpaceMD),
+                              _PracticeSuggestionsCard(
+                                entry: _currentSuggestionEntry!,
+                                onToggle: _toggleSuggestion,
                               ),
                             ],
                           ],
@@ -450,15 +499,19 @@ class _TodayOverviewCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                l.homeTodayOverview,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  l.homeTodayOverview,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Text(label,
                   style: const TextStyle(
                       color: Colors.white70, fontSize: 12)),
@@ -687,6 +740,174 @@ class _MetricMini extends StatelessWidget {
                 ),
               ],
             ),
+    );
+  }
+}
+
+// ── 目前訓練建議卡片 ──────────────────────────────────────────────
+
+class _PracticeSuggestionsCard extends StatelessWidget {
+  final RecordingHistoryEntry entry;
+  final Future<void> Function(
+      RecordingHistoryEntry entry, int index, bool done) onToggle;
+
+  const _PracticeSuggestionsCard({
+    required this.entry,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final suggestions = entry.practiceSuggestions ?? const [];
+    final doneCount = suggestions.where((s) => s.done).length;
+    final goal = entry.nextTrainingGoal?.trim();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(kSpaceLG),
+      decoration: kCardDecoration(radius: kRadiusLG),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.sports_golf_rounded,
+                  color: kPrimaryGreen, size: 20),
+              const SizedBox(width: kSpaceSM),
+              const Expanded(
+                child: Text(
+                  '目前訓練建議',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: kTextPrimary,
+                  ),
+                ),
+              ),
+              Text(
+                '$doneCount/${suggestions.length}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: kPrimaryGreen,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: kSpaceSM),
+          ...suggestions.asMap().entries.map((e) {
+            final i = e.key;
+            final s = e.value;
+            return _SuggestionTile(
+              suggestion: s,
+              onChanged: (v) => onToggle(entry, i, v),
+            );
+          }),
+          if (goal != null && goal.isNotEmpty) ...[
+            const SizedBox(height: kSpaceSM),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(kSpaceSM),
+              decoration: BoxDecoration(
+                color: kPrimaryGreen.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(kRadiusSM),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.flag_rounded,
+                      color: kPrimaryGreen, size: 16),
+                  const SizedBox(width: kSpaceXS),
+                  Expanded(
+                    child: Text(
+                      '下次目標：$goal',
+                      style: const TextStyle(
+                          fontSize: 12, color: kTextSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SuggestionTile extends StatelessWidget {
+  final PracticeSuggestionItem suggestion;
+  final ValueChanged<bool> onChanged;
+
+  const _SuggestionTile({
+    required this.suggestion,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final done = suggestion.done;
+    final titleStyle = TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      color: done ? kTextHint : kTextPrimary,
+      decoration: done ? TextDecoration.lineThrough : null,
+    );
+
+    return InkWell(
+      onTap: () => onChanged(!done),
+      borderRadius: BorderRadius.circular(kRadiusSM),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: kSpaceXS),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: done,
+                onChanged: (v) => onChanged(v ?? false),
+                activeColor: kPrimaryGreen,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+            const SizedBox(width: kSpaceSM),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text(suggestion.drill, style: titleStyle)),
+                      if (suggestion.reps.trim().isNotEmpty) ...[
+                        const SizedBox(width: kSpaceXS),
+                        Text(
+                          suggestion.reps,
+                          style: const TextStyle(
+                              fontSize: 11, color: kPrimaryGreen),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (suggestion.instruction.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        suggestion.instruction,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: done ? kTextHint : kTextSecondary,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

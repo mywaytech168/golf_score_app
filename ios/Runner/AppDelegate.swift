@@ -13,6 +13,12 @@ import UIKit
     if let controller = window?.rootViewController as? FlutterViewController {
       let m = controller.binaryMessenger
 
+      // ── Camera2-equivalent (AVFoundation + MediaPipe) ────────
+      // FlutterViewController implements FlutterTextureRegistry
+      if let textureRegistry = controller as? FlutterTextureRegistry {
+        _ = MediaPipeCameraChannel(messenger: m, registry: textureRegistry)
+      }
+
       // ── 已實作的 channel ─────────────────────────────────────
       setupKeepScreenChannel(messenger: m)
       setupAudioExtractorChannel(messenger: m)

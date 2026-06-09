@@ -82,6 +82,9 @@ namespace UploadServer.Services
             analysis.Status = "processing";
             await db.SaveChangesAsync(ct);
 
+            // full 模式 Gemini 分析成功完成時，於存檔後扣除一次用量（每日配額或獎勵球）
+            string? chargeUserId = null;
+
             try
             {
                 // --- 1. 下載 clip（V3 且已有 ONNX 結果時可省略）---
@@ -189,6 +192,7 @@ namespace UploadServer.Services
                         ct: ct);
 
                     analysis.Status       = "completed";
+                    chargeUserId          = analysis.UserId;
                     analysis.ResultJson   = result.RawJson;
                     analysis.Summary      = result.Summary;
                     analysis.Severity     = result.Severity;
@@ -211,6 +215,23 @@ namespace UploadServer.Services
             }
 
             await db.SaveChangesAsync(ct);
+
+            // 分析已durably存檔後才扣球，避免分析失敗仍扣費；扣球失敗不影響分析結果
+            if (chargeUserId != null)
+            {
+                try
+                {
+                    var userService = scope.ServiceProvider.GetRequiredService<UserService>();
+                    var usage = await userService.IncrementUsageAsync(chargeUserId);
+                    _logger.LogInformation(
+                        "AI Coach 分析扣球: {Id} user={User} todayUsed={Used} remaining={Remaining}",
+                        analysis.Id, chargeUserId, usage?.TodayUsed, usage?.Remaining);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "AI Coach 分析扣球失敗: {Id} user={User}", analysis.Id, chargeUserId);
+                }
+            }
         }
 
         /// <summary>執行 ONNX 推論並將結果寫回 analysis.OnnxResultJson；回傳最佳錯誤類型字串。</summary>

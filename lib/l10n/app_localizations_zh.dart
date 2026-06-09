@@ -551,6 +551,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsCheckUpdate => '檢查更新';
 
   @override
+  String get settingsPrivacyPolicy => '使用者條款與隱私政策';
+
+  @override
+  String get settingsVersion => '版本';
+
+  @override
+  String get settingsPrivacyOpenFailed => '無法開啟隱私政策頁面，請稍後再試';
+
+  @override
+  String get settingsVersionCopied => '已複製版本';
+
+  @override
   String settingsAlreadyLatest(String version) {
     return '已是最新版本 v$version';
   }
@@ -563,6 +575,25 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsLogoutWarning => '登出後需重新登入才能使用雲端功能。';
+
+  @override
+  String get commonContinue => '繼續';
+
+  @override
+  String get settingsDeleteAccount => '刪除帳號';
+
+  @override
+  String get settingsDeleteAccountWarning =>
+      '刪除帳號將永久移除你的個人資料、訂閱與分析紀錄，且無法復原。此操作不會自動退款，訂閱請另於 App Store／Google Play 取消。確定要繼續嗎？';
+
+  @override
+  String get settingsDeleteAccountConfirmTitle => '最後確認';
+
+  @override
+  String get settingsDeleteAccountConfirmHint => '請輸入「DELETE」以確認永久刪除帳號。';
+
+  @override
+  String get settingsDeleteAccountFailed => '刪除帳號失敗，請稍後再試或聯絡客服。';
 
   @override
   String get settingsNameUpdated => '名稱已更新';
@@ -1352,6 +1383,18 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get settingsCheckUpdate => '检查更新';
 
   @override
+  String get settingsPrivacyPolicy => '用户条款与隐私政策';
+
+  @override
+  String get settingsVersion => '版本';
+
+  @override
+  String get settingsPrivacyOpenFailed => '无法开启隐私政策页面，请稍后再试';
+
+  @override
+  String get settingsVersionCopied => '已复制版本';
+
+  @override
   String settingsAlreadyLatest(String version) {
     return '已是最新版本 v$version';
   }
@@ -1364,6 +1407,25 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get settingsLogoutWarning => '退出后需重新登录才能使用云端功能。';
+
+  @override
+  String get commonContinue => '继续';
+
+  @override
+  String get settingsDeleteAccount => '删除帐号';
+
+  @override
+  String get settingsDeleteAccountWarning =>
+      '删除帐号将永久移除你的个人资料、订阅与分析记录，且无法复原。此操作不会自动退款，订阅请另于 App Store／Google Play 取消。确定要继续吗？';
+
+  @override
+  String get settingsDeleteAccountConfirmTitle => '最后确认';
+
+  @override
+  String get settingsDeleteAccountConfirmHint => '请输入「DELETE」以确认永久删除帐号。';
+
+  @override
+  String get settingsDeleteAccountFailed => '删除帐号失败，请稍后再试或联系客服。';
 
   @override
   String get settingsNameUpdated => '名称已更新';
@@ -2153,6 +2215,18 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsCheckUpdate => '檢查更新';
 
   @override
+  String get settingsPrivacyPolicy => '使用者條款與隱私政策';
+
+  @override
+  String get settingsVersion => '版本';
+
+  @override
+  String get settingsPrivacyOpenFailed => '無法開啟隱私政策頁面，請稍後再試';
+
+  @override
+  String get settingsVersionCopied => '已複製版本';
+
+  @override
   String settingsAlreadyLatest(String version) {
     return '已是最新版本 v$version';
   }
@@ -2165,6 +2239,25 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get settingsLogoutWarning => '登出後需重新登入才能使用雲端功能。';
+
+  @override
+  String get commonContinue => '繼續';
+
+  @override
+  String get settingsDeleteAccount => '刪除帳號';
+
+  @override
+  String get settingsDeleteAccountWarning =>
+      '刪除帳號將永久移除你的個人資料、訂閱與分析紀錄，且無法復原。此操作不會自動退款，訂閱請另於 App Store／Google Play 取消。確定要繼續嗎？';
+
+  @override
+  String get settingsDeleteAccountConfirmTitle => '最後確認';
+
+  @override
+  String get settingsDeleteAccountConfirmHint => '請輸入「DELETE」以確認永久刪除帳號。';
+
+  @override
+  String get settingsDeleteAccountFailed => '刪除帳號失敗，請稍後再試或聯絡客服。';
 
   @override
   String get settingsNameUpdated => '名稱已更新';

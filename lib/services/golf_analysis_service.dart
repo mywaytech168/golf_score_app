@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// V2 高爾夫揮桿分析結果。
+/// V2 高爾夫揮桿分析結果（純音訊）。
 ///
-/// 由 Android 原生完成「音訊峰值偵測 + 局部 ML Kit 骨架分析」後回傳，
-/// 比全影片逐幀分析快 10-20 倍。
+/// 由 Android 原生完成音訊峰值偵測後回傳 impactTimeMs。
+/// 骨架分析由 V3 (`analyzeVideoAtCandidate`) 負責。
 class GolfAnalysisResult {
   /// 精準擊球時間（毫秒）
   final int impactTimeMs;
@@ -63,16 +63,10 @@ class GolfAnalysisResult {
       'GolfAnalysisResult(impactTimeMs=$impactTimeMs, hasAudio=$hasAudio, frames=$frameCount)';
 }
 
-/// V2 骨架分析服務：呼叫 Android 原生管線，結合音訊峰值與局部 ML Kit。
+/// 高爾夫揮桿分析服務。
 ///
-/// 使用方式：
-/// ```dart
-/// final result = await GolfAnalysisService.analyzeVideo(videoPath: path);
-/// if (result != null) {
-///   await controller.seekTo(Duration(milliseconds: result.impactTimeMs - 1000));
-///   await controller.setPlaybackSpeed(0.25);
-/// }
-/// ```
+/// - V2 (`analyzeVideo`)：純音訊峰值偵測，快速取得 impactTimeMs，skeletonJson 為空。
+/// - V3 (`analyzeVideoAtCandidate`)：音訊峰值 + MediaPipe 骨架分析，回傳完整 skeletonJson。
 class GolfAnalysisService {
   static const _channel =
       MethodChannel('com.example.golf_score_app/golf_analysis');
@@ -148,28 +142,22 @@ class GolfAnalysisService {
     }
   }
 
-  /// 分析影片，回傳 [GolfAnalysisResult]；找不到擊球動作或分析失敗時回傳 null。
+  /// V2 純音訊分析：找出影片的擊球音訊峰值，回傳 [GolfAnalysisResult]（skeletonJson 為空）。
   ///
   /// - [searchStartMs]：跳過前幾毫秒（排除錄影開始的靜音），預設 500ms
   /// - [searchEndMs]：搜尋到幾毫秒結束，-1 = 搜到結尾
-  /// - [windowMs]：在音訊峰值前後各分析幾毫秒，預設 1000ms（共 ≈60 幀 @ 30fps）
-  /// - [maxWidth]：ML Kit 輸入最大寬度，預設 720px
   static Future<GolfAnalysisResult?> analyzeVideo({
     required String videoPath,
     int searchStartMs = 500,
     int searchEndMs = -1,
-    int windowMs = 1000,
-    int maxWidth = 720,
   }) async {
     try {
       final raw = await _channel.invokeMapMethod<String, dynamic>(
         'analyzeVideo',
         {
-          'videoPath': videoPath,
+          'videoPath':    videoPath,
           'searchStartMs': searchStartMs,
-          'searchEndMs': searchEndMs,
-          'windowMs': windowMs,
-          'maxWidth': maxWidth,
+          'searchEndMs':   searchEndMs,
         },
       );
       if (raw == null) return null;

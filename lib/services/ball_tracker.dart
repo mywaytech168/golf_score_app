@@ -331,6 +331,15 @@ class BallTracker {
   static const int _hitLeadFrames  = 5;   // hitFrame - 5
   static const int _hitTrailFrames = 25;  // hitFrame + 25（加大 P0 搜尋窗口，對準確率有益）
 
+  // ── 全域拋物線擬合 + 離群剔除 + 品質閘門 ───────────────────
+  // 取代「3 點移動平均」：球的飛行符合投射體 x(t)=線性、y(t)=二次（重力）。
+  // 對整段軌跡做穩健擬合並剔除偏離曲線的錯點，再輸出擬合後座標。
+  static const int    _minFitPoints       = 5;     // 少於此點數退回移動平均
+  static const double _fitOutlierFloorPx  = 40.0;  // 離群殘差絕對下限
+  static const double _fitOutlierMadK     = 3.0;   // 殘差 > k×中位殘差 → 離群
+  static const int    _fitIters           = 3;     // 重擬合次數
+  static const double _trackMaxResidualPx = 70.0;  // 擬合中位殘差超過 → 整條拒絕（品質閘門）
+
   // ── 執行狀態（每次 track() 重置）────────────────────────
   _TrackState _state         = _TrackState.waitP0;
   final List<TrackPoint> _trackPts = [];
@@ -353,6 +362,10 @@ class BallTracker {
   int _hitWindowEnd   = -1;
   int _hitFrameIdx    = -1; // 擊球幀（用於 post-impact step guard 放寬）
 
+  // 球員遮罩（coded 空間 [x1,y1,x2,y2]）：落在框內的 blob 視為球員/球桿，直接排除。
+  // 由呼叫端從 MediaPipe pose 人體 bbox 推導後傳入；null = 不遮罩（行為同舊版）。
+  List<int>? _golferBox;
+
   // ══════════════════════════════════════════════════════════
   // 公開入口：track()
   // ══════════════════════════════════════════════════════════
@@ -366,10 +379,12 @@ class BallTracker {
     required int videoH,   // coded 高
     required int rotation, // 影片 rotation metadata
     double? hitSec,
+    List<int>? golferBox,  // coded 空間 [x1,y1,x2,y2]，落在框內的 blob 排除（球員/球桿）
   }) {
     // 重置所有狀態
     _state = _TrackState.waitP0;
     _trackPts.clear();
+    _golferBox       = (golferBox != null && golferBox.length == 4) ? golferBox : null;
     _p0FrameIdx      = -1;
     _noCandCount     = 0;
     _waitFrames      = 0;
@@ -420,9 +435,12 @@ class BallTracker {
         if (_blueHist.length > 10) _blueHist.removeAt(0);
       }
 
+      // ── 球員遮罩：先排除落在球員 bbox 內的 blob（球桿/身體）──
+      final notGolfer = _excludeGolfer(frame.blobs);
+
       // ── ROI 空間篩選 ─────────────────────────────────
       final roiFiltered = _applyRoiFilter(
-          frame.blobs, roiHalfBase, bluePred);
+          notGolfer, roiHalfBase, bluePred);
 
       // ── 動態門檻篩選 ─────────────────────────────────
       final pIndex = math.max(_trackPts.length - 1, 0);
@@ -434,9 +452,163 @@ class BallTracker {
       if (_state == _TrackState.stopped) break; // 停止後跳出循環
     }
 
+    // ── 全域拋物線擬合 + 離群剔除 + 品質閘門 ──────────────────
+    // 足夠點數時改用投射體擬合（取代純移動平均）：能剔除偏離曲線的錯點，
+    // 並對「整條不像拋物線」的軌跡(雜訊/球桿/背景)直接拒絕，寧可不畫也不畫錯。
+    if (_trackPts.length >= _minFitPoints) {
+      final fit = _robustParabolaFit(_trackPts);
+      if (fit != null) {
+        if (fit.medianRes > _trackMaxResidualPx) {
+          debugPrint('[BallTracker] ⛔ 品質閘門拒絕: 中位殘差 '
+              '${fit.medianRes.toStringAsFixed(0)}px > ${_trackMaxResidualPx.toStringAsFixed(0)}px '
+              '(非乾淨拋物線)');
+          return const [];
+        }
+        final fitted = _applyParabolaSmoothing(_trackPts, fit);
+        debugPrint('[BallTracker] ✅ 追蹤完成: ${_trackPts.length} 點 → 擬合 '
+            '(中位殘差 ${fit.medianRes.toStringAsFixed(0)}px, '
+            '保留 ${fitted.length}/${_trackPts.length})');
+        return List.unmodifiable(fitted);
+      }
+    }
+
+    // 點數不足或擬合失敗 → 退回 3 點移動平均（舊行為）
     final smoothed = _smoothTrackPts(_trackPts);
-    debugPrint('[BallTracker] ✅ 追蹤完成: ${_trackPts.length} 點 → smooth');
+    debugPrint('[BallTracker] ✅ 追蹤完成: ${_trackPts.length} 點 → smooth(移動平均)');
     return List.unmodifiable(smoothed);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 球員遮罩
+  // ══════════════════════════════════════════════════════════
+
+  List<BlobData> _excludeGolfer(List<BlobData> blobs) {
+    final box = _golferBox;
+    if (box == null) return blobs;
+    final x1 = box[0], y1 = box[1], x2 = box[2], y2 = box[3];
+    return blobs.where((b) => !(b.cx >= x1 && b.cx <= x2 && b.cy >= y1 && b.cy <= y2)).toList();
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 拋物線擬合（x(t)=線性, y(t)=二次）+ 迭代離群剔除
+  // ══════════════════════════════════════════════════════════
+
+  _ParabolaFit? _robustParabolaFit(List<TrackPoint> pts) {
+    if (pts.length < 3) return null;
+    final fi = [for (final p in pts) p.frameIdx.toDouble()];
+    final xs = [for (final p in pts) p.rawX.toDouble()];
+    final ys = [for (final p in pts) p.rawY.toDouble()];
+    final t0 = fi.reduce(math.min);
+    final t = [for (final v in fi) v - t0];
+    var inlier = List<bool>.filled(pts.length, true);
+    List<double>? cx, cy;
+
+    for (int it = 0; it < math.max(1, _fitIters); it++) {
+      final ti = <double>[], xi = <double>[], yi = <double>[];
+      for (int i = 0; i < t.length; i++) {
+        if (inlier[i]) { ti.add(t[i]); xi.add(xs[i]); yi.add(ys[i]); }
+      }
+      if (ti.length < 3) break;
+      cx = _polyfit(ti, xi, 1);
+      cy = _polyfit(ti, yi, 2);
+      final res = [
+        for (int i = 0; i < t.length; i++)
+          _hypot(xs[i] - _polyval(cx, t[i]), ys[i] - _polyval(cy, t[i]))
+      ];
+      final inRes = [for (int i = 0; i < t.length; i++) if (inlier[i]) res[i]]..sort();
+      final med = inRes.isEmpty ? 0.0 : inRes[inRes.length ~/ 2];
+      final thr = math.max(_fitOutlierFloorPx, _fitOutlierMadK * (med + 1e-6));
+      final ni = [for (final r in res) r <= thr];
+      if (ni.where((b) => b).length < 3) break;
+      if (_sameMask(ni, inlier)) { inlier = ni; break; }
+      inlier = ni;
+    }
+    if (cx == null || cy == null) return null;
+    final resAll = [
+      for (int i = 0; i < t.length; i++)
+        _hypot(xs[i] - _polyval(cx, t[i]), ys[i] - _polyval(cy, t[i]))
+    ]..sort();
+    return _ParabolaFit(cx, cy, t0, inlier, resAll[resAll.length ~/ 2]);
+  }
+
+  /// 用擬合曲線輸出平滑座標，剔除離群點（保留 raw 供 debug）。
+  List<TrackPoint> _applyParabolaSmoothing(List<TrackPoint> pts, _ParabolaFit fit) {
+    final out = <TrackPoint>[];
+    for (int i = 0; i < pts.length; i++) {
+      if (!fit.inlier[i]) continue; // 丟棄偏離曲線的錯點
+      final t = pts[i].frameIdx - fit.t0;
+      out.add(TrackPoint(
+        x: _polyval(fit.cx, t).round(),
+        y: _polyval(fit.cy, t).round(),
+        rawX: pts[i].rawX,
+        rawY: pts[i].rawY,
+        frameIdx: pts[i].frameIdx,
+        ptsUs: pts[i].ptsUs,
+      ));
+    }
+    return out;
+  }
+
+  bool _sameMask(List<bool> a, List<bool> b) {
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  double _hypot(double a, double b) => math.sqrt(a * a + b * b);
+
+  /// 多項式求值，係數最高次在前（同 numpy.polyval）。
+  double _polyval(List<double> c, double x) {
+    double r = 0;
+    for (final coef in c) {
+      r = r * x + coef;
+    }
+    return r;
+  }
+
+  /// 最小平方多項式擬合（normal equations），回傳係數最高次在前。
+  List<double> _polyfit(List<double> xs, List<double> ys, int degree) {
+    final m = degree + 1;
+    final ata = [for (int i = 0; i < m; i++) List<double>.filled(m, 0.0)];
+    final aty = List<double>.filled(m, 0.0);
+    for (int k = 0; k < xs.length; k++) {
+      final pow = List<double>.filled(m, 1.0);
+      for (int j = 1; j < m; j++) {
+        pow[j] = pow[j - 1] * xs[k];
+      }
+      for (int i = 0; i < m; i++) {
+        for (int j = 0; j < m; j++) {
+          ata[i][j] += pow[i] * pow[j];
+        }
+        aty[i] += pow[i] * ys[k];
+      }
+    }
+    final c = _solveLinear(ata, aty); // c[0]=常數 ... c[m-1]=最高次
+    return c.reversed.toList();
+  }
+
+  /// 高斯消去（部分樞軸）。
+  List<double> _solveLinear(List<List<double>> a, List<double> b) {
+    final n = b.length;
+    for (int col = 0; col < n; col++) {
+      int piv = col;
+      for (int r = col + 1; r < n; r++) {
+        if (a[r][col].abs() > a[piv][col].abs()) piv = r;
+      }
+      final tmpA = a[col]; a[col] = a[piv]; a[piv] = tmpA;
+      final tmpB = b[col]; b[col] = b[piv]; b[piv] = tmpB;
+      final d = a[col][col].abs() < 1e-12 ? 1e-12 : a[col][col];
+      for (int r = 0; r < n; r++) {
+        if (r == col) continue;
+        final f = a[r][col] / d;
+        for (int k = col; k < n; k++) {
+          a[r][k] -= f * a[col][k];
+        }
+        b[r] -= f * b[col];
+      }
+    }
+    return [for (int i = 0; i < n; i++) b[i] / (a[i][i].abs() < 1e-12 ? 1e-12 : a[i][i])];
   }
 
   // ══════════════════════════════════════════════════════════
@@ -857,11 +1029,7 @@ class BallTracker {
         final (px, py) = bluePred;
 
         // ── 候選評分 ──────────────────────────────────
-        // 公式：kalmanDist - 0.15×diffMean - 0.0×aiBallScore（預留）
-        // 未來：aiBallScore 由 TFLite CNN crop classifier 提供（0-1，越高越像球）
-        //   final_score ≈
-        //     0.35×kalman_dist_score + 0.25×diff_score
-        //   + 0.25×aiBallScore      + 0.15×trajectory_score
+        // 公式：kalmanDist - 0.15×diffMean（diffMean 越高越可能為移動中的球）
         BlobData best;
         if (pool.length <= _farFewCandsMax) {
           best = pool.reduce((a, b) =>
@@ -870,13 +1038,10 @@ class BallTracker {
                   ? a : b);
         } else {
           best = pool.reduce((a, b) {
-            const double aiBallScore = 0.0; // TODO: 接 TFLite classifier
             final scoreA = _dist(a.cx, a.cy, px.round(), py.round())
-                - 0.15 * a.diffMean
-                - 25.0 * aiBallScore; // 25=比例因子，與距離同量級
+                - 0.15 * a.diffMean;
             final scoreB = _dist(b.cx, b.cy, px.round(), py.round())
-                - 0.15 * b.diffMean
-                - 25.0 * aiBallScore;
+                - 0.15 * b.diffMean;
             return scoreA <= scoreB ? a : b;
           });
         }
@@ -992,4 +1157,14 @@ class BallTracker {
     final dy = (ay - by).toDouble();
     return dx * dx + dy * dy;
   }
+}
+
+/// 拋物線擬合結果：x(t)=cx[0]*t+cx[1]，y(t)=cy[0]*t²+cy[1]*t+cy[2]（t=frameIdx-t0）。
+class _ParabolaFit {
+  final List<double> cx;   // 長度 2（最高次在前）
+  final List<double> cy;   // 長度 3
+  final double t0;
+  final List<bool> inlier; // 與 trackPts 等長
+  final double medianRes;  // 全點到擬合曲線的中位殘差（px）
+  const _ParabolaFit(this.cx, this.cy, this.t0, this.inlier, this.medianRes);
 }

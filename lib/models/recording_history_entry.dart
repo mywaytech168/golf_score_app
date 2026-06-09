@@ -28,6 +28,59 @@ enum VideoType {
   }
 }
 
+/// AI 分析產生的單則訓練建議，附帶「是否已完成」標記
+/// 對應後端 practice_suggestions[]，外加本地 [done] 供使用者勾選
+@immutable
+class PracticeSuggestionItem {
+  /// 練習名稱
+  final String drill;
+
+  /// 具體做法
+  final String instruction;
+
+  /// 建議次數/組數
+  final String reps;
+
+  /// 使用者是否已標記完成
+  final bool done;
+
+  const PracticeSuggestionItem({
+    required this.drill,
+    required this.instruction,
+    required this.reps,
+    this.done = false,
+  });
+
+  PracticeSuggestionItem copyWith({
+    String? drill,
+    String? instruction,
+    String? reps,
+    bool? done,
+  }) {
+    return PracticeSuggestionItem(
+      drill:       drill       ?? this.drill,
+      instruction: instruction ?? this.instruction,
+      reps:        reps        ?? this.reps,
+      done:        done        ?? this.done,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'drill':       drill,
+        'instruction': instruction,
+        'reps':        reps,
+        'done':        done,
+      };
+
+  factory PracticeSuggestionItem.fromJson(Map<String, dynamic> j) =>
+      PracticeSuggestionItem(
+        drill:       j['drill']       as String? ?? '',
+        instruction: j['instruction'] as String? ?? '',
+        reps:        j['reps']        as String? ?? '',
+        done:        j['done']        as bool?   ?? false,
+      );
+}
+
 /// 記錄單次錄影完成後的資料，方便首頁與歷史列表顯示
 @immutable
 class RecordingHistoryEntry {
@@ -119,6 +172,9 @@ class RecordingHistoryEntry {
   /// 錄製時的影片尺寸名稱；固定為 'wide'（16:9）
   final String? recordedAspectRatio;
 
+  /// 是否為前鏡頭錄製（true → 切片時自動水平翻轉）
+  final bool isFrontCamera;
+
   /// 揮桿姿勢分類 label（來自後端 ONNX 骨架模型推論）
   /// '' = 完美(Good)；其餘對應 SwingPosture 5 種錯誤常數
   /// null = 尚未分析
@@ -136,6 +192,13 @@ class RecordingHistoryEntry {
   /// 最後一次 AI Coach 分析使用的 Gemini prompt 版本："v1" | "v2" | "v3"
   /// null = 尚未分析或舊資料（版本不明）
   final String? aiPromptVersion;
+
+  /// AI 分析產生的訓練建議清單（含已完成標記）
+  /// null 或空 = 尚無建議
+  final List<PracticeSuggestionItem>? practiceSuggestions;
+
+  /// AI 分析建議的下一次訓練目標；null = 尚無
+  final String? nextTrainingGoal;
 
   const RecordingHistoryEntry({
     required this.filePath,
@@ -166,10 +229,13 @@ class RecordingHistoryEntry {
     this.isUploaded = false,
     this.bestSpeedValue,
     this.recordedAspectRatio,
+    this.isFrontCamera = false,
     this.swingPostureLabel,
     this.geminiPostureLabel,
     this.postureAnalysisId,
     this.aiPromptVersion,
+    this.practiceSuggestions,
+    this.nextTrainingGoal,
   });
 
   /// 是否已上傳（明確標記 或 AI Coach 分析過）
@@ -214,10 +280,13 @@ class RecordingHistoryEntry {
     bool? isUploaded,
     double? bestSpeedValue,
     String? recordedAspectRatio,
+    bool? isFrontCamera,
     String? swingPostureLabel,
     String? geminiPostureLabel,
     String? postureAnalysisId,
     String? aiPromptVersion,
+    List<PracticeSuggestionItem>? practiceSuggestions,
+    String? nextTrainingGoal,
   }) {
     return RecordingHistoryEntry(
       filePath: filePath ?? this.filePath,
@@ -248,10 +317,13 @@ class RecordingHistoryEntry {
       isUploaded: isUploaded ?? this.isUploaded,
       bestSpeedValue: bestSpeedValue ?? this.bestSpeedValue,
       recordedAspectRatio: recordedAspectRatio ?? this.recordedAspectRatio,
+      isFrontCamera: isFrontCamera ?? this.isFrontCamera,
       swingPostureLabel: swingPostureLabel ?? this.swingPostureLabel,
       geminiPostureLabel: geminiPostureLabel ?? this.geminiPostureLabel,
       postureAnalysisId: postureAnalysisId ?? this.postureAnalysisId,
       aiPromptVersion: aiPromptVersion ?? this.aiPromptVersion,
+      practiceSuggestions: practiceSuggestions ?? this.practiceSuggestions,
+      nextTrainingGoal: nextTrainingGoal ?? this.nextTrainingGoal,
     );
   }
 
@@ -301,10 +373,13 @@ class RecordingHistoryEntry {
       'isUploaded': isUploaded,
       'bestSpeedValue': bestSpeedValue,
       'recordedAspectRatio': recordedAspectRatio,
+      'isFrontCamera':       isFrontCamera,
       'swingPostureLabel':   swingPostureLabel,
       'geminiPostureLabel':  geminiPostureLabel,
       'postureAnalysisId':   postureAnalysisId,
       'aiPromptVersion':     aiPromptVersion,
+      'practiceSuggestions': practiceSuggestions?.map((e) => e.toJson()).toList(),
+      'nextTrainingGoal':    nextTrainingGoal,
     };
   }
 
@@ -328,6 +403,17 @@ class RecordingHistoryEntry {
     List<String>? audioTags;
     if (rawTags is List) {
       audioTags = rawTags.whereType<String>().toList();
+    }
+
+    // 還原訓練建議清單
+    final rawSuggestions = json['practiceSuggestions'];
+    List<PracticeSuggestionItem>? practiceSuggestions;
+    if (rawSuggestions is List) {
+      practiceSuggestions = rawSuggestions
+          .whereType<Map>()
+          .map((e) => PracticeSuggestionItem.fromJson(
+              e.map((k, v) => MapEntry(k.toString(), v))))
+          .toList();
     }
 
     return RecordingHistoryEntry(
@@ -367,10 +453,13 @@ class RecordingHistoryEntry {
       isUploaded:         (json['isUploaded']         as bool?) ?? false,
       bestSpeedValue:     (json['bestSpeedValue']     as num?)?.toDouble(),
       recordedAspectRatio: json['recordedAspectRatio'] as String?,
+      isFrontCamera:       (json['isFrontCamera']      as bool?) ?? false,
       swingPostureLabel:   json['swingPostureLabel']   as String?,
       geminiPostureLabel:  json['geminiPostureLabel']  as String?,
       postureAnalysisId:   json['postureAnalysisId']   as String?,
       aiPromptVersion:     json['aiPromptVersion']     as String?,
+      practiceSuggestions: practiceSuggestions,
+      nextTrainingGoal:    json['nextTrainingGoal']    as String?,
     );
   }
 }

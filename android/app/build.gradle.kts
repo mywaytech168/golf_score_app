@@ -1,4 +1,6 @@
-﻿plugins {
+﻿import java.util.Properties
+
+plugins {
     id("com.android.application")
     // ---------- 套用 Kotlin 外掛 ----------
     // 改用完整外掛識別名稱，確保沿用 settings.gradle.kts 中宣告的 2.0.21 版本
@@ -43,12 +45,7 @@ android {
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // ✅ JNI：只打包用到的 ABI，避免 APK 增大
-        // arm64-v8a  = 絕大多數現代 Android 裝置（有 NEON SIMD）
-        // x86_64     = 模擬器
-        ndk {
-            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
-        }
+        // ABI 由 flutter CLI --target-platform 控制，不在此設定
     }
 
     // ✅ golf_native.so：YUV→NV12 + composite overlay 的 C 加速實作
@@ -59,16 +56,27 @@ android {
         }
     }
 
+    // ABI 由 flutter build apk --target-platform 控制，不在 Gradle 設定
+    // （splits.abi 與 Flutter Plugin 自動設定的 ndk.abiFilters 互斥，會 build error）
+
     buildFeatures {
         buildConfig = true
     }
 
+    // 讀取 android/key.properties（不進 git，本機存放密碼）
+    val keyPropertiesFile = rootProject.file("key.properties")
+    val keyProperties = Properties().also { props: Properties ->
+        if (keyPropertiesFile.exists()) props.load(keyPropertiesFile.inputStream())
+    }
+
     signingConfigs {
         create("release") {
-            storeFile = file("tekswing.jks")
-            storePassword = System.getenv("STORE_PASSWORD") ?: ""
-            keyAlias = "tekswing"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            storeFile = file(keyProperties.getProperty("storeFile") ?: "tekswing.jks")
+            storePassword = keyProperties.getProperty("storePassword")
+                ?: System.getenv("STORE_PASSWORD") ?: ""
+            keyAlias = keyProperties.getProperty("keyAlias") ?: "tekswing"
+            keyPassword = keyProperties.getProperty("keyPassword")
+                ?: System.getenv("KEY_PASSWORD") ?: ""
         }
     }
 
@@ -89,9 +97,9 @@ android {
         exclude("lib/*/libVkLayer_*.so")
     }
 
-    // ✅ TFLite 模型不可被壓縮：AAPT 對壓縮資産無法用 openFd() 讀取
+    // ✅ 模型檔不可被壓縮：AAPT 對壓縮資産無法用 openFd() 讀取
     androidResources {
-        noCompress += listOf("tflite", "lite")
+        noCompress += listOf("tflite", "lite", "task")
     }
 }
 
@@ -111,20 +119,15 @@ configurations.all {
 }
 
 dependencies {
-    // Media3 Transformer removed — VideoTrimmer now uses MediaExtractor+MediaMuxer directly
     // ---------- 圖片方向解析 ----------
-    // 透過 ExifInterface 讀取頭像 EXIF 資訊，以修正相機拍攝的旋轉方向
     implementation("androidx.exifinterface:exifinterface:1.3.7")
-    
-    // ✅ Google ML Kit Pose Detection
-    // 版本需與 Flutter plugin google_mlkit_pose_detection:^0.12.0 的傳遞依賴一致（beta5）
-    // 使用 beta1 會導致 mediapipe-internal 版本衝突 → JNI NoSuchFieldError
-    implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
-    implementation("com.google.mlkit:vision-common:17.3.0")
 
-    // ✅ TFLite Android API（YOLOv8 球偵測，Kotlin 側推論）
+    // ✅ MediaPipe Tasks Vision（Camera2 即時 Pose Landmarker）
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+
+    // ✅ TFLite Android API（YOLOv8 球偵測）
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
 
-    // SAF DocumentFile（資料夾選擇寫檔）
+    // SAF DocumentFile
     implementation("androidx.documentfile:documentfile:1.0.1")
 }

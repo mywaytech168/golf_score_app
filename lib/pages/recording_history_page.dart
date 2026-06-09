@@ -2048,7 +2048,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         promptVersion:    aiMode.promptVersion,
         phaseTimestamps:  aiMode.phaseTimestamps,
         audioAnalysisJson: _buildAudioAnalysisJson(widget.entry),
-        onAnalysisComplete: (geminiErrorType, onnxErrorType, analysisId) {
+        onAnalysisComplete: (geminiErrorType, onnxErrorType, analysisId, result) {
           aiCallbackFired = true;
           final updated = widget.entry.copyWith(
             hasAiCoachAnalysis: true,
@@ -2057,6 +2057,14 @@ class _HistoryTileState extends State<_HistoryTile> {
             swingPostureLabel:  widget.entry.swingPostureLabel ?? onnxErrorType,
             postureAnalysisId:  analysisId,
             aiPromptVersion:    aiMode.promptVersion,
+            practiceSuggestions: result?.practiceSuggestions
+                .map((s) => PracticeSuggestionItem(
+                      drill:       s.drill,
+                      instruction: s.instruction,
+                      reps:        s.reps,
+                    ))
+                .toList(),
+            nextTrainingGoal:   result?.nextTrainingGoal,
           );
           // DB 存檔不需要 mounted，確保離開頁面後資料仍能寫入
           RecordingHistoryStorage.instance.upsertEntry(updated);
@@ -3251,7 +3259,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         promptVersion:    aiMode.promptVersion,
         phaseTimestamps:  aiMode.phaseTimestamps,
         audioAnalysisJson: _buildAudioAnalysisJson(widget.clip),
-        onAnalysisComplete: (geminiErrorType, onnxErrorType, analysisId) {
+        onAnalysisComplete: (geminiErrorType, onnxErrorType, analysisId, result) {
           aiCallbackFired = true;
           final updated = widget.clip.copyWith(
             hasAiCoachAnalysis: true,
@@ -3259,6 +3267,14 @@ class _ClipSubCardState extends State<_ClipSubCard> {
             swingPostureLabel:  widget.clip.swingPostureLabel ?? onnxErrorType,
             postureAnalysisId:  analysisId,
             aiPromptVersion:    aiMode.promptVersion,
+            practiceSuggestions: result?.practiceSuggestions
+                .map((s) => PracticeSuggestionItem(
+                      drill:       s.drill,
+                      instruction: s.instruction,
+                      reps:        s.reps,
+                    ))
+                .toList(),
+            nextTrainingGoal:   result?.nextTrainingGoal,
           );
           // DB 存檔不需要 mounted，確保離開頁面後資料仍能寫入
           RecordingHistoryStorage.instance.upsertEntry(updated);

@@ -1139,7 +1139,13 @@ class _OnnxPostureCardState extends State<_OnnxPostureCard> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(label, style: const TextStyle(fontSize: 13)),
+                Expanded(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                ),
+                const SizedBox(width: 8),
                 Text('${(score * 100).toStringAsFixed(0)}%',
                     style: TextStyle(
                         fontSize: 12,

@@ -6,6 +6,7 @@ import 'home_page.dart';
 import 'today_info_page.dart';
 import 'upgrade_page.dart';
 import 'recording_history_page.dart';
+import 'video_player_page.dart';
 import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
@@ -146,12 +147,22 @@ class _MainShellPageState extends State<MainShellPage> {
       );
       
       await RecordingHistoryStorage.instance.upsertEntry(entry);
-      
-      setState(() {
-        _recordingHistory.insert(0, entry);
-      });
-      
+
+      if (mounted) setState(() => _recordingHistory.insert(0, entry));
+
       debugPrint('[MainShell] 錄製完成: ${videoPath.split('/').last}, Tags: $audioTags');
+
+      // 錄製完成後直接跳到影片播放頁
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VideoPlayerPage(
+              videoPath: entry.filePath,
+              entry: entry,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('[MainShell] 處理錄製完成失敗: $e');
     }
@@ -195,12 +206,7 @@ class _MainShellPageState extends State<MainShellPage> {
                 aspectRatioMode: aspectRatioMode,
                 audioTags: audioTags,
               );
-              // 完成後返回 Home
-              _pageController.animateToPage(
-                0,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
+              // 導向詳情頁由 _handleRecordingComplete 負責；shell 保持在 index 0
             },
             onVideoImported: _loadHistory,
           ),

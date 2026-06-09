@@ -19,7 +19,8 @@ class AiCoachPage extends StatefulWidget {
   /// - [geminiErrorType]：Gemini 分析的姿勢錯誤類型（'' = 完美）
   /// - [onnxErrorType]：ONNX 模型的姿勢錯誤類型（null = 無結果）
   /// - [analysisId]：本次分析 ID
-  final void Function(String geminiErrorType, String? onnxErrorType, String analysisId)? onAnalysisComplete;
+  /// - [result]：完整教練分析結果（含 practiceSuggestions / nextTrainingGoal），可能為 null
+  final void Function(String geminiErrorType, String? onnxErrorType, String analysisId, CoachResult? result)? onAnalysisComplete;
 
   const AiCoachPage({
     super.key,
@@ -50,7 +51,7 @@ class AiCoachPage extends StatefulWidget {
     /// V2："MEDIA_RESOLUTION_HIGH" | "MEDIA_RESOLUTION_MEDIUM"（null = 使用 server 預設）
     String? v2Resolution,
     String? audioAnalysisJson,
-    void Function(String geminiErrorType, String? onnxErrorType, String analysisId)? onAnalysisComplete,
+    void Function(String geminiErrorType, String? onnxErrorType, String analysisId, CoachResult? result)? onAnalysisComplete,
   }) async {
     // ── Cache Check ──────────────────────────────────────────
     // 已有 full 分析 → 直接開啟（避免重複上傳 / 消耗配額）
@@ -256,7 +257,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
             final onnxType = rawOnnx != null && SwingPosture.allLabels.contains(rawOnnx)
                 ? rawOnnx
                 : null;
-            widget.onAnalysisComplete?.call(geminiType, onnxType, widget.analysisId);
+            widget.onAnalysisComplete?.call(geminiType, onnxType, widget.analysisId, status.result);
           }
         }
       }

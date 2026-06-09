@@ -302,6 +302,13 @@ server/.nuget/
 *.userosscache
 *.sln.docstates
 server/appsettings.local.json
+server/appsettings.json
+
+## Misc junk / temp artifacts
+mediapipe-samples-main.zip
+preview_capture.png
+swing_thumb.jpg
+t2.jpg
 
 ## Build folders
 server/*/bin
@@ -311,3 +318,6 @@ server/.vs
 ## Testing
 TestResults/
 coverage.opencover.xml
+CamerAwesome-master/
+flutter_fhd_record_ref/
+mediapipe-samples-main/
