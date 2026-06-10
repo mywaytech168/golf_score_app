@@ -43,7 +43,7 @@ class BallTrackingConfig:
     # Video processing
     track_frames: int = 300
     batch_mode: bool = True
-    input_dir: str = r"\\10.1.1.101\TekSwing\videos\..."
+    input_dir: str = r"\\10.1.1.101\ORVIA\videos\..."
     output_dir: Optional[str] = None
     video_path: str = ""
     
@@ -798,8 +798,8 @@ if __name__ == "__main__":
     # 示例：單支影片追蹤
     config = BallTrackingConfig(
         batch_mode=False,
-        video_path=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized_pose_phase.mp4",
-        output_dir=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41",
+        video_path=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized_pose_phase.mp4",
+        output_dir=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41",
         show_main=False,  # 禁用主窗口
         show_debug_roi=False,  # 禁用调试窗口
     )

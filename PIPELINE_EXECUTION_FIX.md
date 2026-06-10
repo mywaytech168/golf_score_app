@@ -86,7 +86,7 @@ result_data = {
 🔄 執行處理流程 (超時: 1800s)...
    Queue Item ID: 1
    Video ID: 345049fc-e84b-42df-811c-859dea4dd0d5
-   Input Dir: \\10.1.1.101\TekSwing\videos\...
+   Input Dir: \\10.1.1.101\ORVIA\videos\...
 
 🎬 步驟 1/5: 執行 Stabilization...
 ✅ Stabilization 完成 (45.3s)
@@ -132,7 +132,7 @@ result_data = {
 {
   "queueItemId": "1",
   "videoId": "345049fc-e84b-42df-811c-859dea4dd0d5",
-  "inputDir": "\\10.1.1.101\TekSwing\videos\...",
+  "inputDir": "\\10.1.1.101\ORVIA\videos\...",
   "processedAt": "2026-02-03T11:44:14.029346",
   "steps": {
     "stabilization": {

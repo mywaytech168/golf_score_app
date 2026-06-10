@@ -7,7 +7,7 @@ import '../models/announcement.dart';
 import 'auth_token_storage.dart';
 
 class AnnouncementService {
-  static const _baseUrl  = 'https://tekswing.api.atk.tw';
+  static const _baseUrl  = 'https://orvia.api.atk.tw';
   static const _cacheKey = 'announcements_cache';
   static const _readKey  = 'announcements_read_ids';
 

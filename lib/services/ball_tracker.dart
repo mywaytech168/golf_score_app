@@ -49,6 +49,33 @@ class FrameBlobs {
   }
 }
 
+/// BallTracker 可調參數（調參頁用）。
+/// 預設值 = 原本 BallTracker 內寫死的常數，不傳時行為完全不變。
+class TrackerConfig {
+  /// ROI 半徑基準（px）；null = 依 coded 尺寸比例自動計算（原始行為）
+  final double? roiHalfBasePx;
+  final double roiMissScaleMid;            // miss 1-2 ROI 擴張倍率
+  final double roiMissScaleLarge;          // miss 3-4 ROI 擴張倍率
+  final double roiHalfMaxAbs;              // ROI 半徑絕對上限（px）
+  final double p1MaxDistPx;                // P1 離 P0 最遠距離
+  final int    noCandPatiencePostImpact;   // 擊球後連續 miss 容忍幀數
+  final double stepAbsHardMaxPostImpact;   // 擊球後步距硬上限（px/frame）
+  final double predDistHardMaxPostImpact;  // 擊球後 Kalman 預測誤差硬上限
+  final double trackMaxResidualPx;         // 拋物線擬合中位殘差品質閘門
+
+  const TrackerConfig({
+    this.roiHalfBasePx,
+    this.roiMissScaleMid           = 1.8,
+    this.roiMissScaleLarge         = 3.2,
+    this.roiHalfMaxAbs             = 280.0,
+    this.p1MaxDistPx               = 320.0,
+    this.noCandPatiencePostImpact  = 20,
+    this.stepAbsHardMaxPostImpact  = 350.0,
+    this.predDistHardMaxPostImpact = 450.0,
+    this.trackMaxResidualPx        = 70.0,
+  });
+}
+
 /// 單個追蹤點（Dart 決策後傳回 Kotlin 渲染）
 /// rawX/rawY = blob centroid 原始座標，x/y = 平滑後座標
 class TrackPoint {
@@ -267,20 +294,18 @@ class BallTracker {
   // miss 1-2    → ×1.8（中等）
   // miss 3-4    → ×3.2（放寬）
   // miss >= 5   → 已由 _noCandPatience 停止，不到這裡
-  static const double _roiMissScaleMid   = 1.8;
-  static const double _roiMissScaleLarge = 3.2;
-  static const double _roiHalfMaxAbs     = 280.0; // 絕對上限
+  // ROI miss 擴張 / 上限 → 移至 TrackerConfig（roiMissScaleMid/Large, roiHalfMaxAbs）
 
   // ── P0 / P1 ───────────────────────────────────────────
   static const int    _p1DeadlineFrames  = 25;  // P1 最多等待幀數（@30fps≈0.83s，給球飛出足夠時間）
   static const double _p1MinDistPx       = 0.0; // P1 最小移動量：0=接受靜止球（高爾夫球在球座上直到被擊中才移動）
-  static const double _p1MaxDistPx       = 320.0; // P1 離 P0 最遠距離（高速球飛行距離可達 200-300px/frame）
+  // _p1MaxDistPx → TrackerConfig.p1MaxDistPx
   static const int    _waitMaxFrames     = 180;
 
   // ── Tracking 終止 ─────────────────────────────────────
   static const bool   _stopWhenNoCand    = true;
   static const int    _noCandPatience    = 5;   // 擊球前連續 miss 停止幀數
-  static const int    _noCandPatiencePostImpact = 20; // 擊球後：球速快、常模糊，給更多耐心
+  // _noCandPatiencePostImpact → TrackerConfig.noCandPatiencePostImpact
   static const int    _tooManyCandsThreshold = 4;
   static const bool   _tooManyUseBlue   = true;
   static const int    _bluePOffset      = -2;
@@ -301,11 +326,11 @@ class BallTracker {
   static const double _stepAbsHardMaxEarly   = 130.0; // Phase 0: 嚴格（與 v3 一致）
   static const double _stepAbsHardMaxStable  = 160.0; // Phase 1: 穩定
   static const double _stepAbsHardMaxMiss    = 200.0; // Phase 2: miss 後
-  static const double _stepAbsHardMaxPostImpact = 350.0; // Phase 3: 擊球後飛行
+  // _stepAbsHardMaxPostImpact → TrackerConfig.stepAbsHardMaxPostImpact
   static const double _predDistHardMaxEarly  = 170.0; // Phase 0: 嚴格（與 v3 一致）
   static const double _predDistHardMaxStable = 210.0; // Phase 1: 穩定
   static const double _predDistHardMaxMiss   = 250.0; // Phase 2: miss 後
-  static const double _predDistHardMaxPostImpact = 450.0; // Phase 3: 擊球後飛行
+  // _predDistHardMaxPostImpact → TrackerConfig.predDistHardMaxPostImpact
 
   static const bool   _useStepDistGuard      = true;
   static const double _stepEmaAlpha          = 0.25;
@@ -338,7 +363,7 @@ class BallTracker {
   static const double _fitOutlierFloorPx  = 40.0;  // 離群殘差絕對下限
   static const double _fitOutlierMadK     = 3.0;   // 殘差 > k×中位殘差 → 離群
   static const int    _fitIters           = 3;     // 重擬合次數
-  static const double _trackMaxResidualPx = 70.0;  // 擬合中位殘差超過 → 整條拒絕（品質閘門）
+  // _trackMaxResidualPx → TrackerConfig.trackMaxResidualPx
 
   // ── 執行狀態（每次 track() 重置）────────────────────────
   _TrackState _state         = _TrackState.waitP0;
@@ -366,6 +391,15 @@ class BallTracker {
   // 由呼叫端從 MediaPipe pose 人體 bbox 推導後傳入；null = 不遮罩（行為同舊版）。
   List<int>? _golferBox;
 
+  // 種子 P0（coded 空間）：由 YOLO+SAHI 找到的靜止 tee 球。提供時 waitP0 不再用幀差
+  // 搜尋，而是等到 seedFrame 直接以此為 P0，之後仍用幀差+Kalman 追飛行（p0-SAHI 融合）。
+  int? _seedP0X;
+  int? _seedP0Y;
+  int _seedP0Frame = -1;
+
+  // 可調參數（調參頁用）。預設值 = 原本寫死的常數，不傳時行為完全不變。
+  TrackerConfig _cfg = const TrackerConfig();
+
   // ══════════════════════════════════════════════════════════
   // 公開入口：track()
   // ══════════════════════════════════════════════════════════
@@ -380,11 +414,19 @@ class BallTracker {
     required int rotation, // 影片 rotation metadata
     double? hitSec,
     List<int>? golferBox,  // coded 空間 [x1,y1,x2,y2]，落在框內的 blob 排除（球員/球桿）
+    int? seedP0X,          // YOLO+SAHI 找到的 P0（coded 空間）；提供時 bypass 幀差找 p0
+    int? seedP0Y,
+    int? seedP0Frame,
+    TrackerConfig? config, // 可調參數（null = 預設，行為同舊版）
   }) {
     // 重置所有狀態
     _state = _TrackState.waitP0;
     _trackPts.clear();
+    _cfg             = config ?? const TrackerConfig();
     _golferBox       = (golferBox != null && golferBox.length == 4) ? golferBox : null;
+    _seedP0X         = seedP0X;
+    _seedP0Y         = seedP0Y;
+    _seedP0Frame     = seedP0Frame ?? -1;
     _p0FrameIdx      = -1;
     _noCandCount     = 0;
     _waitFrames      = 0;
@@ -399,7 +441,7 @@ class BallTracker {
 
     // ── coded-space ROI（Python FIXED_ROI_CENTER=(1149,406) in 1920×1080）──
     // 直接用 coded 比例乘以 videoW/videoH，無需 rotation 轉換
-    final roiHalfBase = math.min(
+    final roiHalfBase = _cfg.roiHalfBasePx ?? math.min(
         videoW * _roiSizeCodedRatioW / 2,   // = 200 for videoW=1920
         videoH * _roiSizeCodedRatioH / 2,   // = 200 for videoH=1080
     );
@@ -458,9 +500,9 @@ class BallTracker {
     if (_trackPts.length >= _minFitPoints) {
       final fit = _robustParabolaFit(_trackPts);
       if (fit != null) {
-        if (fit.medianRes > _trackMaxResidualPx) {
+        if (fit.medianRes > _cfg.trackMaxResidualPx) {
           debugPrint('[BallTracker] ⛔ 品質閘門拒絕: 中位殘差 '
-              '${fit.medianRes.toStringAsFixed(0)}px > ${_trackMaxResidualPx.toStringAsFixed(0)}px '
+              '${fit.medianRes.toStringAsFixed(0)}px > ${_cfg.trackMaxResidualPx.toStringAsFixed(0)}px '
               '(非乾淨拋物線)');
           return const [];
         }
@@ -619,7 +661,7 @@ class BallTracker {
   double _phaseStepHardMax(int frameIdx) {
     // 擊球後球速極快（200-300px/frame），大幅放寬
     if (_hitFrameIdx >= 0 && frameIdx >= _hitFrameIdx) {
-      return _stepAbsHardMaxPostImpact;
+      return _cfg.stepAbsHardMaxPostImpact;
     }
     if (_trackPts.length < _earlyPhaseLen) {
       return _stepAbsHardMaxEarly;  // 前 5 點：嚴格
@@ -634,7 +676,7 @@ class BallTracker {
   double _phasePredHardMax(int frameIdx) {
     // 擊球後球速極快，Kalman 預測誤差也大，放寬
     if (_hitFrameIdx >= 0 && frameIdx >= _hitFrameIdx) {
-      return _predDistHardMaxPostImpact;
+      return _cfg.predDistHardMaxPostImpact;
     }
     if (_trackPts.length < _earlyPhaseLen) {
       return _predDistHardMaxEarly;
@@ -654,11 +696,11 @@ class BallTracker {
     if (_noCandCount == 0) {
       r = roiHalfBase;               // 精準：只看鄰近
     } else if (_noCandCount <= 2) {
-      r = roiHalfBase * _roiMissScaleMid;   // miss 1-2：中等擴展
+      r = roiHalfBase * _cfg.roiMissScaleMid;   // miss 1-2：中等擴展
     } else {
-      r = roiHalfBase * _roiMissScaleLarge; // miss 3-4：大幅擴展
+      r = roiHalfBase * _cfg.roiMissScaleLarge; // miss 3-4：大幅擴展
     }
-    return math.min(r, _roiHalfMaxAbs);
+    return math.min(r, _cfg.roiHalfMaxAbs);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -846,6 +888,23 @@ class BallTracker {
   // ══════════════════════════════════════════════════════════
 
   void _handleWaitP0(int frameIdx, int ptsUs, List<BlobData> blobs) {
+    // ── p0-SAHI 融合：有 YOLO 種子時，等到 seedFrame 直接定 P0（不靠幀差找 p0）──
+    if (_seedP0X != null && _seedP0Y != null) {
+      if (frameIdx < _seedP0Frame) return;          // 還沒到擊球幀，等待
+      _roiCenterX = _seedP0X!;                       // ROI 中心移到種子球位置
+      _roiCenterY = _seedP0Y!;
+      _trackPts.add(TrackPoint(
+        x: _seedP0X!, y: _seedP0Y!,
+        rawX: _seedP0X!, rawY: _seedP0Y!,
+        frameIdx: frameIdx, ptsUs: ptsUs,
+      ));
+      _state      = _TrackState.waitP1;
+      _p0FrameIdx = frameIdx;
+      _waitFrames = 0;
+      debugPrint('[waitP0] P0 seeded from YOLO @ frame $frameIdx (${_seedP0X},${_seedP0Y})');
+      return;
+    }
+
     if (frameIdx < _hitWindowStart) return;
     if (_hitWindowEnd >= 0 && frameIdx > _hitWindowEnd) {
       _state = _TrackState.stopped;
@@ -905,7 +964,7 @@ class BallTracker {
     //          且不過遠（<_p1MaxDistPx，避免誤接背景亮點）
     final valid = blobs.where((b) {
       final d = _dist(b.cx, b.cy, p0.x, p0.y);
-      return d >= _p1MinDistPx && d <= _p1MaxDistPx;
+      return d >= _p1MinDistPx && d <= _cfg.p1MaxDistPx;
     }).toList();
     if (valid.isEmpty) return;
 
@@ -960,7 +1019,7 @@ class BallTracker {
       }
 
       _checkQualityStop(frameIdx);
-      final patience = isPostImpact ? _noCandPatiencePostImpact : _noCandPatience;
+      final patience = isPostImpact ? _cfg.noCandPatiencePostImpact : _noCandPatience;
       if (_state != _TrackState.stopped &&
           _stopWhenNoCand &&
           _noCandCount > patience) {

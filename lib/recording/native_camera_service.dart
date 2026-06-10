@@ -7,8 +7,8 @@ import 'package:flutter/services.dart';
 import 'pose_result.dart';
 
 // ── Channel 名稱（Android CameraRecorderChannel / iOS MediaPipeCameraChannel 共用）
-const _kMethodChannel = MethodChannel('com.aethertek.tekswing/camera_recorder');
-const _kPoseChannel   = EventChannel('com.aethertek.tekswing/pose_landmarks');
+const _kMethodChannel = MethodChannel('com.aethertek.orvia/camera_recorder');
+const _kPoseChannel   = EventChannel('com.aethertek.orvia/pose_landmarks');
 
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -782,8 +782,8 @@ class MeshFlowStabilizerCython:
 
 def main():
     """测试 Cython 加速版本"""
-    VIDEO_PATH = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4"
-    OUTPUT_PATH = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stab_cython.mp4"
+    VIDEO_PATH = r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4"
+    OUTPUT_PATH = r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stab_cython.mp4"
 
     stabilizer = MeshFlowStabilizerCython()
 

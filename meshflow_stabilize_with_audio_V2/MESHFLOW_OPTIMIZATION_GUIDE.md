@@ -125,8 +125,8 @@ write_video_with_audio_copy(
 from functions.meshflow_stabilization import MeshFlowConfig, run_meshflow_stabilization
 
 config = MeshFlowConfig(
-    input_path=r"\\10.1.1.101\TekSwing\videos\...\clip.mp4",
-    output_path=r"\\10.1.1.101\TekSwing\videos\...\clip_stabilized.mp4",
+    input_path=r"\\10.1.1.101\ORVIA\videos\...\clip.mp4",
+    output_path=r"\\10.1.1.101\ORVIA\videos\...\clip_stabilized.mp4",
     
     # ===== 加速優化 =====
     enable_sampling_detection=True,  # 啟用采樣檢測
@@ -143,8 +143,8 @@ result = run_meshflow_stabilization(config)
 ================================================================================
 🎬 步驟 2/6：MeshFlow Video Stabilization with Audio
 ================================================================================
-輸入：\\10.1.1.101\TekSwing\videos\...\clip.mp4
-輸出：\\10.1.1.101\TekSwing\videos\...\clip_stabilized.mp4
+輸入：\\10.1.1.101\ORVIA\videos\...\clip.mp4
+輸出：\\10.1.1.101\ORVIA\videos\...\clip_stabilized.mp4
 ⚡ 加速模式：采樣檢測 (1/4)，ffmpeg: fast (crf 20)
 ✅ 已讀取視頻：3600 幀，30.00 fps，1920x1080
 ⚡ 加速晃動檢測：采樣 900 幀（每隔 4 幀採樣 1 幀，加速 4x）

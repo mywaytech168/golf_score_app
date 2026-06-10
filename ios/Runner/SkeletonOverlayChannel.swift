@@ -261,22 +261,22 @@ private func smoothFrameData(_ raw: [Int: [LandmarkPoint?]], alpha: Float) -> [I
     // Forward
     var px = Float.nan, py = Float.nan
     for key in sorted {
-      guard var lm = result[key]![lmIdx] else { continue }
+      guard let arr = result[key], lmIdx < arr.count, var lm = arr[lmIdx] else { continue }
       if px.isNaN { px = lm.xPx; py = lm.yPx; continue }
       px = alpha * lm.xPx + (1 - alpha) * px
       py = alpha * lm.yPx + (1 - alpha) * py
       lm.xPx = px; lm.yPx = py
-      result[key]![lmIdx] = lm
+      result[key]?[lmIdx] = lm
     }
     // Backward
     px = Float.nan; py = Float.nan
     for key in sorted.reversed() {
-      guard var lm = result[key]![lmIdx] else { continue }
+      guard let arr = result[key], lmIdx < arr.count, var lm = arr[lmIdx] else { continue }
       if px.isNaN { px = lm.xPx; py = lm.yPx; continue }
       px = alpha * lm.xPx + (1 - alpha) * px
       py = alpha * lm.yPx + (1 - alpha) * py
       lm.xPx = px; lm.yPx = py
-      result[key]![lmIdx] = lm
+      result[key]?[lmIdx] = lm
     }
   }
   return result

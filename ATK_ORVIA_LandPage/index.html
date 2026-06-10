@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORVIA — AI Golf Swing Analysis</title>
+<meta name="description" content="ORVIA：AI 驅動的高爾夫揮桿分析 App。錄製揮桿影片，AI 自動分析動作、追蹤球軌跡、給出教練建議。">
+<meta property="og:title" content="ORVIA — AI Golf Swing Analysis">
+<meta property="og:description" content="Human Motion Intelligence. 錄製揮桿影片，AI 自動分析動作、追蹤球軌跡、給出教練建議。">
+<meta property="og:image" content="images/og-banner.png">
+<link rel="icon" type="image/png" href="images/brand-icon.png">
+<link rel="apple-touch-icon" href="images/brand-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0A0A0A;
+  --bg-soft:#111111;
+  --card:#1A1A1A;
+  --border:#262626;
+  --border-bright:#3a3a3a;
+  --green:#2DD4BF;
+  --green-dim:rgba(45,212,191,.12);
+  --text:#F5F5F5;
+  --muted:#8a8a8a;
+  --radius:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang TC','PingFang SC','Microsoft JhengHei','Microsoft YaHei',sans-serif;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+.container{max-width:1120px;margin:0 auto;padding:0 24px}
+a{color:inherit;text-decoration:none}
+img{max-width:100%}
+section{padding:96px 0}
+
+/* ---------- Nav ---------- */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(10,10,10,.8);
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+}
+.nav-inner{
+  max-width:1120px;margin:0 auto;padding:0 24px;
+  height:60px;display:flex;align-items:center;justify-content:space-between;
+}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem;letter-spacing:.02em}
+.brand-logo{height:30px;display:block}
+.lang-switch{display:flex;gap:4px;border:1px solid var(--border);border-radius:999px;padding:3px;background:var(--bg-soft)}
+.lang-switch button{
+  background:none;border:none;color:var(--muted);
+  font:inherit;font-size:.78rem;font-weight:600;
+  padding:4px 12px;border-radius:999px;cursor:pointer;
+  transition:color .2s,background .2s;
+}
+.lang-switch button.active{background:var(--green);color:#042f2a}
+.lang-switch button:not(.active):hover{color:var(--text)}
+
+/* ---------- Buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:10px;
+  padding:13px 24px;border-radius:12px;font-weight:600;font-size:.95rem;
+  border:1px solid var(--border-bright);background:var(--card);color:var(--text);
+  transition:transform .15s ease,border-color .2s,background .2s;
+  cursor:pointer;
+}
+.btn:hover{border-color:var(--green)}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--green);border-color:var(--green);color:#042f2a}
+.btn-primary:hover{background:#5eead4}
+.btn svg{width:20px;height:20px;flex-shrink:0}
+.btn small{display:block;font-size:.68rem;font-weight:500;opacity:.75;line-height:1.1}
+.btn .store-label{text-align:left;line-height:1.15}
+.badge-soon{
+  font-size:.62rem;font-weight:700;letter-spacing:.05em;
+  background:var(--green-dim);color:var(--green);
+  border:1px solid rgba(45,212,191,.3);
+  padding:2px 8px;border-radius:999px;margin-left:4px;
+}
+
+/* ---------- Hero ---------- */
+.hero{
+  min-height:100vh;display:flex;align-items:center;
+  padding:140px 0 80px;position:relative;
+}
+.hero::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(600px 400px at 75% 35%,rgba(45,212,191,.07),transparent 70%),
+    radial-gradient(800px 500px at 20% 80%,rgba(45,212,191,.04),transparent 70%);
+}
+.hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;position:relative}
+.hero-logo{height:64px;display:block;margin-bottom:28px}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--green);margin-bottom:20px;
+}
+.eyebrow::before{content:"";width:24px;height:1px;background:var(--green)}
+.hero h1{
+  font-size:clamp(2.4rem,5vw,3.6rem);font-weight:800;line-height:1.12;
+  letter-spacing:-.02em;margin-bottom:20px;
+}
+.hero h1 .accent{color:var(--green)}
+.hero .lead{color:var(--muted);font-size:1.08rem;max-width:480px;margin-bottom:36px}
+.hero-ctas{display:flex;gap:14px;flex-wrap:wrap}
+
+/* ---------- CSS Phone Mockup ---------- */
+.phone-wrap{display:flex;justify-content:center;perspective:1000px}
+.phone{
+  width:270px;height:556px;border-radius:42px;
+  background:#161616;
+  border:1px solid #2e2e2e;
+  box-shadow:0 0 0 8px #0f0f0f,0 40px 80px -20px rgba(0,0,0,.8),0 0 120px -30px rgba(45,212,191,.25);
+  padding:12px;position:relative;
+  animation:float 3s ease-in-out infinite;
+}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.phone-screen{
+  width:100%;height:100%;border-radius:32px;overflow:hidden;
+  background:linear-gradient(180deg,#0d1412 0%,#0a0a0a 100%);
+  display:flex;flex-direction:column;position:relative;
+}
+.phone-notch{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  width:84px;height:22px;border-radius:999px;background:#000;z-index:2;
+}
+.ps-header{padding:46px 18px 10px;display:flex;justify-content:space-between;align-items:center}
+.ps-header .ps-title{font-size:.8rem;font-weight:700}
+.ps-rec{display:flex;align-items:center;gap:5px;font-size:.6rem;color:#f87171;font-weight:700}
+.ps-rec i{width:7px;height:7px;border-radius:50%;background:#ef4444;animation:blink 1.2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.ps-canvas{
+  flex:1;margin:8px 14px;border-radius:16px;position:relative;
+  background:linear-gradient(180deg,#101816 0%,#0c100f 60%,#0e1211 100%);
+  border:1px solid #1f2a27;overflow:hidden;
+}
+.ps-canvas svg{position:absolute;inset:0;width:100%;height:100%}
+.ps-stats{display:flex;gap:8px;padding:10px 14px 18px}
+.ps-stat{
+  flex:1;background:#141a18;border:1px solid #1f2a27;border-radius:10px;
+  padding:8px 10px;
+}
+.ps-stat b{display:block;font-size:.86rem;color:var(--green);font-weight:700}
+.ps-stat span{font-size:.55rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+
+/* ---------- Section headings ---------- */
+.sec-head{text-align:center;max-width:620px;margin:0 auto 56px}
+.sec-head h2{font-size:clamp(1.7rem,3.4vw,2.4rem);font-weight:800;letter-spacing:-.01em;margin-bottom:14px}
+.sec-head p{color:var(--muted);font-size:1rem}
+
+/* ---------- Feature cards ---------- */
+.cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:30px 26px;transition:border-color .25s;
+}
+.card:hover{border-color:var(--border-bright)}
+.card .icon{
+  width:44px;height:44px;border-radius:12px;margin-bottom:20px;
+  background:var(--green-dim);border:1px solid rgba(45,212,191,.25);
+  display:flex;align-items:center;justify-content:center;
+}
+.card .icon svg{width:22px;height:22px;stroke:var(--green);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.card h3{font-size:1.08rem;font-weight:700;margin-bottom:10px}
+.card p{color:var(--muted);font-size:.92rem}
+
+/* ---------- Steps ---------- */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;position:relative}
+.step{text-align:center;padding:36px 22px;background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);position:relative}
+.step .num{
+  width:40px;height:40px;border-radius:50%;margin:0 auto 18px;
+  border:1px solid var(--green);color:var(--green);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:.95rem;background:var(--green-dim);
+}
+.step h3{font-size:1.02rem;font-weight:700;margin-bottom:8px}
+.step p{color:var(--muted);font-size:.9rem}
+.step::after{
+  content:"→";position:absolute;right:-22px;top:50%;transform:translateY(-50%);
+  color:var(--green);font-size:1.2rem;z-index:1;
+}
+.step:last-child::after{display:none}
+
+/* ---------- Showcase ---------- */
+.show-row{
+  display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center;
+  padding:48px 0;
+}
+.show-row:nth-child(even) .show-visual{order:2}
+.show-text .tag{
+  display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--green);margin-bottom:14px;
+}
+.show-text h3{font-size:1.5rem;font-weight:800;margin-bottom:14px;letter-spacing:-.01em}
+.show-text p{color:var(--muted);font-size:.98rem;max-width:440px}
+.mini-phone{
+  width:210px;height:430px;border-radius:34px;margin:0 auto;
+  background:#161616;border:1px solid #2c2c2c;padding:10px;
+  box-shadow:0 0 0 6px #0f0f0f,0 30px 60px -20px rgba(0,0,0,.7);
+}
+.mini-screen{
+  width:100%;height:100%;border-radius:25px;overflow:hidden;
+  background:#0c0f0c;border:1px solid #1c241c;
+  display:flex;flex-direction:column;
+}
+.mini-screen svg{width:100%;height:100%}
+
+/* ---------- Pricing ---------- */
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1040px;margin:0 auto}
+.plan{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:36px 32px;display:flex;flex-direction:column;
+  transition:border-color .25s;
+}
+.plan:hover{border-color:var(--border-bright)}
+.plan.pro{border-color:rgba(45,212,191,.45);position:relative}
+.plan.pro:hover{border-color:var(--green)}
+.plan .plan-badge{
+  position:absolute;top:-12px;left:32px;
+  background:var(--green);color:#042f2a;font-size:.68rem;font-weight:800;
+  letter-spacing:.06em;padding:3px 12px;border-radius:999px;text-transform:uppercase;
+}
+.plan h3{font-size:1.05rem;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;font-size:.82rem}
+.plan .price{font-size:2rem;font-weight:800;margin-bottom:4px}
+.plan .price-note{color:var(--muted);font-size:.85rem;margin-bottom:26px}
+.plan ul{list-style:none;display:flex;flex-direction:column;gap:13px;margin-bottom:30px;flex:1}
+.plan li{display:flex;gap:10px;font-size:.92rem;align-items:flex-start}
+.plan li svg{width:17px;height:17px;flex-shrink:0;margin-top:3px}
+.plan li.yes svg{stroke:var(--green)}
+.plan li.no{color:var(--muted)}
+.plan li.no svg{stroke:#525252}
+
+/* ---------- Referral strip ---------- */
+.referral{
+  padding:0;
+}
+.referral-inner{
+  display:flex;align-items:center;justify-content:center;gap:14px;
+  background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);
+  padding:26px 32px;flex-wrap:wrap;text-align:center;
+}
+.referral-inner svg{width:22px;height:22px;stroke:var(--green);fill:none;stroke-width:1.8;flex-shrink:0}
+.referral-inner p{color:var(--text);font-size:.96rem}
+.referral-inner p b{color:var(--green)}
+
+/* ---------- Download CTA ---------- */
+.cta{
+  background:linear-gradient(180deg,#0d130e 0%,#0A0A0A 100%);
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+  text-align:center;
+}
+.cta h2{font-size:clamp(1.8rem,3.6vw,2.6rem);font-weight:800;letter-spacing:-.01em;margin-bottom:14px}
+.cta p{color:var(--muted);margin-bottom:36px}
+.cta .hero-ctas{justify-content:center}
+
+/* ---------- Footer ---------- */
+footer{padding:48px 0;border-top:1px solid var(--border)}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.footer-links{display:flex;gap:28px;align-items:center;font-size:.86rem;color:var(--muted)}
+.footer-links a:hover{color:var(--text)}
+.copyright{font-size:.8rem;color:#555;margin-top:24px}
+
+/* ---------- Reveal animation ---------- */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none;transition:none}
+  .phone{animation:none}
+}
+
+/* ---------- RWD ---------- */
+@media (max-width:900px){
+  section{padding:72px 0}
+  .hero{padding-top:120px}
+  .hero-grid{grid-template-columns:1fr;gap:56px;text-align:center}
+  .hero .lead{margin:0 auto 36px}
+  .hero-logo{margin:0 auto 24px;height:52px}
+  .hero-ctas{justify-content:center}
+  .eyebrow{justify-content:center}
+  .cards3,.steps{grid-template-columns:1fr;max-width:440px;margin:0 auto}
+  .step::after{content:"↓";right:auto;left:50%;top:auto;bottom:-26px;transform:translateX(-50%)}
+  .show-row{grid-template-columns:1fr;gap:36px;text-align:center}
+  .show-row:nth-child(even) .show-visual{order:0}
+  .show-text p{margin:0 auto}
+  .pricing-grid{grid-template-columns:1fr;max-width:460px}
+  .footer-inner{flex-direction:column;text-align:center}
+}
+@media (max-width:560px){
+  .hero h1{font-size:2.1rem}
+  .phone{width:240px;height:496px}
+  .btn{width:100%;justify-content:center}
+  .hero-ctas{flex-direction:column;width:100%}
+  .cta .hero-ctas{align-items:center}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav>
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <img class="brand-logo" src="images/orvia-logo.png" alt="ORVIA">
+    </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button data-lang="zh">繁</button>
+      <button data-lang="cn">简</button>
+      <button data-lang="en">EN</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ 1. HERO ============ -->
+<header class="hero" id="top">
+  <div class="container hero-grid">
+    <div>
+      <img class="hero-logo" src="images/orvia-logo.png" alt="ORVIA — Human Motion Intelligence">
+      <span class="eyebrow" data-i18n="hero.eyebrow"></span>
+      <h1>Your AI Golf Coach,<br><span class="accent">In Your Pocket.</span></h1>
+      <p class="lead" data-i18n="hero.lead"></p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#download">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.6 1.8 13.8 12 3.6 22.2c-.4-.2-.6-.7-.6-1.2V3c0-.5.2-1 .6-1.2zm12.1 8.3 2.6-1.5 3 1.7c.9.5.9 1.9 0 2.4l-3 1.7-2.6-1.5L14.6 12l1.1-1.9zM5.2 1.3l11 6.3-2.3 2.3L5.2 1.3zm0 21.4 8.7-8.6 2.3 2.3-11 6.3z"/></svg>
+          <span class="store-label"><small data-i18n="hero.gpSmall"></small>Google Play</span>
+        </a>
+        <a class="btn" href="#download">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.9c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.8-2-1.6-.2-3.1 1-3.9 1s-2-1-3.4-1c-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.4-.8s2 .8 3.4.8 2.3-1.2 3.1-2.4c1-1.4 1.4-2.8 1.4-2.8s-2.7-1-2.7-4.2zM14.1 4.9c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/></svg>
+          <span class="store-label"><small data-i18n="hero.asSmall"></small>App Store<span class="badge-soon" data-i18n="hero.soon"></span></span>
+        </a>
+      </div>
+    </div>
+
+    <div class="phone-wrap">
+      <div class="phone" aria-hidden="true">
+        <div class="phone-screen">
+          <div class="phone-notch"></div>
+          <div class="ps-header">
+            <span class="ps-title">Swing Analysis</span>
+            <span class="ps-rec"><i></i>REC</span>
+          </div>
+          <div class="ps-canvas">
+            <svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">
+              <!-- ball trajectory -->
+              <path d="M55 235 Q 115 60 195 95" fill="none" stroke="#2DD4BF" stroke-width="2" stroke-dasharray="5 6" opacity=".8"/>
+              <circle cx="55" cy="235" r="4" fill="#fff"/>
+              <circle cx="118" cy="118" r="2.5" fill="#2DD4BF" opacity=".7"/>
+              <circle cx="160" cy="96" r="2.5" fill="#2DD4BF" opacity=".5"/>
+              <!-- skeleton -->
+              <g stroke="#2DD4BF" stroke-width="2.4" stroke-linecap="round">
+                <line x1="85" y1="120" x2="85" y2="170"/>
+                <line x1="85" y1="130" x2="62" y2="155"/>
+                <line x1="62" y1="155" x2="48" y2="125"/>
+                <line x1="85" y1="130" x2="106" y2="150"/>
+                <line x1="106" y1="150" x2="98" y2="118"/>
+                <line x1="85" y1="170" x2="70" y2="210"/>
+                <line x1="70" y1="210" x2="68" y2="245"/>
+                <line x1="85" y1="170" x2="100" y2="208"/>
+                <line x1="100" y1="208" x2="104" y2="244"/>
+              </g>
+              <!-- club -->
+              <line x1="48" y1="125" x2="40" y2="78" stroke="#9ca3af" stroke-width="1.8"/>
+              <g fill="#2DD4BF">
+                <circle cx="85" cy="108" r="7"/>
+                <circle cx="85" cy="130" r="3.4"/><circle cx="62" cy="155" r="3.4"/>
+                <circle cx="48" cy="125" r="3.4"/><circle cx="106" cy="150" r="3.4"/>
+                <circle cx="98" cy="118" r="3.4"/><circle cx="85" cy="170" r="3.4"/>
+                <circle cx="70" cy="210" r="3.4"/><circle cx="100" cy="208" r="3.4"/>
+                <circle cx="68" cy="245" r="3.4"/><circle cx="104" cy="244" r="3.4"/>
+              </g>
+            </svg>
+          </div>
+          <div class="ps-stats">
+            <div class="ps-stat"><b>92</b><span>Score</span></div>
+            <div class="ps-stat"><b>8/8</b><span>Phases</span></div>
+            <div class="ps-stat"><b>1.2s</b><span>Tempo</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 2. CORE FEATURES ============ -->
+<section id="features">
+  <div class="container">
+    <div class="sec-head reveal">
+      <h2 data-i18n="feat.title"></h2>
+      <p data-i18n="feat.sub"></p>
+    </div>
+    <div class="cards3">
+      <div class="card reveal">
+        <div class="icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.5v5M12 12.5l-4 4M12 12.5l4 4M12 9.5l-4.5 2M12 9.5l4.5 2"/></svg></div>
+        <h3 data-i18n="feat.c1.t"></h3>
+        <p data-i18n="feat.c1.d"></p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M4 19 Q 10 4 20 8"/><circle cx="4" cy="19" r="1.8"/><circle cx="20" cy="8" r="1.8"/></svg></div>
+        <h3 data-i18n="feat.c2.t"></h3>
+        <p data-i18n="feat.c2.d"></p>
+      </div>
+      <div class="card reveal">
+        <div class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="7.5" height="14" rx="1.5"/><rect x="13.5" y="5" width="7.5" height="14" rx="1.5"/></svg></div>
+        <h3 data-i18n="feat.c3.t"></h3>
+        <p data-i18n="feat.c3.d"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. HOW IT WORKS ============ -->
+<section id="how" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="container">
+    <div class="sec-head reveal">
+      <h2 data-i18n="how.title"></h2>
+      <p data-i18n="how.sub"></p>
+    </div>
+    <div class="steps">
+      <div class="step reveal"><div class="num">1</div><h3 data-i18n="how.s1.t"></h3><p data-i18n="how.s1.d"></p></div>
+      <div class="step reveal"><div class="num">2</div><h3 data-i18n="how.s2.t"></h3><p data-i18n="how.s2.d"></p></div>
+      <div class="step reveal"><div class="num">3</div><h3 data-i18n="how.s3.t"></h3><p data-i18n="how.s3.d"></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. SHOWCASE ============ -->
+<section id="showcase">
+  <div class="container">
+    <div class="sec-head reveal">
+      <h2 data-i18n="show.title"></h2>
+      <p data-i18n="show.sub"></p>
+    </div>
+
+    <!-- 4a. Auto clip -->
+    <div class="show-row reveal">
+      <div class="show-visual">
+        <div class="mini-phone"><div class="mini-screen">
+          <svg viewBox="0 0 190 380">
+            <rect x="16" y="30" width="158" height="84" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+            <polygon points="88,60 104,72 88,84" fill="#2DD4BF"/>
+            <!-- audio waveform with impact peaks -->
+            <rect x="16" y="126" width="158" height="40" rx="8" fill="#0f140f" stroke="#1f2a1f"/>
+            <g stroke="#3a463a" stroke-width="2" stroke-linecap="round">
+              <line x1="24" y1="143" x2="24" y2="149"/><line x1="30" y1="141" x2="30" y2="151"/>
+              <line x1="36" y1="144" x2="36" y2="148"/><line x1="42" y1="140" x2="42" y2="152"/>
+              <line x1="48" y1="143" x2="48" y2="149"/><line x1="60" y1="142" x2="60" y2="150"/>
+              <line x1="66" y1="144" x2="66" y2="148"/><line x1="72" y1="141" x2="72" y2="151"/>
+              <line x1="84" y1="143" x2="84" y2="149"/><line x1="90" y1="140" x2="90" y2="152"/>
+              <line x1="96" y1="144" x2="96" y2="148"/><line x1="108" y1="142" x2="108" y2="150"/>
+              <line x1="114" y1="143" x2="114" y2="149"/><line x1="126" y1="141" x2="126" y2="151"/>
+              <line x1="132" y1="144" x2="132" y2="148"/><line x1="144" y1="142" x2="144" y2="150"/>
+              <line x1="150" y1="143" x2="150" y2="149"/><line x1="162" y1="144" x2="162" y2="148"/>
+            </g>
+            <g stroke="#2DD4BF" stroke-width="2.4" stroke-linecap="round">
+              <line x1="54" y1="132" x2="54" y2="160"/>
+              <line x1="102" y1="130" x2="102" y2="162"/>
+              <line x1="138" y1="133" x2="138" y2="159"/>
+            </g>
+            <g fill="#2DD4BF">
+              <circle cx="54" cy="128" r="2"/><circle cx="102" cy="126" r="2"/><circle cx="138" cy="129" r="2"/>
+            </g>
+            <g font-family="Inter,sans-serif" font-size="9" fill="#8a8a8a">
+              <text x="16" y="185">Clip 1 · 00:42</text><text x="16" y="242">Clip 2 · 01:15</text><text x="16" y="299">Clip 3 · 02:03</text>
+            </g>
+            <rect x="16" y="192" width="158" height="36" rx="8" fill="#141a14" stroke="#2DD4BF" stroke-opacity=".5"/>
+            <rect x="16" y="249" width="158" height="36" rx="8" fill="#141a14" stroke="#1f2a1f"/>
+            <rect x="16" y="306" width="158" height="36" rx="8" fill="#141a14" stroke="#1f2a1f"/>
+          </svg>
+        </div></div>
+      </div>
+      <div class="show-text">
+        <span class="tag" data-i18n="show.r1.tag"></span>
+        <h3 data-i18n="show.r1.t"></h3>
+        <p data-i18n="show.r1.d"></p>
+      </div>
+    </div>
+
+    <!-- 4b. Compare -->
+    <div class="show-row reveal">
+      <div class="show-visual">
+        <div class="mini-phone"><div class="mini-screen">
+          <svg viewBox="0 0 190 380">
+            <!-- top bar: A / B titles -->
+            <rect x="10" y="30" width="170" height="24" rx="6" fill="#141414"/>
+            <rect x="38" y="36" width="56" height="12" rx="6" fill="#1E8E5A"/>
+            <text x="50" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing A</text>
+            <rect x="104" y="36" width="56" height="12" rx="6" fill="#1565C0"/>
+            <text x="116" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing B</text>
+            <!-- two videos side-by-side, 1px divider -->
+            <rect x="10" y="60" width="170" height="200" fill="#0b0b0b"/>
+            <line x1="95" y1="60" x2="95" y2="260" stroke="#fff" stroke-width="1"/>
+            <text x="16" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:12 / 00:34</text>
+            <text x="101" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:08 / 00:21</text>
+            <g stroke="#1E8E5A" stroke-width="2" stroke-linecap="round">
+              <line x1="52" y1="120" x2="52" y2="165"/><line x1="52" y1="132" x2="34" y2="150"/><line x1="52" y1="132" x2="68" y2="148"/>
+              <line x1="52" y1="165" x2="42" y2="200"/><line x1="52" y1="165" x2="62" y2="200"/>
+            </g>
+            <circle cx="52" cy="110" r="6" fill="#1E8E5A"/>
+            <g stroke="#1565C0" stroke-width="2" stroke-linecap="round">
+              <line x1="138" y1="120" x2="138" y2="165"/><line x1="138" y1="132" x2="118" y2="142"/><line x1="138" y1="132" x2="156" y2="146"/>
+              <line x1="138" y1="165" x2="128" y2="200"/><line x1="138" y1="165" x2="148" y2="200"/>
+            </g>
+            <circle cx="138" cy="110" r="6" fill="#1565C0"/>
+            <!-- controls: progress slider -->
+            <rect x="10" y="260" width="170" height="80" rx="0" fill="#141414"/>
+            <rect x="22" y="278" width="146" height="5" rx="2.5" fill="#3a3a3a"/>
+            <rect x="22" y="278" width="86" height="5" rx="2.5" fill="#1E8E5A"/>
+            <circle cx="108" cy="280.5" r="6" fill="#fff"/>
+            <!-- playback row: time / -1% play +1% / time -->
+            <text x="22" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:12</text>
+            <text x="62" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">-1%</text>
+            <circle cx="95" cy="313" r="13" fill="#1E8E5A"/>
+            <polygon points="91,306 103,313 91,320" fill="#fff"/>
+            <text x="113" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">+1%</text>
+            <text x="148" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:34</text>
+          </svg>
+        </div></div>
+      </div>
+      <div class="show-text">
+        <span class="tag" data-i18n="show.r2.tag"></span>
+        <h3 data-i18n="show.r2.t"></h3>
+        <p data-i18n="show.r2.d"></p>
+      </div>
+    </div>
+
+    <!-- 4c. AI coach -->
+    <div class="show-row reveal">
+      <div class="show-visual">
+        <div class="mini-phone"><div class="mini-screen">
+          <svg viewBox="0 0 190 380">
+            <!-- app bar -->
+            <text x="62" y="44" font-family="Inter,sans-serif" font-size="10" fill="#f5f5f5" font-weight="700">AI 教練分析</text>
+            <text x="18" y="44" font-family="Inter,sans-serif" font-size="11" fill="#8a8a8a">‹</text>
+            <!-- summary card: posture label + severity badge -->
+            <rect x="14" y="58" width="162" height="74" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+            <rect x="24" y="68" width="58" height="14" rx="7" fill="#1E8E5A"/>
+            <text x="31" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">早期伸展</text>
+            <rect x="88" y="68" width="30" height="14" rx="7" fill="#f97316"/>
+            <text x="95" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">中等</text>
+            <rect x="24" y="92" width="138" height="6" rx="3" fill="#2a342a"/>
+            <rect x="24" y="104" width="120" height="6" rx="3" fill="#1f2a1f"/>
+            <rect x="24" y="116" width="96" height="6" rx="3" fill="#1f2a1f"/>
+            <!-- impact quality card: 5-segment bar -->
+            <rect x="14" y="142" width="162" height="62" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+            <text x="24" y="158" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">擊球品質（音訊）</text>
+            <rect x="118" y="149" width="44" height="13" rx="6.5" fill="#7C3AED"/>
+            <text x="124" y="158.5" font-family="Inter,sans-serif" font-size="6.5" fill="#fff" font-weight="700">甜蜜點+</text>
+            <g>
+              <rect x="24" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
+              <rect x="53" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
+              <rect x="82" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
+              <rect x="111" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
+              <rect x="140" y="168" width="26" height="7" rx="3.5" fill="#2a342a"/>
+            </g>
+            <line x1="24" y1="184" x2="24" y2="196" stroke="#1E8E5A" stroke-width="2.4"/>
+            <rect x="30" y="186" width="118" height="6" rx="3" fill="#1f2a1f"/>
+            <!-- coach feedback card: green arrow bullets -->
+            <rect x="14" y="214" width="162" height="64" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+            <text x="24" y="231" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">教練回饋</text>
+            <text x="24" y="248" font-family="Inter,sans-serif" font-size="8" fill="#2DD4BF">›</text>
+            <rect x="34" y="242" width="126" height="6" rx="3" fill="#2a342a"/>
+            <text x="24" y="264" font-family="Inter,sans-serif" font-size="8" fill="#2DD4BF">›</text>
+            <rect x="34" y="258" width="108" height="6" rx="3" fill="#1f2a1f"/>
+            <!-- practice suggestions card: numbered drills -->
+            <rect x="14" y="288" width="162" height="60" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+            <text x="24" y="305" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">練習建議</text>
+            <circle cx="29" cy="320" r="6" fill="none" stroke="#1E8E5A" stroke-width="1.4"/>
+            <text x="26.6" y="323" font-family="Inter,sans-serif" font-size="7" fill="#2DD4BF">1</text>
+            <rect x="42" y="317" width="110" height="6" rx="3" fill="#2a342a"/>
+            <circle cx="29" cy="336" r="6" fill="none" stroke="#1E8E5A" stroke-width="1.4"/>
+            <text x="26.6" y="339" font-family="Inter,sans-serif" font-size="7" fill="#2DD4BF">2</text>
+            <rect x="42" y="333" width="92" height="6" rx="3" fill="#1f2a1f"/>
+          </svg>
+        </div></div>
+      </div>
+      <div class="show-text">
+        <span class="tag" data-i18n="show.r3.tag"></span>
+        <h3 data-i18n="show.r3.t"></h3>
+        <p data-i18n="show.r3.d"></p>
+      </div>
+    </div>
+
+    <!-- 4d. Library -->
+    <div class="show-row reveal">
+      <div class="show-visual">
+        <div class="mini-phone"><div class="mini-screen">
+          <svg viewBox="0 0 190 380">
+            <rect x="16" y="34" width="158" height="26" rx="13" fill="#141a14" stroke="#1f2a1f"/>
+            <circle cx="32" cy="47" r="5" fill="none" stroke="#8a8a8a" stroke-width="1.6"/>
+            <line x1="36" y1="51" x2="40" y2="55" stroke="#8a8a8a" stroke-width="1.6"/>
+            <g font-family="Inter,sans-serif" font-size="8">
+              <rect x="16" y="70" width="52" height="18" rx="9" fill="#2DD4BF"/>
+              <text x="29" y="82" fill="#042f2a" font-weight="700">All</text>
+              <rect x="74" y="70" width="52" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
+              <text x="82" y="82" fill="#8a8a8a">Analyzed</text>
+              <rect x="132" y="70" width="42" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
+              <text x="140" y="82" fill="#8a8a8a">Clipped</text>
+            </g>
+            <g>
+              <rect x="16" y="100" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
+              <rect x="99" y="100" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
+              <rect x="16" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
+              <rect x="99" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
+              <polygon points="48,142 60,150 48,158" fill="#2DD4BF"/>
+              <polygon points="131,142 143,150 131,158" fill="#2DD4BF"/>
+              <polygon points="48,250 60,258 48,266" fill="#2DD4BF"/>
+              <polygon points="131,250 143,258 131,266" fill="#2DD4BF"/>
+              <rect x="22" y="180" width="40" height="12" rx="6" fill="#0f1a12" stroke="#2DD4BF" stroke-opacity=".5"/>
+              <rect x="105" y="180" width="40" height="12" rx="6" fill="#1c1c1c"/>
+            </g>
+          </svg>
+        </div></div>
+      </div>
+      <div class="show-text">
+        <span class="tag" data-i18n="show.r4.tag"></span>
+        <h3 data-i18n="show.r4.t"></h3>
+        <p data-i18n="show.r4.d"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5. PRICING ============ -->
+<section id="pricing" style="background:var(--bg-soft);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="container">
+    <div class="sec-head reveal">
+      <h2 data-i18n="price.title"></h2>
+      <p data-i18n="price.sub"></p>
+    </div>
+    <div class="pricing-grid">
+      <div class="plan reveal">
+        <h3 data-i18n="price.free.name"></h3>
+        <div class="price" data-i18n="price.free.price"></div>
+        <div class="price-note" data-i18n="price.free.note"></div>
+        <ul>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.free.f1"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.free.f2"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.free.f3"></span></li>
+          <li class="no"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span data-i18n="price.free.f4"></span></li>
+          <li class="no"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span data-i18n="price.free.f5"></span></li>
+        </ul>
+        <a class="btn" href="#download" data-i18n="price.free.cta"></a>
+      </div>
+      <div class="plan pro reveal">
+        <span class="plan-badge" data-i18n="price.pro.badge"></span>
+        <h3 data-i18n="price.pro.name"></h3>
+        <div class="price" data-i18n="price.pro.price"></div>
+        <div class="price-note" data-i18n="price.pro.note"></div>
+        <ul>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.pro.f1"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.pro.f2"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.pro.f3"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.pro.f4"></span></li>
+          <li class="no"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg><span data-i18n="price.pro.f5"></span></li>
+        </ul>
+        <a class="btn btn-primary" href="#download" data-i18n="price.pro.cta"></a>
+      </div>
+      <div class="plan reveal">
+        <h3 data-i18n="price.elite.name"></h3>
+        <div class="price" data-i18n="price.elite.price"></div>
+        <div class="price-note" data-i18n="price.elite.note"></div>
+        <ul>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.elite.f1"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.elite.f2"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.elite.f3"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.elite.f4"></span></li>
+          <li class="yes"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg><span data-i18n="price.elite.f5"></span></li>
+        </ul>
+        <a class="btn" href="#download" data-i18n="price.elite.cta"></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. REFERRAL ============ -->
+<section class="referral" style="padding:56px 0">
+  <div class="container">
+    <div class="referral-inner reveal">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v8H4v-8M2 7h20v5H2zM12 22V7M12 7c-2.5 0-4.5-1-4.5-3C7.5 2 9 1.5 10 2c1.5.7 2 3 2 5zM12 7c2.5 0 4.5-1 4.5-3C16.5 2 15 1.5 14 2c-1.5.7-2 3-2 5z"/></svg>
+      <p data-i18n-html="referral.text"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7. DOWNLOAD CTA ============ -->
+<section class="cta" id="download">
+  <div class="container reveal">
+    <h2 data-i18n="cta.title"></h2>
+    <p data-i18n="cta.sub"></p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="#">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.6 1.8 13.8 12 3.6 22.2c-.4-.2-.6-.7-.6-1.2V3c0-.5.2-1 .6-1.2zm12.1 8.3 2.6-1.5 3 1.7c.9.5.9 1.9 0 2.4l-3 1.7-2.6-1.5L14.6 12l1.1-1.9zM5.2 1.3l11 6.3-2.3 2.3L5.2 1.3zm0 21.4 8.7-8.6 2.3 2.3-11 6.3z"/></svg>
+        <span class="store-label"><small data-i18n="hero.gpSmall"></small>Google Play</span>
+      </a>
+      <a class="btn" href="#">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.7 12.9c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.8-2-1.6-.2-3.1 1-3.9 1s-2-1-3.4-1c-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.4-.8s2 .8 3.4.8 2.3-1.2 3.1-2.4c1-1.4 1.4-2.8 1.4-2.8s-2.7-1-2.7-4.2zM14.1 4.9c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.6-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/></svg>
+        <span class="store-label"><small data-i18n="hero.asSmall"></small>App Store<span class="badge-soon" data-i18n="hero.soon"></span></span>
+      </a>
+      <a class="btn" href="https://orvia.api.atk.tw/apks/android-latest.apk">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span class="store-label"><small data-i18n="cta.apkSmall"></small>APK</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 8. FOOTER ============ -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <a class="brand" href="#top">
+        <img class="brand-logo" src="images/orvia-logo.png" alt="ORVIA">
+      </a>
+      <div class="footer-links">
+        <a href="privacy.html" data-i18n="footer.privacy"></a>
+        <a href="terms.html" data-i18n="footer.terms"></a>
+        <a href="mailto:support@aethertek.com">support@aethertek.com</a>
+      </div>
+    </div>
+    <p class="copyright">© 2026 Aethertek Technology Co., Ltd. All rights reserved.</p>
+  </div>
+</footer>
+
+<script>
+const I18N = {
+  zh: {
+    "hero.eyebrow": "AI 高爾夫揮桿分析",
+    "hero.lead": "錄下你的揮桿，AI 自動偵測骨架、追蹤球軌跡，並給出專屬教練建議。從練習場到球場，每一桿都看得更清楚。",
+    "hero.gpSmall": "下載於",
+    "hero.asSmall": "即將登陸",
+    "hero.soon": "即將推出",
+    "feat.title": "核心功能",
+    "feat.sub": "從動作到球路，一支手機完成完整揮桿分析。",
+    "feat.c1.t": "AI 揮桿分析",
+    "feat.c1.d": "上傳揮桿影片，AI 骨架偵測自動辨識動作階段並評分，量化每一次揮桿。",
+    "feat.c2.t": "球軌跡追蹤",
+    "feat.c2.d": "自動偵測球的飛行路徑與落點，直接在影片上呈現完整球路。",
+    "feat.c3.t": "雙影片比對",
+    "feat.c3.d": "與職業選手或自己過去的影片並排對比，同步播放，差異一目了然。",
+    "how.title": "三步驟開始",
+    "how.sub": "不需要額外設備，一支手機就能開始。",
+    "how.s1.t": "錄製",
+    "how.s1.d": "在練習場或球場架好手機，錄下你的揮桿。",
+    "how.s2.t": "分析",
+    "how.s2.d": "自動切出揮桿片段，偵測骨架、球軌跡與擊球聲音並評分。",
+    "how.s3.t": "AI 分析",
+    "how.s3.d": "AI 給出動作標記與個人化訓練建議，針對弱點改善。",
+    "show.title": "功能展示",
+    "show.sub": "為練習而設計的每一個細節。",
+    "show.r1.tag": "自動切片",
+    "show.r1.t": "長影片，自動找出每一次揮桿",
+    "show.r1.d": "不用手動剪輯。錄一整段練習影片，AI 以揮桿動作與擊球聲音雙重判斷，自動擷取每一個揮桿片段，立即可以逐一檢視與分析。",
+    "show.r2.tag": "雙影片比對",
+    "show.r2.t": "和職業選手並排，看出差在哪",
+    "show.r2.d": "選一段職業選手或自己過去的影片，按揮桿進度百分比同步播放，姿勢差異清楚對照。",
+    "show.r3.tag": "AI 教練建議",
+    "show.r3.t": "不只評分，告訴你怎麼改",
+    "show.r3.d": "AI 在影片上標記關鍵動作點，並依你的揮桿數據給出個人化訓練建議。",
+    "show.r4.tag": "歷史影片管理",
+    "show.r4.t": "每一次練習，都找得回來",
+    "show.r4.d": "依已分析、未分析、已切片快速篩選與搜尋，追蹤自己長期的進步軌跡。",
+    "price.title": "方案比較",
+    "price.free.name": "Free",
+    "price.free.price": "免費",
+    "price.free.note": "下載即可使用",
+    "price.free.f1": "每日 10 球分析額度",
+    "price.free.f2": "AI 揮桿分析與球軌跡追蹤",
+    "price.free.f3": "邀請好友累積額外球數",
+    "price.free.f4": "無限分析",
+    "price.free.f5": "無廣告體驗",
+    "price.free.cta": "免費開始",
+    "price.pro.badge": "最受歡迎",
+    "price.pro.name": "Pro",
+    "price.pro.price": "月訂閱",
+    "price.pro.note": "可隨時取消",
+    "price.pro.f1": "無限揮桿分析",
+    "price.pro.f2": "完全無廣告",
+    "price.pro.f3": "完整 AI 教練建議與動作標記",
+    "price.pro.f4": "雙影片比對與歷史管理",
+    "price.pro.f5": "大容量錄影空間",
+    "price.pro.cta": "訂閱 Pro",
+    "price.elite.name": "Elite",
+    "price.elite.price": "月訂閱",
+    "price.elite.note": "進階玩家完整體驗",
+    "price.elite.f1": "包含 Pro 全部功能",
+    "price.elite.f2": "大容量錄影空間",
+    "price.elite.f3": "優先 AI 分析佇列",
+    "price.elite.f4": "完整歷史影片無上限",
+    "price.elite.f5": "搶先體驗新功能",
+    "price.elite.cta": "訂閱 Elite",
+    "price.sub": "從免費額度開始，依需求選擇訂閱方案。",
+    "referral.text": "邀請好友加入 ORVIA，<b>雙方各獲得額外免費分析球數</b>。",
+    "cta.title": "下一桿，看得更清楚",
+    "cta.sub": "立即下載 ORVIA，每天 10 球免費分析額度。",
+    "cta.apkSmall": "直接下載",
+    "footer.privacy": "隱私權政策",
+    "footer.terms": "使用條款"
+  },
+  en: {
+    "hero.eyebrow": "AI Golf Swing Analysis",
+    "hero.lead": "Record your swing and let AI detect your pose, track the ball flight, and deliver coaching advice tailored to you. See every swing clearly, from the range to the course.",
+    "hero.gpSmall": "GET IT ON",
+    "hero.asSmall": "COMING TO",
+    "hero.soon": "SOON",
+    "feat.title": "Core Features",
+    "feat.sub": "Complete swing analysis with nothing but your phone.",
+    "feat.c1.t": "AI Swing Analysis",
+    "feat.c1.d": "Upload a swing video and AI pose detection identifies each phase of your motion and scores it.",
+    "feat.c2.t": "Ball Tracking",
+    "feat.c2.d": "Automatically detects the ball's flight path and landing point, rendered right on your video.",
+    "feat.c3.t": "Side-by-Side Compare",
+    "feat.c3.d": "Compare against a pro or your past swings, played back in sync so differences stand out.",
+    "how.title": "Three Steps to Start",
+    "how.sub": "No extra hardware. Just your phone.",
+    "how.s1.t": "Record",
+    "how.s1.d": "Set up your phone at the range or course and record your swing.",
+    "how.s2.t": "Analyze",
+    "how.s2.d": "Each swing is clipped automatically, with pose, ball flight, and impact sound detected and scored.",
+    "how.s3.t": "AI Analysis",
+    "how.s3.d": "AI delivers motion markers and personalized training tips to fix weak spots.",
+    "show.title": "In the App",
+    "show.sub": "Every detail designed for practice.",
+    "show.r1.tag": "Auto Clipping",
+    "show.r1.t": "Every swing, found automatically",
+    "show.r1.d": "No manual editing. Record a full practice session and AI combines swing motion with impact sound to extract each swing clip, ready to review and analyze.",
+    "show.r2.tag": "Side-by-Side Compare",
+    "show.r2.t": "Line up next to a pro and spot the gap",
+    "show.r2.d": "Pick a pro's video or one of your own past swings. Playback syncs by swing progress so posture differences are easy to see.",
+    "show.r3.tag": "AI Coach Advice",
+    "show.r3.t": "More than a score — how to improve",
+    "show.r3.d": "AI marks key positions on your video and generates personalized training advice from your swing data.",
+    "show.r4.tag": "Video Library",
+    "show.r4.t": "Every session, easy to find",
+    "show.r4.d": "Search and filter by analyzed, unanalyzed, or clipped to track your long-term progress.",
+    "price.title": "Plans",
+    "price.free.name": "Free",
+    "price.free.price": "Free",
+    "price.free.note": "Start right after download",
+    "price.free.f1": "10 swing analyses per day",
+    "price.free.f2": "AI swing analysis & ball tracking",
+    "price.free.f3": "Earn extra swings by inviting friends",
+    "price.free.f4": "Unlimited analysis",
+    "price.free.f5": "Ad-free experience",
+    "price.free.cta": "Start Free",
+    "price.pro.badge": "Most Popular",
+    "price.pro.name": "Pro",
+    "price.pro.price": "Monthly",
+    "price.pro.note": "Cancel anytime",
+    "price.pro.f1": "Unlimited swing analysis",
+    "price.pro.f2": "Completely ad-free",
+    "price.pro.f3": "Full AI coaching & motion markers",
+    "price.pro.f4": "Side-by-side compare & video library",
+    "price.pro.f5": "Expanded recording storage",
+    "price.pro.cta": "Subscribe to Pro",
+    "price.elite.name": "Elite",
+    "price.elite.price": "Monthly",
+    "price.elite.note": "The full experience for serious players",
+    "price.elite.f1": "Everything in Pro",
+    "price.elite.f2": "Expanded recording storage",
+    "price.elite.f3": "Priority AI analysis queue",
+    "price.elite.f4": "Unlimited video history",
+    "price.elite.f5": "Early access to new features",
+    "price.elite.cta": "Subscribe to Elite",
+    "price.sub": "Start free. Subscribe when you need more.",
+    "referral.text": "Invite a friend to ORVIA and <b>you both earn extra free analyses</b>.",
+    "cta.title": "See Your Next Swing Clearly",
+    "cta.sub": "Download ORVIA now — 10 free analyses every day.",
+    "cta.apkSmall": "DIRECT DOWNLOAD",
+    "footer.privacy": "Privacy Policy",
+    "footer.terms": "Terms & Conditions"
+  },
+  cn: {
+    "hero.eyebrow": "AI 高尔夫挥杆分析",
+    "hero.lead": "录下你的挥杆，AI 自动检测骨架、追踪球轨迹，并给出专属教练建议。从练习场到球场，每一杆都看得更清楚。",
+    "hero.gpSmall": "下载于",
+    "hero.asSmall": "即将登陆",
+    "hero.soon": "即将推出",
+    "feat.title": "核心功能",
+    "feat.sub": "从动作到球路，一部手机完成完整挥杆分析。",
+    "feat.c1.t": "AI 挥杆分析",
+    "feat.c1.d": "上传挥杆视频，AI 骨架检测自动识别动作阶段并评分，量化每一次挥杆。",
+    "feat.c2.t": "球轨迹追踪",
+    "feat.c2.d": "自动检测球的飞行路径与落点，直接在视频上呈现完整球路。",
+    "feat.c3.t": "双视频对比",
+    "feat.c3.d": "与职业选手或自己过去的视频并排对比，同步播放，差异一目了然。",
+    "how.title": "三步开始",
+    "how.sub": "不需要额外设备，一部手机就能开始。",
+    "how.s1.t": "录制",
+    "how.s1.d": "在练习场或球场架好手机，录下你的挥杆。",
+    "how.s2.t": "分析",
+    "how.s2.d": "自动切出挥杆片段，检测骨架、球轨迹与击球声音并评分。",
+    "how.s3.t": "AI 分析",
+    "how.s3.d": "AI 给出动作标记与个性化训练建议，针对弱点改善。",
+    "show.title": "功能展示",
+    "show.sub": "为练习而设计的每一个细节。",
+    "show.r1.tag": "自动切片",
+    "show.r1.t": "长视频，自动找出每一次挥杆",
+    "show.r1.d": "无需手动剪辑。录一整段练习视频，AI 以挥杆动作与击球声音双重判断，自动提取每一个挥杆片段，立即可以逐一查看与分析。",
+    "show.r2.tag": "双视频对比",
+    "show.r2.t": "和职业选手并排，看出差在哪",
+    "show.r2.d": "选一段职业选手或自己过去的视频，按挥杆进度百分比同步播放，姿势差异清楚对照。",
+    "show.r3.tag": "AI 教练建议",
+    "show.r3.t": "不只评分，告诉你怎么改",
+    "show.r3.d": "AI 在视频上标记关键动作点，并依据你的挥杆数据给出个性化训练建议。",
+    "show.r4.tag": "历史视频管理",
+    "show.r4.t": "每一次练习，都找得回来",
+    "show.r4.d": "按已分析、未分析、已切片快速筛选与搜索，追踪自己长期的进步轨迹。",
+    "price.title": "方案对比",
+    "price.free.name": "Free",
+    "price.free.price": "免费",
+    "price.free.note": "下载即可使用",
+    "price.free.f1": "每日 10 球分析额度",
+    "price.free.f2": "AI 挥杆分析与球轨迹追踪",
+    "price.free.f3": "邀请好友累积额外球数",
+    "price.free.f4": "无限分析",
+    "price.free.f5": "无广告体验",
+    "price.free.cta": "免费开始",
+    "price.pro.badge": "最受欢迎",
+    "price.pro.name": "Pro",
+    "price.pro.price": "月订阅",
+    "price.pro.note": "可随时取消",
+    "price.pro.f1": "无限挥杆分析",
+    "price.pro.f2": "完全无广告",
+    "price.pro.f3": "完整 AI 教练建议与动作标记",
+    "price.pro.f4": "双视频对比与历史管理",
+    "price.pro.f5": "大容量录像空间",
+    "price.pro.cta": "订阅 Pro",
+    "price.elite.name": "Elite",
+    "price.elite.price": "月订阅",
+    "price.elite.note": "进阶玩家完整体验",
+    "price.elite.f1": "包含 Pro 全部功能",
+    "price.elite.f2": "大容量录像空间",
+    "price.elite.f3": "优先 AI 分析队列",
+    "price.elite.f4": "完整历史视频无上限",
+    "price.elite.f5": "抢先体验新功能",
+    "price.elite.cta": "订阅 Elite",
+    "price.sub": "从免费额度开始，按需选择订阅方案。",
+    "referral.text": "邀请好友加入 ORVIA，<b>双方各获得额外免费分析球数</b>。",
+    "cta.title": "下一杆，看得更清楚",
+    "cta.sub": "立即下载 ORVIA，每天 10 球免费分析额度。",
+    "cta.apkSmall": "直接下载",
+    "footer.privacy": "隐私政策",
+    "footer.terms": "使用条款"
+  }
+};
+
+function setLang(lang){
+  if(!I18N[lang]) lang = "zh";
+  const dict = I18N[lang];
+  document.querySelectorAll("[data-i18n]").forEach(el=>{
+    const k = el.getAttribute("data-i18n");
+    if(dict[k] !== undefined) el.textContent = dict[k];
+  });
+  document.querySelectorAll("[data-i18n-html]").forEach(el=>{
+    const k = el.getAttribute("data-i18n-html");
+    if(dict[k] !== undefined) el.innerHTML = dict[k];
+  });
+  document.documentElement.lang = lang==="zh" ? "zh-TW" : (lang==="cn" ? "zh-CN" : lang);
+  document.querySelectorAll(".lang-switch button").forEach(b=>{
+    b.classList.toggle("active", b.dataset.lang===lang);
+  });
+  try{ localStorage.setItem("orvia_lang", lang); }catch(e){}
+}
+
+document.querySelectorAll(".lang-switch button").forEach(b=>{
+  b.addEventListener("click", ()=>setLang(b.dataset.lang));
+});
+
+let saved = null;
+try{ saved = localStorage.getItem("orvia_lang"); }catch(e){}
+setLang(saved || "zh");
+
+// scroll reveal
+const io = new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      e.target.classList.add("in");
+      io.unobserve(e.target);
+    }
+  });
+},{threshold:0.15});
+document.querySelectorAll(".reveal").forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

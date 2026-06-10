@@ -209,7 +209,7 @@ class _LoginPageState extends State<LoginPage> {
 
       final dio = Dio();
       final response = await dio.post(
-        'https://tekswing.api.atk.tw/api/auth/google-login',
+        'https://orvia.api.atk.tw/api/auth/google-login',
         data: {
           'idToken': googleAuth.idToken,
           'email': googleUser.email,
@@ -442,24 +442,13 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: _onDevLogoTap,
-                      child: const Icon(Icons.golf_course_rounded, size: 42, color: Colors.white),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(l10n.appName,
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              color: Colors.white, fontWeight: FontWeight.bold)),
-                        Text(l10n.appTagline,
-                            style: theme.textTheme.titleSmall?.copyWith(color: Colors.white70)),
-                      ],
-                    ),
-                  ],
+                GestureDetector(
+                  onTap: _onDevLogoTap,
+                  child: Image.asset(
+                    'assets/branding/logo_horizontal.png',
+                    height: 56,
+                    alignment: Alignment.centerLeft,
+                  ),
                 ),
                 const SizedBox(height: 36),
                 Text(

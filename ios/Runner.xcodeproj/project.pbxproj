@@ -24,6 +24,7 @@
 		AA0001111CF9AA0000000011 /* BallYoloDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001101CF9AA0000000010 /* BallYoloDetector.swift */; };
 		AA0001131CF9AA0000000013 /* VideoTranscoderChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */; };
 		AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001141CF9AA0000000014 /* VideoExportChannel.swift */; };
+		AA0001171CF9AA0000000017 /* GolfAnalysisChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */; };
 		EBD96FC061E6446ADA9EA04D /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3EE3AF767EEE86B6ED334B6 /* Pods_Runner.framework */; };
 /* End PBXBuildFile section */
 
@@ -79,6 +80,7 @@
 		AA0001101CF9AA0000000010 /* BallYoloDetector.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BallYoloDetector.swift; sourceTree = "<group>"; };
 		AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoTranscoderChannel.swift; sourceTree = "<group>"; };
 		AA0001141CF9AA0000000014 /* VideoExportChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoExportChannel.swift; sourceTree = "<group>"; };
+		AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GolfAnalysisChannel.swift; sourceTree = "<group>"; };
 		BC5660C4942F611BB7C5199E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		C9E16FC20A40393144B19E4D /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 		D3EE3AF767EEE86B6ED334B6 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -174,6 +176,7 @@
 				AA0001101CF9AA0000000010 /* BallYoloDetector.swift */,
 				AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */,
 				AA0001141CF9AA0000000014 /* VideoExportChannel.swift */,
+				AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -433,6 +436,7 @@
 				AA0001111CF9AA0000000011 /* BallYoloDetector.swift in Sources */,
 				AA0001131CF9AA0000000013 /* VideoTranscoderChannel.swift in Sources */,
 				AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */,
+				AA0001171CF9AA0000000017 /* GolfAnalysisChannel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -535,7 +539,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = aethertek.tekswing;
+				PRODUCT_BUNDLE_IDENTIFIER = aethertek.orvia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -609,7 +613,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = AppIcon;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
@@ -669,7 +673,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = AppIcon;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
@@ -737,7 +741,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = aethertek.tekswing;
+				PRODUCT_BUNDLE_IDENTIFIER = aethertek.orvia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = YES;
@@ -762,7 +766,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = aethertek.tekswing;
+				PRODUCT_BUNDLE_IDENTIFIER = aethertek.orvia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

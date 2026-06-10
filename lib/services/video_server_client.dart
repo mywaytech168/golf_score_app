@@ -15,7 +15,7 @@ class UnauthorizedException implements Exception {
 
 /// 伺服器 API 客戶端（登入/統計，不含上傳/同步）
 class VideoServerClient {
-  static const String _baseUrl = 'https://tekswing.api.atk.tw';
+  static const String _baseUrl = 'https://orvia.api.atk.tw';
 
   static final VideoServerClient _instance = VideoServerClient._internal();
 

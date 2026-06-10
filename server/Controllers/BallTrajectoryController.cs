@@ -140,7 +140,20 @@ public class BallTrajectoryController : ControllerBase
                     Rotation = a.VideoRotation ?? 0,
                 };
             }
-            catch { /* JSON 損毀時忽略 */ }
+            catch (JsonException ex)
+            {
+                // 資料損毀要讓前端看得到，不可與「完成但無軌跡」混淆
+                return new BallTrajectoryStatusResponse
+                {
+                    AnalysisId   = a.Id,
+                    VideoId      = a.VideoId,
+                    Status       = a.Status,
+                    Result       = null,
+                    ErrorMessage = $"軌跡資料損毀：{ex.Message}",
+                    CreatedAt    = a.CreatedAt,
+                    CompletedAt  = a.CompletedAt,
+                };
+            }
         }
 
         return new BallTrajectoryStatusResponse

@@ -515,8 +515,8 @@ builder.Services.AddHostedService<JwtKeyRotationService>();
 {
   "Jwt": {
     "Secret": "your-super-secret-key-at-least-32-characters-long!!!",
-    "Issuer": "TekSwing.API",
-    "Audience": "TekSwing.Client",
+    "Issuer": "ORVIA.API",
+    "Audience": "ORVIA.Client",
     "ExpirationMinutes": 60,
     "RefreshTokenExpirationDays": 7,
     "KeyRotationIntervalDays": 90,
@@ -528,8 +528,8 @@ builder.Services.AddHostedService<JwtKeyRotationService>();
 **.env (生產環境)**:
 ```bash
 JWT_SECRET=your-super-secret-key-at-least-32-characters-long!!!
-JWT_ISSUER=TekSwing.API
-JWT_AUDIENCE=TekSwing.Client
+JWT_ISSUER=ORVIA.API
+JWT_AUDIENCE=ORVIA.Client
 ```
 
 **效果**:
@@ -773,8 +773,8 @@ dotnet add package Pomelo.EntityFrameworkCore.MySql
 {
   "Jwt": {
     "Secret": "your-32-character-secret-key!!!",
-    "Issuer": "TekSwing.API",
-    "Audience": "TekSwing.Client"
+    "Issuer": "ORVIA.API",
+    "Audience": "ORVIA.Client"
   },
   "IpRateLimiting": {
     "GeneralRules": [

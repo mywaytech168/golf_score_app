@@ -41,58 +41,58 @@ namespace UploadServer.Data
         private static List<(User user, UserAuth auth)> BuildAccounts() => new()
         {
             // A - 全新 Free 用戶（今日 0 次）
-            MakeLocal("test_free",       "test_free@tekswing.dev",       "Test1234!",
+            MakeLocal("test_free",       "test_free@orvia.dev",       "Test1234!",
                       "測試Free用戶",    "free",  bonusBalls: 0,  todayUsed: 0),
 
             // B - Free 今日配額用完（10/10）
-            MakeLocal("test_free_full",  "test_free_full@tekswing.dev",  "Test1234!",
+            MakeLocal("test_free_full",  "test_free_full@orvia.dev",  "Test1234!",
                       "Free配額耗盡",   "free",  bonusBalls: 0,  todayUsed: 10, setTodayDate: true),
 
             // B2 - Free 今日耗盡但有 Bonus Ball
-            MakeLocal("test_free_balls", "test_free_balls@tekswing.dev", "Test1234!",
+            MakeLocal("test_free_balls", "test_free_balls@orvia.dev", "Test1234!",
                       "Free有BonusBall","free",  bonusBalls: 15, todayUsed: 10, setTodayDate: true),
 
             // B3 - Free 今日廣告獎勵也用完（adClaimedToday=5）
-            MakeLocal("test_ad_full",    "test_ad_full@tekswing.dev",    "Test1234!",
+            MakeLocal("test_ad_full",    "test_ad_full@orvia.dev",    "Test1234!",
                       "廣告獎勵耗盡",   "free",  bonusBalls: 25, todayUsed: 10,
                       setTodayDate: true, adClaimedToday: 5),
 
             // C - Pro 用戶接近每日上限（88/90）
-            MakeLocal("test_pro",        "test_pro@tekswing.dev",        "Test1234!",
+            MakeLocal("test_pro",        "test_pro@orvia.dev",        "Test1234!",
                       "Pro接近上限",     "pro",   bonusBalls: 0,  todayUsed: 88, setTodayDate: true),
 
             // D - Elite 用戶（無限制）
-            MakeLocal("test_elite",      "test_elite@tekswing.dev",      "Test1234!",
+            MakeLocal("test_elite",      "test_elite@orvia.dev",      "Test1234!",
                       "Elite教練",       "elite", bonusBalls: 0,  todayUsed: 0),
 
             // E - 被停權帳號
-            MakeLocal("test_suspended",  "test_suspended@tekswing.dev",  "Test1234!",
+            MakeLocal("test_suspended",  "test_suspended@orvia.dev",  "Test1234!",
                       "停權帳號",        "free",  bonusBalls: 0,  todayUsed: 0,
                       status: UserStatus.Suspended),
 
             // G - 分享功能測試者
-            MakeLocal("test_sharer",     "test_sharer@tekswing.dev",     "Test1234!",
+            MakeLocal("test_sharer",     "test_sharer@orvia.dev",     "Test1234!",
                       "分享測試",        "pro",   bonusBalls: 0,  todayUsed: 0),
 
             // H - AI Coach 分析測試者
-            MakeLocal("test_aicoach",    "test_aicoach@tekswing.dev",    "Test1234!",
+            MakeLocal("test_aicoach",    "test_aicoach@orvia.dev",    "Test1234!",
                       "AI教練測試",      "pro",   bonusBalls: 0,  todayUsed: 0),
 
             // I - IAP 購買測試者
-            MakeLocal("test_iap",        "test_iap@tekswing.dev",        "Test1234!",
+            MakeLocal("test_iap",        "test_iap@orvia.dev",        "Test1234!",
                       "購買測試",        "free",  bonusBalls: 0,  todayUsed: 0),
 
             // J - 邀請者（invite_code = TESTINVITE0001）
-            MakeLocal("test_inviter",    "test_inviter@tekswing.dev",    "Test1234!",
+            MakeLocal("test_inviter",    "test_inviter@orvia.dev",    "Test1234!",
                       "邀請者",          "free",  bonusBalls: 0,  todayUsed: 0,
                       inviteCode: "TESTINVITE0001"),
 
             // J - 被邀請者（尚未使用邀請碼，保持空白供測試用）
-            MakeLocal("test_invitee",    "test_invitee@tekswing.dev",    "Test1234!",
+            MakeLocal("test_invitee",    "test_invitee@orvia.dev",    "Test1234!",
                       "被邀請者",        "free",  bonusBalls: 0,  todayUsed: 0),
 
             // F - 用於 Token 測試（正常帳號，搭配手動過期 token 測試）
-            MakeLocal("test_token",      "test_token@tekswing.dev",      "Test1234!",
+            MakeLocal("test_token",      "test_token@orvia.dev",      "Test1234!",
                       "Token測試",       "free",  bonusBalls: 0,  todayUsed: 0),
         };
 

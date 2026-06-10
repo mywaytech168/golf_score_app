@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 
 :: =============================================================================
-::  TekSwing 推版腳本 (Windows 版)
+::  ORVIA 推版腳本 (Windows 版)
 ::  用法：
 ::    release.bat                            ← 互動式
 ::    release.bat -n "修正 bug" -n "新功能"  ← 帶更新說明
@@ -16,14 +16,14 @@ chcp 65001 >nul 2>&1
 
 :: ── ① 設定區（只需改這裡）─────────────────────────────────────────────────
 set "ADMIN_KEY=change-this-admin-secret-in-production"
-set "API_BASE=https://tekswing.api.atk.tw"
+set "API_BASE=https://orvia.api.atk.tw"
 
 set "B2_KEY_ID=005cdd4425aa9cd0000000003"
 set "B2_APP_KEY=K005l60DuFwoMdfpAWLq8Hr5Wq47hR8"
-set "B2_BUCKET=tekswing"
+set "B2_BUCKET=orvia"
 set "B2_ENDPOINT=https://s3.us-east-005.backblazeb2.com"
 set "APK_REMOTE_DIR=releases/android"
-set "DOWNLOAD_BASE=https://s3.us-east-005.backblazeb2.com/tekswing"
+set "DOWNLOAD_BASE=https://s3.us-east-005.backblazeb2.com/orvia"
 
 :: ── ② 解析參數 ────────────────────────────────────────────────────────────────
 set "FORCE_UPDATE=false"
@@ -64,7 +64,7 @@ goto :eof
 :: =============================================================================
 :usage
 echo.
-echo TekSwing 推版腳本 (Windows 版)
+echo ORVIA 推版腳本 (Windows 版)
 echo.
 echo 用法: %~nx0 [選項]
 echo.
@@ -274,7 +274,7 @@ exit /b 0
 :main
 echo.
 echo ══════════════════════════════════════════
-echo   TekSwing 推版腳本
+echo   ORVIA 推版腳本
 echo ══════════════════════════════════════════
 
 call :read_pubspec_version

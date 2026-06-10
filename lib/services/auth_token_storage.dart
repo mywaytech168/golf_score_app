@@ -61,7 +61,7 @@ class AuthTokenStorage {
   // ── 共用 Token 刷新邏輯 ─────────────────────────────────────
   // 可被多個 HTTP client（VideoServerClient、AnalysisService…）共用
 
-  static const _serverBaseUrl = 'https://tekswing.api.atk.tw';
+  static const _serverBaseUrl = 'https://orvia.api.atk.tw';
 
   bool _isRefreshing = false;
   final List<Completer<bool>> _refreshWaiters = [];

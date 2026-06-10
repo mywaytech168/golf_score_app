@@ -59,7 +59,7 @@ class VideoExportService {
     }
   }
 
-  /// 讓使用者選擇資料夾後下載影片（Android SAF，iOS fallback 到下載）
+  /// 讓使用者選擇資料夾後下載影片（Android SAF，iOS Document Picker 匯出到「檔案」）
   static Future<ExportResult> downloadToFolder(
     String videoPath, {
     String? displayName,
@@ -72,7 +72,7 @@ class VideoExportService {
     final base     = displayName ?? _defaultName(videoPath);
     final fileName = '$base$ext';
 
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       try {
         final savedUri = await _channel.invokeMethod<String>(
           'pickFolderAndSave',

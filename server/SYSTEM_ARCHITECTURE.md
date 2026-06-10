@@ -46,7 +46,7 @@
                  ↓                           ↓
         ┌──────────────────────┐   ┌──────────────────────┐
         │   MySQL Database     │   │  File System         │
-        │   (\\server\TekSwing) │   │  (Local Storage)     │
+        │   (\\server\ORVIA) │   │  (Local Storage)     │
         │                      │   │                      │
         │ Tables:              │   │ /videos/             │
         │ - users              │   │ /uploads/            │

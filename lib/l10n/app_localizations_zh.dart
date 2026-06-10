@@ -9,7 +9,7 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
-  String get appName => 'TekSwing';
+  String get appName => 'ORVIA';
 
   @override
   String get appTagline => '智慧揮桿訓練平台';
@@ -51,13 +51,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get authWelcomeBack => '歡迎回來！';
 
   @override
-  String get authLoginSubtitle => '請登入 TekSwing 以同步揮桿資料並探索最新分析報告。';
+  String get authLoginSubtitle => '請登入 ORVIA 以同步揮桿資料並探索最新分析報告。';
 
   @override
   String get authRegisterTitle => '建立帳號';
 
   @override
-  String get authRegisterSubtitle => '填寫以下資料即可開始使用 TekSwing。';
+  String get authRegisterSubtitle => '填寫以下資料即可開始使用 ORVIA。';
 
   @override
   String get authLoginTitle => '登入帳號';
@@ -99,7 +99,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get authForgotPassword => '忘記密碼？';
 
   @override
-  String get authLoginButton => '登入 TekSwing';
+  String get authLoginButton => '登入 ORVIA';
 
   @override
   String get authRegisterButton => '建立帳號';
@@ -224,7 +224,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get permAndroidInstructions =>
-      '請在系統設定中允許以下權限：\n1. 進入「應用程式與通知」\n2. 選擇 TekSwing → 權限\n3. 啟用「附近裝置、藍牙」與「定位」';
+      '請在系統設定中允許以下權限：\n1. 進入「應用程式與通知」\n2. 選擇 ORVIA → 權限\n3. 啟用「附近裝置、藍牙」與「定位」';
 
   @override
   String get permStatusGranted => '已允許';
@@ -551,7 +551,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsCheckUpdate => '檢查更新';
 
   @override
-  String get settingsPrivacyPolicy => '使用者條款與隱私政策';
+  String get settingsPrivacyPolicy => '隱私權政策';
+
+  @override
+  String get settingsTermsOfService => '使用條款';
 
   @override
   String get settingsVersion => '版本';
@@ -774,7 +777,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateRequiredTitle => '必要更新';
 
   @override
-  String get updateRequiredSubtitle => '請更新後繼續使用 TekSwing';
+  String get updateRequiredSubtitle => '請更新後繼續使用 ORVIA';
 
   @override
   String get updateFoundTitle => '發現新版本';
@@ -841,7 +844,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   AppLocalizationsZhCn() : super('zh_CN');
 
   @override
-  String get appName => 'TekSwing';
+  String get appName => 'ORVIA';
 
   @override
   String get appTagline => '智能挥杆训练平台';
@@ -883,13 +886,13 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get authWelcomeBack => '欢迎回来！';
 
   @override
-  String get authLoginSubtitle => '登录 TekSwing 以同步挥杆数据并探索最新分析报告。';
+  String get authLoginSubtitle => '登录 ORVIA 以同步挥杆数据并探索最新分析报告。';
 
   @override
   String get authRegisterTitle => '创建账号';
 
   @override
-  String get authRegisterSubtitle => '填写以下信息即可开始使用 TekSwing。';
+  String get authRegisterSubtitle => '填写以下信息即可开始使用 ORVIA。';
 
   @override
   String get authLoginTitle => '登录账号';
@@ -931,7 +934,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get authForgotPassword => '忘记密码？';
 
   @override
-  String get authLoginButton => '登录 TekSwing';
+  String get authLoginButton => '登录 ORVIA';
 
   @override
   String get authRegisterButton => '创建账号';
@@ -1056,7 +1059,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get permAndroidInstructions =>
-      '请在系统设置中允许以下权限：\n1. 进入「应用与通知」\n2. 选择 TekSwing → 权限\n3. 启用「附近设备、蓝牙」与「定位」';
+      '请在系统设置中允许以下权限：\n1. 进入「应用与通知」\n2. 选择 ORVIA → 权限\n3. 启用「附近设备、蓝牙」与「定位」';
 
   @override
   String get permStatusGranted => '已允许';
@@ -1383,7 +1386,10 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get settingsCheckUpdate => '检查更新';
 
   @override
-  String get settingsPrivacyPolicy => '用户条款与隐私政策';
+  String get settingsPrivacyPolicy => '隐私政策';
+
+  @override
+  String get settingsTermsOfService => '使用条款';
 
   @override
   String get settingsVersion => '版本';
@@ -1606,7 +1612,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get updateRequiredTitle => '必要更新';
 
   @override
-  String get updateRequiredSubtitle => '请更新后继续使用 TekSwing';
+  String get updateRequiredSubtitle => '请更新后继续使用 ORVIA';
 
   @override
   String get updateFoundTitle => '发现新版本';
@@ -1673,7 +1679,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   AppLocalizationsZhTw() : super('zh_TW');
 
   @override
-  String get appName => 'TekSwing';
+  String get appName => 'ORVIA';
 
   @override
   String get appTagline => '智慧揮桿訓練平台';
@@ -1715,13 +1721,13 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get authWelcomeBack => '歡迎回來！';
 
   @override
-  String get authLoginSubtitle => '請登入 TekSwing 以同步揮桿資料並探索最新分析報告。';
+  String get authLoginSubtitle => '請登入 ORVIA 以同步揮桿資料並探索最新分析報告。';
 
   @override
   String get authRegisterTitle => '建立帳號';
 
   @override
-  String get authRegisterSubtitle => '填寫以下資料即可開始使用 TekSwing。';
+  String get authRegisterSubtitle => '填寫以下資料即可開始使用 ORVIA。';
 
   @override
   String get authLoginTitle => '登入帳號';
@@ -1763,7 +1769,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get authForgotPassword => '忘記密碼？';
 
   @override
-  String get authLoginButton => '登入 TekSwing';
+  String get authLoginButton => '登入 ORVIA';
 
   @override
   String get authRegisterButton => '建立帳號';
@@ -1888,7 +1894,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get permAndroidInstructions =>
-      '請在系統設定中允許以下權限：\n1. 進入「應用程式與通知」\n2. 選擇 TekSwing → 權限\n3. 啟用「附近裝置、藍牙」與「定位」';
+      '請在系統設定中允許以下權限：\n1. 進入「應用程式與通知」\n2. 選擇 ORVIA → 權限\n3. 啟用「附近裝置、藍牙」與「定位」';
 
   @override
   String get permStatusGranted => '已允許';
@@ -2215,7 +2221,10 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsCheckUpdate => '檢查更新';
 
   @override
-  String get settingsPrivacyPolicy => '使用者條款與隱私政策';
+  String get settingsPrivacyPolicy => '隱私權政策';
+
+  @override
+  String get settingsTermsOfService => '使用條款';
 
   @override
   String get settingsVersion => '版本';
@@ -2438,7 +2447,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get updateRequiredTitle => '必要更新';
 
   @override
-  String get updateRequiredSubtitle => '請更新後繼續使用 TekSwing';
+  String get updateRequiredSubtitle => '請更新後繼續使用 ORVIA';
 
   @override
   String get updateFoundTitle => '發現新版本';

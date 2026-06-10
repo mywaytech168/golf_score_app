@@ -1,7 +1,7 @@
 {
   "@@locale": "en",
 
-  "appName": "TekSwing",
+  "appName": "ORVIA",
   "appTagline": "Smart Swing Training Platform",
 
   "commonSave": "Save",
@@ -17,9 +17,9 @@
   "commonUnknownError": "An unknown error occurred, please try again later",
 
   "authWelcomeBack": "Welcome Back!",
-  "authLoginSubtitle": "Login to TekSwing to sync swing data and explore the latest analysis reports.",
+  "authLoginSubtitle": "Login to ORVIA to sync swing data and explore the latest analysis reports.",
   "authRegisterTitle": "Create Account",
-  "authRegisterSubtitle": "Fill in the details below to start using TekSwing.",
+  "authRegisterSubtitle": "Fill in the details below to start using ORVIA.",
   "authLoginTitle": "Sign In",
   "authUsernameOrEmail": "Username / Email",
   "authUsernameHint": "username or you@example.com",
@@ -33,7 +33,7 @@
   "authConfirmPassword": "Confirm Password",
   "authRememberMe": "Remember Me",
   "authForgotPassword": "Forgot Password?",
-  "authLoginButton": "Login to TekSwing",
+  "authLoginButton": "Login to ORVIA",
   "authRegisterButton": "Create Account",
   "authSocialDivider": "Or sign in with social account",
   "authLoginWithGoogle": "Continue with Google",
@@ -90,7 +90,7 @@
   "permIKnow": "Got It",
   "permBluetooth": "Please allow Bluetooth permission.",
   "permIosInstructions": "Location permission is required for Bluetooth scanning:\n\n1. Tap \"Open Settings\"\n2. Find \"Golf Score App\"\n3. Tap \"Location\" → \"While Using the App\"\n4. Return to the app and login again",
-  "permAndroidInstructions": "Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select TekSwing → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"",
+  "permAndroidInstructions": "Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select ORVIA → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"",
   "permStatusGranted": "Granted",
   "permStatusDenied": "Denied",
 
@@ -223,7 +223,8 @@
   "settingsSectionGeneral": "General",
   "settingsLanguage": "Language",
   "settingsCheckUpdate": "Check for Updates",
-  "settingsPrivacyPolicy": "Terms & Privacy Policy",
+  "settingsPrivacyPolicy": "Privacy Policy",
+  "settingsTermsOfService": "Terms & Conditions",
   "settingsVersion": "Version",
   "settingsPrivacyOpenFailed": "Unable to open the privacy policy page, please try again later",
   "settingsVersionCopied": "Version copied",
@@ -322,7 +323,7 @@
   "updateDontRemind": "Don't Remind",
   "updateCannotOpenStore": "Cannot open store. Please update manually.",
   "updateRequiredTitle": "Required Update",
-  "updateRequiredSubtitle": "Please update to continue using TekSwing",
+  "updateRequiredSubtitle": "Please update to continue using ORVIA",
   "updateFoundTitle": "New Version Available",
   "updateFoundSubtitle": "Update recommended for the best experience",
   "updateCurrentVersion": "Current Version",

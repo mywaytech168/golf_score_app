@@ -778,8 +778,8 @@ def run_opencv_affine_stabilization(config: Optional[OpenCVAffineConfig] = None)
 if __name__ == "__main__":
     # 測試用例
     config = OpenCVAffineConfig(
-        input_path=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip.mp4",
-        output_path=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized_opencv.mp4",
+        input_path=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip.mp4",
+        output_path=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized_opencv.mp4",
         detector="SIFT",
         auto_shake_segment=True,
         export_matrices=False,

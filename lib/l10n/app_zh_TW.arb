@@ -1,7 +1,7 @@
 {
   "@@locale": "zh_TW",
 
-  "appName": "TekSwing",
+  "appName": "ORVIA",
   "appTagline": "智慧揮桿訓練平台",
 
   "commonSave": "儲存",
@@ -17,9 +17,9 @@
   "commonUnknownError": "發生未知錯誤，請稍後再試",
 
   "authWelcomeBack": "歡迎回來！",
-  "authLoginSubtitle": "請登入 TekSwing 以同步揮桿資料並探索最新分析報告。",
+  "authLoginSubtitle": "請登入 ORVIA 以同步揮桿資料並探索最新分析報告。",
   "authRegisterTitle": "建立帳號",
-  "authRegisterSubtitle": "填寫以下資料即可開始使用 TekSwing。",
+  "authRegisterSubtitle": "填寫以下資料即可開始使用 ORVIA。",
   "authLoginTitle": "登入帳號",
   "authUsernameOrEmail": "用戶名 / 電子郵件",
   "authUsernameHint": "username 或 you@example.com",
@@ -33,7 +33,7 @@
   "authConfirmPassword": "確認密碼",
   "authRememberMe": "記住我",
   "authForgotPassword": "忘記密碼？",
-  "authLoginButton": "登入 TekSwing",
+  "authLoginButton": "登入 ORVIA",
   "authRegisterButton": "建立帳號",
   "authSocialDivider": "或使用社群帳號快速登入",
   "authLoginWithGoogle": "使用 Google 登入",
@@ -75,7 +75,7 @@
   "permIKnow": "知道了",
   "permBluetooth": "請允許藍牙權限。",
   "permIosInstructions": "需要定位權限才能使用藍牙掃描功能：\n\n1. 點擊「開啟設定」\n2. 找到「Golf Score App」\n3. 點選「位置」→「使用 App 期間」\n4. 返回 App 重新登入",
-  "permAndroidInstructions": "請在系統設定中允許以下權限：\n1. 進入「應用程式與通知」\n2. 選擇 TekSwing → 權限\n3. 啟用「附近裝置、藍牙」與「定位」",
+  "permAndroidInstructions": "請在系統設定中允許以下權限：\n1. 進入「應用程式與通知」\n2. 選擇 ORVIA → 權限\n3. 啟用「附近裝置、藍牙」與「定位」",
   "permStatusGranted": "已允許",
   "permStatusDenied": "已拒絕",
 
@@ -195,7 +195,8 @@
   "settingsSectionGeneral": "一般",
   "settingsLanguage": "語言 / Language",
   "settingsCheckUpdate": "檢查更新",
-  "settingsPrivacyPolicy": "使用者條款與隱私政策",
+  "settingsPrivacyPolicy": "隱私權政策",
+  "settingsTermsOfService": "使用條款",
   "settingsVersion": "版本",
   "settingsPrivacyOpenFailed": "無法開啟隱私政策頁面，請稍後再試",
   "settingsVersionCopied": "已複製版本",
@@ -294,7 +295,7 @@
   "updateDontRemind": "不再提醒",
   "updateCannotOpenStore": "無法開啟商店頁面，請手動前往更新",
   "updateRequiredTitle": "必要更新",
-  "updateRequiredSubtitle": "請更新後繼續使用 TekSwing",
+  "updateRequiredSubtitle": "請更新後繼續使用 ORVIA",
   "updateFoundTitle": "發現新版本",
   "updateFoundSubtitle": "建議更新以獲得最佳體驗",
   "updateCurrentVersion": "目前版本",

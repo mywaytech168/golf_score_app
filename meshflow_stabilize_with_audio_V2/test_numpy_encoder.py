@@ -103,7 +103,7 @@ def test_processing_result():
     result_data = {
         'queueItemId': '1',
         'videoId': '345049fc-e84b-42df-811c-859dea4dd0d5',
-        'inputDir': '\\\\10.1.1.101\\TekSwing\\videos\\...',
+        'inputDir': '\\\\10.1.1.101\\ORVIA\\videos\\...',
         'processedAt': datetime.now().isoformat(),
         'steps': {
             'stabilization': {

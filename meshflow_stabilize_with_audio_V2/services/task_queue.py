@@ -49,12 +49,12 @@ def normalize_unc_path(path: str) -> str:
         
     Examples:
         # Linux 上：
-        normalize_unc_path(r"\\10.1.1.101\TekSwing\videos\...")
-        # 返回：/data/tekswing/videos/...
+        normalize_unc_path(r"\\10.1.1.101\ORVIA\videos\...")
+        # 返回：/data/orvia/videos/...
         
         # Windows 上：
-        normalize_unc_path(r"\\10.1.1.101\TekSwing\videos\...")
-        # 返回：\\10.1.1.101\\TekSwing\\videos\\...（不變）
+        normalize_unc_path(r"\\10.1.1.101\ORVIA\videos\...")
+        # 返回：\\10.1.1.101\\ORVIA\\videos\\...（不變）
     """
     if not isinstance(path, str):
         return path
@@ -63,15 +63,15 @@ def normalize_unc_path(path: str) -> str:
     
     # ✅ 只在 Linux 系統上執行轉換
     if current_os == "Linux":
-        # 處理 Windows UNC 路徑格式：\\10.1.1.101\TekSwing\...
-        if "\\\\10.1.1.101\\TekSwing" in path or "\\10.1.1.101\\TekSwing" in path:
+        # 處理 Windows UNC 路徑格式：\\10.1.1.101\ORVIA\...
+        if "\\\\10.1.1.101\\ORVIA" in path or "\\10.1.1.101\\ORVIA" in path:
             # 轉換 UNC 路徑為 Linux 路徑
             converted = path.replace(
-                "\\\\10.1.1.101\\TekSwing",
-                "/data/tekswing"
+                "\\\\10.1.1.101\\ORVIA",
+                "/data/orvia"
             ).replace(
-                "\\10.1.1.101\\TekSwing",
-                "/data/tekswing"
+                "\\10.1.1.101\\ORVIA",
+                "/data/orvia"
             ).replace("\\", "/")  # 將所有反斜杠轉換為正斜杠
             logger.debug(f"🔄 路徑轉換 (UNC→Linux): {path} → {converted}")
             return converted
@@ -1101,7 +1101,7 @@ def get_task_queue(
     
     if _task_queue_instance is None:
         if csharp_server_url is None:
-            csharp_server_url = "https://tekswing.api.atk.tw"
+            csharp_server_url = "https://orvia.api.atk.tw"
         
         _task_queue_instance = TaskQueue(
             csharp_server_url=csharp_server_url,

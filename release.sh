@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-#  TekSwing 推版腳本
+#  ORVIA 推版腳本
 #  用法：
 #    ./release.sh                            ← 互動式
 #    ./release.sh -n "修正 bug" -n "新功能"  ← 帶更新說明
@@ -12,11 +12,11 @@ set -euo pipefail
 
 # ── ① 設定區（只需改這裡）────────────────────────────────────────────────────
 ADMIN_KEY="change-this-admin-secret-in-production"   # ← 改成正式密鑰
-API_BASE="https://tekswing.api.atk.tw"
+API_BASE="https://orvia.api.atk.tw"
 
 B2_KEY_ID="005cdd4425aa9cd0000000003"
 B2_APP_KEY="K005l60DuFwoMdfpAWLq8Hr5Wq47hR8"
-B2_BUCKET="tekswing"
+B2_BUCKET="orvia"
 B2_ENDPOINT="https://s3.us-east-005.backblazeb2.com"
 APK_REMOTE_DIR="releases/android"          # B2 bucket 內的路徑
 
@@ -46,7 +46,7 @@ RELEASE_NOTES=()
 
 usage() {
   echo ""
-  echo -e "${BOLD}TekSwing 推版腳本${NC}"
+  echo -e "${BOLD}ORVIA 推版腳本${NC}"
   echo ""
   echo "用法: $0 [選項]"
   echo ""
@@ -284,7 +284,7 @@ print_summary() {
 
 # ── 主流程 ───────────────────────────────────────────────────────────────────
 main() {
-  print_header "TekSwing 推版腳本"
+  print_header "ORVIA 推版腳本"
 
   # 讀版本
   local full_version v_name

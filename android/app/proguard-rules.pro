@@ -26,6 +26,15 @@
 # TFLite
 -keep class org.tensorflow.** { *; }
 
+# MediaPipe Tasks（PoseLandmarker 走 JNI，類名不可混淆）
+-keep class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**
+
+# 保留所有含 native 方法的類別與方法名（golf_native.so JNI 綁定）
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
 # SQLite / sqflite
 -keep class io.flutter.plugins.sqflite.** { *; }
 

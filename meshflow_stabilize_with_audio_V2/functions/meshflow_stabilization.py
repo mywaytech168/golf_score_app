@@ -679,9 +679,9 @@ def run_meshflow_stabilization(config: Optional[MeshFlowConfig] = None) -> Dict[
 if __name__ == "__main__":
     # 測試用例
     config = MeshFlowConfig(
-        #input_path=r"/data/tekswing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
-        #output_path=r"/data/tekswing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
-        input_path=r"//10.1.1.101/TekSwing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
-        output_path=r"//10.1.1.101/TekSwing/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
+        #input_path=r"/data/orvia/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
+        #output_path=r"/data/orvia/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
+        input_path=r"//10.1.1.101/ORVIA/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip.mp4",
+        output_path=r"//10.1.1.101/ORVIA/videos/8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9/4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41/clip_stabilized.mp4"
     )
     result = run_meshflow_stabilization(config)

@@ -120,8 +120,8 @@ video_name = Path(video_path).stem
 # ❌ 前
 if __name__ == "__main__":
     config = AudioAnalysisConfig(
-        batch_dir=r"\\10.1.1.101\TekSwing\...",
-        output_dir=r"\\10.1.1.101\TekSwing\...",
+        batch_dir=r"\\10.1.1.101\ORVIA\...",
+        output_dir=r"\\10.1.1.101\ORVIA\...",
         loudness_mode="dbfs",
         save_segment_audio=True,
     )

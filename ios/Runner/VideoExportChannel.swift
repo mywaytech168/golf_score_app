@@ -9,8 +9,7 @@ func registerVideoExportChannel(messenger: FlutterBinaryMessenger) {
     name: "com.example.golf_score_app/video_export",
     binaryMessenger: messenger
   ).setMethodCallHandler { call, result in
-    guard call.method == "saveToDownloads",
-          let args    = call.arguments as? [String: Any],
+    guard let args    = call.arguments as? [String: Any],
           let srcPath = args["srcPath"] as? String,
           !srcPath.isEmpty
     else {
@@ -18,9 +17,85 @@ func registerVideoExportChannel(messenger: FlutterBinaryMessenger) {
       return
     }
 
-    // iOS: 儲存到相機膠卷（Photos library）
-    // 等同 Android「下載」體驗，使用者可在「照片」App 中找到影片
-    vxSaveVideoToPhotos(srcPath: srcPath, result: result)
+    switch call.method {
+    case "saveToDownloads":
+      // iOS: 儲存到相機膠卷（Photos library）
+      // 等同 Android「下載」體驗，使用者可在「照片」App 中找到影片
+      vxSaveVideoToPhotos(srcPath: srcPath, result: result)
+
+    case "pickFolderAndSave":
+      // iOS: 等同 Android SAF —— Document Picker 匯出到「檔案」App 任選位置
+      let fileName = args["fileName"] as? String ?? URL(fileURLWithPath: srcPath).lastPathComponent
+      vxPickFolderAndSave(srcPath: srcPath, fileName: fileName, result: result)
+
+    default:
+      result(FlutterMethodNotImplemented)
+    }
+  }
+}
+
+// MARK: - Pick folder and save (Document Picker, mirrors Android ACTION_OPEN_DOCUMENT_TREE)
+
+/// Document Picker 的 delegate 需在 picker 存活期間被持有
+private var vxActivePickerDelegate: VxDocumentPickerDelegate?
+
+private final class VxDocumentPickerDelegate: NSObject, UIDocumentPickerDelegate {
+  private let result: FlutterResult
+  private let tempURL: URL
+
+  init(result: @escaping FlutterResult, tempURL: URL) {
+    self.result = result
+    self.tempURL = tempURL
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController,
+                      didPickDocumentsAt urls: [URL]) {
+    try? FileManager.default.removeItem(at: tempURL)
+    result(urls.first?.path ?? "")
+    vxActivePickerDelegate = nil
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    try? FileManager.default.removeItem(at: tempURL)
+    result(FlutterError(code: "cancelled", message: "使用者取消選擇", details: nil))
+    vxActivePickerDelegate = nil
+  }
+}
+
+private func vxPickFolderAndSave(srcPath: String, fileName: String, result: @escaping FlutterResult) {
+  guard FileManager.default.fileExists(atPath: srcPath) else {
+    result(FlutterError(code: "file_not_found", message: "影片檔案不存在: \(srcPath)", details: nil))
+    return
+  }
+
+  // 先複製到暫存檔，讓匯出的檔名 = 使用者指定的 fileName
+  let tempURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    .appendingPathComponent(fileName)
+  do {
+    try? FileManager.default.removeItem(at: tempURL)
+    try FileManager.default.copyItem(at: URL(fileURLWithPath: srcPath), to: tempURL)
+  } catch {
+    result(FlutterError(code: "save_failed", message: error.localizedDescription, details: nil))
+    return
+  }
+
+  DispatchQueue.main.async {
+    guard let rootVC = UIApplication.shared.windows.first?.rootViewController else {
+      try? FileManager.default.removeItem(at: tempURL)
+      result(FlutterError(code: "no_view_controller", message: "找不到 rootViewController", details: nil))
+      return
+    }
+
+    let picker: UIDocumentPickerViewController
+    if #available(iOS 14, *) {
+      picker = UIDocumentPickerViewController(forExporting: [tempURL], asCopy: true)
+    } else {
+      picker = UIDocumentPickerViewController(url: tempURL, in: .exportToService)
+    }
+    let delegate = VxDocumentPickerDelegate(result: result, tempURL: tempURL)
+    vxActivePickerDelegate = delegate
+    picker.delegate = delegate
+    rootVC.present(picker, animated: true)
   }
 }
 

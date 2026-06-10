@@ -64,7 +64,7 @@ case "completed":
 ┌─────────────────────────────────────────────────────┐
 │ ProcessAndUploadOutputFilesAsync()                  │
 │ 從輸出目錄收集所有生成的文件                            │
-│ 例如：\\10.1.1.101\TekSwing\videos\{videoId}\...    │
+│ 例如：\\10.1.1.101\ORVIA\videos\{videoId}\...    │
 └────────────┬──────────────────────────────────────┘
              │
              ↓
@@ -92,8 +92,8 @@ case "completed":
 
 ```csharp
 // 從隊列項目的 SourceLocalFilePath 提取目錄
-// 例如：\\10.1.1.101\TekSwing\videos\video-id-1\clip.mp4
-// 目錄：\\10.1.1.101\TekSwing\videos\video-id-1\
+// 例如：\\10.1.1.101\ORVIA\videos\video-id-1\clip.mp4
+// 目錄：\\10.1.1.101\ORVIA\videos\video-id-1\
 var outputDir = Path.GetDirectoryName(queueItem.SourceLocalFilePath);
 ```
 

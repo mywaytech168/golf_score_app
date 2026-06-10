@@ -270,7 +270,7 @@ from functions.ball_trajectory_worker import extract_trajectory
 from services.task_queue import get_task_queue
 
 # 初始化任務隊列 (單例)
-CSHARP_SERVER_URL = os.getenv('CSHARP_SERVER_URL', 'https://tekswing.api.atk.tw')
+CSHARP_SERVER_URL = os.getenv('CSHARP_SERVER_URL', 'https://orvia.api.atk.tw')
 task_queue = get_task_queue(
     csharp_server_url=CSHARP_SERVER_URL,
     redis_host=os.getenv('REDIS_HOST', '10.1.1.80'),
@@ -348,7 +348,7 @@ def setup_network_connections():
     logger.info("=" * 80)
     
     network_shares = [
-        r"\\10.1.1.101\TekSwing",
+        r"\\10.1.1.101\ORVIA",
     ]
     
     for share in network_shares:

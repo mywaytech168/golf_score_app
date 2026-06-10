@@ -31,10 +31,11 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
-    // IIS in-process 部署：請求體上限由 web.config requestLimits 控管
-    // 這裡將 Kestrel 層設為 null（不限制），讓 IIS 及 [RequestSizeLimit] 屬性生效
+    // IIS in-process 部署：請求體上限主要由 web.config requestLimits 控管，
+    // [RequestSizeLimit] 屬性可再縮小。Kestrel 層保留 600MB 保底，
+    // 避免脫離 IIS 直跑（docker/kestrel）時完全無上限。
     builder.WebHost.ConfigureKestrel(o =>
-        o.Limits.MaxRequestBodySize = null);
+        o.Limits.MaxRequestBodySize = 600L * 1024 * 1024);
 
     // 使用 NLog 作為日誌提供程序
     builder.Logging.ClearProviders();  // 清除預設日誌提供者
@@ -100,8 +101,8 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("MobileApp", policy =>
         policy.WithOrigins(
-                "https://tekswing.com",
-                "https://tekswing.api.atk.tw",  // 管理後臺同站請求
+                "https://orvia.com",
+                "https://orvia.api.atk.tw",  // 管理後臺同站請求
                 "http://localhost:3000"           // 本機開發用
             )
             .AllowAnyHeader()
@@ -168,6 +169,10 @@ builder.Services.AddAuthorization();
     // ============================================================
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen();
+
+    // Health check：含 DB 連線探測，供 IIS/監控/load balancer 使用
+    builder.Services.AddHealthChecks()
+        .AddDbContextCheck<UploadServer.Data.VideoDbContext>("database");
 
     var app = builder.Build();
 
@@ -244,12 +249,13 @@ app.UseAuthorization();
 // 8. 路由映射
 // ============================================================
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 // ============================================================
 // 11. 應用啟動
 // ============================================================
 logger.Info("════════════════════════════════════════════════════════════");
-logger.Info("✅ TekSwing 高爾夫揮桿分析伺服器啟動");
+logger.Info("✅ ORVIA 高爾夫揮桿分析伺服器啟動");
 logger.Info("════════════════════════════════════════════════════════════");
 logger.Info($"📊 數據庫: {(connectionString != null ? "已配置" : "使用默認本地配置")}");
 logger.Info($"☁️  存儲: Backblaze B2");

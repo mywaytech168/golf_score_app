@@ -410,7 +410,7 @@ class _WatchAdCardState extends State<_WatchAdCard> {
     try {
       final rewarded = await AdService.showRewardedAiCoach();
       if (!rewarded) {
-        widget.onError('請看完廣告才能獲得獎勵');
+        widget.onError('廣告未播放完成或暫時無法載入，請稍後再試');
         return;
       }
       final balls = await RewardService.claimAdReward();

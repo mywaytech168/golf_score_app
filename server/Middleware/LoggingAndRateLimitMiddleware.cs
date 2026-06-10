@@ -84,15 +84,16 @@ namespace UploadServer.Middleware
         private readonly Dictionary<string, UserRateLimit> _ipLimits = new();
         private readonly object _lock = new();
 
-        private static readonly HashSet<string> _protectedPaths = new(StringComparer.OrdinalIgnoreCase)
+        // path → (上限次數, 視窗分鐘)。重設密碼類端點更嚴格，防驗證碼爆破
+        private static readonly Dictionary<string, (int Max, int WindowMin)> _protectedPaths =
+            new(StringComparer.OrdinalIgnoreCase)
         {
-            "/api/auth/register",
-            "/api/auth/login",
-            "/api/auth/google-login",
+            { "/api/auth/register",        (10, 15) },
+            { "/api/auth/login",           (10, 15) },
+            { "/api/auth/google-login",    (10, 15) },
+            { "/api/auth/forgot-password", (5,  60) },
+            { "/api/auth/reset-password",  (5,  60) },
         };
-
-        private const int MAX_REQUESTS = 10;
-        private const int WINDOW_MINUTES = 15;
 
         public IpRateLimitMiddleware(RequestDelegate next, ILogger<IpRateLimitMiddleware> logger)
         {
@@ -102,15 +103,17 @@ namespace UploadServer.Middleware
 
         public async Task InvokeAsync(HttpContext context)
         {
-            if (_protectedPaths.Contains(context.Request.Path.Value ?? ""))
+            var path = context.Request.Path.Value ?? "";
+            if (_protectedPaths.TryGetValue(path, out var policy))
             {
                 var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                var key = $"{ip}:{path}";
 
                 UserRateLimit limit;
                 lock (_lock)
                 {
-                    if (!_ipLimits.TryGetValue(ip, out limit!))
-                        _ipLimits[ip] = limit = new UserRateLimit(MAX_REQUESTS, WINDOW_MINUTES);
+                    if (!_ipLimits.TryGetValue(key, out limit!))
+                        _ipLimits[key] = limit = new UserRateLimit(policy.Max, policy.WindowMin);
                 }
 
                 if (limit.IsLimited())

@@ -73,7 +73,7 @@ class AuthProvider with ChangeNotifier {
 
       // 送後端驗證，取得 JWT
       final response = await http.post(
-        Uri.parse('https://tekswing.api.atk.tw/api/auth/google-login'),
+        Uri.parse('https://orvia.api.atk.tw/api/auth/google-login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'idToken': idToken,

@@ -30,12 +30,12 @@ namespace UploadServer.Services
             var user    = smtp["Username"] ?? throw new InvalidOperationException("Smtp:Username 未設定");
             var pass    = smtp["Password"] ?? throw new InvalidOperationException("Smtp:Password 未設定");
             var from    = smtp["From"]     ?? user;
-            var fromName= smtp["FromName"] ?? "TekSwing";
+            var fromName= smtp["FromName"] ?? "ORVIA";
 
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress(fromName, from));
             message.To.Add(new MailboxAddress(toDisplayName, toEmail));
-            message.Subject = "【TekSwing】密碼重設驗證碼";
+            message.Subject = "【ORVIA】密碼重設驗證碼";
 
             message.Body = new TextPart("html")
             {
@@ -47,7 +47,7 @@ namespace UploadServer.Services
               padding:32px; box-shadow:0 2px 8px rgba(0,0,0,0.08);'>
     <div style='text-align:center; margin-bottom:24px;'>
       <span style='font-size:32px;'>⛳</span>
-      <h2 style='margin:8px 0 0; color:#1E8E5A; font-size:22px;'>TekSwing</h2>
+      <h2 style='margin:8px 0 0; color:#1E8E5A; font-size:22px;'>ORVIA</h2>
     </div>
     <h3 style='color:#123B70; margin-bottom:8px;'>密碼重設</h3>
     <p style='color:#4A5568; margin-bottom:20px;'>您好 <strong>{toDisplayName}</strong>，<br>

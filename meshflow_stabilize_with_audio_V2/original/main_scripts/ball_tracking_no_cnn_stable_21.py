@@ -11,13 +11,13 @@ from datetime import datetime
 BATCH_MODE = False  # ✅ 是否啟用批量模式
 
 # 批量輸入資料夾（會掃描 *.mp4）
-INPUT_DIR = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase"
+INPUT_DIR = r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase"
 
 # 批量輸出資料夾（None=輸出到影片同資料夾；建議設一個子資料夾）
-BATCH_OUTPUT_DIR = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase\traj_out"
+BATCH_OUTPUT_DIR = r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase\traj_out"
 
 # 單支影片模式用
-VIDEO_PATH = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase\clip_stabilized_pose_phase.mp4"
+VIDEO_PATH = r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\phase\clip_stabilized_pose_phase.mp4"
 
 # ✅ 固定 ROI center 模式（新增）
 FIXED_ROI_MODE = True

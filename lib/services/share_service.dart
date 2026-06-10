@@ -10,7 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/recording_history_entry.dart';
 import 'recording_history_storage.dart';
 
-const _baseUrl = 'https://tekswing.api.atk.tw';
+const _baseUrl = 'https://orvia.api.atk.tw';
 
 // ── API 回傳資料結構 ─────────────────────────────────────────
 

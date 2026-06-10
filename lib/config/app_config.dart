@@ -26,7 +26,7 @@ class AppConfig {
   }
 
   /// API 基礎 URL
-  static const String apiBaseUrl = 'https://tekswing.api.atk.tw';
+  static const String apiBaseUrl = 'https://orvia.api.atk.tw';
 
   /// 環境名稱
   static String get environmentName {

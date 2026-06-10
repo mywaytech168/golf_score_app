@@ -1,7 +1,7 @@
 {
   "@@locale": "zh_CN",
 
-  "appName": "TekSwing",
+  "appName": "ORVIA",
   "appTagline": "智能挥杆训练平台",
 
   "commonSave": "保存",
@@ -17,9 +17,9 @@
   "commonUnknownError": "发生未知错误，请稍后再试",
 
   "authWelcomeBack": "欢迎回来！",
-  "authLoginSubtitle": "登录 TekSwing 以同步挥杆数据并探索最新分析报告。",
+  "authLoginSubtitle": "登录 ORVIA 以同步挥杆数据并探索最新分析报告。",
   "authRegisterTitle": "创建账号",
-  "authRegisterSubtitle": "填写以下信息即可开始使用 TekSwing。",
+  "authRegisterSubtitle": "填写以下信息即可开始使用 ORVIA。",
   "authLoginTitle": "登录账号",
   "authUsernameOrEmail": "用户名 / 电子邮件",
   "authUsernameHint": "username 或 you@example.com",
@@ -33,7 +33,7 @@
   "authConfirmPassword": "确认密码",
   "authRememberMe": "记住我",
   "authForgotPassword": "忘记密码？",
-  "authLoginButton": "登录 TekSwing",
+  "authLoginButton": "登录 ORVIA",
   "authRegisterButton": "创建账号",
   "authSocialDivider": "或使用社交账号快速登录",
   "authLoginWithGoogle": "使用 Google 登录",
@@ -76,7 +76,7 @@
   "permIKnow": "知道了",
   "permBluetooth": "请允许蓝牙权限。",
   "permIosInstructions": "需要定位权限才能使用蓝牙扫描功能：\n\n1. 点击「打开设置」\n2. 找到「Golf Score App」\n3. 点选「位置」→「使用 App 期间」\n4. 返回 App 重新登录",
-  "permAndroidInstructions": "请在系统设置中允许以下权限：\n1. 进入「应用与通知」\n2. 选择 TekSwing → 权限\n3. 启用「附近设备、蓝牙」与「定位」",
+  "permAndroidInstructions": "请在系统设置中允许以下权限：\n1. 进入「应用与通知」\n2. 选择 ORVIA → 权限\n3. 启用「附近设备、蓝牙」与「定位」",
   "permStatusGranted": "已允许",
   "permStatusDenied": "已拒绝",
 
@@ -196,7 +196,8 @@
   "settingsSectionGeneral": "通用",
   "settingsLanguage": "语言 / Language",
   "settingsCheckUpdate": "检查更新",
-  "settingsPrivacyPolicy": "用户条款与隐私政策",
+  "settingsPrivacyPolicy": "隐私政策",
+  "settingsTermsOfService": "使用条款",
   "settingsVersion": "版本",
   "settingsPrivacyOpenFailed": "无法开启隐私政策页面，请稍后再试",
   "settingsVersionCopied": "已复制版本",
@@ -295,7 +296,7 @@
   "updateDontRemind": "不再提醒",
   "updateCannotOpenStore": "无法打开商店页面，请手动前往更新",
   "updateRequiredTitle": "必要更新",
-  "updateRequiredSubtitle": "请更新后继续使用 TekSwing",
+  "updateRequiredSubtitle": "请更新后继续使用 ORVIA",
   "updateFoundTitle": "发现新版本",
   "updateFoundSubtitle": "建议更新以获得最佳体验",
   "updateCurrentVersion": "当前版本",

@@ -8,7 +8,7 @@
 [AudioExtraction] ❌ 所有提取方案均失败
 ```
 
-**根本原因**: 新建的 `AudioExtractionHandler.kt` 和 `"com.tekswing.golf/audio_extraction"` Channel 从未被成功注册。
+**根本原因**: 新建的 `AudioExtractionHandler.kt` 和 `"com.orvia.golf/audio_extraction"` Channel 从未被成功注册。
 
 ---
 

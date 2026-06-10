@@ -89,7 +89,7 @@ C# → Python:
 {
   "queueItemId": "1",
   "videoId": "345049fc-e84b-42df-811c-859dea4dd0d5",
-  "inputDir": "\\10.1.1.101\TekSwing\videos\...\345049fc-e84b-42df-811c-859dea4dd0d5",
+  "inputDir": "\\10.1.1.101\ORVIA\videos\...\345049fc-e84b-42df-811c-859dea4dd0d5",
   "timestamp": "2026-02-03T11:32:39"
 }
 ```
@@ -99,7 +99,7 @@ C# → Python:
 task_data:1 = {
   "queueItemId": "1",
   "videoId": "345049fc-e84b-42df-811c-859dea4dd0d5",
-  "inputDir": "\\10.1.1.101\TekSwing\videos\...",
+  "inputDir": "\\10.1.1.101\ORVIA\videos\...",
   "receivedAt": "2026-02-03T11:32:39",
   "status": "queued"
 }

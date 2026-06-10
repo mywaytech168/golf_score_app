@@ -46,6 +46,9 @@ import UIKit
       // ── 影片匯出（下載 / 存到相機膠卷）──────────────────
       registerVideoExportChannel(messenger: m)
 
+      // ── 擊球分析（V2 音訊峰值 / V3 局部骨架）────────────
+      registerGolfAnalysisChannel(messenger: m)
+
       // ── Stub channels（iOS 尚未實作）────────────────────────
       setupStubChannel(name: "volume_button_channel", messenger: m)
     }
@@ -133,7 +136,8 @@ private extension AppDelegate {
     var sampleRate = 44100
     var channels   = 1
 
-    if let desc = track.formatDescriptions.first {
+    if let desc = track.formatDescriptions.first,
+       CFGetTypeID(desc as CFTypeRef) == CMFormatDescriptionGetTypeID() {
       let formatDesc = desc as! CMFormatDescription
       if CMFormatDescriptionGetMediaType(formatDesc) == kCMMediaType_Audio,
          let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee {

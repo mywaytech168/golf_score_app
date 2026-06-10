@@ -126,8 +126,8 @@ flutter build apk --release
 ### Google Play Console 中的配置
 
 ```
-應用名稱: Golf Score App / TekSwing
-包名: com.tekswing.golf_score_app (自動生成)
+應用名稱: Golf Score App / ORVIA
+包名: com.orvia.golf_score_app (自動生成)
 
 應用內產品:
 ├─ 產品 ID: golf_no_ads_premium

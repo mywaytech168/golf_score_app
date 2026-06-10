@@ -103,7 +103,7 @@ abstract class AppLocalizations {
   /// No description provided for @appName.
   ///
   /// In en, this message translates to:
-  /// **'TekSwing'**
+  /// **'ORVIA'**
   String get appName;
 
   /// No description provided for @appTagline.
@@ -187,7 +187,7 @@ abstract class AppLocalizations {
   /// No description provided for @authLoginSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Login to TekSwing to sync swing data and explore the latest analysis reports.'**
+  /// **'Login to ORVIA to sync swing data and explore the latest analysis reports.'**
   String get authLoginSubtitle;
 
   /// No description provided for @authRegisterTitle.
@@ -199,7 +199,7 @@ abstract class AppLocalizations {
   /// No description provided for @authRegisterSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Fill in the details below to start using TekSwing.'**
+  /// **'Fill in the details below to start using ORVIA.'**
   String get authRegisterSubtitle;
 
   /// No description provided for @authLoginTitle.
@@ -283,7 +283,7 @@ abstract class AppLocalizations {
   /// No description provided for @authLoginButton.
   ///
   /// In en, this message translates to:
-  /// **'Login to TekSwing'**
+  /// **'Login to ORVIA'**
   String get authLoginButton;
 
   /// No description provided for @authRegisterButton.
@@ -517,7 +517,7 @@ abstract class AppLocalizations {
   /// No description provided for @permAndroidInstructions.
   ///
   /// In en, this message translates to:
-  /// **'Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select TekSwing → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"'**
+  /// **'Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select ORVIA → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"'**
   String get permAndroidInstructions;
 
   /// No description provided for @permStatusGranted.
@@ -1159,8 +1159,14 @@ abstract class AppLocalizations {
   /// No description provided for @settingsPrivacyPolicy.
   ///
   /// In en, this message translates to:
-  /// **'Terms & Privacy Policy'**
+  /// **'Privacy Policy'**
   String get settingsPrivacyPolicy;
+
+  /// No description provided for @settingsTermsOfService.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms & Conditions'**
+  String get settingsTermsOfService;
 
   /// No description provided for @settingsVersion.
   ///
@@ -1567,7 +1573,7 @@ abstract class AppLocalizations {
   /// No description provided for @updateRequiredSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Please update to continue using TekSwing'**
+  /// **'Please update to continue using ORVIA'**
   String get updateRequiredSubtitle;
 
   /// No description provided for @updateFoundTitle.

@@ -18,7 +18,6 @@ import 'services/auth_token_storage.dart';
 import 'services/ad_service.dart';
 import 'services/purchase_service.dart';
 import 'services/in_app_purchase_service.dart';
-import 'services/daily_ad_manager.dart';
 import 'pages/login_page.dart';
 import 'pages/main_shell_page.dart';
 import 'pages/terms_of_service_page.dart';
@@ -79,7 +78,6 @@ Future<void> _initServicesInBackground() async {
   await guard('MobileAds', () => MobileAds.instance.initialize());
   await guard('InAppPurchase', () => InAppPurchaseService.instance.init());
   await guard('PurchaseService', () => PurchaseService().initialize());
-  await guard('DailyAdManager', () => DailyAdManager().initialize());
 
   unawaited(AdService.loadAiCoachInterstitial());
   unawaited(AdService.loadBallDetectionInterstitial());
@@ -146,7 +144,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         builder: (context, localeProvider, _) {
           return MaterialApp(
             navigatorKey: _navigatorKey,
-            title: 'TekSwing',
+            title: 'ORVIA',
             theme: buildAppTheme(),
             locale: localeProvider.locale,
             supportedLocales: LocaleProvider.supportedLocales,

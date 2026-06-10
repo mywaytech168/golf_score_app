@@ -795,8 +795,8 @@ def run_audio_analysis(config: Optional[AudioAnalysisConfig] = None) -> Dict[str
 if __name__ == "__main__":
     # 測試配置：處理單一影片
     config = AudioAnalysisConfig(
-        video_path=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized.mp4",
-        output_dir=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41"
+        video_path=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized.mp4",
+        output_dir=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41"
     )
     result = run_audio_analysis(config)
     print(result)

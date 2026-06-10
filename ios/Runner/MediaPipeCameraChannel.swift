@@ -11,8 +11,8 @@ import UIKit
  *   - 預覽路徑：CVPixelBuffer → CoreGraphics 繪製骨架 → Flutter Texture
  *   - 錄製路徑：CVPixelBuffer → AVAssetWriter → MP4（與預覽路徑共用同一 buffer，零拷貝）
  *
- * MethodChannel : com.aethertek.tekswing/camera_recorder
- * EventChannel  : com.aethertek.tekswing/pose_landmarks
+ * MethodChannel : com.aethertek.orvia/camera_recorder
+ * EventChannel  : com.aethertek.orvia/pose_landmarks
  */
 @objc class MediaPipeCameraChannel: NSObject, FlutterTexture {
 
@@ -68,9 +68,9 @@ import UIKit
 
     init(messenger: FlutterBinaryMessenger, registry: FlutterTextureRegistry) {
         self.registry = registry
-        methodChannel  = FlutterMethodChannel(name: "com.aethertek.tekswing/camera_recorder",
+        methodChannel  = FlutterMethodChannel(name: "com.aethertek.orvia/camera_recorder",
                                               binaryMessenger: messenger)
-        poseEventChannel = FlutterEventChannel(name: "com.aethertek.tekswing/pose_landmarks",
+        poseEventChannel = FlutterEventChannel(name: "com.aethertek.orvia/pose_landmarks",
                                                binaryMessenger: messenger)
         super.init()
         methodChannel.setMethodCallHandler(handleMethodCall)

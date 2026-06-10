@@ -106,15 +106,15 @@ def _normalize_path(path: str) -> str:
     標準化路徑（Windows UNC → Linux 相容）
     
     Example:
-      \\10.1.1.101\TekSwing\videos\... → /data/tekswing/videos/...
+      \\10.1.1.101\ORVIA\videos\... → /data/orvia/videos/...
     """
     current_os = platform.system()
     
     if current_os == "Linux":
         # 只在 Linux 上進行轉換
-        if "\\\\10.1.1.101\\TekSwing" in path or "\\10.1.1.101\\TekSwing" in path:
-            converted = path.replace("\\\\10.1.1.101\\TekSwing", "/data/tekswing")
-            converted = converted.replace("\\10.1.1.101\\TekSwing", "/data/tekswing")
+        if "\\\\10.1.1.101\\ORVIA" in path or "\\10.1.1.101\\ORVIA" in path:
+            converted = path.replace("\\\\10.1.1.101\\ORVIA", "/data/orvia")
+            converted = converted.replace("\\10.1.1.101\\ORVIA", "/data/orvia")
             converted = converted.replace("\\", "/")
             return converted
     
@@ -383,8 +383,8 @@ def run_ffmpeg_stabilization(config: Optional[FFmpegStabilizeConfig] = None) -> 
 if __name__ == "__main__":
     # 測試用例 - 優化穩定化參數
     config = FFmpegStabilizeConfig(
-        input_path=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip.mp4",
-        output_path=r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized2.mp4",
+        input_path=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip.mp4",
+        output_path=r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\4897e6a5-d3f4-4d7a-a76b-4c7153bfbc41\clip_stabilized2.mp4",
         # 偵測參數
         shakiness=6,        # 更敏感的檢測
         accuracy=15,        # 保持高精度

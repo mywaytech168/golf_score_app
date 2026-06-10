@@ -75,7 +75,7 @@ flutter build apk --release
 
 #### 4.2 建立新應用
 1. 點擊「建立應用」
-2. 名稱：`Golf Score App` 或 `TekSwing`
+2. 名稱：`Golf Score App` 或 `ORVIA`
 3. 點擊「建立」
 
 #### 4.3 上傳 APK

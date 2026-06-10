@@ -46,7 +46,7 @@ extern "C" {
 //   3. GetPrimitiveArrayCritical：in-place 鎖定，不複製
 // ─────────────────────────────────────────────────────────────────────────────
 JNIEXPORT void JNICALL
-Java_com_aethertek_tekswing_NativeLib_yuvToNv12(
+Java_com_aethertek_orvia_NativeLib_yuvToNv12(
         JNIEnv* env, jclass /*clazz*/,
         jbyteArray yArray, jbyteArray uArray, jbyteArray vArray,
         jint yStride, jint uvStride, jint uvPixelStride,
@@ -123,7 +123,7 @@ Java_com_aethertek_tekswing_NativeLib_yuvToNv12(
 // 內層迴圈更容易被 clang 向量化。
 // ─────────────────────────────────────────────────────────────────────────────
 JNIEXPORT void JNICALL
-Java_com_aethertek_tekswing_NativeLib_yuvFillNv12(
+Java_com_aethertek_orvia_NativeLib_yuvFillNv12(
         JNIEnv* env, jclass /*clazz*/,
         jbyteArray yArray, jbyteArray uArray, jbyteArray vArray,
         jint yStride, jint uvStride, jint uvPixelStride,
@@ -192,7 +192,7 @@ Java_com_aethertek_tekswing_NativeLib_yuvFillNv12(
 //   - alpha >= 240 fast-path：直接覆寫，不做混合乘法
 // ─────────────────────────────────────────────────────────────────────────────
 JNIEXPORT void JNICALL
-Java_com_aethertek_tekswing_NativeLib_compositeOverlay(
+Java_com_aethertek_orvia_NativeLib_compositeOverlay(
         JNIEnv* env, jclass /*clazz*/,
         jobject bitmap,
         jint w, jint h,
@@ -280,7 +280,7 @@ Java_com_aethertek_tekswing_NativeLib_compositeOverlay(
 //       GPU 前處理的 memory bandwidth 消耗（6MB → 0.7MB 搬運量）。
 // ─────────────────────────────────────────────────────────────────────────────
 JNIEXPORT void JNICALL
-Java_com_aethertek_tekswing_NativeLib_yuvToNv21(
+Java_com_aethertek_orvia_NativeLib_yuvToNv21(
         JNIEnv* env, jclass /*clazz*/,
         jbyteArray yArray, jbyteArray uArray, jbyteArray vArray,
         jint yStride, jint uvStride, jint uvPixelStride,
@@ -356,7 +356,7 @@ Java_com_aethertek_tekswing_NativeLib_yuvToNv21(
 //   - GetPrimitiveArrayCritical 避免 ByteArray 複製
 // ─────────────────────────────────────────────────────────────────────────────
 JNIEXPORT void JNICALL
-Java_com_aethertek_tekswing_NativeLib_fillYoloInput(
+Java_com_aethertek_orvia_NativeLib_fillYoloInput(
         JNIEnv* env, jclass /*clazz*/,
         jbyteArray yArray, jint yStride,
         jbyteArray uArray, jint uStride, jint uPixelStride,
@@ -474,7 +474,7 @@ Java_com_aethertek_tekswing_NativeLib_fillYoloInput(
 //   openedOut[j*w+i] = 0 或 1（形態開運算後，1=前景，供 BFS 連通域）
 // ─────────────────────────────────────────────────────────────────────────────
 JNIEXPORT void JNICALL
-Java_com_aethertek_tekswing_NativeLib_blobDiffAndMorphOpen(
+Java_com_aethertek_orvia_NativeLib_blobDiffAndMorphOpen(
         JNIEnv* env, jclass /*clazz*/,
         jbyteArray curArray, jbyteArray prevArray,
         jint w, jint h, jint stride,

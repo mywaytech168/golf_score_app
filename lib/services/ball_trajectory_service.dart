@@ -96,45 +96,32 @@ class BallTrajectoryService {
     }
   }
 
-  // ──────────────────────────────────────────────────────────────
-  // Step 1c：TFLite 模式 → Kotlin YOLOv8n 偵測
-  // ──────────────────────────────────────────────────────────────
-
-  /// TFLite 模式：呼叫 Kotlin 端 YOLOv8n int8 模型直接偵測每幀中的高爾夫球。
-  ///
-  /// 與原版 extractBlobs 不同，此方法不做幀差——每幀獨立推論，
-  /// 適合場景變化大或背景複雜的情況。
-  ///
-  /// 當 Kotlin 回傳 error（模型未載入或推論失敗），自動 fallback 至原版 extractBlobs。
-  /// 失敗回傳 null。
-  static Future<FrameExtractionResult?> extractBlobsTflite({
+  /// p0-SAHI：呼叫 Kotlin 端對擊球前數幀做整幀多-tile YOLO 掃描，回傳最穩定的靜止
+  /// 球 P0（coded 空間）。供 BallTracker 當種子(seedP0)，飛行段仍走幀差+Kalman。
+  /// 回傳 {cx, cy, frame} 或 null（未找到 → 不種子，tracker 退回幀差找 p0）。
+  static Future<({int cx, int cy, int frame})?> findBallP0({
     required String inputPath,
     double? hitSec,
   }) async {
-    debugPrint('[BallTraj] ▶ TFLite 模式啟動：呼叫 Kotlin YOLOv8 偵測器 hitSec=${hitSec?.toStringAsFixed(2) ?? 'null'}');
     try {
       final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
-        'extractBlobsYolo',
+        'findBallP0',
         {
           'inputPath': inputPath,
           if (hitSec != null) 'hitSec': hitSec,
         },
       );
-      if (raw == null) {
-        debugPrint('[BallTraj] ❌ TFLite: Kotlin 回傳 null（模型未載入），fallback 至原版');
-        return extractBlobs(inputPath: inputPath);
-      }
-      final result = FrameExtractionResult._fromMap(raw);
-      final totalDets = result.frames.fold<int>(0, (s, f) => s + f.blobs.length);
-      final framesWithHits = result.frames.where((f) => f.blobs.isNotEmpty).length;
-      debugPrint('[BallTraj] ✅ TFLite YOLOv8 完成：${result.frames.length} 幀，'
-          '$totalDets 偵測，$framesWithHits 幀有球 '
-          '(${result.frames.isEmpty ? 0 : (framesWithHits * 100 ~/ result.frames.length)}%)');
-      return result;
-    } on PlatformException catch (e) {
-      debugPrint('[BallTraj] ⚠ TFLite 失敗 → FALLBACK 至原版 BFS');
-      debugPrint('[BallTraj]   code=${e.code}  msg=${e.message}');
-      return extractBlobs(inputPath: inputPath);
+      if (raw == null) return null;
+      final cx = (raw['cx'] as num?)?.toInt();
+      final cy = (raw['cy'] as num?)?.toInt();
+      final frame = (raw['frame'] as num?)?.toInt();
+      if (cx == null || cy == null || frame == null) return null;
+      debugPrint('[BallTraj] ✅ p0-SAHI P0=($cx,$cy) frame=$frame '
+          'count=${raw['count']} conf=${raw['conf']}');
+      return (cx: cx, cy: cy, frame: frame);
+    } catch (e) {
+      debugPrint('[BallTraj] findBallP0 error: $e');
+      return null;
     }
   }
 

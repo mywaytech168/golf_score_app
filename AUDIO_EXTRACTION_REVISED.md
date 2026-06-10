@@ -3,7 +3,7 @@
 ## 问题分析
 
 初始实现遇到的问题：
-- ❌ 新的 `AudioExtractionHandler.kt` 和 `"com.tekswing.golf/audio_extraction"` Channel 未被正确注册
+- ❌ 新的 `AudioExtractionHandler.kt` 和 `"com.orvia.golf/audio_extraction"` Channel 未被正确注册
 - ❌ Android Platform Channel 无法被调用
 - ❌ 系统中无 FFmpeg 支持
 

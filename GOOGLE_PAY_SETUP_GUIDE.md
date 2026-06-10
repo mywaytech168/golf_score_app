@@ -22,7 +22,7 @@
 
 ### 1.2 建立新應用
 1. 點擊「建立應用」
-2. 填入應用名稱：`Golf Score App` 或 `TekSwing`
+2. 填入應用名稱：`Golf Score App` 或 `ORVIA`
 3. 選擇預設語言：`繁體中文` 或 `英文`
 4. 選擇應用類型：`應用`
 5. 點擊「建立」
@@ -56,7 +56,7 @@ Keystore password: [輸入密碼，例如: 12345678]
 Key password: [輸入密碼，同上]
 First and Last Name: [您的名字]
 Organizational Unit: [部門，例如: Development]
-Organization Name: [公司名，例如: TekSwing]
+Organization Name: [公司名，例如: ORVIA]
 City or Locality: [城市]
 State or Province Name: [州/省]
 Country Code: [國家代碼，例如: TW 表示台灣]

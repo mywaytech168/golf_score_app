@@ -7,7 +7,7 @@
 ### ❌ 错误 1: Permission denied
 ```
 ❌ 音頻評分失敗：[Errno 13] Permission denied: 
-'\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\345049fc-e84b-42df-811c-859dea4dd0d5'
+'\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\345049fc-e84b-42df-811c-859dea4dd0d5'
 ```
 
 ### ❌ 错误 2: JSON 序列化
@@ -255,8 +255,8 @@ curl http://localhost:5001/api/meshflow
 curl -X POST http://localhost:5001/api/meshflow \
   -H "Content-Type: application/json" \
   -d '{
-    "input_dir": "\\\\10.1.1.101\\TekSwing\\videos\\YOUR_VIDEO_ID",
-    "output_dir": "\\\\10.1.1.101\\TekSwing\\output"
+    "input_dir": "\\\\10.1.1.101\\ORVIA\\videos\\YOUR_VIDEO_ID",
+    "output_dir": "\\\\10.1.1.101\\ORVIA\\output"
   }'
 ```
 **期望**: 

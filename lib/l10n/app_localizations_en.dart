@@ -9,7 +9,7 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get appName => 'TekSwing';
+  String get appName => 'ORVIA';
 
   @override
   String get appTagline => 'Smart Swing Training Platform';
@@ -53,14 +53,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get authLoginSubtitle =>
-      'Login to TekSwing to sync swing data and explore the latest analysis reports.';
+      'Login to ORVIA to sync swing data and explore the latest analysis reports.';
 
   @override
   String get authRegisterTitle => 'Create Account';
 
   @override
   String get authRegisterSubtitle =>
-      'Fill in the details below to start using TekSwing.';
+      'Fill in the details below to start using ORVIA.';
 
   @override
   String get authLoginTitle => 'Sign In';
@@ -102,7 +102,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get authForgotPassword => 'Forgot Password?';
 
   @override
-  String get authLoginButton => 'Login to TekSwing';
+  String get authLoginButton => 'Login to ORVIA';
 
   @override
   String get authRegisterButton => 'Create Account';
@@ -231,7 +231,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get permAndroidInstructions =>
-      'Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select TekSwing → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"';
+      'Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select ORVIA → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"';
 
   @override
   String get permStatusGranted => 'Granted';
@@ -560,7 +560,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsCheckUpdate => 'Check for Updates';
 
   @override
-  String get settingsPrivacyPolicy => 'Terms & Privacy Policy';
+  String get settingsPrivacyPolicy => 'Privacy Policy';
+
+  @override
+  String get settingsTermsOfService => 'Terms & Conditions';
 
   @override
   String get settingsVersion => 'Version';
@@ -790,8 +793,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get updateRequiredTitle => 'Required Update';
 
   @override
-  String get updateRequiredSubtitle =>
-      'Please update to continue using TekSwing';
+  String get updateRequiredSubtitle => 'Please update to continue using ORVIA';
 
   @override
   String get updateFoundTitle => 'New Version Available';

@@ -32,8 +32,8 @@ def test_config_defaults():
     print("="*80)
     
     config = MeshFlowConfig(
-        input_path=r"\\10.1.1.101\TekSwing\videos\test_video.mp4",
-        output_path=r"\\10.1.1.101\TekSwing\videos\test_output.mp4",
+        input_path=r"\\10.1.1.101\ORVIA\videos\test_video.mp4",
+        output_path=r"\\10.1.1.101\ORVIA\videos\test_output.mp4",
     )
     
     print(f"✅ 采樣檢測啟用: {config.enable_sampling_detection}")

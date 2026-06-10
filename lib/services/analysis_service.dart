@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'auth_token_storage.dart';
 import 'v3_analysis_service.dart';
 
-const _baseUrl = 'https://tekswing.api.atk.tw';
+const _baseUrl = 'https://orvia.api.atk.tw';
 
 // ── 資料模型 ──────────────────────────────────────────────────
 

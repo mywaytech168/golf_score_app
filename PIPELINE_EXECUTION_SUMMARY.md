@@ -129,7 +129,7 @@ result = run_ball_tracking(config=config)
 🔄 執行處理流程 (超時: 1800s)...
    Queue Item ID: 1
    Video ID: 345049fc-e84b-42df-811c-859dea4dd0d5
-   Input Dir: \\10.1.1.101\TekSwing\videos\8f89d7b1\345049fc-e84b-42df-811c-859dea4dd0d5
+   Input Dir: \\10.1.1.101\ORVIA\videos\8f89d7b1\345049fc-e84b-42df-811c-859dea4dd0d5
 
 🎬 步驟 1/5: 執行 Stabilization...
 ✅ Stabilization 完成 (48.3s)
@@ -146,7 +146,7 @@ result = run_ball_tracking(config=config)
 ⚽ 步驟 5/5: 執行 Ball Tracking...
 ✅ Ball Tracking 完成 (26.2s)
 
-✅ 結果已追加到: \\10.1.1.101\TekSwing\videos\8f89d7b1\345049fc-e84b-42df-811c-859dea4dd0d5\processing.log
+✅ 結果已追加到: \\10.1.1.101\ORVIA\videos\8f89d7b1\345049fc-e84b-42df-811c-859dea4dd0d5\processing.log
 ```
 
 ### Processing.log 输出
@@ -172,7 +172,7 @@ result = run_ball_tracking(config=config)
 {
   "queueItemId": "1",
   "videoId": "345049fc-e84b-42df-811c-859dea4dd0d5",
-  "inputDir": "\\10.1.1.101\TekSwing\videos\...",
+  "inputDir": "\\10.1.1.101\ORVIA\videos\...",
   "processedAt": "2026-02-03T11:44:14.029346",
   "steps": {
     "stabilization": {

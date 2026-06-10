@@ -5,8 +5,11 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
+import '../recording/pose_csv_loader.dart';
+import '../recording/skeleton_painter.dart';
 import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
@@ -348,6 +351,11 @@ class _ChartsBody extends StatelessWidget {
       children: [
         _SwingPhasesCard(entry: entry),
         const SizedBox(height: 16),
+        // 骨架預覽：有 pose_landmarks.csv 即可疊圖預覽（與播放頁同機制）
+        if (File(p.join(p.dirname(entry.filePath), 'pose_landmarks.csv')).existsSync()) ...[
+          _SkeletonPreviewCard(entry: entry),
+          const SizedBox(height: 16),
+        ],
         if (postureAnalysisId != null)
           _OnnxPostureCard(analysisId: postureAnalysisId!)
         else if (isAutoAnalyzing)
@@ -399,6 +407,189 @@ class _ChartsBody extends StatelessWidget {
           const SizedBox(height: 16),
           _AudioFeaturesCard(entry: entry),
         ],
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// 骨架預覽卡片：乾淨 clip 上即時疊 CSV 骨架（與播放頁骨架 Tab 同機制）
+// ════════════════════════════════════════════════════════════════
+
+class _SkeletonPreviewCard extends StatefulWidget {
+  final RecordingHistoryEntry entry;
+  const _SkeletonPreviewCard({required this.entry});
+
+  @override
+  State<_SkeletonPreviewCard> createState() => _SkeletonPreviewCardState();
+}
+
+class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
+  VideoPlayerController? _ctrl;
+  PoseTrack? _track;
+  bool _loading = true;
+  String? _error;
+
+  String get _sessionDir => p.dirname(widget.entry.filePath);
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      // base 影片須與 CSV 時間軸一致：clip 紀錄用 clip.mp4，否則用 entry 本身影片
+      final clip = p.join(_sessionDir, 'clip.mp4');
+      final basePath = File(clip).existsSync() ? clip : widget.entry.filePath;
+      if (!File(basePath).existsSync()) {
+        throw Exception('影片不存在');
+      }
+      final track = await PoseTrack.load(p.join(_sessionDir, 'pose_landmarks.csv'));
+      final ctrl = VideoPlayerController.file(File(basePath));
+      await ctrl.initialize();
+      ctrl.setLooping(true);
+      ctrl.addListener(_onTick);
+      // 起始定位到擊球點，第一眼就有骨架姿勢
+      final hit = widget.entry.hitSecond;
+      if (hit != null && hit > 0) {
+        await ctrl.seekTo(Duration(milliseconds: (hit * 1000).round()));
+      }
+      if (!mounted) {
+        ctrl.dispose();
+        return;
+      }
+      setState(() {
+        _track = track;
+        _ctrl = ctrl;
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+    }
+  }
+
+  void _onTick() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.removeListener(_onTick);
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2)),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.person_rounded, color: Color(0xFF1E8E5A), size: 18),
+              SizedBox(width: 8),
+              Text('骨架預覽',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_loading)
+            const SizedBox(
+              height: 160,
+              child: Center(child: CircularProgressIndicator(color: kPrimaryGreen)),
+            )
+          else if (_error != null || _ctrl == null)
+            SizedBox(
+              height: 80,
+              child: Center(
+                child: Text('骨架預覽載入失敗',
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+              ),
+            )
+          else
+            _buildPlayer(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayer() {
+    final ctrl = _ctrl!;
+    final posSec = ctrl.value.position.inMilliseconds / 1000.0;
+    final pose = _track?.sampleAt(posSec);
+    return Column(
+      children: [
+        Center(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 320,
+              child: AspectRatio(
+                aspectRatio: 9 / 16,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    VideoPlayer(ctrl),
+                    if (pose != null)
+                      CustomPaint(
+                        painter: SkeletonPainter(
+                          pose: pose,
+                          videoShortSide: ctrl.value.size.shortestSide,
+                        ),
+                      ),
+                    // 點擊播放/暫停
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => setState(() {
+                          ctrl.value.isPlaying ? ctrl.pause() : ctrl.play();
+                        }),
+                        child: !ctrl.value.isPlaying
+                            ? const Center(
+                                child: Icon(Icons.play_circle_fill_rounded,
+                                    color: Colors.white70, size: 48),
+                              )
+                            : const SizedBox.expand(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                ),
+                child: Slider(
+                  value: posSec.clamp(
+                      0, ctrl.value.duration.inMilliseconds / 1000.0),
+                  max: ctrl.value.duration.inMilliseconds / 1000.0,
+                  activeColor: kPrimaryGreen,
+                  onChanged: (v) =>
+                      ctrl.seekTo(Duration(milliseconds: (v * 1000).round())),
+                ),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }

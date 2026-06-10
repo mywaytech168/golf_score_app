@@ -16,7 +16,7 @@ tasks.withType(JavaCompile::class).configureEach {
 }
 
 android {
-    namespace = "com.aethertek.tekswing"
+    namespace = "com.aethertek.orvia"
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
@@ -38,7 +38,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.aethertek.tekswing"
+        applicationId = "com.aethertek.orvia"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26
@@ -69,14 +69,26 @@ android {
         if (keyPropertiesFile.exists()) props.load(keyPropertiesFile.inputStream())
     }
 
+    // 簽章密碼缺失時不可用空字串靜默簽出壞檔：release build 直接報錯
+    val storePwd = keyProperties.getProperty("storePassword") ?: System.getenv("STORE_PASSWORD")
+    val keyPwd   = keyProperties.getProperty("keyPassword")   ?: System.getenv("KEY_PASSWORD")
+    val hasSigningCreds = !storePwd.isNullOrBlank() && !keyPwd.isNullOrBlank()
+
     signingConfigs {
         create("release") {
-            storeFile = file(keyProperties.getProperty("storeFile") ?: "tekswing.jks")
-            storePassword = keyProperties.getProperty("storePassword")
-                ?: System.getenv("STORE_PASSWORD") ?: ""
-            keyAlias = keyProperties.getProperty("keyAlias") ?: "tekswing"
-            keyPassword = keyProperties.getProperty("keyPassword")
-                ?: System.getenv("KEY_PASSWORD") ?: ""
+            storeFile = file(keyProperties.getProperty("storeFile") ?: "orvia.jks")
+            storePassword = storePwd ?: ""
+            keyAlias = keyProperties.getProperty("keyAlias") ?: "orvia"
+            keyPassword = keyPwd ?: ""
+        }
+    }
+
+    if (!hasSigningCreds) {
+        gradle.taskGraph.whenReady {
+            if (allTasks.any { it.name.contains("Release") }) {
+                throw GradleException(
+                    "缺少簽章密碼：請建立 android/key.properties 或設定 STORE_PASSWORD / KEY_PASSWORD 環境變數")
+            }
         }
     }
 

@@ -473,7 +473,7 @@ namespace UploadServer.Controllers
         // ════════════════════════════════════════════════════════════════
 
         private string ApksDir => Path.Combine(_env.WebRootPath, "apks");
-        private string BaseUrl  => (_config["App:BaseUrl"] ?? "https://tekswing.api.atk.tw").TrimEnd('/');
+        private string BaseUrl  => (_config["App:BaseUrl"] ?? "https://orvia.api.atk.tw").TrimEnd('/');
 
         /// <summary>
         /// POST /api/admin/app/version/android/apk

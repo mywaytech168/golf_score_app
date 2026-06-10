@@ -40,7 +40,7 @@ class SplitHitsConfig:
     
     def __init__(
         self,
-        base_dir: str = r"\\10.1.1.101\TekSwing\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\d474e14c-fe9a-4078-9eff-a22928ef14fb",
+        base_dir: str = r"\\10.1.1.101\ORVIA\videos\8f89d7b1-da5d-4eaf-84fd-6234c0fcbad9\d474e14c-fe9a-4078-9eff-a22928ef14fb",
         out_dir_name: str = "cut",
         detect_from: str = "Codi2",
         window_sec_before: float = 3.0,

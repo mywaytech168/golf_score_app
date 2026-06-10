@@ -644,32 +644,39 @@ private func btRenderOverlay(
 
     CVPixelBufferLockBaseAddress(srcBuf, .readOnly)
     CVPixelBufferLockBaseAddress(dstBuf, [])
-    let srcBase = CVPixelBufferGetBaseAddress(srcBuf)!
-    let dstBase = CVPixelBufferGetBaseAddress(dstBuf)!
-    let srcBPR  = CVPixelBufferGetBytesPerRow(srcBuf)
-    let dstBPR  = CVPixelBufferGetBytesPerRow(dstBuf)
-    if srcBPR == dstBPR {
-      memcpy(dstBase, srcBase, dstBPR * codedH)
-    } else {
-      let copyW = min(srcBPR, dstBPR)
-      for row in 0..<codedH {
-        memcpy(dstBase + row * dstBPR, srcBase + row * srcBPR, copyW)
+    let frameOk: Bool = {
+      // defer 確保任何 early return 都正確解鎖，不會卡住下一幀
+      defer {
+        CVPixelBufferUnlockBaseAddress(srcBuf, .readOnly)
+        CVPixelBufferUnlockBaseAddress(dstBuf, [])
       }
-    }
-    CVPixelBufferUnlockBaseAddress(srcBuf, .readOnly)
+      guard let srcBase = CVPixelBufferGetBaseAddress(srcBuf),
+            let dstBase = CVPixelBufferGetBaseAddress(dstBuf) else { return false }
+      let srcBPR = CVPixelBufferGetBytesPerRow(srcBuf)
+      let dstBPR = CVPixelBufferGetBytesPerRow(dstBuf)
+      if srcBPR == dstBPR {
+        memcpy(dstBase, srcBase, dstBPR * codedH)
+      } else {
+        let copyW = min(srcBPR, dstBPR)
+        for row in 0..<codedH {
+          memcpy(dstBase + row * dstBPR, srcBase + row * srcBPR, copyW)
+        }
+      }
 
-    let frameUs   = Int64(CMTimeGetSeconds(framePts) * 1_000_000)
-    let visiblePts = btBinarySearchLast(pts: pts, upToUs: frameUs)
+      let frameUs   = Int64(CMTimeGetSeconds(framePts) * 1_000_000)
+      let visiblePts = btBinarySearchLast(pts: pts, upToUs: frameUs)
 
-    if !visiblePts.isEmpty,
-       let ctx = btMakeCGContext(base: dstBase, w: codedW, h: codedH, bpr: dstBPR) {
-      // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y
-      ctx.translateBy(x: 0, y: CGFloat(codedH))
-      ctx.scaleBy(x: 1, y: -1)
-      // track points 已在 coded 空間，直接畫在 coded frame 上
-      btDrawTrajectory(ctx: ctx, pts: visiblePts, roiSize: roiSize, w: codedW, h: codedH)
-    }
-    CVPixelBufferUnlockBaseAddress(dstBuf, [])
+      if !visiblePts.isEmpty,
+         let ctx = btMakeCGContext(base: dstBase, w: codedW, h: codedH, bpr: dstBPR) {
+        // CVPixelBuffer row-0 = top; Quartz origin is bottom-left → flip Y
+        ctx.translateBy(x: 0, y: CGFloat(codedH))
+        ctx.scaleBy(x: 1, y: -1)
+        // track points 已在 coded 空間，直接畫在 coded frame 上
+        btDrawTrajectory(ctx: ctx, pts: visiblePts, roiSize: roiSize, w: codedW, h: codedH)
+      }
+      return true
+    }()
+    guard frameOk else { continue }
 
     if adaptor.append(dstBuf, withPresentationTime: framePts) { encodedFrames += 1 }
     frameCount += 1
@@ -746,7 +753,7 @@ private func btDrawTrajectory(
   }
 
   // White dot at latest point
-  let last = pts.last!
+  guard let last = pts.last else { return }
   let dotR: CGFloat = 5
   ctx.setFillColor(whiteColor)
   ctx.setStrokeColor(goldColor)

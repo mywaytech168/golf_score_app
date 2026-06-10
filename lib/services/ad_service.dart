@@ -14,7 +14,7 @@ class AdService {
     }
     return Platform.isAndroid
         ? 'ca-app-pub-6355169055224194/YOUR_ANDROID_BANNER_ID'
-        : 'ca-app-pub-6355169055224194/YOUR_IOS_BANNER_ID';
+        : 'ca-app-pub-6355169055224194/4074869153';
   }
 
   // ── 插頁廣告單元 IDs ──────────────────────────────────────────
@@ -198,7 +198,7 @@ class AdService {
         await Future.delayed(const Duration(milliseconds: 500));
       } catch (e) {
         debugPrint('[AdService] 顯示獎勵廣告出錯: $e');
-        return true;
+        return false;
       }
       return rewarded;
     } else {

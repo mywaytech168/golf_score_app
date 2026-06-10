@@ -8,9 +8,11 @@ import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
+import 'ball_tuning_page.dart';
 import '../models/swing_posture.dart';
 import '../recording/pose_csv_loader.dart';
 import '../recording/skeleton_painter.dart';
+import '../recording/trajectory_painter.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
@@ -68,6 +70,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   bool _skeletonLoading = false;
   bool get _onSkeletonTab =>
       _activeTabs[_tabController.index].type == 'skeleton';
+  bool get _onAnalyzedTab =>
+      _activeTabs[_tabController.index].type == 'analyzed';
+
+  // 分析 Tab 即時疊圖（骨架 + 球軌跡）；trajectory.json 不存在時 fallback 燒錄影片
+  TrajectoryTrack? _trajTrack;
+  bool _analyzedLive = false;
 
   // 甜蜜點特效動畫（僅分析 Tab）
   late final AnimationController _impactAnim;
@@ -89,9 +97,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     (icon: Icons.analytics, label: '分析',  type: 'analyzed'),
   ];
 
-  /// 長影片只顯示「原始」tab
+  /// 長影片只顯示「原始」tab；但若已有骨架 CSV（完整分析過）仍開放「骨架」tab
   List<({IconData icon, String label, String type})> get _activeTabs =>
-      _isLongVideo ? [_allTabs.first] : _allTabs;
+      _isLongVideo
+          ? (_hasSkeletonCsv ? [_allTabs[0], _allTabs[1]] : [_allTabs.first])
+          : _allTabs;
+
+  /// pose_landmarks.csv 是否存在（initState 時檢查一次，決定 tab 數量）
+  late final bool _hasSkeletonCsv;
 
   static const _chartTabs = [
     (label: '聲音峰值', color: Color(0xFFE53935)),
@@ -106,6 +119,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   @override
   void initState() {
     super.initState();
+
+    _hasSkeletonCsv = File('${_sessionDir}pose_landmarks.csv').existsSync();
 
     // 有分析結果 → 預設分析 Tab(2)；長影片或否則 → 原始 Tab(0)
     final hasAnalysis = widget.entry?.isAnalyzed ?? false;
@@ -130,7 +145,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       });
 
     // 依初始 tab 載入對應影片
-    if (hasAnalysis) {
+    if (initialTab == 2) {
+      _viewAnalyzed();   // 即時疊圖（或 fallback 燒錄影片）
+    } else if (hasAnalysis) {
       _initController(widget.videoPath, isOriginal: true);
     } else {
       // 載入原始影片（swing.mp4 優先，否則 clip.mp4）
@@ -319,7 +336,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   void _showSnack(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    });
   }
 
   String _fmt(Duration d) {
@@ -368,8 +388,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   }
 
   void _viewAnalyzed() {
+    // 即時疊圖模式：有 trajectory.json 時，在乾淨 clip 上即時畫骨架+軌跡
+    //（與骨架 Tab 同 base 影片；舊紀錄無 trajectory.json → fallback 燒錄影片）
+    final clip = '${_sessionDir}clip.mp4';
+    if (File('${_sessionDir}trajectory.json').existsSync() &&
+        File(clip).existsSync()) {
+      _analyzedLive = true;
+      _switchTo(clip);
+      _ensureSkeletonTrack();
+      _ensureTrajectoryTrack();
+      return;
+    }
+    _analyzedLive = false;
     if (!File(widget.videoPath).existsSync()) { _showSnack('分析影片不存在'); return; }
     _switchTo(widget.videoPath);
+  }
+
+  Future<void> _ensureTrajectoryTrack() async {
+    if (_trajTrack != null) return;
+    final track = await TrajectoryTrack.load('${_sessionDir}trajectory.json');
+    if (mounted && track != null) setState(() => _trajTrack = track);
   }
 
   // ── UI ──────────────────────────────────────────────────────
@@ -432,6 +470,23 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             ),
             const SizedBox(width: 8),
           ],
+          // 球軌跡調參（排查用）：對本 clip 即時調參重跑
+          IconButton(
+            icon: const Icon(Icons.tune, color: Colors.white, size: 20),
+            tooltip: '球軌跡調參',
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            onPressed: () {
+              final clip = File('${_sessionDir}clip.mp4').existsSync()
+                  ? '${_sessionDir}clip.mp4'
+                  : widget.videoPath;
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => BallTuningPage(
+                  clipPath: clip,
+                  hitSec: widget.entry?.hitSecond,
+                ),
+              ));
+            },
+          ),
         ],
       ),
     );
@@ -454,14 +509,32 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           children: [
             VideoPlayer(ctrl),
             // 骨架疊圖：依播放位置即時取樣 CSV（offset=0，CSV 為 clip 相對時間）
-            if (_onSkeletonTab && _skeletonTrack != null)
+            // 骨架 Tab 與「分析 Tab 即時模式」共用
+            if ((_onSkeletonTab || (_onAnalyzedTab && _analyzedLive)) &&
+                _skeletonTrack != null)
               Positioned.fill(
                 child: Builder(builder: (_) {
                   final pose = _skeletonTrack!
                       .sampleAt(ctrl.value.position.inMilliseconds / 1000.0);
                   if (pose == null) return const SizedBox.shrink();
-                  return CustomPaint(painter: SkeletonPainter(pose: pose));
+                  return CustomPaint(
+                    painter: SkeletonPainter(
+                      pose: pose,
+                      // 線寬以影片像素為基準，對齊燒錄版視覺粗細
+                      videoShortSide: ctrl.value.size.shortestSide,
+                    ),
+                  );
                 }),
+              ),
+            // 球軌跡疊圖（分析 Tab 即時模式）：只畫 pts ≤ 播放位置的軌跡
+            if (_onAnalyzedTab && _analyzedLive && _trajTrack != null)
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: TrajectoryPainter(
+                    track: _trajTrack!,
+                    positionSec: ctrl.value.position.inMilliseconds / 1000.0,
+                  ),
+                ),
               ),
             if (_onSkeletonTab && _skeletonLoading)
               const Positioned.fill(

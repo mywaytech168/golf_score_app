@@ -14,13 +14,10 @@ import '../models/swing_hit.dart';
 import '../recording/pose_csv_writer.dart';
 import 'analysis_progress_service.dart';
 import 'audio_extraction_service.dart';
-import 'ball_detection_prefs.dart';
 import 'ball_tracker.dart';
 import 'ball_trajectory_service.dart';
 import 'golf_analysis_service.dart';
 import 'golfer_mask.dart';
-import 'server_ball_trajectory_service.dart';
-import 'skeleton_overlay_service.dart';
 import 'video_analysis_service.dart';
 import 'video_clip_service.dart';
 
@@ -460,6 +457,11 @@ class ClipPipelineService {
   // 若切片時已繼承 pose_landmarks.csv，直接跳過 VideoAnalysisService。
   // ──────────────────────────────────────────────────────────────
 
+  /// 完整分析：產生資料檔（CSV + trajectory.json），不燒錄影片。
+  ///
+  /// UI 端（VideoPlayerPage）已透過 SkeletonPainter + TrajectoryPainter 即時疊圖，
+  /// 不需要 skeleton.mp4 / final.mp4。
+  /// [quality] 參數保留以維持 API 相容，目前無作用。
   static Future<AnalysisResult?> analyze({
     required String clipPath,
     required String sessionDir,
@@ -479,25 +481,23 @@ class ClipPipelineService {
         onProgress: onProgress,
       );
     }
-    // ── V1 完整分析繼續往下 ──────────────────────────────────────────
-    final csvPath = p.join(sessionDir, 'pose_landmarks.csv');
-
+    // ── V1 / V3 完整分析 ────────────────────────────────────────────
+    final csvPath     = p.join(sessionDir, 'pose_landmarks.csv');
     final progressSvc = AnalysisProgressService.instance;
-    bool hasSilence = false;
+    bool hasSilence   = false;
 
-    // 1. Pose 分析（若 CSV 已由切片繼承則略過，節省重複 ML Kit 推理）
+    // 1. Pose CSV（已由切片繼承則略過 ML Kit）
     final wavPath = p.join(sessionDir, 'audio.wav');
     if (await File(csvPath).exists()) {
       onProgress?.call('使用骨架資料...');
       debugPrint('[Pipeline.analyze] ✅ CSV 已繼承，略過 VideoAnalysis：$csvPath');
-      // Pose 分析跳過，但靜默偵測仍需執行（WAV 不存在也視為靜默）
       hasSilence = await VideoAnalysisService().checkSilence(wavPath: wavPath);
-      debugPrint('[Pipeline.analyze] 靜默偵測（WAV 獨立）: hasSilence=$hasSilence');
+      debugPrint('[Pipeline.analyze] 靜默偵測: hasSilence=$hasSilence');
     } else {
       onProgress?.call('分析骨架中...');
       progressSvc.reset('分析骨架中...');
-      void _listenPose() => onProgress?.call(progressSvc.progress.value.$2);
-      progressSvc.progress.addListener(_listenPose);
+      void listenPose() => onProgress?.call(progressSvc.progress.value.$2);
+      progressSvc.progress.addListener(listenPose);
       try {
         final vaResult = await VideoAnalysisService().analyze(
           videoPath: clipPath,
@@ -507,158 +507,90 @@ class ClipPipelineService {
         );
         hasSilence = vaResult.hasSilence;
       } catch (e) {
-        progressSvc.progress.removeListener(_listenPose);
+        progressSvc.progress.removeListener(listenPose);
         debugPrint('[Pipeline.analyze] VideoAnalysis 失敗: $e');
         return null;
       }
-      progressSvc.progress.removeListener(_listenPose);
+      progressSvc.progress.removeListener(listenPose);
       if (!await File(csvPath).exists()) {
         debugPrint('[Pipeline.analyze] ❌ VideoAnalysis 完成但 CSV 不存在：$csvPath');
         return null;
       }
     }
 
-    // 2. 疊加骨架（startSec=0，CSV 已相對於切片）
-    onProgress?.call('疊加骨架中...');
-    progressSvc.reset('疊加骨架中...');
-    void _listenSkeleton() => onProgress?.call(progressSvc.progress.value.$2);
-    progressSvc.progress.addListener(_listenSkeleton);
-    bool hasSkeleton = false;
-    String? skeletonPath;
-    final skelOut = p.join(sessionDir, 'skeleton.mp4');
+    final hasSkeleton = await File(csvPath).exists();
 
-    String? overlaid = await SkeletonOverlayService.render(
-      clipPath: clipPath,
-      csvPath: csvPath,
-      startSec: 0,
-      outputPath: skelOut,
-      quality: quality,
-    );
-    progressSvc.progress.removeListener(_listenSkeleton);
-    if (overlaid != null && !await File(overlaid).exists()) {
-      debugPrint('[Pipeline.analyze] ❌ 骨架輸出檔不存在，視為失敗');
-      overlaid = null;
-    }
-    if (overlaid != null) {
-      hasSkeleton = true;
-      skeletonPath = overlaid;
-      debugPrint('[Pipeline.analyze] ✅ 骨架疊加成功');
-    } else {
-      debugPrint('[Pipeline.analyze] ❌ 骨架疊加失敗');
-      final bad = File(skelOut);
-      if (await bad.exists()) await bad.delete();
-    }
-
-    // 3. 球軌跡（Phase1 blob/server → Phase2 Kalman/後端 → Phase3 本地疊加）
+    // 2. 球軌跡：提取 blob + 追蹤 + 儲存 trajectory.json（不燒錄影片）
     bool hasBallTrack = false;
-    String? finalPath;
-    if (skeletonPath != null) {
-      final trajOut  = p.join(sessionDir, 'final.mp4');
-      final ballMode = await BallDetectionPrefs.getMode();
-      debugPrint('[Pipeline.analyze] 球偵測模式: ${ballMode.label}');
+    onProgress?.call('追蹤球軌跡中...');
+    progressSvc.reset('球追蹤分析中...');
+    void listenBlobs() => onProgress?.call(progressSvc.progress.value.$2);
+    progressSvc.progress.addListener(listenBlobs);
+    final extraction = await BallTrajectoryService.extractBlobs(inputPath: clipPath);
+    progressSvc.progress.removeListener(listenBlobs);
 
-      List<TrackPoint>? trackPts;
-
-      if (ballMode == BallDetectionMode.server) {
-        // ── 後端模式：上傳 clip → Python worker → 回傳 track_pts ──
-        onProgress?.call('上傳至伺服器中...');
-        try {
-          final serverResult = await ServerBallTrajectoryService.instance.runAndWait(
-            clipPath: clipPath,
-            hitSec:  hitSec,
-            onStatus: onProgress,
-          );
-          trackPts = serverResult.trackPts;
-          debugPrint('[Pipeline.analyze] ✅ 後端追蹤完成：${trackPts.length} 點 '
-              '(${serverResult.width}×${serverResult.height} fps=${serverResult.fps.toStringAsFixed(1)})');
-        } catch (e) {
-          debugPrint('[Pipeline.analyze] ❌ 後端球軌跡失敗: $e');
-        }
-      } else {
-        // ── 本地模式：blob / tflite + Dart Kalman ──────────────────
-        onProgress?.call('追蹤球軌跡中...');
-        progressSvc.reset('球追蹤分析中...');
-        void listenBlobs() => onProgress?.call(progressSvc.progress.value.$2);
-        progressSvc.progress.addListener(listenBlobs);
-
-        final extraction = ballMode == BallDetectionMode.tflite
-            ? await BallTrajectoryService.extractBlobsTflite(inputPath: clipPath, hitSec: hitSec)
-            : await BallTrajectoryService.extractBlobs(inputPath: clipPath);
-        progressSvc.progress.removeListener(listenBlobs);
-
-        if (extraction == null) {
-          debugPrint('[Pipeline.analyze] ❌ blob 提取失敗');
-        } else {
-          debugPrint('[Pipeline.analyze] ✅ blob 提取完成：'
-              '${extraction.frames.length} 幀，'
-              'fps=${extraction.fps.toStringAsFixed(1)}，'
-              '${extraction.width}×${extraction.height}');
-
-          // 自動球員遮罩：從本 clip 的 pose CSV(擊球幀)算出球員 bbox(coded 空間),
-          // 排除落在身體/球桿上的 blob，避免軌跡飛到人身上。拿不到 pose 時為 null(不遮罩)。
-          List<int>? golferBox;
-          if (hitSec != null) {
-            final poseCsvPath = p.join(p.dirname(clipPath), 'pose_landmarks.csv');
-            golferBox = await GolferMask.codedBoxFromPoseCsv(
-              csvPath:  poseCsvPath,
-              hitSec:   hitSec,
-              codedW:   extraction.width,
-              codedH:   extraction.height,
-              rotation: extraction.rotation,
-            );
-          }
-
-          final tracker = BallTracker();
-          trackPts = tracker.track(
-            frames:   extraction.frames,
-            fps:      extraction.fps,
-            videoW:   extraction.width,
-            videoH:   extraction.height,
-            rotation: extraction.rotation,
-            hitSec:   hitSec,
-            golferBox: golferBox,
-          );
-          debugPrint('[Pipeline.analyze] ✅ 追蹤完成：${trackPts.length} 個軌跡點'
-              ' (成功率 ${extraction.frames.isEmpty ? 0 : (trackPts.length * 100 ~/ extraction.frames.length)}%)');
-        }
-      }
-
-      // ── 本地 renderOverlay（無論哪個模式都走這裡）─────────────────
-      if (trackPts != null && trackPts.length >= 2) {
-        const int roiSize = 400;
-        onProgress?.call('軌跡渲染中...');
-        progressSvc.reset('軌跡渲染中...');
-        void listenOverlay() => onProgress?.call(progressSvc.progress.value.$2);
-        progressSvc.progress.addListener(listenOverlay);
-        final withTraj = await BallTrajectoryService.renderOverlay(
-          inputPath:  skeletonPath,
-          outputPath: trajOut,
-          trackPts:   trackPts.map((pt) => pt.toMap()).toList(),
-          roiSize:    roiSize,
-          quality:    quality,
-        );
-        progressSvc.progress.removeListener(listenOverlay);
-        if (withTraj != null) {
-          hasBallTrack = true;
-          finalPath    = withTraj;
-          debugPrint('[Pipeline.analyze] ✅ 球軌跡疊加成功 (ROI=$roiSize px，${trackPts.length} 點)');
-        } else {
-          debugPrint('[Pipeline.analyze] ❌ 球軌跡疊加失敗');
-          final bad = File(trajOut);
-          if (await bad.exists()) await bad.delete();
-        }
-      } else {
-        debugPrint('[Pipeline.analyze] ⚠️ 軌跡點不足（${trackPts?.length ?? 0}），略過疊加');
-      }
+    if (extraction == null) {
+      debugPrint('[Pipeline.analyze] ❌ blob 提取失敗，略過球軌跡');
     } else {
-      debugPrint('[Pipeline.analyze] ⚠️ 骨架失敗，略過球軌跡');
+      debugPrint('[Pipeline.analyze] ✅ blob 提取完成：'
+          '${extraction.frames.length} 幀，'
+          'fps=${extraction.fps.toStringAsFixed(1)}，'
+          '${extraction.width}×${extraction.height}');
+
+      List<int>? golferBox;
+      if (hitSec != null) {
+        golferBox = await GolferMask.codedBoxFromPoseCsv(
+          csvPath:  p.join(sessionDir, 'pose_landmarks.csv'),
+          hitSec:   hitSec,
+          codedW:   extraction.width,
+          codedH:   extraction.height,
+          rotation: extraction.rotation,
+        );
+      }
+
+      final seed = await BallTrajectoryService.findBallP0(
+        inputPath: clipPath, hitSec: hitSec,
+      );
+
+      final trackPts = BallTracker().track(
+        frames:      extraction.frames,
+        fps:         extraction.fps,
+        videoW:      extraction.width,
+        videoH:      extraction.height,
+        rotation:    extraction.rotation,
+        hitSec:      hitSec,
+        golferBox:   golferBox,
+        seedP0X:     seed?.cx,
+        seedP0Y:     seed?.cy,
+        seedP0Frame: seed?.frame,
+      );
+      debugPrint('[Pipeline.analyze] 追蹤完成：${trackPts.length} 個軌跡點');
+
+      if (trackPts.length >= 2) {
+        try {
+          await File(p.join(sessionDir, 'trajectory.json')).writeAsString(jsonEncode({
+            'codedW':   extraction.width,
+            'codedH':   extraction.height,
+            'rotation': extraction.rotation,
+            'fps':      extraction.fps,
+            'points':   trackPts.map((pt) => pt.toMap()).toList(),
+          }));
+          hasBallTrack = true;
+          debugPrint('[Pipeline.analyze] ✅ trajectory.json 已儲存（${trackPts.length} 點）');
+        } catch (e) {
+          debugPrint('[Pipeline.analyze] trajectory.json 儲存失敗: $e');
+        }
+      } else {
+        debugPrint('[Pipeline.analyze] ⚠️ 軌跡點不足（${trackPts.length}），略過');
+      }
     }
 
+    // finalPath 直接回 clip.mp4；UI 以 trajectory.json + CSV 即時疊圖
     return AnalysisResult(
-      finalPath: finalPath ?? skeletonPath ?? clipPath,
-      hasSkeleton: hasSkeleton,
+      finalPath:    clipPath,
+      hasSkeleton:  hasSkeleton,
       hasBallTrack: hasBallTrack,
-      hasSilence: hasSilence,
+      hasSilence:   hasSilence,
     );
   }
 
