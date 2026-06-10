@@ -37,7 +37,9 @@ target 'Runner' do
   pod 'MediaPipeTasksVision', '~> 0.10.14'
 
   # TFLite Swift API — YOLOv8n 高爾夫球偵測（iOS 側推論）
-  pod 'TensorFlowLiteSwift', '~> 2.14.0'
+  # 2.17：需與 MediaPipeTasksCommon 內建 TFLite 版本相容
+  # （subgraph.o 引用 TfLiteTensorClone 等 2.16+ 新增的 C API）
+  pod 'TensorFlowLiteSwift', '~> 2.17.0'
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
   target 'RunnerTests' do
