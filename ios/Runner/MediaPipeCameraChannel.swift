@@ -19,7 +19,7 @@ import UIKit
     // ── Flutter channels ───────────────────────────────────────────────────────
     private let methodChannel: FlutterMethodChannel
     private let poseEventChannel: FlutterEventChannel
-    private var poseSink: FlutterEventSink?
+    fileprivate var poseSink: FlutterEventSink?
 
     // ── Flutter Texture ────────────────────────────────────────────────────────
     private let registry: FlutterTextureRegistry
@@ -532,6 +532,20 @@ import UIKit
             textureId = -1
         }
     }
+
+    // ── Letterboxing state（供 extension 內的 captureOutput / delegate 使用）──
+
+    let lboxSize: Int = 256   // 與 pose_landmarker_lite 模型輸入一致
+
+    // 上一幀的 letterbox 參數（供 delegate 逆還原）
+    struct LboxParams {
+        let contentXNorm: Double  // scaledW / lboxSize
+        let contentYNorm: Double  // scaledH / lboxSize
+        let padXNorm:     Double  // padX    / lboxSize
+        let padYNorm:     Double  // padY    / lboxSize
+    }
+    var currentLboxParams: LboxParams = LboxParams(contentXNorm:1,contentYNorm:1,padXNorm:0,padYNorm:0)
+    var lastLboxParams:    LboxParams = LboxParams(contentXNorm:1,contentYNorm:1,padXNorm:0,padYNorm:0)
 }
 
 // ── AVCaptureVideoDataOutputSampleBufferDelegate ───────────────────────────────
@@ -598,18 +612,6 @@ extension MediaPipeCameraChannel: AVCaptureVideoDataOutputSampleBufferDelegate,
     }
 
     // ── Letterboxing helpers ──────────────────────────────────────────────────
-
-    private let lboxSize: Int = 256   // 與 pose_landmarker_lite 模型輸入一致
-
-    // 上一幀的 letterbox 參數（供 delegate 逆還原）
-    private struct LboxParams {
-        let contentXNorm: Double  // scaledW / lboxSize
-        let contentYNorm: Double  // scaledH / lboxSize
-        let padXNorm:     Double  // padX    / lboxSize
-        let padYNorm:     Double  // padY    / lboxSize
-    }
-    private var currentLboxParams: LboxParams = LboxParams(contentXNorm:1,contentYNorm:1,padXNorm:0,padYNorm:0)
-    private var lastLboxParams:    LboxParams = LboxParams(contentXNorm:1,contentYNorm:1,padXNorm:0,padYNorm:0)
 
     /// CVPixelBuffer (任意尺寸) → 等比例縮放填黑邊 → targetSize×targetSize BGRA buffer
     private func letterboxPixelBuffer(_ src: CVPixelBuffer, targetSize: Int) -> CVPixelBuffer? {
