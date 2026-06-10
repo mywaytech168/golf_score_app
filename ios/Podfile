@@ -61,13 +61,19 @@ post_install do |installer|
 
   # ── 解 MediaPipeTasksCommon × TensorFlowLiteC 重複符號（48 duplicate symbols）──
   # MediaPipe 的靜態 graph library 內含 TFLite C API objects，與 TensorFlowLiteSwift
-  # 依賴的 TensorFlowLiteC.framework 撞名。移除 MediaPipe 側重複的 .o，
-  # 連結時改用 TensorFlowLiteC 提供的同名符號。
+  # 依賴的 TensorFlowLiteC.framework 撞名。注意 .a 內有同名成員（GPU/Metal 也有
+  # common.o / types.o），不能用 ar -d 盲刪；strip_tflite_dups.py 會用 nm 驗證後
+  # 只移除真正定義 TFLite C 符號的成員，連結時改用 TensorFlowLiteC 的版本。
+  conflict_syms = %w[
+    _TfLiteXNNPackDelegateCreate
+    _TfLiteIntArrayCreate
+    _TfLiteSynchronizationCreate
+    _TfLiteTelemetryInterpreterSettingsGetSubgraphInfo
+  ]
   graph_dir = File.join(__dir__, 'Pods', 'MediaPipeTasksCommon', 'frameworks', 'graph_libraries')
   Dir.glob(File.join(graph_dir, '*.a')).each do |archive|
-    %w[xnnpack_delegate.o common.o types.o telemetry_setting_internal.o].each do |obj|
-      system('ar', '-d', archive, obj, err: File::NULL)
-    end
+    system('python3', File.join(__dir__, 'strip_tflite_dups.py'), archive, *conflict_syms) \
+      or raise "strip_tflite_dups failed for #{archive}"
   end
 end
 
