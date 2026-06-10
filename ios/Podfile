@@ -58,5 +58,16 @@ post_install do |installer|
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
     end
   end
+
+  # ── 解 MediaPipeTasksCommon × TensorFlowLiteC 重複符號（48 duplicate symbols）──
+  # MediaPipe 的靜態 graph library 內含 TFLite C API objects，與 TensorFlowLiteSwift
+  # 依賴的 TensorFlowLiteC.framework 撞名。移除 MediaPipe 側重複的 .o，
+  # 連結時改用 TensorFlowLiteC 提供的同名符號。
+  graph_dir = File.join(__dir__, 'Pods', 'MediaPipeTasksCommon', 'frameworks', 'graph_libraries')
+  Dir.glob(File.join(graph_dir, '*.a')).each do |archive|
+    %w[xnnpack_delegate.o common.o types.o telemetry_setting_internal.o].each do |obj|
+      system('ar', '-d', archive, obj, err: File::NULL)
+    end
+  end
 end
 
