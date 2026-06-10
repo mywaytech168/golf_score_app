@@ -497,9 +497,9 @@ import UIKit
 
     private func setZoom(frac: Double) {
         guard let device = currentDevice else { return }
-        let min = device.minAvailableVideoZoomFactor
-        let max = min(device.maxAvailableVideoZoomFactor, 5.0)
-        let level = (min + CGFloat(frac) * (max - min)).clamped(to: min...max)
+        let minZoom = device.minAvailableVideoZoomFactor
+        let maxZoom = Swift.min(device.maxAvailableVideoZoomFactor, 5.0)
+        let level = (minZoom + CGFloat(frac) * (maxZoom - minZoom)).clamped(to: minZoom...maxZoom)
         try? device.lockForConfiguration()
         device.videoZoomFactor = level
         device.unlockForConfiguration()
