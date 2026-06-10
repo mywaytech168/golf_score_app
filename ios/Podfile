@@ -62,20 +62,19 @@ post_install do |installer|
   end
 
   # ── 解 MediaPipeTasksCommon × TensorFlowLiteC 重複符號（48 duplicate symbols）──
-  # MediaPipe 的靜態 graph library 內含 TFLite C API objects，與 TensorFlowLiteSwift
-  # 依賴的 TensorFlowLiteC.framework 撞名。注意 .a 內有同名成員（GPU/Metal 也有
-  # common.o / types.o），不能用 ar -d 盲刪；strip_tflite_dups.py 會用 nm 驗證後
-  # 只移除真正定義 TFLite C 符號的成員，連結時改用 TensorFlowLiteC 的版本。
-  conflict_syms = %w[
-    _TfLiteXNNPackDelegateCreate
-    _TfLiteIntArrayCreate
-    _TfLiteSynchronizationCreate
-    _TfLiteTelemetryInterpreterSettingsGetSubgraphInfo
-  ]
-  graph_dir = File.join(__dir__, 'Pods', 'MediaPipeTasksCommon', 'frameworks', 'graph_libraries')
-  Dir.glob(File.join(graph_dir, '*.a')).each do |archive|
-    system('python3', File.join(__dir__, 'strip_tflite_dups.py'), archive, *conflict_syms) \
-      or raise "strip_tflite_dups failed for #{archive}"
+  # 兩者都內含 TFLite C API；MediaPipe 內建版本較新（引用 TfLiteTensorClone 等
+  # pod 版 TensorFlowLiteC 沒有的符號），不能刪 MediaPipe 側。
+  # strip_tflite_dups.py 改將 TensorFlowLiteC.framework 內與 MediaPipe 重複的
+  # 全域符號降為 local（ld -r -unexported_symbols_list），兩份 TFLite 各自內聚。
+  graph_libs = Dir.glob(File.join(__dir__, 'Pods', 'MediaPipeTasksCommon',
+                                  'frameworks', 'graph_libraries', '*.a'))
+  tflc_bins = Dir.glob(File.join(__dir__, 'Pods', 'TensorFlowLiteC', 'Frameworks',
+                                 '**', 'TensorFlowLiteC.framework', 'TensorFlowLiteC'))
+  unless graph_libs.empty? || tflc_bins.empty?
+    tflc_bins.each do |bin|
+      system('python3', File.join(__dir__, 'strip_tflite_dups.py'), bin, *graph_libs) \
+        or raise "strip_tflite_dups failed for #{bin}"
+    end
   end
 end
 
