@@ -50,6 +50,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
     final ctrl = VideoPlayerController.file(File(widget.clipPath));
     _ctrl = ctrl;
     await ctrl.initialize();
+    if (!mounted) return;
     ctrl.setLooping(true);
     ctrl.addListener(_onTick);
     await _reextract();           // 抽 blob + seed + golfer + 首次 track
@@ -65,6 +66,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
 
   /// 重抽：原生偵測(diffThresh/area) + p0-SAHI 種子 + 球員框，然後 track。
   Future<void> _reextract() async {
+    if (!mounted) return;
     setState(() { _busy = true; _hud = '偵測中…'; });
     _ext = await BallTrajectoryService.extractBlobsWithConfig(
       inputPath: widget.clipPath,
@@ -73,6 +75,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
     );
     _seed = await BallTrajectoryService.findBallP0(inputPath: widget.clipPath, hitSec: widget.hitSec);
     await _recomputeGolfer();
+    if (!mounted) return;   // 非同步抽取期間頁面可能已關閉
     _rerun();
     if (mounted) setState(() => _busy = false);
   }
@@ -92,6 +95,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
 
   /// 即時重跑 track（純 Dart，讀快取 blob）。
   void _rerun() {
+    if (!mounted) return;
     final ext = _ext;
     if (ext == null) { setState(() => _hud = 'blob 抽取失敗'); return; }
     final pts = BallTracker().track(

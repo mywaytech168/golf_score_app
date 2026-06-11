@@ -16,6 +16,7 @@ import '../recording/trajectory_painter.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
+import '../services/skeleton_csv_locator.dart';
 import '../theme/app_theme.dart';
 import 'ai_coach_page.dart';
 
@@ -41,7 +42,6 @@ class VideoPlayerPage extends StatefulWidget {
 class _VideoPlayerPageState extends State<VideoPlayerPage>
     with TickerProviderStateMixin {
   VideoPlayerController? _controller;
-  late final TabController _tabController;
   bool _initialized = false;
 
   /// 是否為長影片（原始錄製 > 5 秒），長影片無骨架/分析 Tab 及 AI，但可顯示圖表
@@ -68,14 +68,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 骨架疊圖（取代燒錄 skeleton.mp4）：CSV 為 clip 相對時間，offset=0 直接用 position 取樣
   PoseTrack? _skeletonTrack;
   bool _skeletonLoading = false;
-  bool get _onSkeletonTab =>
-      _activeTabs[_tabController.index].type == 'skeleton';
-  bool get _onAnalyzedTab =>
-      _activeTabs[_tabController.index].type == 'analyzed';
+  // ── 疊層開關（取代舊 Tab 切換）：骨架 / 軌跡各自獨立 checkbox ─────────────
+  bool _showSkeleton   = false;
+  bool _showTrajectory = false;
+  bool _showImpactFx   = false;   // 擊球光圈 / Sweet Spot 徽章 / impact chip 金標
+  late final bool _hasTrajectory;   // trajectory.json 是否存在
+  bool get _hasImpactFx =>
+      widget.entry?.hitSecond != null && widget.entry?.goodShot != null;
 
-  // 分析 Tab 即時疊圖（骨架 + 球軌跡）；trajectory.json 不存在時 fallback 燒錄影片
   TrajectoryTrack? _trajTrack;
-  bool _analyzedLive = false;
 
   // 甜蜜點特效動畫（僅分析 Tab）
   late final AnimationController _impactAnim;
@@ -91,19 +92,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     ('finish',        '收桿'),
   ];
 
-  static const _allTabs = [
-    (icon: Icons.videocam,  label: '原始',  type: 'original'),
-    (icon: Icons.person,    label: '骨架',  type: 'skeleton'),
-    (icon: Icons.analytics, label: '分析',  type: 'analyzed'),
-  ];
-
-  /// 長影片只顯示「原始」tab；但若已有骨架 CSV（完整分析過）仍開放「骨架」tab
-  List<({IconData icon, String label, String type})> get _activeTabs =>
-      _isLongVideo
-          ? (_hasSkeletonCsv ? [_allTabs[0], _allTabs[1]] : [_allTabs.first])
-          : _allTabs;
-
-  /// pose_landmarks.csv 是否存在（initState 時檢查一次，決定 tab 數量）
+  /// 骨架 CSV 是否存在（逐幀版或 live 版皆可；initState 檢查一次）
   late final bool _hasSkeletonCsv;
 
   static const _chartTabs = [
@@ -120,42 +109,30 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   void initState() {
     super.initState();
 
-    _hasSkeletonCsv = File('${_sessionDir}pose_landmarks.csv').existsSync();
-
-    // 有分析結果 → 預設分析 Tab(2)；長影片或否則 → 原始 Tab(0)
-    final hasAnalysis = widget.entry?.isAnalyzed ?? false;
-    final initialTab  = (!_isLongVideo && hasAnalysis) ? 2 : 0;
+    _hasSkeletonCsv = resolveSkeletonCsv(p.dirname(widget.videoPath)) != null;
+    _hasTrajectory  = File('${_sessionDir}trajectory.json').existsSync();
 
     _impactAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
 
-    _tabController = TabController(
-      length: _activeTabs.length,
-      vsync: this,
-      initialIndex: initialTab,
-    )..addListener(() {
-        if (!_tabController.indexIsChanging) return;
-        switch (_activeTabs[_tabController.index].type) {
-          case 'original': _viewOriginal();
-          case 'skeleton': _viewSkeleton();
-          case 'analyzed': _viewAnalyzed();
-        }
-      });
+    // ── 單一影片 + checkbox 疊層（取代舊 原始/骨架/分析 Tab 切換）──────────
+    // base 影片優先乾淨 clip.mp4（與 CSV/trajectory 時間軸對齊），
+    // 否則 swing.mp4（原始/長影片），最後退回 widget.videoPath。
+    final clipPath  = '${_sessionDir}clip.mp4';
+    final swingPath = '${_sessionDir}swing.mp4';
+    final basePath = File(clipPath).existsSync()
+        ? clipPath
+        : (File(swingPath).existsSync() ? swingPath : widget.videoPath);
+    _initController(basePath, isOriginal: basePath != clipPath);
 
-    // 依初始 tab 載入對應影片
-    if (initialTab == 2) {
-      _viewAnalyzed();   // 即時疊圖（或 fallback 燒錄影片）
-    } else if (hasAnalysis) {
-      _initController(widget.videoPath, isOriginal: true);
-    } else {
-      // 載入原始影片（swing.mp4 優先，否則 clip.mp4）
-      final originalPath = File('${p.dirname(widget.videoPath)}${p.separator}swing.mp4').existsSync()
-          ? '${p.dirname(widget.videoPath)}${p.separator}swing.mp4'
-          : widget.videoPath;
-      _initController(originalPath, isOriginal: true);
-    }
+    // 預設：有資料的疊層直接開啟（對齊舊「分析 Tab」的開箱體驗）
+    _showSkeleton   = _hasSkeletonCsv;
+    _showTrajectory = _hasTrajectory;
+    _showImpactFx   = _hasImpactFx;
+    if (_showSkeleton) _ensureSkeletonTrack();
+    if (_showTrajectory) _ensureTrajectoryTrack();
 
     // 讀取揮桿 8 階段時間點；並預載圖表資料（供波形使用）
     // localClip（切片）或 isAnalyzed（匯入後已完成分析）都載入
@@ -233,7 +210,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   }
 
   void _checkImpactTrigger() {
-    if (_tabController.index != 2) return;
+    if (!_showImpactFx) return;
     final hitSec = widget.entry?.hitSecond;
     if (hitSec == null || widget.entry?.goodShot == null) return;
     final ctrl = _controller;
@@ -250,8 +227,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       _impactAnim.reset();
     }
   }
-
-  void _switchTo(String path) => _initController(path);
 
   void _toggleCharts() {
     setState(() => _chartsExpanded = !_chartsExpanded);
@@ -328,7 +303,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   @override
   void dispose() {
     _impactAnim.dispose();
-    _tabController.dispose();
     _controller?.removeListener(_onUpdate);
     _controller?.dispose();
     super.dispose();
@@ -348,31 +322,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     return '$m:$s';
   }
 
-  // ── 切換按鈕 ────────────────────────────────────────────────
-
-  void _viewOriginal() {
-    final path = File('${_sessionDir}swing.mp4').existsSync()
-        ? '${_sessionDir}swing.mp4'
-        : '${_sessionDir}clip.mp4';
-    if (!File(path).existsSync()) { _showSnack('原始影片不存在'); return; }
-    _switchTo(path);
-  }
-
-  /// 骨架：不再切換到燒錄的 skeleton.mp4，改在乾淨 clip 上即時疊 CustomPainter。
-  /// （燒錄管道仍保留給「匯出帶骨架影片」使用。）
-  void _viewSkeleton() {
-    // base 影片必須是 clip 相對時間（與 pose_landmarks.csv 對齊），不可用完整 swing.mp4
-    final clip = '${_sessionDir}clip.mp4';
-    final basePath = File(clip).existsSync() ? clip : widget.videoPath;
-    if (!File(basePath).existsSync()) { _showSnack('影片不存在'); return; }
-    _switchTo(basePath);
-    _ensureSkeletonTrack();
-  }
+  // ── 疊層資料載入 ────────────────────────────────────────────
 
   Future<void> _ensureSkeletonTrack() async {
     if (_skeletonTrack != null || _skeletonLoading) return;
-    final csvPath = '${_sessionDir}pose_landmarks.csv';
-    if (!File(csvPath).existsSync()) {
+    // 逐幀 CSV 優先；剛錄完背景分析未完成時退回 live CSV 先顯示。
+    // 載入一次即定：本頁生命週期內不偷換來源，避免使用者不知情下骨架變樣。
+    final csvPath = resolveSkeletonCsv(p.dirname(widget.videoPath));
+    if (csvPath == null) {
       _showSnack('骨架資料不存在');
       return;
     }
@@ -385,23 +342,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     } finally {
       if (mounted) setState(() => _skeletonLoading = false);
     }
-  }
-
-  void _viewAnalyzed() {
-    // 即時疊圖模式：有 trajectory.json 時，在乾淨 clip 上即時畫骨架+軌跡
-    //（與骨架 Tab 同 base 影片；舊紀錄無 trajectory.json → fallback 燒錄影片）
-    final clip = '${_sessionDir}clip.mp4';
-    if (File('${_sessionDir}trajectory.json').existsSync() &&
-        File(clip).existsSync()) {
-      _analyzedLive = true;
-      _switchTo(clip);
-      _ensureSkeletonTrack();
-      _ensureTrajectoryTrack();
-      return;
-    }
-    _analyzedLive = false;
-    if (!File(widget.videoPath).existsSync()) { _showSnack('分析影片不存在'); return; }
-    _switchTo(widget.videoPath);
   }
 
   Future<void> _ensureTrajectoryTrack() async {
@@ -421,6 +361,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           children: [
             _buildTopBar(context),
             Expanded(child: _buildVideo()),
+            if (_initialized) _buildOverlayToggles(),
             if (_initialized) _buildControls(),
             if (_initialized && _phases != null) _buildPhaseStrip(),
             _buildChartsPanel(),
@@ -442,25 +383,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             onPressed: () => Navigator.pop(context),
           ),
           Expanded(
-            child: TabBar(
-              controller: _tabController,
-              indicatorColor: const Color(0xFF1E8E5A),
-              indicatorWeight: 2,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white54,
-              labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              unselectedLabelStyle: const TextStyle(fontSize: 13),
-              tabs: _activeTabs.map((t) => Tab(
-                height: 40,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(t.icon, size: 14),
-                    const SizedBox(width: 4),
-                    Text(t.label),
-                  ],
-                ),
-              )).toList(),
+            child: Text(
+              widget.entry?.displayTitle ?? '影片查看',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
           if (widget.avatarPath != null) ...[
@@ -470,11 +398,83 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             ),
             const SizedBox(width: 8),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// 疊層開關列：骨架 / 軌跡 checkbox + 軌跡調參入口（從頂列移下來）
+  Widget _buildOverlayToggles() {
+    Widget toggle({
+      required String label,
+      required IconData icon,
+      required bool value,
+      required ValueChanged<bool> onChanged,
+    }) {
+      return InkWell(
+        onTap: () => onChanged(!value),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(
+              width: 32, height: 32,
+              child: Checkbox(
+                value: value,
+                onChanged: (v) => onChanged(v ?? false),
+                activeColor: const Color(0xFF1E8E5A),
+                side: const BorderSide(color: Colors.white54),
+              ),
+            ),
+            Icon(icon, color: value ? Colors.white : Colors.white54, size: 16),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    color: value ? Colors.white : Colors.white54, fontSize: 13)),
+          ]),
+        ),
+      );
+    }
+
+    return Container(
+      color: Colors.black87,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          if (_hasSkeletonCsv)
+            toggle(
+              label: '骨架',
+              icon: Icons.person,
+              value: _showSkeleton,
+              onChanged: (v) {
+                setState(() => _showSkeleton = v);
+                if (v) _ensureSkeletonTrack();
+              },
+            ),
+          if (_hasTrajectory) ...[
+            const SizedBox(width: 8),
+            toggle(
+              label: '軌跡',
+              icon: Icons.sports_golf,
+              value: _showTrajectory,
+              onChanged: (v) {
+                setState(() => _showTrajectory = v);
+                if (v) _ensureTrajectoryTrack();
+              },
+            ),
+          ],
+          if (_hasImpactFx) ...[
+            const SizedBox(width: 8),
+            toggle(
+              label: '特效',
+              icon: Icons.auto_awesome,
+              value: _showImpactFx,
+              onChanged: (v) => setState(() => _showImpactFx = v),
+            ),
+          ],
+          const Spacer(),
           // 球軌跡調參（排查用）：對本 clip 即時調參重跑
-          IconButton(
-            icon: const Icon(Icons.tune, color: Colors.white, size: 20),
-            tooltip: '球軌跡調參',
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+          TextButton.icon(
             onPressed: () {
               final clip = File('${_sessionDir}clip.mp4').existsSync()
                   ? '${_sessionDir}clip.mp4'
@@ -486,6 +486,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 ),
               ));
             },
+            icon: const Icon(Icons.tune, color: Colors.white54, size: 16),
+            label: const Text('軌跡調參',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
           ),
         ],
       ),
@@ -498,9 +501,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       return const Center(child: CircularProgressIndicator(color: Colors.white54));
     }
 
-    final isAnalysis = _tabController.index == 2;
     final entry = widget.entry;
-    final showEffects = isAnalysis && entry?.hitSecond != null && entry?.goodShot != null;
+    final showEffects = _showImpactFx && _hasImpactFx;
 
     return Center(
       child: AspectRatio(
@@ -509,9 +511,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           children: [
             VideoPlayer(ctrl),
             // 骨架疊圖：依播放位置即時取樣 CSV（offset=0，CSV 為 clip 相對時間）
-            // 骨架 Tab 與「分析 Tab 即時模式」共用
-            if ((_onSkeletonTab || (_onAnalyzedTab && _analyzedLive)) &&
-                _skeletonTrack != null)
+            if (_showSkeleton && _skeletonTrack != null)
               Positioned.fill(
                 child: Builder(builder: (_) {
                   final pose = _skeletonTrack!
@@ -526,8 +526,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   );
                 }),
               ),
-            // 球軌跡疊圖（分析 Tab 即時模式）：只畫 pts ≤ 播放位置的軌跡
-            if (_onAnalyzedTab && _analyzedLive && _trajTrack != null)
+            // 球軌跡疊圖：只畫 pts ≤ 播放位置的軌跡
+            if (_showTrajectory && _trajTrack != null)
               Positioned.fill(
                 child: CustomPaint(
                   painter: TrajectoryPainter(
@@ -536,7 +536,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   ),
                 ),
               ),
-            if (_onSkeletonTab && _skeletonLoading)
+            if (_showSkeleton && _skeletonLoading)
               const Positioned.fill(
                 child: Center(
                   child: CircularProgressIndicator(color: Colors.white54),
@@ -731,9 +731,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           final sec      = phases[key];
           final isActive = currentPhase == key;
 
-          // Impact chip 在分析 Tab 且有甜蜜點結果時顯示特殊顏色
+          // Impact chip 在「擊球特效」開啟且有甜蜜點結果時顯示特殊顏色
           final isImpactMark = key == 'impact'
-              && _tabController.index == 2
+              && _showImpactFx
               && widget.entry?.goodShot != null;
           final impactColor = isImpactMark
               ? (widget.entry!.goodShot!

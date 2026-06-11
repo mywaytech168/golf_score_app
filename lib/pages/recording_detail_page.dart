@@ -16,6 +16,8 @@ import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/recording_history_storage.dart';
+import '../services/overlay_burn_service.dart';
+import '../services/skeleton_csv_locator.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/video_export_service.dart';
 import '../theme/app_theme.dart';
@@ -153,6 +155,12 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
       icon:  Icons.accessibility_new_rounded,
     ),
     _VideoOption(
+      file:  'clip.mp4',
+      label: '原始片段',
+      desc:  '無任何 overlay',
+      icon:  Icons.videocam_rounded,
+    ),
+    _VideoOption(
       file:  'swing.mp4',
       label: '原始影片',
       desc:  '無任何 overlay',
@@ -166,14 +174,22 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     ),
   ];
 
-  /// 顯示下載選單 → 使用者選擇 → 執行下載
+  /// 顯示下載選單 → 使用者選擇 → 執行下載。
+  /// 燒錄版（final/skeleton）改為下載時隨選燒錄：分析階段已不產生燒錄影片，
+  /// 只要素材齊全（clip + CSV / trajectory.json）選項就會出現，選了現場燒。
   Future<void> _downloadVideo() async {
     final sessionDir = p.dirname(widget.entry.filePath);
 
-    // 篩選出實際存在的檔案
-    final available = _kDownloadOptions
-        .where((o) => File(p.join(sessionDir, o.file)).existsSync())
-        .toList();
+    bool isAvailable(_VideoOption o) {
+      if (File(p.join(sessionDir, o.file)).existsSync()) return true;
+      return switch (o.file) {
+        'final.mp4'    => OverlayBurnService.canBurnFinal(sessionDir),
+        'skeleton.mp4' => OverlayBurnService.canBurnSkeleton(sessionDir),
+        _              => false,
+      };
+    }
+
+    final available = _kDownloadOptions.where(isAvailable).toList();
 
     if (available.isEmpty) {
       _showSnack('找不到可下載的影片', isError: true);
@@ -190,10 +206,23 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     );
     if (chosen == null || !mounted) return;
 
-    // 執行下載
+    // 執行下載（燒錄版不存在時先隨選燒錄）
     setState(() => _isDownloading = true);
     try {
-      final videoPath  = p.join(sessionDir, chosen.file);
+      var videoPath = p.join(sessionDir, chosen.file);
+      if (!File(videoPath).existsSync()) {
+        _showSnack('燒錄「${chosen.label}」中…');
+        final burned = switch (chosen.file) {
+          'final.mp4'    => await OverlayBurnService.ensureFinalVideo(sessionDir),
+          'skeleton.mp4' => await OverlayBurnService.ensureSkeletonVideo(sessionDir),
+          _              => null,
+        };
+        if (burned == null) {
+          _showSnack('燒錄失敗，請稍後重試', isError: true);
+          return;
+        }
+        videoPath = burned;
+      }
       final displayName = '${_title.replaceAll(RegExp(r'[^\w一-龥]'), '_')}_${chosen.label}';
       final result = await VideoExportService.download(videoPath, displayName: displayName);
 
@@ -351,8 +380,8 @@ class _ChartsBody extends StatelessWidget {
       children: [
         _SwingPhasesCard(entry: entry),
         const SizedBox(height: 16),
-        // 骨架預覽：有 pose_landmarks.csv 即可疊圖預覽（與播放頁同機制）
-        if (File(p.join(p.dirname(entry.filePath), 'pose_landmarks.csv')).existsSync()) ...[
+        // 骨架預覽：逐幀 CSV 優先、live CSV 退補（與播放頁同機制）
+        if (resolveSkeletonCsv(p.dirname(entry.filePath)) != null) ...[
           _SkeletonPreviewCard(entry: entry),
           const SizedBox(height: 16),
         ],
@@ -446,7 +475,7 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
       if (!File(basePath).existsSync()) {
         throw Exception('影片不存在');
       }
-      final track = await PoseTrack.load(p.join(_sessionDir, 'pose_landmarks.csv'));
+      final track = await PoseTrack.load(resolveSkeletonCsv(_sessionDir)!);
       final ctrl = VideoPlayerController.file(File(basePath));
       await ctrl.initialize();
       ctrl.setLooping(true);
