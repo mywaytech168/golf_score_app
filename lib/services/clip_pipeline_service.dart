@@ -20,6 +20,7 @@ import 'golf_analysis_service.dart';
 import 'golfer_mask.dart';
 import 'video_analysis_service.dart';
 import 'video_clip_service.dart';
+import 'skeleton_csv_locator.dart';
 
 /// 骨架分析模式。
 ///
@@ -91,7 +92,9 @@ class ClipPipelineService {
     final srcSessionDir = p.dirname(srcVideoPath);
     final sessionName   = p.basename(srcSessionDir);
     final golfRecDir    = p.dirname(srcSessionDir);
-    final srcCsvPath    = p.join(srcSessionDir, 'pose_landmarks.csv');
+    // 逐幀 CSV 優先；只有 live CSV 時也切給 clip 用（顯示/偵測皆接受 live）
+    final srcCsvPath    = resolveSkeletonCsv(srcSessionDir) ??
+        p.join(srcSessionDir, 'pose_landmarks.csv');
     // 優先使用 audio.wav（VideoAnalysisService 從影片提取），
     // 若不存在則退回 audio.pcm（原始錄製的即時 float32 PCM）
     // 若兩者都不存在（V2/V3 跳過全片分析），從影片提取 audio.wav

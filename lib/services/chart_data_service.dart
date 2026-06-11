@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/recording_history_entry.dart';
+import 'skeleton_csv_locator.dart';
 
 /// 圖表用單點資料（x = 時間秒, y = 數值）
 class ChartPoint {
@@ -35,7 +36,8 @@ class ChartDataService {
   static Future<ChartDataSet> loadFromEntry(RecordingHistoryEntry entry) async {
     final sessionDir = p.dirname(entry.filePath);
     final audioCsvPath = '$sessionDir/audio_features.csv';
-    final poseCsvPath  = '$sessionDir/pose_landmarks.csv';
+    // 逐幀 CSV 優先；背景分析未完成時退回 live CSV（低取樣，曲線較疏但可看）
+    final poseCsvPath  = resolveSkeletonCsv(sessionDir) ?? '$sessionDir/pose_landmarks.csv';
 
     final audioFuture = _parseAudioCsv(audioCsvPath);
     final poseFuture  = _parsePoseCsv(poseCsvPath);

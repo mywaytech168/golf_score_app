@@ -374,18 +374,50 @@ class _CsvResult {
   _CsvResult(this.speed, this.ySmooth, this.vis, this.fps);
 }
 
-// 右手腕 = landmark 16
+// 左手腕 = landmark 15，右手腕 = landmark 16
 // CSV 欄位：frame(0), time_sec(1), pose_update_id(2),
 //           [lm0_x_norm, lm0_y_norm, lm0_z, lm0_vis, lm0_x_px, lm0_y_px] × 33  (從 col 3 開始)
-// lm16_vis   = 3 + 16*6 + 3 = 102
-// lm16_x_px  = 3 + 16*6 + 4 = 103
-// lm16_y_px  = 3 + 16*6 + 5 = 104
+// lm{i}_vis  = 3 + i*6 + 3；lm{i}_x_px = +4；lm{i}_y_px = +5
 const int _colTimeSec = 1;
-const int _colRwVis   = 102;
+const int _colLwVis   = 96;   // 3 + 15*6 + 3
+const int _colLwXpx   = 97;
+const int _colLwYpx   = 98;
+const int _colRwVis   = 102;  // 3 + 16*6 + 3
 const int _colRwXpx   = 103;
 const int _colRwYpx   = 104;
 const double _minVisibility = 0.1;
-const int    _smoothWrist   = 5;
+// 手腕座標/速度平滑窗（秒）：30fps 下 ≈ 5 幀，與舊版固定值等效
+const double _smoothWristSec = 0.17;
+
+class _WristTrack {
+  final List<double> x = [];
+  final List<double> y = [];
+  int valid = 0;
+  void add(double vis, double xpx, double ypx) {
+    if (vis >= _minVisibility && !xpx.isNaN && !ypx.isNaN) {
+      x.add(xpx);
+      y.add(ypx);
+      valid++;
+    } else {
+      x.add(double.nan);
+      y.add(double.nan);
+    }
+  }
+}
+
+/// 插值 + 平滑 + 計算速度（px/frame）。
+(List<double> speed, List<double> ySmooth) _wristSpeed(
+    _WristTrack w, int smoothWin) {
+  final xs = _movingAverage(_interpNan(w.x), smoothWin);
+  final ys = _movingAverage(_interpNan(w.y), smoothWin);
+  final speed = List<double>.filled(xs.length, 0.0);
+  for (int i = 1; i < xs.length; i++) {
+    final dx = xs[i] - xs[i - 1];
+    final dy = ys[i] - ys[i - 1];
+    speed[i] = math.sqrt(dx * dx + dy * dy);
+  }
+  return (_movingAverage(speed, smoothWin), ys);
+}
 
 _CsvResult? _parseWristSpeed(String csvPath) {
   try {
@@ -396,65 +428,57 @@ _CsvResult? _parseWristSpeed(String csvPath) {
     if (rows.length < 3) return null;
 
     final data   = rows.sublist(1);
-    final xList  = <double>[];
-    final yList  = <double>[];
+    final right  = _WristTrack();
+    final left   = _WristTrack();
     final visList = <double>[];
     final times  = <double>[];
-    int validCount = 0;
 
     for (final row in data) {
       if (row.length <= _colRwYpx) {
-        xList.add(double.nan);
-        yList.add(double.nan);
+        right.add(0.0, double.nan, double.nan);
+        left.add(0.0, double.nan, double.nan);
         visList.add(0.0);
         if (times.isEmpty && row.length > _colTimeSec) {
           times.add(_toDouble(row[_colTimeSec]));
         }
         continue;
       }
-      final vis = _toDouble(row[_colRwVis]);
-      final xpx = _toDouble(row[_colRwXpx]);
-      final ypx = _toDouble(row[_colRwYpx]);
-      final t   = _toDouble(row[_colTimeSec]);
-      times.add(t);
-      visList.add(vis);
-      if (vis >= _minVisibility && !xpx.isNaN && !ypx.isNaN) {
-        xList.add(xpx);
-        yList.add(ypx);
-        validCount++;
-      } else {
-        xList.add(double.nan);
-        yList.add(double.nan);
-      }
+      final rVis = _toDouble(row[_colRwVis]);
+      times.add(_toDouble(row[_colTimeSec]));
+      visList.add(rVis);
+      right.add(rVis, _toDouble(row[_colRwXpx]), _toDouble(row[_colRwYpx]));
+      left.add(_toDouble(row[_colLwVis]),
+          _toDouble(row[_colLwXpx]), _toDouble(row[_colLwYpx]));
     }
 
-    debugPrint('[ParseCSV] 有效幀: $validCount/${xList.length}');
-    if (xList.length < 2) return null;
+    final n = right.x.length;
+    debugPrint('[ParseCSV] 有效幀: 右腕 ${right.valid}/$n, 左腕 ${left.valid}/$n');
+    if (n < 2) return null;
 
-    // FPS 估計：用總幀數 / 總時長（times 可能因短行而少於 xList.length）
+    // FPS 估計：用總幀數 / 總時長（times 可能因短行而少於幀數）
     double fps = 30.0;
     if (times.length >= 2) {
       final dur = times.last - times.first;
-      if (dur > 0) fps = (xList.length - 1) / dur;
+      if (dur > 0) fps = (n - 1) / dur;
     }
     debugPrint('[ParseCSV] FPS: $fps');
 
-    // 插值 + 平滑（用於速度計算）
-    final x  = _interpNan(xList);
-    final y  = _interpNan(yList);
-    final xs = _movingAverage(x, _smoothWrist);
-    final ys = _movingAverage(y, _smoothWrist);
+    // 平滑窗以秒為單位換算（FPS 自適應；30fps ≈ 5 幀，與舊版等效）
+    final smoothWin = _oddKernel(math.max(3, (_smoothWristSec * fps).round()));
 
-    // 速度（px/frame）
-    final speed = List<double>.filled(xs.length, 0.0);
-    for (int i = 1; i < xs.length; i++) {
-      final dx = xs[i] - xs[i - 1];
-      final dy = ys[i] - ys[i - 1];
-      speed[i] = math.sqrt(dx * dx + dy * dy);
+    // 左右腕都算速度，選高百分位速度較大者（左打者主導腕為左腕）
+    final (rSpeed, rY) = _wristSpeed(right, smoothWin);
+    final (lSpeed, lY) = _wristSpeed(left, smoothWin);
+    double p95of(List<double> s) {
+      final v = s.where((e) => e.isFinite).toList()..sort();
+      return v.isEmpty ? 0.0 : _percentile(v, 95.0);
     }
-    final speedSmooth = _movingAverage(speed, _smoothWrist);
+    final useLeft = left.valid > 0 && p95of(lSpeed) > p95of(rSpeed) * 1.15;
+    if (useLeft) debugPrint('[ParseCSV] 🫲 改用左腕（速度 p95 較大，疑似左打者）');
 
-    return _CsvResult(speedSmooth, ys, visList, fps);
+    return useLeft
+        ? _CsvResult(lSpeed, lY, visList, fps)
+        : _CsvResult(rSpeed, rY, visList, fps);
   } catch (e) {
     debugPrint('[ParseCSV] ❌ 異常: $e');
     return null;

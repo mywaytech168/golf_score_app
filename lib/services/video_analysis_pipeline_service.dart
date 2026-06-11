@@ -11,9 +11,35 @@ import 'video_analysis_service.dart';
 /// - 短影片 (5-60s)：直接進行完整分析 (骨架 + 音訊 + 球軌跡)
 /// - 長影片 (60-120s)：先進行基礎分析 (骨架 + 音訊)，後續可選偵測擊球或球軌跡
 class VideoAnalysisPipelineService {
+  /// 進行中的分析（key = sessionDir）：錄影後背景自動分析與使用者手動
+  /// 觸發（偵測擊球/完整分析）可能同時呼叫，共用同一個 Future 防重複推論。
+  static final Map<String, Future<BasicAnalysisResult?>> _inflight = {};
+
   /// 執行基礎分析：骨架提取 + 音訊提取（不含球軌跡追蹤）
   /// 用於長影片的初始階段，為後續擊球偵測或詳細分析準備數據
   static Future<BasicAnalysisResult?> analyzeBasic({
+    required String videoPath,
+    required String sessionDir,
+    required int durationSeconds,
+    void Function(String label)? onProgress,
+  }) {
+    final running = _inflight[sessionDir];
+    if (running != null) {
+      debugPrint('[VideoAnalysisPipeline] ⏳ 同 session 分析進行中，共用結果');
+      onProgress?.call('分析骨架中...');
+      return running;
+    }
+    final future = _analyzeBasicImpl(
+      videoPath: videoPath,
+      sessionDir: sessionDir,
+      durationSeconds: durationSeconds,
+      onProgress: onProgress,
+    ).whenComplete(() => _inflight.remove(sessionDir));
+    _inflight[sessionDir] = future;
+    return future;
+  }
+
+  static Future<BasicAnalysisResult?> _analyzeBasicImpl({
     required String videoPath,
     required String sessionDir,
     required int durationSeconds,

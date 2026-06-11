@@ -36,7 +36,8 @@ class LiveSwingDetector {
   int    _fallFrames   = 0;
   static const int _minFallFrames = 2;
 
-  double? _prevX, _prevY;
+  double? _prevRx, _prevRy;
+  double? _prevLx, _prevLy;
 
   LiveSwingDetector({
     this.calibrationSec      = 3.0,
@@ -55,8 +56,10 @@ class LiveSwingDetector {
     _peakSpeed         = 0;
     _peakTimeSec       = 0;
     _fallFrames        = 0;
-    _prevX             = null;
-    _prevY             = null;
+    _prevRx            = null;
+    _prevRy            = null;
+    _prevLx            = null;
+    _prevLy            = null;
   }
 
   /// 喂入一禎姿勢資料（MediaPipe NativePoseResult）。
@@ -64,17 +67,29 @@ class LiveSwingDetector {
   /// [pose]    MediaPipe 結果（歸一化座標 0-1）
   /// [timeSec] 相對錄製開始的秒數
   void feed(NativePoseResult pose, double timeSec) {
-    double speed = 0.0;
+    // 雙腕都追蹤、取速度較大者：左打者主導腕為左腕，只看右腕會鈍化偵測
+    double rSpeed = 0.0, lSpeed = 0.0;
     final rw = pose.rightWrist;
     if (rw != null && rw.visibility >= 0.1) {
-      if (_prevX != null) {
-        final dx = rw.x - _prevX!;
-        final dy = rw.y - _prevY!;
-        speed = math.sqrt(dx * dx + dy * dy);
+      if (_prevRx != null) {
+        final dx = rw.x - _prevRx!;
+        final dy = rw.y - _prevRy!;
+        rSpeed = math.sqrt(dx * dx + dy * dy);
       }
-      _prevX = rw.x;
-      _prevY = rw.y;
+      _prevRx = rw.x;
+      _prevRy = rw.y;
     }
+    final lw = pose.leftWrist;
+    if (lw != null && lw.visibility >= 0.1) {
+      if (_prevLx != null) {
+        final dx = lw.x - _prevLx!;
+        final dy = lw.y - _prevLy!;
+        lSpeed = math.sqrt(dx * dx + dy * dy);
+      }
+      _prevLx = lw.x;
+      _prevLy = lw.y;
+    }
+    final speed = math.max(rSpeed, lSpeed);
 
     _speedBuf.addLast(speed);
     if (_speedBuf.length > _bufSize) _speedBuf.removeFirst();

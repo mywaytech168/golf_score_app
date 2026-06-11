@@ -10,10 +10,14 @@ import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../services/audio_analysis_service.dart';
 import '../services/audio_extraction_service.dart';
+import '../models/recording_history_entry.dart';
 import '../services/realtime_audio_service.dart';
+import '../services/swing_auto_clip_service.dart';
 import 'device_capability.dart';
+import 'live_swing_detector.dart';
 import 'native_camera_service.dart';
 import 'pose_csv_writer.dart';
+import 'prewarm_cleanup.dart';
 import 'pose_frame_model.dart';
 import 'pose_result.dart';
 import 'recording_config.dart';
@@ -51,6 +55,11 @@ class _RecordScreenState extends State<RecordScreen> {
   String _audioPath = '';
   PoseCsvWriter? _csvWriter;
 
+  // 即時揮桿偵測：錄影中記錄擊球時刻（影片時鐘），錄後與音訊峰值聯集做自動切片
+  late final LiveSwingDetector _liveDetector =
+      LiveSwingDetector(onImpact: _liveImpacts.add);
+  final List<double> _liveImpacts = [];
+
   bool _recording  = false;
   bool get _isRecording => _recording;
   int  _frameCount = 0;
@@ -75,6 +84,7 @@ class _RecordScreenState extends State<RecordScreen> {
     _resetSession();
     _checkDeviceCapability();
     _initCamera();
+    unawaited(cleanupStalePrewarmDirs());
   }
 
   Future<void> _checkDeviceCapability() async {
@@ -207,6 +217,8 @@ class _RecordScreenState extends State<RecordScreen> {
     _startingRecording = false;
     _recordingStart = null;
     _elapsed      = Duration.zero;
+    _liveImpacts.clear();
+    _liveDetector.reset();
   }
 
   Future<void> _preparePaths() async {
@@ -215,7 +227,7 @@ class _RecordScreenState extends State<RecordScreen> {
     final sessionDir = p.join(appDir.path, 'golf_recordings', _sessionId);
     await Directory(sessionDir).create(recursive: true);
     _videoPath = p.join(sessionDir, 'swing.mp4');
-    _csvPath   = p.join(sessionDir, 'pose_landmarks.csv');
+    _csvPath   = p.join(sessionDir, 'pose_landmarks.live.csv');
     _audioPath = p.join(sessionDir, 'audio.wav');
     _csvWriter = PoseCsvWriter(_csvPath);
   }
@@ -353,7 +365,7 @@ class _RecordScreenState extends State<RecordScreen> {
 
         final dir = p.dirname(_videoPath);
         _sessionId = p.basename(dir);
-        _csvPath   = p.join(dir, 'pose_landmarks.csv');
+        _csvPath   = p.join(dir, 'pose_landmarks.live.csv');
         _audioPath = p.join(dir, 'audio.wav');
         _csvWriter = PoseCsvWriter(_csvPath);
 
@@ -487,6 +499,27 @@ class _RecordScreenState extends State<RecordScreen> {
       debugPrint('[RecordScreen] audio processing error: $e');
     }
 
+    // ★ 擊球事件驅動自動切片（背景）：live impacts ∪ 音訊峰值 → 切 5 秒 clip
+    //   → 只對每個 clip 跑逐幀分析（~150 幀）。全片逐幀分析完全跳過，
+    //   分析成本 = O(揮桿數)，與影片長度無關。
+    await SwingAutoClipService.saveLiveImpacts(
+        p.dirname(_videoPath), List.of(_liveImpacts));
+    final autoClipSource = RecordingHistoryEntry(
+      filePath:            _videoPath,
+      roundIndex:          1,
+      recordedAt:          _recordingStart ?? DateTime.now(),
+      durationSeconds:     duration,
+      videoType:           VideoType.original,
+      recordedAspectRatio: _config.aspectRatioMode,
+      isFrontCamera:       _isFront,
+    );
+    unawaited(SwingAutoClipService.run(
+      videoPath: _videoPath,
+      sourceEntry: autoClipSource,
+      liveImpacts: List.of(_liveImpacts),
+    ).then((clips) =>
+        debugPrint('[RecordScreen] 背景自動切片完成: ${clips.length} 桿')));
+
     try {
       debugPrint('[RecordFlow] 08 generateThumbnail path=$_videoPath');
       final thumbnailPath = await _generateThumbnail(_videoPath);
@@ -553,10 +586,13 @@ class _RecordScreenState extends State<RecordScreen> {
 
     setState(() {});
 
-    if (_isRecording && !pose.isEmpty) {
+    if (_isRecording) {
       final timeSec = _recordingStart != null
           ? DateTime.now().difference(_recordingStart!).inMilliseconds / 1000.0
           : 0.0;
+      // 即時揮桿偵測（影片時鐘；前 3 秒為偵測器校準期，漏掉的桿由音訊峰值補）
+      _liveDetector.feed(pose, timeSec);
+      if (pose.isEmpty) return;
       // 座標已歸一化，PoseFrameModel 需要像素座標 → 用固定分析幀尺寸 640×360 反算
       const imgW = 640.0;
       const imgH = 360.0;

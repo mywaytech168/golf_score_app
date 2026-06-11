@@ -15,8 +15,10 @@ import '../models/hits_summary.dart';
 import '../models/swing_hit.dart';
 import '../models/swing_posture.dart';
 import '../services/recording_history_storage.dart';
+import '../services/skeleton_csv_locator.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/statistics_service.dart';
+import '../services/swing_auto_clip_service.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/golf_analysis_service.dart';
@@ -1311,7 +1313,15 @@ class _HistoryTileState extends State<_HistoryTile> {
         if (cancelToken.isCancelled) return;
         debugPrint('[偵測擊球 V2] 音訊峰值: $peakMs');
 
-        if (peakMs.isEmpty) {
+        // 聯集錄影時 LiveSwingDetector 記錄的擊球時刻（若有），補音訊漏掉的桿
+        final liveImpacts =
+            await SwingAutoClipService.loadLiveImpacts(sessionDir);
+        final candidates = SwingAutoClipService.mergeCandidates(
+          audioPeaks: peakMs.map((ms) => ms / 1000.0).toList(),
+          liveImpacts: liveImpacts,
+        );
+
+        if (candidates.isEmpty) {
           navigator.pop();
           setState(() => _isDetecting = false);
           messenger.showSnackBar(const SnackBar(
@@ -1322,24 +1332,25 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
 
         progressNotifier.value = (0.4, '裁切片段中...');
-        // 把音訊峰值轉為 SwingHit（±2.5 秒精確窗口）
-        // 每個峰值各自對應一個 clip；若兩峰值相距 < 5 秒，clip 可重疊，這是預期行為。
-        // trimWithSurface() 保證每個 clip 精確 5 秒，以峰值為中心。
+        // 把候選轉為 SwingHit（±2.5 秒精確窗口）
+        // 每個候選各自對應一個 clip；若兩候選相距 < 5 秒，clip 可重疊，這是預期行為。
+        // trimWithSurface() 保證每個 clip 精確 5 秒，以候選為中心。
         final totalDur = widget.entry.durationSeconds.toDouble();
-        final v2Hits = peakMs.map((ms) {
-          final hitSec = ms / 1000.0;
+        final v2Hits = <SwingHit>[];
+        for (int i = 0; i < candidates.length; i++) {
+          final c = candidates[i];
           final (s2, e2) = SwingImpactDetector.calculateClipBoundaries(
-            hitSec: hitSec, totalDurationSec: totalDur);
-          return SwingHit(
-            hitIndex:   peakMs.indexOf(ms) + 1,
-            hitFrame:   (hitSec * 30).round(),
-            hitSec:     hitSec,
+            hitSec: c.sec, totalDurationSec: totalDur);
+          v2Hits.add(SwingHit(
+            hitIndex:   i + 1,
+            hitFrame:   (c.sec * 30).round(),
+            hitSec:     c.sec,
             startSec:   s2,
             endSec:     e2,
             speedValue: 0.0,
-            audioValue: 1.0,
-          );
-        }).toList();
+            audioValue: c.fromAudio ? 1.0 : 0.0,
+          ));
+        }
 
         // 直接裁切，不跑骨架分析（進度從 0.6 起算）
         await _clipAndSaveHits(
@@ -1468,22 +1479,27 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
-      // ── V1：確保骨架與音訊已分析（若無則先進行基礎分析）──────────────
-      if (!await File(csvPath).exists()) {
-        debugPrint('[偵測擊球] CSV 不存在，先執行基礎分析...');
-        final durationSeconds = widget.entry.durationSeconds;
+      // ── V1：骨架 CSV 來源（live 優先，零等待）─────────────────────────
+      // 有現成骨架（逐幀版或錄影即時 live 版）就直接用，不重新分析；
+      // 兩者都沒有時才執行逐幀基礎分析。live 版取樣較疏（~15fps），
+      // 擊球幀可能落在兩幀之間 — 使用者已知並接受此 trade-off。
+      var detectCsvPath = resolveSkeletonCsv(sessionDir);
+      if (detectCsvPath == null) {
         final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
           videoPath: widget.entry.filePath,
           sessionDir: sessionDir,
-          durationSeconds: durationSeconds,
+          durationSeconds: widget.entry.durationSeconds,
           onProgress: (label) {
             progressNotifier.value = (0.3, label);
           },
         );
         if (cancelToken.isCancelled) return;
-        if (basicAnalysis == null) {
+        if (basicAnalysis == null || !await File(csvPath).exists()) {
           throw '基礎分析失敗：無法生成骨架';
         }
+        detectCsvPath = csvPath;
+      } else {
+        debugPrint('[偵測擊球] ✅ 使用現成骨架: ${p.basename(detectCsvPath)}');
       }
 
       if (cancelToken.isCancelled) return;
@@ -1492,7 +1508,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       debugPrint('[偵測擊球] 📋 讀取 CSV 文件...');
       List<String> csvLines = [];
       try {
-        csvLines = await File(csvPath).readAsLines();
+        csvLines = await File(detectCsvPath).readAsLines();
         debugPrint('[偵測擊球] 📋 CSV 行數: ${csvLines.length}');
         int validFrames = 0; double maxConfidence = 0.0;
         for (int i = 1; i < csvLines.length; i++) {
@@ -1511,7 +1527,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 3. 骨架速度偵測擊球
       debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
       progressNotifier.value = (0.5, '偵測擊球中...');
-      final hits = await SwingImpactDetector.detect(csvPath: csvPath);
+      final hits = await SwingImpactDetector.detect(csvPath: detectCsvPath);
       if (cancelToken.isCancelled) return;
       debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
 
@@ -1655,10 +1671,25 @@ class _HistoryTileState extends State<_HistoryTile> {
     );
     messenger.showSnackBar(
       SnackBar(
-        content: Text('已生成 ${results.length} 個擊球片段 ✅\n可對每個切片執行「影片分析」加入骨架與球軌跡'),
+        content: Text('已生成 ${results.length} 個擊球片段 ✅\n骨架與 8 階段正在背景分析中'),
         duration: const Duration(seconds: 4),
       ),
     );
+
+    // 背景逐 clip 局部分析（~150 幀/clip）：補逐幀骨架 + 精確 hitSecond + 8 階段。
+    // 已分析過的 clip（如 V3 帶 skeletonJson）analyzeBasic 會直接跳過。
+    unawaited(() async {
+      for (final r in results) {
+        if (r.entry.isAnalyzed) continue;
+        try {
+          final analyzed = await SwingAutoClipService.analyzeClipEntry(r.entry);
+          await RecordingHistoryStorage.instance.upsertEntry(analyzed);
+        } catch (e) {
+          debugPrint('[偵測擊球] clip 背景分析失敗: $e');
+        }
+      }
+      debugPrint('[偵測擊球] ✅ 全部 clip 背景分析完成');
+    }());
   }
 
   /// 執行完整分析（視頻 + 音頻），合併結果
