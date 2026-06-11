@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
@@ -46,6 +47,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isConfirmObscure = true;
   bool _isLoading = false;
   bool _isGoogleSigningIn = false;
+  bool _isAppleSigningIn = false;
 
   // ── Dev 小幫手（debug only）──────────────────────────────────
   int _devTapCount = 0;
@@ -274,6 +276,108 @@ class _LoginPageState extends State<LoginPage> {
       }
     } finally {
       if (mounted) setState(() => _isGoogleSigningIn = false);
+    }
+  }
+
+  // ── Apple 登入（App Store 審核要求：有第三方登入即須提供）──────
+
+  Future<void> _handleAppleLogin() async {
+    if (_isAppleSigningIn) return;
+    setState(() => _isAppleSigningIn = true);
+
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+
+      if (credential.identityToken == null) {
+        if (!mounted) return;
+        _showSnackBar(
+          AppLocalizations.of(context).msgAppleLoginFailed('no identityToken'),
+          isError: true,
+        );
+        return;
+      }
+
+      // fullName/email 僅首次授權提供
+      final displayName = [credential.givenName, credential.familyName]
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .join(' ');
+
+      final dio = Dio();
+      final response = await dio.post(
+        'https://orvia.api.atk.tw/api/auth/apple-login',
+        data: {
+          'identityToken': credential.identityToken,
+          'email': credential.email,
+          'displayName': displayName.isEmpty ? null : displayName,
+        },
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          sendTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+        ),
+      );
+
+      final data = response.data as Map<String, dynamic>;
+      final token = data['token'] ?? data['accessToken']
+          ?? (data['data'] is Map ? data['data']['token'] ?? data['data']['accessToken'] : null);
+
+      if (token == null || (token as String).isEmpty) {
+        if (!mounted) return;
+        _showSnackBar(AppLocalizations.of(context).msgAppleLoginNoToken, isError: true);
+        return;
+      }
+
+      final user = data['user'] ?? (data['data'] is Map ? data['data']['user'] : null);
+      await AuthTokenStorage.instance.saveTokens(
+        accessToken: token,
+        refreshToken: data['refreshToken'],
+        userId: user?['id']?.toString() ?? credential.userIdentifier ?? '',
+        userEmail: user?['email'] ?? credential.email ?? '',
+      );
+
+      final prefs = await SharedPreferences.getInstance();
+      if (user?['displayName'] != null) {
+        await prefs.setString('user_name', user['displayName'].toString());
+      }
+
+      if (mounted) {
+        _showSnackBar(AppLocalizations.of(context).msgAppleLoginSuccess);
+        await _navigateToHome();
+      }
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        if (mounted) {
+          _showSnackBar(AppLocalizations.of(context).msgAppleLoginCancelled);
+        }
+      } else if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgAppleLoginFailed(e.message),
+          isError: true,
+        );
+      }
+    } on DioException catch (e) {
+      final msg = e.response?.data?['message'] ?? e.message ?? '';
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgAppleLoginFailed(msg),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar(
+          AppLocalizations.of(context).msgAppleLoginFailed(e.toString()),
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isAppleSigningIn = false);
     }
   }
 
@@ -607,6 +711,35 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         ),
+        if (!kIsWeb && Platform.isIOS) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _isAppleSigningIn ? null : _handleAppleLogin,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                foregroundColor: context.isDarkMode ? Colors.white : Colors.black,
+                side: BorderSide(
+                    color: context.isDarkMode ? Colors.white : Colors.black),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_isAppleSigningIn)
+                    const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    const Icon(Icons.apple, size: 26),
+                  const SizedBox(width: 8),
+                  Text(_isAppleSigningIn ? l10n.authAppleSigningIn : l10n.authLoginWithApple),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Center(
           child: TextButton(

@@ -144,6 +144,60 @@ namespace UploadServer.Tests
             Assert.Equal("用戶不存在", error);
         }
 
+        // ── AppleLoginAsync ──────────────────────────────────────────
+
+        [Fact]
+        public async Task AppleLogin_FirstAuth_CreatesUserWithEmail()
+        {
+            var (success, _, _, user, error) = await _service.AppleLoginAsync(
+                "apple-sub-001", "relay@privaterelay.appleid.com", "Hung Chen");
+
+            Assert.True(success, error);
+            Assert.Equal("relay@privaterelay.appleid.com", user.Email);
+            Assert.Equal("Hung Chen", user.DisplayName);
+            Assert.NotNull(await _db.UserAuths.SingleOrDefaultAsync(
+                a => a.Provider == AuthProvider.Apple && a.ProviderUserId == "apple-sub-001"));
+        }
+
+        [Fact]
+        public async Task AppleLogin_SubsequentLoginWithoutEmail_FindsSameUser()
+        {
+            var (_, _, _, first, _) = await _service.AppleLoginAsync(
+                "apple-sub-001", "relay@privaterelay.appleid.com", "Hung Chen");
+
+            // 後續登入 Apple 不再給 email/displayName
+            var (success, _, _, again, error) = await _service.AppleLoginAsync(
+                "apple-sub-001", null, null);
+
+            Assert.True(success, error);
+            Assert.Equal(first.Id, again.Id);
+            Assert.Equal(1, await _db.Users.CountAsync());
+        }
+
+        [Fact]
+        public async Task AppleLogin_SameEmailAsExistingUser_MergesAccount()
+        {
+            await SeedUserAsync(localPassword: "Abcd1234"); // u1@test.com
+
+            var (success, _, _, user, error) = await _service.AppleLoginAsync(
+                "apple-sub-002", "u1@test.com", null);
+
+            Assert.True(success, error);
+            Assert.Equal("u1", user.Id);
+            Assert.Equal(2, await _db.UserAuths.CountAsync(a => a.UserId == "u1"));
+        }
+
+        [Fact]
+        public async Task AppleLogin_NoEmailNoRecord_CreatesPlaceholderUser()
+        {
+            var (success, _, _, user, error) = await _service.AppleLoginAsync(
+                "apple-sub-003-long-id", null, null);
+
+            Assert.True(success, error);
+            Assert.StartsWith("apple_", user.Email);
+            Assert.EndsWith("@apple.local", user.Email);
+        }
+
         // ── SetPasswordAsync ─────────────────────────────────────────
 
         [Fact]

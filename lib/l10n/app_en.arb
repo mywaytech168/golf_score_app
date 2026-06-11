@@ -38,6 +38,8 @@
   "authSocialDivider": "Or sign in with social account",
   "authLoginWithGoogle": "Continue with Google",
   "authGoogleSigningIn": "Signing in with Google...",
+  "authLoginWithApple": "Continue with Apple",
+  "authAppleSigningIn": "Signing in with Apple...",
   "authNoAccount": "Don't have an account? Register now",
   "authHaveAccount": "Already have an account? Back to Login",
 
@@ -76,6 +78,15 @@
     }
   },
   "msgGoogleLoginNoToken": "Google login failed: server did not return an auth token",
+  "msgAppleLoginCancelled": "Apple sign-in cancelled",
+  "msgAppleLoginSuccess": "Apple sign-in successful, welcome back!",
+  "msgAppleLoginFailed": "Apple sign-in failed: {error}",
+  "@msgAppleLoginFailed": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "msgAppleLoginNoToken": "Apple sign-in failed: server did not return an auth token",
 
   "permTitle": "Please Allow Bluetooth & Location",
   "permSubtitle": "Bluetooth permission is required on first login.",

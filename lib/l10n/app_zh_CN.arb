@@ -38,6 +38,8 @@
   "authSocialDivider": "或使用社交账号快速登录",
   "authLoginWithGoogle": "使用 Google 登录",
   "authGoogleSigningIn": "Google 登录中...",
+  "authLoginWithApple": "使用 Apple 登录",
+  "authAppleSigningIn": "Apple 登录中...",
   "authNoAccount": "还没有账号？立即注册",
   "authHaveAccount": "已有账号？返回登录",
 
@@ -62,6 +64,10 @@
   "msgGoogleLoginSuccess": "Google 登录成功，欢迎回来！",
   "msgGoogleLoginFailed": "Google 登录失败：{error}",
   "msgGoogleLoginNoToken": "Google 登录失败：服务器未返回认证令牌",
+  "msgAppleLoginCancelled": "已取消 Apple 登录流程",
+  "msgAppleLoginSuccess": "Apple 登录成功，欢迎回来！",
+  "msgAppleLoginFailed": "Apple 登录失败：{error}",
+  "msgAppleLoginNoToken": "Apple 登录失败：服务器未返回认证令牌",
 
   "permTitle": "请先授权蓝牙与定位",
   "permSubtitle": "首次登录时需要获取蓝牙权限。",

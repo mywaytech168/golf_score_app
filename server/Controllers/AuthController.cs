@@ -297,6 +297,65 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// Apple Sign In 登入（iOS App Store 審核要求：有第三方登入即須提供）
+        /// POST: /api/auth/apple-login
+        /// </summary>
+        [HttpPost("apple-login")]
+        public async Task<IActionResult> AppleLogin(
+            [FromBody] AppleLoginRequest request,
+            [FromServices] AppleTokenValidator appleValidator)
+        {
+            try
+            {
+                if (request == null || string.IsNullOrEmpty(request.IdentityToken))
+                {
+                    return BadRequest(new GoogleLoginResponse
+                    {
+                        Success = false,
+                        Message = "Apple identity token 為必需",
+                    });
+                }
+
+                var (valid, sub, tokenEmail, validateError) =
+                    await appleValidator.ValidateAsync(request.IdentityToken);
+                if (!valid)
+                {
+                    _logger.LogWarning("❌ Apple token 驗證失敗: {Error}", validateError);
+                    return Unauthorized(new GoogleLoginResponse
+                    {
+                        Success = false,
+                        Message = "無效的 Apple identity token",
+                    });
+                }
+
+                // email 以 token 內為準；token 沒有時才用 request（首次授權 fullName/email 走 request）
+                var email = !string.IsNullOrEmpty(tokenEmail) ? tokenEmail : request.Email;
+
+                var (success, token, refreshToken, user, error) = await _authService.AppleLoginAsync(
+                    sub!, email, request.DisplayName);
+
+                if (!success)
+                    return BadRequest(new GoogleLoginResponse { Success = false, Message = error });
+
+                _logger.LogInformation("✅ Apple 登入成功: AppleId={Sub}", sub);
+
+                return Ok(new GoogleLoginResponse
+                {
+                    Success = true,
+                    Message = "Apple 登入成功",
+                    Token = token,
+                    RefreshToken = refreshToken,
+                    User = user,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Apple 登入失敗");
+                return StatusCode(500, new GoogleLoginResponse { Success = false, Message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// 綁定 Google 帳號至當前登入用戶
         /// POST: /api/auth/google/link  body: { "idToken": "..." }
         /// </summary>

@@ -63,6 +63,7 @@ builder.Services.AddDbContext<VideoDbContext>(options =>
 // 2. 服務層依賴注入
 // ============================================================
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddSingleton<AppleTokenValidator>(); // JWKS 快取需跨請求共用
 builder.Services.AddSingleton<B2Service>();
 builder.Services.AddScoped<ShareService>();
 builder.Services.AddScoped<UserService>();

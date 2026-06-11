@@ -85,6 +85,18 @@ namespace UploadServer.DTOs
         public UserDto User { get; set; }
     }
 
+    public class AppleLoginRequest
+    {
+        /// <summary>Apple identity token (JWT, from sign_in_with_apple package)</summary>
+        public string IdentityToken { get; set; }
+
+        /// <summary>Apple 僅在首次授權提供，後續為 null</summary>
+        public string? Email { get; set; }
+
+        /// <summary>Apple 僅在首次授權提供（givenName + familyName）</summary>
+        public string? DisplayName { get; set; }
+    }
+
     // ============================================================
     // Token 刷新
     // ============================================================

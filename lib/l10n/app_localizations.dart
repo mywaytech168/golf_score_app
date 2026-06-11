@@ -310,6 +310,18 @@ abstract class AppLocalizations {
   /// **'Signing in with Google...'**
   String get authGoogleSigningIn;
 
+  /// No description provided for @authLoginWithApple.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Apple'**
+  String get authLoginWithApple;
+
+  /// No description provided for @authAppleSigningIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Signing in with Apple...'**
+  String get authAppleSigningIn;
+
   /// No description provided for @authNoAccount.
   ///
   /// In en, this message translates to:
@@ -435,6 +447,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Google login failed: server did not return an auth token'**
   String get msgGoogleLoginNoToken;
+
+  /// No description provided for @msgAppleLoginCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in cancelled'**
+  String get msgAppleLoginCancelled;
+
+  /// No description provided for @msgAppleLoginSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in successful, welcome back!'**
+  String get msgAppleLoginSuccess;
+
+  /// No description provided for @msgAppleLoginFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in failed: {error}'**
+  String msgAppleLoginFailed(Object error);
+
+  /// No description provided for @msgAppleLoginNoToken.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple sign-in failed: server did not return an auth token'**
+  String get msgAppleLoginNoToken;
 
   /// No description provided for @permTitle.
   ///

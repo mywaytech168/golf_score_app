@@ -114,6 +114,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get authGoogleSigningIn => 'Google 登入中...';
 
   @override
+  String get authLoginWithApple => '使用 Apple 登入';
+
+  @override
+  String get authAppleSigningIn => 'Apple 登入中...';
+
+  @override
   String get authNoAccount => '還沒有帳戶？立即註冊';
 
   @override
@@ -181,6 +187,20 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get msgGoogleLoginNoToken => 'Google 登入失敗：後端未返回認證令牌';
+
+  @override
+  String get msgAppleLoginCancelled => '已取消 Apple 登入流程';
+
+  @override
+  String get msgAppleLoginSuccess => 'Apple 登入成功，歡迎回來！';
+
+  @override
+  String msgAppleLoginFailed(Object error) {
+    return 'Apple 登入失敗：$error';
+  }
+
+  @override
+  String get msgAppleLoginNoToken => 'Apple 登入失敗：後端未返回認證令牌';
 
   @override
   String get permTitle => '請先授權藍牙與定位';
@@ -970,6 +990,12 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get authGoogleSigningIn => 'Google 登录中...';
 
   @override
+  String get authLoginWithApple => '使用 Apple 登录';
+
+  @override
+  String get authAppleSigningIn => 'Apple 登录中...';
+
+  @override
   String get authNoAccount => '还没有账号？立即注册';
 
   @override
@@ -1037,6 +1063,20 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get msgGoogleLoginNoToken => 'Google 登录失败：服务器未返回认证令牌';
+
+  @override
+  String get msgAppleLoginCancelled => '已取消 Apple 登录流程';
+
+  @override
+  String get msgAppleLoginSuccess => 'Apple 登录成功，欢迎回来！';
+
+  @override
+  String msgAppleLoginFailed(Object error) {
+    return 'Apple 登录失败：$error';
+  }
+
+  @override
+  String get msgAppleLoginNoToken => 'Apple 登录失败：服务器未返回认证令牌';
 
   @override
   String get permTitle => '请先授权蓝牙与定位';
@@ -1826,6 +1866,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get authGoogleSigningIn => 'Google 登入中...';
 
   @override
+  String get authLoginWithApple => '使用 Apple 登入';
+
+  @override
+  String get authAppleSigningIn => 'Apple 登入中...';
+
+  @override
   String get authNoAccount => '還沒有帳戶？立即註冊';
 
   @override
@@ -1893,6 +1939,20 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get msgGoogleLoginNoToken => 'Google 登入失敗：後端未返回認證令牌';
+
+  @override
+  String get msgAppleLoginCancelled => '已取消 Apple 登入流程';
+
+  @override
+  String get msgAppleLoginSuccess => 'Apple 登入成功，歡迎回來！';
+
+  @override
+  String msgAppleLoginFailed(Object error) {
+    return 'Apple 登入失敗：$error';
+  }
+
+  @override
+  String get msgAppleLoginNoToken => 'Apple 登入失敗：後端未返回認證令牌';
 
   @override
   String get permTitle => '請先授權藍牙與定位';

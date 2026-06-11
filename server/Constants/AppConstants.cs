@@ -55,6 +55,7 @@ namespace UploadServer.Constants
     {
         public const string Local  = "local";
         public const string Google = "google";
+        public const string Apple  = "apple";
     }
 
     public static class AnalysisSource

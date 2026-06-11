@@ -117,6 +117,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get authGoogleSigningIn => 'Signing in with Google...';
 
   @override
+  String get authLoginWithApple => 'Continue with Apple';
+
+  @override
+  String get authAppleSigningIn => 'Signing in with Apple...';
+
+  @override
   String get authNoAccount => 'Don\'t have an account? Register now';
 
   @override
@@ -188,6 +194,21 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get msgGoogleLoginNoToken =>
       'Google login failed: server did not return an auth token';
+
+  @override
+  String get msgAppleLoginCancelled => 'Apple sign-in cancelled';
+
+  @override
+  String get msgAppleLoginSuccess => 'Apple sign-in successful, welcome back!';
+
+  @override
+  String msgAppleLoginFailed(Object error) {
+    return 'Apple sign-in failed: $error';
+  }
+
+  @override
+  String get msgAppleLoginNoToken =>
+      'Apple sign-in failed: server did not return an auth token';
 
   @override
   String get permTitle => 'Please Allow Bluetooth & Location';

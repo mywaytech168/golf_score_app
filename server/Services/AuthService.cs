@@ -218,6 +218,95 @@ namespace UploadServer.Services
         }
 
         // ============================================================
+        // Apple Sign In 登入 / 註冊 / 帳號合併
+        // 注意：Apple 僅在首次授權提供 email/displayName，後續登入皆為 null
+        // ============================================================
+        public async Task<(bool Success, string Token, string RefreshToken, UserDto User, string Error)>
+            AppleLoginAsync(string appleId, string? email, string? displayName)
+        {
+            try
+            {
+                // 1. 找到現有的 Apple UserAuth
+                var appleAuth = await _context.UserAuths
+                    .Include(a => a.User)
+                    .FirstOrDefaultAsync(a => a.Provider == AuthProvider.Apple && a.ProviderUserId == appleId);
+
+                User user;
+
+                if (appleAuth != null)
+                {
+                    user = appleAuth.User;
+                    appleAuth.LastUsedAt = DateTime.UtcNow;
+                    user.LastLoginAt = DateTime.UtcNow;
+                    user.UpdatedAt   = DateTime.UtcNow;
+                }
+                else
+                {
+                    // 2. 以 email 合併現有 User（首次授權才有 email；private relay 信箱也視為有效）
+                    user = !string.IsNullOrEmpty(email)
+                        ? await _context.Users.FirstOrDefaultAsync(u => u.Email == email)
+                        : null;
+
+                    if (user != null)
+                    {
+                        _context.UserAuths.Add(new UserAuth
+                        {
+                            UserId         = user.Id,
+                            Provider       = AuthProvider.Apple,
+                            ProviderUserId = appleId,
+                            CreatedAt      = DateTime.UtcNow,
+                            LastUsedAt     = DateTime.UtcNow,
+                        });
+                        user.LastLoginAt = DateTime.UtcNow;
+                        user.UpdatedAt   = DateTime.UtcNow;
+
+                        _logger.LogInformation("✅ Apple 帳號已合併至現有 User: UserId={UserId}", user.Id);
+                    }
+                    else
+                    {
+                        // 3. 全新 Apple 用戶。非首次授權且查無記錄時 email 為 null
+                        //    （例如用戶移除 App 授權後 DB 又遺失），以佔位信箱建立。
+                        var sub8 = appleId[..Math.Min(8, appleId.Length)];
+                        user = new User
+                        {
+                            Email       = email ?? $"apple_{sub8}@apple.local",
+                            DisplayName = string.IsNullOrEmpty(displayName) ? "Golfer" : displayName,
+                            Username    = $"apple_{sub8}",
+                            Status      = UserStatus.Active,
+                            LastLoginAt = DateTime.UtcNow,
+                            CreatedAt   = DateTime.UtcNow,
+                            UpdatedAt   = DateTime.UtcNow,
+                        };
+
+                        _context.Users.Add(user);
+                        _context.UserAuths.Add(new UserAuth
+                        {
+                            UserId         = user.Id,
+                            Provider       = AuthProvider.Apple,
+                            ProviderUserId = appleId,
+                            CreatedAt      = DateTime.UtcNow,
+                            LastUsedAt     = DateTime.UtcNow,
+                        });
+
+                        _logger.LogInformation("✅ 新 Apple 用戶已建立: UserId={UserId}", user.Id);
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+
+                var providers = await GetProvidersAsync(user.Id);
+                var (token, refreshToken) = GenerateTokens(user, providers);
+
+                return (true, token, refreshToken, MapUserToDto(user, providers), null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Apple 登入失敗");
+                return (false, null, null, null, ex.Message);
+            }
+        }
+
+        // ============================================================
         // 刷新 Token
         // ============================================================
         public async Task<(string NewToken, string NewRefreshToken)> RefreshTokenAsync(string refreshToken)
