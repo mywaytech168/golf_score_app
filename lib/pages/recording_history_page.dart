@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/export_quality.dart';
+import '../theme/app_theme.dart';
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
 import '../models/swing_hit.dart';
@@ -569,10 +570,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           width: 32,
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF6F7B86),
+              color: context.textSecondary,
             ),
           ),
         ),
@@ -640,7 +641,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_selectedGoodShot == false) items.add(('壞球',   const Color(0xFFF44336)));
     if (_videoTypeIsLong  == true)  items.add(('長影片', const Color(0xFF1565C0)));
     if (_videoTypeIsLong  == false) items.add(('短影片', const Color(0xFF757575)));
-    if (_aiAnalyzedFilter == true)  items.add(('已分析', const Color(0xFF1E8E5A)));
+    if (_aiAnalyzedFilter == true)  items.add(('已分析', const Color(0xFF1AA87C)));
     if (_aiAnalyzedFilter == false) items.add(('未分析', const Color(0xFF9AA6B2)));
     if (_aiCoachFilter    == true)  items.add(('AI已分析', const Color(0xFF7C3AED)));
     if (_aiCoachFilter    == false) items.add(('AI未分析', const Color(0xFF9AA6B2)));
@@ -664,8 +665,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_sortBy != _SortBy.date)    items.add((_sortBy.label, const Color(0xFF1565C0)));
 
     if (items.isEmpty) {
-      return const Text('全部',
-          style: TextStyle(fontSize: 11, color: Color(0xFF9AA6B2)));
+      return Text('全部',
+          style: TextStyle(fontSize: 11, color: context.textHint));
     }
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -866,7 +867,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             : '共 ${_entries.length} 筆 · 好球 $goodCount · 壞球 $badCount';
 
     return Scaffold(
-        backgroundColor: const Color(0xFFF4F6F9),
+        backgroundColor: context.bgPage,
         body: Column(
           children: [
             // ── 綠色頂部面板 ─────────────────────────────────────
@@ -886,18 +887,18 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             ),
             // ── 文字搜尋欄（常駐）────────────────────────────────
             Container(
-              color: Colors.white,
+              color: context.bgCard,
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: SizedBox(
                 height: 38,
                 child: TextField(
                   controller: _searchController,
                   textInputAction: TextInputAction.search,
-                  style: const TextStyle(fontSize: 14, color: Color(0xFF1A1A2E)),
+                  style: TextStyle(fontSize: 14, color: context.textPrimary),
                   decoration: InputDecoration(
                     hintText: '搜尋影片名稱、日期…',
-                    hintStyle: const TextStyle(fontSize: 13.5, color: Color(0xFFB0B8C1)),
-                    prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF9AA6B2)),
+                    hintStyle: TextStyle(fontSize: 13.5, color: context.textHint),
+                    prefixIcon: Icon(Icons.search_rounded, size: 18, color: context.textHint),
                     prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                     suffixIcon: _searchQuery.isNotEmpty
                         ? GestureDetector(
@@ -905,12 +906,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                               _searchController.clear();
                               FocusScope.of(context).unfocus();
                             },
-                            child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF9AA6B2)),
+                            child: Icon(Icons.close_rounded, size: 16, color: context.textHint),
                           )
                         : null,
                     suffixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                     filled: true,
-                    fillColor: const Color(0xFFF4F6F9),
+                    fillColor: context.bgInset,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -918,7 +919,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFF1E8E5A), width: 1.2),
+                      borderSide: const BorderSide(color: Color(0xFF1AA87C), width: 1.2),
                     ),
                   ),
                 ),
@@ -926,7 +927,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
             ),
             // ── 篩選 & 排序面板（可折疊）────────────────────────
             Container(
-              color: Colors.white,
+              color: context.bgCard,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -940,20 +941,20 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                       child: Row(
                         children: [
                           const Icon(Icons.tune_rounded,
-                              size: 15, color: Color(0xFF1E8E5A)),
+                              size: 15, color: Color(0xFF1AA87C)),
                           const SizedBox(width: 6),
-                          const Text('篩選與排序',
+                          Text('篩選與排序',
                               style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: Color(0xFF123B70))),
+                                  color: context.textPrimary)),
                           if (_activeFilterCount > 0) ...[
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 1),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1E8E5A),
+                                color: const Color(0xFF1AA87C),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text('$_activeFilterCount',
@@ -972,10 +973,10 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           AnimatedRotation(
                             turns: _filtersExpanded ? 0.5 : 0,
                             duration: const Duration(milliseconds: 200),
-                            child: const Icon(
+                            child: Icon(
                                 Icons.keyboard_arrow_down_rounded,
                                 size: 20,
-                                color: Color(0xFF9AA6B2)),
+                                color: context.textHint),
                           ),
                         ],
                       ),
@@ -994,32 +995,32 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 _filterRow('好/壞', [
-                                  _chip('全部',   _selectedGoodShot == null,  const Color(0xFF1E8E5A), () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
+                                  _chip('全部',   _selectedGoodShot == null,  const Color(0xFF1AA87C), () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
                                   _chip('好球',   _selectedGoodShot == true,  const Color(0xFF4CAF50), () { setState(() => _selectedGoodShot = true);  _saveFilters(); }),
                                   _chip('壞球',   _selectedGoodShot == false, const Color(0xFFF44336), () { setState(() => _selectedGoodShot = false); _saveFilters(); }),
                                 ]),
                                 _filterRow('影片', [
-                                  _chip('全部',   _videoTypeIsLong == null,  const Color(0xFF1E8E5A), () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
+                                  _chip('全部',   _videoTypeIsLong == null,  const Color(0xFF1AA87C), () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
                                   _chip('長影片', _videoTypeIsLong == true,  const Color(0xFF1565C0), () { setState(() => _videoTypeIsLong = true);  _saveFilters(); }),
                                   _chip('短影片', _videoTypeIsLong == false, const Color(0xFF757575), () { setState(() => _videoTypeIsLong = false); _saveFilters(); }),
                                 ]),
                                 _filterRow('分析', [
-                                  _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
+                                  _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1AA87C), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
                                   _chip('已分析', _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
                                   _chip('未分析', _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
                                 ]),
                                 _filterRow('AI', [
-                                  _chip('全部',   _aiCoachFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
+                                  _chip('全部',   _aiCoachFilter == null,  const Color(0xFF1AA87C), () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
                                   _chip('已分析', _aiCoachFilter == true,  const Color(0xFF7C3AED), () { setState(() => _aiCoachFilter = true);  _saveFilters(); }),
                                   _chip('未分析', _aiCoachFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiCoachFilter = false); _saveFilters(); }),
                                 ]),
                                 _filterRow('切片', [
-                                  _chip('全部',   _clippedFilter == null,  const Color(0xFF1E8E5A), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
+                                  _chip('全部',   _clippedFilter == null,  const Color(0xFF1AA87C), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
                                   _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
                                   _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
                                 ]),
                                 _filterRow('姿勢', [
-                                  _chip('全部', _postureFilter == null, const Color(0xFF1E8E5A), () { setState(() => _postureFilter = null); _saveFilters(); }),
+                                  _chip('全部', _postureFilter == null, const Color(0xFF1AA87C), () { setState(() => _postureFilter = null); _saveFilters(); }),
                                   _chip(
                                     SwingPosture.zhName(SwingPosture.good),
                                     _postureFilter == SwingPosture.good,
@@ -1035,7 +1036,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                     ),
                                 ]),
                                 _filterRow('日期', [
-                                  _chip('全部', _datePreset == null,    const Color(0xFF1E8E5A), () { setState(() { _datePreset = null; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip('全部', _datePreset == null,    const Color(0xFF1AA87C), () { setState(() { _datePreset = null; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
                                   _chip('今天', _datePreset == 'today', const Color(0xFF2196F3), () { setState(() { _datePreset = 'today'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
                                   _chip('本週', _datePreset == 'week',  const Color(0xFF2196F3), () { setState(() { _datePreset = 'week';  _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
                                   _chip('本月', _datePreset == 'month', const Color(0xFF2196F3), () { setState(() { _datePreset = 'month'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
@@ -1050,7 +1051,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                   ),
                                 ]),
                                 _filterRow('排序', [
-                                  _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1E8E5A), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
+                                  _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1AA87C), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
                                   _chip('最佳速度', _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
                                   _chip('片段時間', _sortBy == _SortBy.clipTime,  const Color(0xFFFF9800), () { setState(() => _sortBy = _SortBy.clipTime);  _saveFilters(); }),
                                 ]),
@@ -1059,7 +1060,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                           )
                         : const SizedBox.shrink(),
                   ),
-                  const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  Divider(height: 1, thickness: 1, color: context.borderColor),
                 ],
               ),
             ),
@@ -1109,17 +1110,17 @@ class _EmptyHistoryView extends StatelessWidget {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(Icons.video_collection_outlined, size: 72, color: Color(0xFF9AA6B2)),
-          SizedBox(height: 16),
+        children: [
+          Icon(Icons.video_collection_outlined, size: 72, color: context.textHint),
+          const SizedBox(height: 16),
           Text(
             '目前沒有錄影紀錄',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF123B70)),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: context.textPrimary),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             '完成一次錄影後即可在此查看歷史影片。',
-            style: TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+            style: TextStyle(fontSize: 13, color: context.textSecondary),
           ),
         ],
       ),
@@ -1139,23 +1140,23 @@ class _SearchEmptyView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.search_off_rounded, size: 64, color: Color(0xFF9AA6B2)),
+          Icon(Icons.search_off_rounded, size: 64, color: context.textHint),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             '找不到符合的影片',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Color(0xFF123B70)),
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: context.textPrimary),
           ),
           const SizedBox(height: 6),
           Text(
             '沒有包含「$query」的紀錄',
-            style: const TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+            style: TextStyle(fontSize: 13, color: context.textSecondary),
           ),
           const SizedBox(height: 20),
           TextButton.icon(
             onPressed: onClear,
             icon: const Icon(Icons.close_rounded, size: 16),
             label: const Text('清除搜尋'),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFF1E8E5A)),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF1AA87C)),
           ),
         ],
       ),
@@ -2310,7 +2311,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       children: [
         // ── 主卡片 ──────────────────────────────────────────────
         Material(
-      color: Colors.white,
+      color: context.bgCard,
       borderRadius: BorderRadius.circular(16),
       shadowColor: Colors.black.withValues(alpha: 0.08),
       elevation: 2,
@@ -2343,10 +2344,10 @@ class _HistoryTileState extends State<_HistoryTile> {
                         // 標題
                         Text(
                           widget.entry.displayTitle,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF123B70),
+                            color: context.textPrimary,
                             height: 1.3,
                           ),
                           maxLines: 2,
@@ -2355,14 +2356,14 @@ class _HistoryTileState extends State<_HistoryTile> {
                         const SizedBox(height: 5),
                         // 時間資訊
                         Row(children: [
-                          const Icon(Icons.access_time_rounded,
-                              size: 12, color: Color(0xFF9AA6B2)),
+                          Icon(Icons.access_time_rounded,
+                              size: 12, color: context.textHint),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               '${widget.formattedTime} · ${widget.entry.durationSeconds}秒',
-                              style: const TextStyle(
-                                  fontSize: 11, color: Color(0xFF9AA6B2)),
+                              style: TextStyle(
+                                  fontSize: 11, color: context.textHint),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -2371,14 +2372,14 @@ class _HistoryTileState extends State<_HistoryTile> {
                         if (widget.formattedImportTime != null) ...[
                           const SizedBox(height: 2),
                           Row(children: [
-                            const Icon(Icons.download_rounded,
-                                size: 12, color: Color(0xFF9AA6B2)),
+                            Icon(Icons.download_rounded,
+                                size: 12, color: context.textHint),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
                                 '${widget.formattedImportTime!}${widget.entry.sharerName != null ? '  · 來自 ${widget.entry.sharerName}' : ''}',
-                                style: const TextStyle(
-                                    fontSize: 11, color: Color(0xFF9AA6B2)),
+                                style: TextStyle(
+                                    fontSize: 11, color: context.textHint),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -2405,7 +2406,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 true)
                               _badge('無聲音', const Color(0xFF9E9E9E)),
                             if (widget.entry.isAnalyzed)
-                              _badge('已分析', const Color(0xFF1E8E5A)),
+                              _badge('已分析', const Color(0xFF1AA87C)),
                             if (widget.entry.hasAiCoachAnalysis)
                               _badgeWithIcon('AI', const Color(0xFF7C3AED),
                                   Icons.psychology_rounded),
@@ -2459,13 +2460,13 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 Container(
                                   width: 1,
                                   height: 13,
-                                  color: const Color(0xFFE0E4EA),
+                                  color: context.borderColor,
                                 ),
                                 const SizedBox(width: 10),
-                                const Text(
+                                Text(
                                   '甜蜜點',
                                   style: TextStyle(
-                                      fontSize: 11, color: Color(0xFF9AA6B2)),
+                                      fontSize: 11, color: context.textHint),
                                 ),
                                 const SizedBox(width: 4),
                                 Container(
@@ -2548,7 +2549,7 @@ class _HistoryTileState extends State<_HistoryTile> {
               },
             ),
             // ── 底部操作列 ────────────────────────────────────────
-            const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+            Divider(height: 1, thickness: 1, color: context.borderColor),
             IntrinsicHeight(
               child: Row(
                 children: [
@@ -2560,16 +2561,16 @@ class _HistoryTileState extends State<_HistoryTile> {
                         builder: (_) =>
                             RecordingDetailPage(entry: widget.entry))),
                   ),
-                  const VerticalDivider(
-                      width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  VerticalDivider(
+                      width: 1, thickness: 1, color: context.borderColor),
                   _actionBtn(
                     icon: Icons.play_arrow_rounded,
                     label: '播放',
-                    color: const Color(0xFF1E8E5A),
+                    color: const Color(0xFF1AA87C),
                     onTap: widget.onTap,
                   ),
-                  const VerticalDivider(
-                      width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  VerticalDivider(
+                      width: 1, thickness: 1, color: context.borderColor),
                   if (_isLongVideo && _isOriginalVideo && widget.entry.isClipped && hasClips)
                     _actionBtn(
                       icon: _isExpanded
@@ -2615,9 +2616,9 @@ class _HistoryTileState extends State<_HistoryTile> {
           right: 4,
           child: PopupMenuButton<_HistoryMenuAction>(
             tooltip: '更多操作',
-            icon: const Icon(
+            icon: Icon(
                 Icons.more_vert_rounded,
-                color: Color(0xFF9AA6B2),
+                color: context.textHint,
                 size: 20),
             padding: EdgeInsets.zero,
             onSelected: (action) {
@@ -2695,7 +2696,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                     Icon(Icons.share_outlined,
                         size: 16,
                         color: canShare
-                            ? const Color(0xFF1E8E5A)
+                            ? const Color(0xFF1AA87C)
                             : Colors.grey),
                     const SizedBox(width: 8),
                     Text('分享連結',
@@ -2711,7 +2712,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                         size: 16,
                         color: _isDownloading
                             ? Colors.grey
-                            : const Color(0xFF1E8E5A)),
+                            : const Color(0xFF1AA87C)),
                     const SizedBox(width: 8),
                     Text(_isDownloading ? '下載中...' : '下載影片'),
                   ]),
@@ -2798,11 +2799,11 @@ class _HistoryPreview extends StatelessWidget {
             width: 130,
             height: 82,
             decoration: BoxDecoration(
-              color: const Color(0xFFE5EBF5),
+              color: context.bgInset,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.videocam_outlined,
-                color: Color(0xFF123B70), size: 32),
+            child: Icon(Icons.videocam_outlined,
+                color: context.textSecondary, size: 32),
           );
 
     final overlayDeco = BoxDecoration(
@@ -3377,7 +3378,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
           child: Stack(
             children: [
           Material(
-            color: Colors.white,
+            color: context.bgCard,
             borderRadius: BorderRadius.circular(12),
             elevation: 1,
             shadowColor: Colors.black.withValues(alpha: 0.06),
@@ -3407,10 +3408,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                 clip.customName?.trim().isNotEmpty == true
                                     ? clip.customName!.trim()
                                     : '第 ${widget.clipIndex} 球',
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
-                                    color: Color(0xFF123B70)),
+                                    color: context.textPrimary),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -3422,9 +3423,9 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                   const SizedBox(width: 3),
                                   Text(
                                     '擊球 @ ${clip.hitSecond!.toStringAsFixed(1)}s',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                         fontSize: 11,
-                                        color: Color(0xFF9AA6B2)),
+                                        color: context.textHint),
                                   ),
                                 ]),
                               ],
@@ -3433,9 +3434,9 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                 const SizedBox(height: 2),
                                 Text(
                                   '片段 ${clip.startSecond!.toStringAsFixed(1)}s ~ ${clip.endSecond!.toStringAsFixed(1)}s',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 11,
-                                      color: Color(0xFF9AA6B2)),
+                                      color: context.textHint),
                                 ),
                               ],
                               const SizedBox(height: 5),
@@ -3445,7 +3446,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                 runSpacing: 3,
                                 children: [
                                   if (clip.isAnalyzed)
-                                    _smallBadge('已分析', const Color(0xFF1E8E5A)),
+                                    _smallBadge('已分析', const Color(0xFF1AA87C)),
                                   if (clip.hasAiCoachAnalysis)
                                     _smallBadge('AI', const Color(0xFF7C3AED)),
                                   if (clip.swingPostureLabel != null)
@@ -3497,13 +3498,13 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     Container(
                                         width: 1,
                                         height: 11,
-                                        color: const Color(0xFFE0E4EA)),
+                                        color: context.borderColor),
                                     const SizedBox(width: 8),
-                                    const Text(
+                                    Text(
                                       '甜蜜點',
                                       style: TextStyle(
                                           fontSize: 10,
-                                          color: Color(0xFF9AA6B2)),
+                                          color: context.textHint),
                                     ),
                                     const SizedBox(width: 4),
                                     Container(
@@ -3564,7 +3565,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     ),
                   ),
                   // ── 操作列 ──────────────────────────────────
-                  const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                  Divider(height: 1, thickness: 1, color: context.borderColor),
                   IntrinsicHeight(
                     child: Row(
                       children: [
@@ -3578,16 +3579,16 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     RecordingDetailPage(entry: clip)),
                           ),
                         ),
-                        const VerticalDivider(
-                            width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                        VerticalDivider(
+                            width: 1, thickness: 1, color: context.borderColor),
                         _clipBtn(
                           icon: Icons.play_arrow_rounded,
                           label: '播放',
-                          color: const Color(0xFF1E8E5A),
+                          color: const Color(0xFF1AA87C),
                           onTap: _play,
                         ),
-                        const VerticalDivider(
-                            width: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                        VerticalDivider(
+                            width: 1, thickness: 1, color: context.borderColor),
                         if (!clip.isAnalyzed)
                           _clipBtn(
                             icon: Icons.analytics_rounded,
@@ -3617,8 +3618,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
             right: 2,
             child: PopupMenuButton<_ClipMenuAction>(
               tooltip: '更多操作',
-              icon: const Icon(Icons.more_vert_rounded,
-                  size: 18, color: Color(0xFF9AA6B2)),
+              icon: Icon(Icons.more_vert_rounded,
+                  size: 18, color: context.textHint),
               padding: EdgeInsets.zero,
               onSelected: (action) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3650,7 +3651,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     Icon(Icons.share_outlined,
                         size: 16,
                         color: clip.isAnalyzed
-                            ? const Color(0xFF1E8E5A)
+                            ? const Color(0xFF1AA87C)
                             : Colors.grey),
                     const SizedBox(width: 8),
                     Text('分享連結',
@@ -3667,7 +3668,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         size: 16,
                         color: _isDownloading
                             ? Colors.grey
-                            : const Color(0xFF1E8E5A)),
+                            : const Color(0xFF1AA87C)),
                     const SizedBox(width: 8),
                     Text(_isDownloading ? '下載中...' : '下載影片'),
                   ]),
@@ -3787,7 +3788,7 @@ class _ClipThumbnail extends StatelessWidget {
             width: 90,
             height: 60,
             decoration: BoxDecoration(
-              color: const Color(0xFFE5EBF5),
+              color: context.bgInset,
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.content_cut_rounded,
@@ -3841,9 +3842,9 @@ class _ComparePickerSheet extends StatelessWidget {
       maxChildSize: 0.85,
       builder: (_, scrollController) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: context.bgCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3866,18 +3867,18 @@ class _ComparePickerSheet extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       '⚖️ 選擇比較影片',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF123B70),
+                        color: context.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '將與「${currentEntry.displayTitle}」對軸比較',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, color: context.textSecondary),
                     ),
                   ],
                 ),
@@ -3959,10 +3960,10 @@ class _DateRangeChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? color : Colors.white,
+          color: selected ? color : context.bgCard,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? color : const Color(0xFFBBC4CE),
+            color: selected ? color : context.borderColor,
             width: 1.2,
           ),
         ),
@@ -3972,7 +3973,7 @@ class _DateRangeChip extends StatelessWidget {
             Icon(
               Icons.date_range_rounded,
               size: 13,
-              color: selected ? Colors.white : const Color(0xFF4A5568),
+              color: selected ? Colors.white : context.textSecondary,
             ),
             const SizedBox(width: 4),
             Text(
@@ -3980,7 +3981,7 @@ class _DateRangeChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: selected ? Colors.white : const Color(0xFF4A5568),
+                color: selected ? Colors.white : context.textSecondary,
               ),
             ),
           ],
@@ -4011,10 +4012,10 @@ class _HistoryFilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? selectedColor : Colors.white,
+          color: selected ? selectedColor : context.bgCard,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? selectedColor : const Color(0xFFBBC4CE),
+            color: selected ? selectedColor : context.borderColor,
             width: 1.2,
           ),
         ),
@@ -4023,7 +4024,7 @@ class _HistoryFilterChip extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: selected ? Colors.white : const Color(0xFF4A5568),
+            color: selected ? Colors.white : context.textSecondary,
           ),
         ),
       ),
@@ -4132,7 +4133,7 @@ class _SelectAiModeDialog extends StatelessWidget {
       onTap: () => Navigator.pop(ctx, version),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: Color(0xFFE5E7EB)),
+        side: BorderSide(color: ctx.borderColor),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
     );
@@ -4255,7 +4256,7 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
         children: [
           Text(
             widget.description,
-            style: const TextStyle(fontSize: 13.5, color: Color(0xFF4B5563), height: 1.5),
+            style: TextStyle(fontSize: 13.5, color: context.textSecondary, height: 1.5),
           ),
           const SizedBox(height: 14),
           // ── 今日不再提醒 ──
@@ -4273,13 +4274,13 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                     activeColor: const Color(0xFF6B7280),
-                    side: const BorderSide(color: Color(0xFFB0B8C1)),
+                    side: BorderSide(color: context.textHint),
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   '今日不再提醒',
-                  style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+                  style: TextStyle(fontSize: 12.5, color: context.textSecondary),
                 ),
               ],
             ),
@@ -4290,7 +4291,7 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
-          child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+          child: Text('取消', style: TextStyle(color: context.textSecondary)),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
@@ -4329,7 +4330,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
   SkeletonAnalysisMode _mode = SkeletonAnalysisMode.v1;
   bool _skipToday = false;
 
-  static const _kGreen  = Color(0xFF1E8E5A);
+  static const _kGreen  = Color(0xFF1AA87C);
   static const _kOrange = Color(0xFFE65100);
   static const _kBlue   = Color(0xFF1565C0);
 
@@ -4383,7 +4384,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
             timeHint: '每球約 5–15 秒',
           ),
           // ── 今日不再提醒 ──
-          const Divider(height: 16, thickness: 0.8, color: Color(0xFFF0F2F5)),
+          Divider(height: 16, thickness: 0.8, color: context.borderColor),
           GestureDetector(
             onTap: () => setState(() => _skipToday = !_skipToday),
             behavior: HitTestBehavior.opaque,
@@ -4398,11 +4399,11 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                     activeColor: const Color(0xFF6B7280),
-                    side: const BorderSide(color: Color(0xFFB0B8C1)),
+                    side: BorderSide(color: context.textHint),
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Text('今日不再提醒', style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280))),
+                Text('今日不再提醒', style: TextStyle(fontSize: 12.5, color: context.textSecondary)),
               ]),
             ),
           ),
@@ -4412,7 +4413,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
-          child: const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+          child: Text('取消', style: TextStyle(color: context.textSecondary)),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
@@ -4450,19 +4451,19 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
           color: isOn ? color.withValues(alpha: 0.07) : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isOn ? color : const Color(0xFFDDE1E7),
+            color: isOn ? color : context.borderColor,
             width: isOn ? 1.5 : 1.0,
           ),
         ),
         child: Row(children: [
-          Icon(icon, color: isOn ? color : const Color(0xFFB0B8C1), size: 24),
+          Icon(icon, color: isOn ? color : context.textHint, size: 24),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Text(title, style: TextStyle(
                   fontSize: 13.5, fontWeight: isOn ? FontWeight.w700 : FontWeight.w500,
-                  color: isOn ? color : const Color(0xFF1A1A2E),
+                  color: isOn ? color : context.textPrimary,
                 )),
                 const SizedBox(width: 6),
                 Container(
@@ -4475,11 +4476,11 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
                 ),
               ]),
               const SizedBox(height: 2),
-              Text(subtitle, style: const TextStyle(fontSize: 11.5, color: Color(0xFF6B7280))),
+              Text(subtitle, style: TextStyle(fontSize: 11.5, color: context.textSecondary)),
             ]),
           ),
           Text(timeHint, style: TextStyle(
-            fontSize: 10.5, color: isOn ? color : const Color(0xFFB0B8C1), fontWeight: FontWeight.w500,
+            fontSize: 10.5, color: isOn ? color : context.textHint, fontWeight: FontWeight.w500,
           )),
         ]),
       ),
@@ -4516,7 +4517,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
       actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       title: const Row(
         children: [
-          Icon(Icons.high_quality_rounded, color: Color(0xFF1E8E5A), size: 22),
+          Icon(Icons.high_quality_rounded, color: Color(0xFF1AA87C), size: 22),
           SizedBox(width: 8),
           Text('選擇輸出品質', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         ],
@@ -4535,13 +4536,13 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF1E8E5A).withValues(alpha: 0.08)
+                      ? const Color(0xFF1AA87C).withValues(alpha: 0.08)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isSelected
-                        ? const Color(0xFF1E8E5A)
-                        : const Color(0xFFDDE1E7),
+                        ? const Color(0xFF1AA87C)
+                        : context.borderColor,
                     width: isSelected ? 1.5 : 1.0,
                   ),
                 ),
@@ -4552,8 +4553,8 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                           ? Icons.radio_button_checked_rounded
                           : Icons.radio_button_off_rounded,
                       color: isSelected
-                          ? const Color(0xFF1E8E5A)
-                          : const Color(0xFFB0B8C1),
+                          ? const Color(0xFF1AA87C)
+                          : context.textHint,
                       size: 20,
                     ),
                     const SizedBox(width: 10),
@@ -4568,15 +4569,15 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                               fontWeight:
                                   isSelected ? FontWeight.w700 : FontWeight.w500,
                               color: isSelected
-                                  ? const Color(0xFF1E8E5A)
-                                  : const Color(0xFF1A1A2E),
+                                  ? const Color(0xFF1AA87C)
+                                  : context.textPrimary,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             q.sizeHint,
-                            style: const TextStyle(
-                                fontSize: 12, color: Color(0xFF6B7280)),
+                            style: TextStyle(
+                                fontSize: 12, color: context.textSecondary),
                           ),
                         ],
                       ),
@@ -4586,8 +4587,8 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                       style: TextStyle(
                         fontSize: 11,
                         color: isSelected
-                            ? const Color(0xFF1E8E5A)
-                            : const Color(0xFFB0B8C1),
+                            ? const Color(0xFF1AA87C)
+                            : context.textHint,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -4597,7 +4598,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
             );
           }),
           // ── 今日不再提醒 ──
-          const Divider(height: 16, thickness: 0.8, color: Color(0xFFF0F2F5)),
+          Divider(height: 16, thickness: 0.8, color: context.borderColor),
           GestureDetector(
             onTap: () => setState(() => _skipToday = !_skipToday),
             behavior: HitTestBehavior.opaque,
@@ -4616,14 +4617,14 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(4)),
                       activeColor: const Color(0xFF6B7280),
-                      side: const BorderSide(color: Color(0xFFB0B8C1)),
+                      side: BorderSide(color: context.textHint),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     '今日不再提醒',
                     style:
-                        TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+                        TextStyle(fontSize: 12.5, color: context.textSecondary),
                   ),
                 ],
               ),
@@ -4636,11 +4637,11 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
           child:
-              const Text('取消', style: TextStyle(color: Color(0xFF6B7280))),
+              Text('取消', style: TextStyle(color: context.textSecondary)),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF1E8E5A),
+            backgroundColor: const Color(0xFF1AA87C),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
@@ -4811,7 +4812,7 @@ const _kDlOptions = [
   _DlOption(
     file: 'final.mp4', label: '完整分析',
     desc: '骨架 + 球軌跡 overlay',
-    icon: Icons.sports_golf_rounded, color: Color(0xFF1E8E5A),
+    icon: Icons.sports_golf_rounded, color: Color(0xFF1AA87C),
   ),
   _DlOption(
     file: 'skeleton.mp4', label: '骨架版',
@@ -4904,7 +4905,7 @@ class _DownloadVersionPicker extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
             child: Row(
               children: [
-                const Icon(Icons.download_rounded, color: Color(0xFF1E8E5A), size: 22),
+                const Icon(Icons.download_rounded, color: Color(0xFF1AA87C), size: 22),
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Text('選擇下載版本',
@@ -4960,11 +4961,11 @@ class _DlOptionTile extends StatelessWidget {
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
                   Text(option.desc,
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                      style: TextStyle(fontSize: 12, color: context.textSecondary)),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: Color(0xFFCCCCCC)),
+            Icon(Icons.chevron_right_rounded, color: context.textHint),
           ],
         ),
       ),
@@ -4989,7 +4990,7 @@ class _CandidateCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade200),
+          border: Border.all(color: context.borderColor),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -4997,7 +4998,7 @@ class _CandidateCard extends StatelessWidget {
             // 縮圖
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: _buildThumb(),
+              child: _buildThumb(context),
             ),
             const SizedBox(width: 12),
             // 資訊
@@ -5007,10 +5008,10 @@ class _CandidateCard extends StatelessWidget {
                 children: [
                   Text(
                     entry.displayTitle,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF1A1A2E),
+                      color: context.textPrimary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -5018,11 +5019,11 @@ class _CandidateCard extends StatelessWidget {
                   const SizedBox(height: 3),
                   Row(
                     children: [
-                      const Icon(Icons.access_time, size: 12, color: Colors.grey),
+                      Icon(Icons.access_time, size: 12, color: context.textHint),
                       const SizedBox(width: 3),
                       Text(
                         '${entry.durationSeconds} 秒',
-                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        style: TextStyle(fontSize: 11, color: context.textHint),
                       ),
                       if (entry.isAnalyzed) ...[
                         const SizedBox(width: 8),
@@ -5038,14 +5039,14 @@ class _CandidateCard extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            Icon(Icons.chevron_right, color: context.textHint),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildThumb() {
+  Widget _buildThumb(BuildContext context) {
     final thumbPath = entry.thumbnailPath;
     if (thumbPath != null && File(thumbPath).existsSync()) {
       return Image.file(
@@ -5058,8 +5059,8 @@ class _CandidateCard extends StatelessWidget {
     return Container(
       width: 64,
       height: 48,
-      color: const Color(0xFFE8EDF2),
-      child: const Icon(Icons.videocam, size: 24, color: Colors.grey),
+      color: context.bgInset,
+      child: Icon(Icons.videocam, size: 24, color: context.textHint),
     );
   }
 }
@@ -5116,7 +5117,7 @@ class _AudioFeatureMiniBar extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 9,
-            color: enabled ? const Color(0xFF6F7B86) : dimColor,
+            color: enabled ? context.textSecondary : dimColor,
             fontWeight: FontWeight.w600,
           ),
           textAlign: TextAlign.center,

@@ -138,7 +138,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get validationUsernameTooShort => '用戶名至少 3 個字元';
 
   @override
-  String get validationPasswordTooShort => '密碼至少需要 6 碼';
+  String get validationPasswordTooShort => '密碼須至少 8 碼且包含大寫、小寫字母及數字';
 
   @override
   String get validationPasswordMismatch => '兩次密碼不一致';
@@ -510,6 +510,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsPasswordChanged => '密碼已修改';
 
   @override
+  String get settingsSetPassword => '設定密碼';
+
+  @override
+  String get settingsSetPasswordDesc => '設定密碼後也可用 Email 登入';
+
+  @override
+  String get settingsPasswordSet => '密碼已設定';
+
+  @override
   String get settingsGoogleLogin => 'Google 登入';
 
   @override
@@ -546,6 +555,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsLanguage => '語言 / Language';
+
+  @override
+  String get settingsTheme => '外觀主題';
+
+  @override
+  String get settingsThemeSystem => '跟隨系統';
+
+  @override
+  String get settingsThemeLight => '日間模式';
+
+  @override
+  String get settingsThemeDark => '夜間模式';
 
   @override
   String get settingsCheckUpdate => '檢查更新';
@@ -973,7 +994,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get validationUsernameTooShort => '用户名至少 3 个字符';
 
   @override
-  String get validationPasswordTooShort => '密码至少需要 6 位';
+  String get validationPasswordTooShort => '密码须至少 8 位且包含大写、小写字母及数字';
 
   @override
   String get validationPasswordMismatch => '两次密码不一致';
@@ -1345,6 +1366,15 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get settingsPasswordChanged => '密码已修改';
 
   @override
+  String get settingsSetPassword => '设置密码';
+
+  @override
+  String get settingsSetPasswordDesc => '设置密码后也可用 Email 登录';
+
+  @override
+  String get settingsPasswordSet => '密码已设置';
+
+  @override
   String get settingsGoogleLogin => 'Google 登录';
 
   @override
@@ -1381,6 +1411,18 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get settingsLanguage => '语言 / Language';
+
+  @override
+  String get settingsTheme => '外观主题';
+
+  @override
+  String get settingsThemeSystem => '跟随系统';
+
+  @override
+  String get settingsThemeLight => '日间模式';
+
+  @override
+  String get settingsThemeDark => '夜间模式';
 
   @override
   String get settingsCheckUpdate => '检查更新';
@@ -1808,7 +1850,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get validationUsernameTooShort => '用戶名至少 3 個字元';
 
   @override
-  String get validationPasswordTooShort => '密碼至少需要 6 碼';
+  String get validationPasswordTooShort => '密碼須至少 8 碼且包含大寫、小寫字母及數字';
 
   @override
   String get validationPasswordMismatch => '兩次密碼不一致';
@@ -2180,6 +2222,15 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsPasswordChanged => '密碼已修改';
 
   @override
+  String get settingsSetPassword => '設定密碼';
+
+  @override
+  String get settingsSetPasswordDesc => '設定密碼後也可用 Email 登入';
+
+  @override
+  String get settingsPasswordSet => '密碼已設定';
+
+  @override
   String get settingsGoogleLogin => 'Google 登入';
 
   @override
@@ -2216,6 +2267,18 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get settingsLanguage => '語言 / Language';
+
+  @override
+  String get settingsTheme => '外觀主題';
+
+  @override
+  String get settingsThemeSystem => '跟隨系統';
+
+  @override
+  String get settingsThemeLight => '日間模式';
+
+  @override
+  String get settingsThemeDark => '夜間模式';
 
   @override
   String get settingsCheckUpdate => '檢查更新';

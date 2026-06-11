@@ -361,7 +361,7 @@ abstract class AppLocalizations {
   /// No description provided for @validationPasswordTooShort.
   ///
   /// In en, this message translates to:
-  /// **'Password must be at least 6 characters'**
+  /// **'Password must be 8+ characters with uppercase, lowercase and a digit'**
   String get validationPasswordTooShort;
 
   /// No description provided for @validationPasswordMismatch.
@@ -1078,6 +1078,24 @@ abstract class AppLocalizations {
   /// **'Password changed'**
   String get settingsPasswordChanged;
 
+  /// No description provided for @settingsSetPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Set Password'**
+  String get settingsSetPassword;
+
+  /// No description provided for @settingsSetPasswordDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Set a password to also sign in with email'**
+  String get settingsSetPasswordDesc;
+
+  /// No description provided for @settingsPasswordSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Password set'**
+  String get settingsPasswordSet;
+
   /// No description provided for @settingsGoogleLogin.
   ///
   /// In en, this message translates to:
@@ -1149,6 +1167,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Language'**
   String get settingsLanguage;
+
+  /// No description provided for @settingsTheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get settingsTheme;
+
+  /// No description provided for @settingsThemeSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow system'**
+  String get settingsThemeSystem;
+
+  /// No description provided for @settingsThemeLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get settingsThemeLight;
+
+  /// No description provided for @settingsThemeDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get settingsThemeDark;
 
   /// No description provided for @settingsCheckUpdate.
   ///

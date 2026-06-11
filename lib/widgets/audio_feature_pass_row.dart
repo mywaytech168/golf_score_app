@@ -9,10 +9,14 @@ class AudioFeaturePassRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final feats = AudioAnalysisService.featureLabels.entries.toList();
-    const dimColor = Color(0xFFCBD0D8);
+    final dimColor = context.textHint;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: kSpaceMD, vertical: kSpaceSM),
-      decoration: kCardDecoration(radius: kRadiusMD),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        borderRadius: BorderRadius.circular(kRadiusMD),
+        boxShadow: context.cardShadow,
+      ),
       child: Row(
         children: feats.asMap().entries.expand<Widget>((e) {
           final i = e.key;

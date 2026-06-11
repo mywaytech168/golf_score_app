@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/recording_history_entry.dart';
+import '../theme/app_theme.dart';
 
 /// 自訂底部彈窗，統一顯示錄影歷史列表與播放行為
 Future<void> showRecordingHistorySheet({
@@ -13,6 +14,7 @@ Future<void> showRecordingHistorySheet({
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
+    backgroundColor: context.bgCard,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
@@ -32,7 +34,7 @@ Future<void> showRecordingHistorySheet({
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade400,
+                      color: sheetContext.borderColor,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -40,10 +42,10 @@ Future<void> showRecordingHistorySheet({
                 const SizedBox(height: 12),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF123B70),
+                    color: sheetContext.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -51,12 +53,12 @@ Future<void> showRecordingHistorySheet({
                   Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.video_collection_outlined, size: 56, color: Color(0xFF9AA6B2)),
-                        SizedBox(height: 12),
+                      children: [
+                        Icon(Icons.video_collection_outlined, size: 56, color: sheetContext.textHint),
+                        const SizedBox(height: 12),
                         Text(
                           '目前沒有錄影紀錄，完成錄影後會自動顯示在此處。',
-                          style: TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+                          style: TextStyle(fontSize: 13, color: sheetContext.textSecondary),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -78,7 +80,7 @@ Future<void> showRecordingHistorySheet({
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF4F7FB),
+                              color: context.bgInset,
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: Row(
@@ -101,21 +103,21 @@ Future<void> showRecordingHistorySheet({
                                     children: [
                                       Text(
                                         entry.displayTitle,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 15,
                                           fontWeight: FontWeight.w600,
-                                          color: Color(0xFF123B70),
+                                          color: context.textPrimary,
                                         ),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
                                         _buildSubtitle(entry),
-                                        style: const TextStyle(fontSize: 12, color: Color(0xFF6F7B86)),
+                                        style: TextStyle(fontSize: 12, color: context.textSecondary),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.play_arrow_rounded, color: Color(0xFF1E8E5A), size: 28),
+                                const Icon(Icons.play_arrow_rounded, color: Color(0xFF1AA87C), size: 28),
                               ],
                             ),
                           ),

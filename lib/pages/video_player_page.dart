@@ -98,7 +98,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   static const _chartTabs = [
     (label: '聲音峰值', color: Color(0xFFE53935)),
     (label: '手腕 Y',   color: Color(0xFF1565C0)),
-    (label: '速度',      color: Color(0xFF1E8E5A)),
+    (label: '速度',      color: Color(0xFF1AA87C)),
     (label: '姿勢',     color: Color(0xFF7C3AED)),
     (label: '音頻特徵', color: Color(0xFF7B1FA2)),
   ];
@@ -422,7 +422,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               child: Checkbox(
                 value: value,
                 onChanged: (v) => onChanged(v ?? false),
-                activeColor: const Color(0xFF1E8E5A),
+                activeColor: const Color(0xFF1AA87C),
                 side: const BorderSide(color: Colors.white54),
               ),
             ),
@@ -648,7 +648,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   width: 44,
                   height: 44,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1E8E5A),
+                    color: Color(0xFF1AA87C),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -673,7 +673,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   child: Icon(
                     Icons.bar_chart_rounded,
                     color: _chartsExpanded
-                        ? const Color(0xFF1E8E5A)
+                        ? const Color(0xFF1AA87C)
                         : Colors.white54,
                     size: 24,
                   ),
@@ -817,7 +817,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   Widget _buildChartContent() {
     if (_chartsLoading) {
       return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF1E8E5A), strokeWidth: 2),
+        child: CircularProgressIndicator(color: Color(0xFF1AA87C), strokeWidth: 2),
       );
     }
     final data = _chartData;
@@ -1847,7 +1847,7 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
               trackHeight: 3,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
               overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: const Color(0xFF1E8E5A),
+              activeTrackColor: const Color(0xFF1AA87C),
               thumbColor: Colors.white,
               inactiveTrackColor: Colors.white24,
               overlayColor: Colors.white24,
@@ -1868,7 +1868,7 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
                   width: 44,
                   height: 44,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1E8E5A),
+                    color: Color(0xFF1AA87C),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -2097,7 +2097,7 @@ class _MultiModalTimelinePainter extends CustomPainter {
           ? ((hitSecond! / totalSeconds) * numBars).floor().clamp(0, numBars - 1)
           : -1;
 
-      final paintPlayed = Paint()..color = const Color(0xFF1E8E5A).withValues(alpha: 0.80);
+      final paintPlayed = Paint()..color = const Color(0xFF1AA87C).withValues(alpha: 0.80);
       final paintFuture = Paint()..color = Colors.white.withValues(alpha: 0.18);
       final paintHit    = Paint()..color = const Color(0xFFFF8F00);
       final paintGlow   = Paint()

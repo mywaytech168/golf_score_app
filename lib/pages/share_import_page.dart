@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/user_provider.dart';
+import '../theme/app_theme.dart';
 import '../services/share_service.dart';
 
 /// 從分享碼取得影片頁面
@@ -101,13 +102,13 @@ class _ShareImportPageState extends State<ShareImportPage> {
             const Text('從分享連結取得', style: TextStyle(fontSize: 16)),
             Text(
               context.watch<UserProvider>().displayName,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.black54),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: context.textSecondary),
             ),
           ],
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: Colors.black87,
+        foregroundColor: context.textPrimary,
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -137,18 +138,18 @@ class _ShareImportPageState extends State<ShareImportPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 32),
-        const Icon(Icons.download_for_offline_outlined, size: 64, color: Color(0xFF1E8E5A)),
+        const Icon(Icons.download_for_offline_outlined, size: 64, color: Color(0xFF1AA87C)),
         const SizedBox(height: 24),
-        const Text(
+        Text(
           '輸入 16 碼分享碼',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.textPrimary),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           '對方分享後，輸入分享碼即可下載影片到本機',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: Colors.black54),
+          style: TextStyle(fontSize: 13, color: context.textSecondary),
         ),
         const SizedBox(height: 32),
         Form(
@@ -183,7 +184,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
               : const Icon(Icons.search),
           label: Text(_phase == _ImportPhase.looking ? '查詢中…' : '查詢'),
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF1E8E5A),
+            backgroundColor: const Color(0xFF1AA87C),
             minimumSize: const Size.fromHeight(50),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -208,7 +209,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
         Text(
           info.title,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.textPrimary),
         ),
         const SizedBox(height: 20),
         if (info.sharerName != null && info.sharerName!.isNotEmpty)
@@ -257,10 +258,10 @@ class _ShareImportPageState extends State<ShareImportPage> {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: Colors.black45),
+          Icon(icon, size: 18, color: context.textHint),
           const SizedBox(width: 8),
-          Text('$label：', style: const TextStyle(color: Colors.black54, fontSize: 14)),
-          Text(value, style: const TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w500)),
+          Text('$label：', style: TextStyle(color: context.textSecondary, fontSize: 14)),
+          Text(value, style: TextStyle(color: context.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -288,12 +289,12 @@ class _ShareImportPageState extends State<ShareImportPage> {
           const SizedBox(height: 24),
           Text(
             label,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: context.textPrimary),
           ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
             value: progressValue,
-            backgroundColor: Colors.black12,
+            backgroundColor: context.bgInset,
             color: const Color(0xFF1565C0),
             minHeight: 6,
             borderRadius: BorderRadius.circular(3),
@@ -302,7 +303,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
           if (_downloadSub == _DownloadSub.downloading)
             Text(
               '${(_downloadProgress * 100).toStringAsFixed(0)}%',
-              style: const TextStyle(color: Colors.black54, fontSize: 13),
+              style: TextStyle(color: context.textSecondary, fontSize: 13),
             )
           else
             const SizedBox(height: 16),
@@ -318,16 +319,16 @@ class _ShareImportPageState extends State<ShareImportPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.check_circle_outline, size: 80, color: Color(0xFF1E8E5A)),
+          const Icon(Icons.check_circle_outline, size: 80, color: Color(0xFF1AA87C)),
           const SizedBox(height: 24),
-          const Text('下載完成！', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+          Text('下載完成！', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary)),
           const SizedBox(height: 8),
-          const Text('影片已加入歷史記錄', style: TextStyle(color: Colors.black54)),
+          Text('影片已加入歷史記錄', style: TextStyle(color: context.textSecondary)),
           const SizedBox(height: 40),
           FilledButton(
             onPressed: () => Navigator.pop(context),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1E8E5A),
+              backgroundColor: const Color(0xFF1AA87C),
               minimumSize: const Size(200, 50),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),

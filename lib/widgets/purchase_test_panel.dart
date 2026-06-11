@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/purchase_service.dart';
+import '../theme/app_theme.dart';
 
 /// 測試購買面板 - 只在調試模式下顯示
 class PurchaseTestPanel extends StatefulWidget {
@@ -108,7 +109,9 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.amber.shade50,
+        color: context.isDarkMode
+            ? Colors.amber.withValues(alpha: 0.10)
+            : Colors.amber.shade50,
         border: Border.all(color: Colors.amber.shade300, width: 2),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -127,7 +130,9 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Colors.amber.shade900,
+                  color: context.isDarkMode
+                      ? Colors.amber.shade300
+                      : Colors.amber.shade900,
                 ),
               ),
             ],
@@ -137,7 +142,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
           // 狀態顯示
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.bgCard,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: Colors.amber.shade200),
             ),
@@ -152,7 +157,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.green.shade100,
+                          color: Colors.green.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -167,7 +172,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.red.shade100,
+                          color: Colors.red.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -183,7 +188,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                 const SizedBox(height: 8),
                 Text(
                   '支付方式: ${_paymentMethod ?? "無"}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(fontSize: 12, color: context.textSecondary),
                 ),
               ],
             ),

@@ -154,7 +154,10 @@ class ClipPipelineService {
       endSec:         hit.endSec,
       targetWidth:    tw,
       targetHeight:   th,
-      flipHorizontal: sourceEntry.isFrontCamera, // 前鏡頭水平翻轉
+      // 前鏡頭水平翻轉（僅 Android：iOS 在擷取階段已 isVideoMirrored，
+      // 來源檔本身就是鏡像，再翻會雙重翻轉）
+      flipHorizontal: sourceEntry.isFrontCamera &&
+          defaultTargetPlatform == TargetPlatform.android,
     );
     if (trimResult == null) {
       debugPrint('[Pipeline] hit ${hit.hitIndex} → ❌ 裁切失敗');

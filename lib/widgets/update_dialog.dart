@@ -51,6 +51,7 @@ class _UpdateDialog extends StatelessWidget {
       // 強制更新時攔截返回鍵，使用者無法跳過
       canPop: !result.isForced,
       child: Dialog(
+        backgroundColor: context.bgCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
         child: Column(
@@ -74,10 +75,10 @@ class _UpdateDialog extends StatelessWidget {
                     if (result.releaseNotes.isNotEmpty) ...[
                       Text(
                         AppLocalizations.of(context).updateNotes,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF0A3D2E),
+                          color: context.isDarkMode ? kPrimaryGreen : kPrimaryDark,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -95,9 +96,9 @@ class _UpdateDialog extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   note,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 13,
-                                      color: Color(0xFF333333),
+                                      color: context.textPrimary,
                                       height: 1.5),
                                 ),
                               ),
@@ -113,9 +114,11 @@ class _UpdateDialog extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.red.shade50,
+                          color: Colors.redAccent
+                              .withValues(alpha: context.isDarkMode ? 0.12 : 0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.red.shade200),
+                          border: Border.all(
+                              color: Colors.redAccent.withValues(alpha: 0.4)),
                         ),
                         child: Row(
                           children: [
@@ -171,7 +174,7 @@ class _UpdateDialog extends StatelessWidget {
                           child: TextButton(
                             onPressed: () => Navigator.of(context).pop(false),
                             style: TextButton.styleFrom(
-                              foregroundColor: Colors.grey,
+                              foregroundColor: context.textSecondary,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                             child: Text(AppLocalizations.of(context).updateRemindLater,
@@ -183,7 +186,7 @@ class _UpdateDialog extends StatelessWidget {
                           child: TextButton(
                             onPressed: () => _snooze(context),
                             style: TextButton.styleFrom(
-                              foregroundColor: Colors.grey.shade500,
+                              foregroundColor: context.textHint,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                             child: Text(AppLocalizations.of(context).updateDontRemind,
@@ -220,7 +223,7 @@ class _Header extends StatelessWidget {
         gradient: LinearGradient(
           colors: isForced
               ? [const Color(0xFFB71C1C), const Color(0xFFE53935)]
-              : [const Color(0xFF1E8E5A), const Color(0xFF0A3D2E)],
+              : [const Color(0xFF1AA87C), const Color(0xFF0F5C46)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -272,7 +275,7 @@ class _VersionRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F5),
+        color: context.bgInset,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -280,12 +283,12 @@ class _VersionRow extends StatelessWidget {
           _VersionChip(
             label: AppLocalizations.of(context).updateCurrentVersion,
             version: result.currentVersion,
-            color: Colors.grey.shade600,
+            color: context.textSecondary,
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Icon(Icons.arrow_forward_rounded,
-                size: 16, color: Colors.grey),
+                size: 16, color: context.textSecondary),
           ),
           _VersionChip(
             label: AppLocalizations.of(context).updateLatestVersion,
@@ -296,7 +299,7 @@ class _VersionRow extends StatelessWidget {
             const Spacer(),
             Text(
               result.releaseDate,
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+              style: TextStyle(fontSize: 11, color: context.textHint),
             ),
           ],
         ],
@@ -318,7 +321,7 @@ class _VersionChip extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            style: TextStyle(fontSize: 10, color: context.textHint)),
         Text(
           'v$version',
           style: TextStyle(

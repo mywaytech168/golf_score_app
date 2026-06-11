@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../theme/app_theme.dart';
+
 /// 個人資訊編輯結果模型，用於回傳最新填寫內容
 class ProfileEditResult {
   final String displayName; // 暱稱顯示名稱
@@ -197,7 +199,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   }
 
   /// 建立頭像預覽區塊，包含目前圖片、覆蓋提示與操作按鈕
-  Widget _buildAvatarSection() {
+  Widget _buildAvatarSection(BuildContext context) {
     final hasAvatar = _avatarPath != null && File(_avatarPath!).existsSync();
 
     return Column(
@@ -209,9 +211,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               width: 108,
               height: 108,
               decoration: BoxDecoration(
-                color: const Color(0xFFE6F4EA),
+                color: context.mintTint,
                 borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: const Color(0xFF1E8E5A), width: 2),
+                border: Border.all(color: const Color(0xFF1AA87C), width: 2),
               ),
               clipBehavior: Clip.antiAlias,
               child: hasAvatar
@@ -219,7 +221,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       File(_avatarPath!),
                       fit: BoxFit.cover,
                     )
-                  : const Icon(Icons.person, size: 56, color: Color(0xFF1E8E5A)),
+                  : const Icon(Icons.person, size: 56, color: Color(0xFF1AA87C)),
             ),
             Positioned(
               bottom: 6,
@@ -227,14 +229,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               child: FloatingActionButton.small(
                 heroTag: 'avatarPicker',
                 onPressed: () => _handlePickAvatar(),
-                backgroundColor: const Color(0xFF1E8E5A),
+                backgroundColor: const Color(0xFF1AA87C),
                 child: const Icon(Icons.edit, color: Colors.white),
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        const Text('設定個人頭像讓教練更容易識別', style: TextStyle(color: Color(0xFF6E7B87))),
+        Text('設定個人頭像讓教練更容易識別', style: TextStyle(color: context.textSecondary)),
         if (hasAvatar)
           TextButton.icon(
             onPressed: () => _handleRemoveAvatar(),
@@ -258,11 +260,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
-              _buildAvatarSection(),
+              _buildAvatarSection(context),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 '調整個人資訊以獲得更精準的揮桿分析，完成後記得儲存。',
-                style: TextStyle(color: Color(0xFF6E7B87)),
+                style: TextStyle(color: context.textSecondary),
               ),
               const SizedBox(height: 24),
               TextFormField(

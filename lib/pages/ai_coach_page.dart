@@ -269,7 +269,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgPage,
+      backgroundColor: context.bgPage,
       appBar: AppBar(
         title: const Text('AI 教練分析'),
         backgroundColor: kPrimaryDark,
@@ -335,9 +335,9 @@ class _LoadingView extends StatelessWidget {
             child: CircularProgressIndicator(color: kPrimaryGreen, strokeWidth: 3),
           ),
           const SizedBox(height: kSpaceLG),
-          Text(_label, style: const TextStyle(fontSize: 16, color: kTextSecondary)),
+          Text(_label, style: TextStyle(fontSize: 16, color: context.textSecondary)),
           const SizedBox(height: kSpaceSM),
-          const Text('通常需要 10~30 秒', style: TextStyle(fontSize: 13, color: kTextHint)),
+          Text('通常需要 10~30 秒', style: TextStyle(fontSize: 13, color: context.textHint)),
         ],
       ),
     );
@@ -361,7 +361,7 @@ class _ErrorView extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, size: 64, color: kBadColor),
             const SizedBox(height: kSpaceMD),
-            Text(error, textAlign: TextAlign.center, style: const TextStyle(color: kTextSecondary)),
+            Text(error, textAlign: TextAlign.center, style: TextStyle(color: context.textSecondary)),
             const SizedBox(height: kSpaceLG),
             FilledButton(onPressed: onRetry, child: const Text('重試')),
           ],
@@ -441,10 +441,10 @@ class _IdleView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: kSpaceSM),
-        const Text(
+        Text(
           '* AI 教練將依據姿勢分析結果，提供詳細教練評語與訓練建議',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 11, color: kTextHint),
+          style: TextStyle(fontSize: 11, color: context.textHint),
         ),
         const SizedBox(height: kSpaceLG),
       ],
@@ -543,18 +543,18 @@ class _SummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: kSpaceMD),
-          Text(result.summary, style: const TextStyle(fontSize: 16, height: 1.5, color: kTextPrimary)),
+          Text(result.summary, style: TextStyle(fontSize: 16, height: 1.5, color: context.textPrimary)),
           if (err.evidence.isNotEmpty) ...[
             const SizedBox(height: kSpaceMD),
-            const Text('依據', style: TextStyle(fontSize: 12, color: kTextHint, fontWeight: FontWeight.bold)),
+            Text('依據', style: TextStyle(fontSize: 12, color: context.textHint, fontWeight: FontWeight.bold)),
             const SizedBox(height: kSpaceXS),
             ...err.evidence.map((e) => Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('• ', style: TextStyle(color: kTextSecondary)),
-                  Expanded(child: Text(e, style: const TextStyle(fontSize: 13, color: kTextSecondary))),
+                  Text('• ', style: TextStyle(color: context.textSecondary)),
+                  Expanded(child: Text(e, style: TextStyle(fontSize: 13, color: context.textSecondary))),
                 ],
               ),
             )),
@@ -598,8 +598,8 @@ class _ImpactQualityCard extends StatelessWidget {
             children: [
               Icon(Icons.graphic_eq_rounded, color: _levelColor, size: 20),
               const SizedBox(width: 8),
-              const Text('擊球品質（音訊）',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kTextPrimary)),
+              Text('擊球品質（音訊）',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.textPrimary)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
@@ -628,7 +628,7 @@ class _ImpactQualityCard extends StatelessWidget {
                           duration: const Duration(milliseconds: 400),
                           height: 8,
                           decoration: BoxDecoration(
-                            color: i < iq.passCount ? _levelColor : const Color(0xFFE0E4EA),
+                            color: i < iq.passCount ? _levelColor : context.bgInset,
                             borderRadius: BorderRadius.circular(4),
                           ),
                         ),
@@ -648,7 +648,7 @@ class _ImpactQualityCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             '${iq.passCount} / ${iq.totalFeatures} 項特徵符合甜蜜點範圍',
-            style: const TextStyle(color: kTextSecondary, fontSize: 11),
+            style: TextStyle(color: context.textSecondary, fontSize: 11),
           ),
           // AI 音頻反饋
           if (iq.audioFeedback.isNotEmpty) ...[
@@ -662,7 +662,7 @@ class _ImpactQualityCard extends StatelessWidget {
               ),
               child: Text(
                 iq.audioFeedback,
-                style: const TextStyle(color: kTextPrimary, fontSize: 13, height: 1.55),
+                style: TextStyle(color: context.textPrimary, fontSize: 13, height: 1.55),
               ),
             ),
           ],
@@ -693,7 +693,7 @@ class _FeedbackCard extends StatelessWidget {
             children: [
               const Icon(Icons.arrow_right, size: 20, color: kPrimaryGreen),
               const SizedBox(width: kSpaceXS),
-              Expanded(child: Text(f, style: const TextStyle(fontSize: 14, height: 1.5, color: kTextPrimary))),
+              Expanded(child: Text(f, style: TextStyle(fontSize: 14, height: 1.5, color: context.textPrimary))),
             ],
           ),
         )).toList(),
@@ -741,7 +741,7 @@ class _PracticeCard extends StatelessWidget {
                         Text(s.drill, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         if (s.reps.isNotEmpty) ...[
                           const SizedBox(height: 4),
-                          Text(s.reps, style: const TextStyle(fontSize: 12, color: kTextSecondary)),
+                          Text(s.reps, style: TextStyle(fontSize: 12, color: context.textSecondary)),
                         ],
                       ],
                     ),
@@ -749,7 +749,7 @@ class _PracticeCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: kSpaceSM),
-              Text(s.instruction, style: const TextStyle(fontSize: 13, color: kTextSecondary, height: 1.5)),
+              Text(s.instruction, style: TextStyle(fontSize: 13, color: context.textSecondary, height: 1.5)),
             ],
           );
         }).toList(),
@@ -776,9 +776,9 @@ class _NextGoalCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('下次練習目標', style: TextStyle(fontSize: 12, color: kTextHint, fontWeight: FontWeight.bold)),
+                Text('下次練習目標', style: TextStyle(fontSize: 12, color: context.textHint, fontWeight: FontWeight.bold)),
                 const SizedBox(height: kSpaceXS),
-                Text(goal, style: const TextStyle(fontSize: 14, height: 1.5, color: kTextPrimary)),
+                Text(goal, style: TextStyle(fontSize: 14, height: 1.5, color: context.textPrimary)),
               ],
             ),
           ),
@@ -803,9 +803,9 @@ class _Card extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(kSpaceMD),
       decoration: BoxDecoration(
-        color: kBgCard,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(kRadiusMD),
-        boxShadow: kCardShadow,
+        boxShadow: context.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -817,7 +817,7 @@ class _Card extends StatelessWidget {
                   Icon(icon, size: 18, color: kPrimaryGreen),
                   const SizedBox(width: kSpaceXS),
                 ],
-                Text(title!, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: kTextPrimary)),
+                Text(title!, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.textPrimary)),
               ],
             ),
             const SizedBox(height: kSpaceMD),
@@ -889,18 +889,18 @@ class _ReanalyzeLoaderState extends State<_ReanalyzeLoader> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgPage,
-      body: const Center(
+      backgroundColor: context.bgPage,
+      body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
+            const SizedBox(
               width: 48,
               height: 48,
               child: CircularProgressIndicator(color: kPrimaryGreen, strokeWidth: 3),
             ),
-            SizedBox(height: 16),
-            Text('提交重新分析中...', style: TextStyle(color: kTextSecondary, fontSize: 15)),
+            const SizedBox(height: 16),
+            Text('提交重新分析中...', style: TextStyle(color: context.textSecondary, fontSize: 15)),
           ],
         ),
       ),

@@ -581,7 +581,7 @@ class VideoServerClient {
   /// 修改密碼（需要目前密碼驗證）
   ///
   /// 端點：POST /api/auth/change-password
-  /// body: `{ "currentPassword": "...", "newPassword": "..." }`
+  /// body: `{ "oldPassword": "...", "newPassword": "..." }`
   Future<Map<String, dynamic>> changePassword({
     required String currentPassword,
     required String newPassword,
@@ -592,7 +592,7 @@ class VideoServerClient {
         'POST',
         '/api/auth/change-password',
         body: {
-          'currentPassword': currentPassword,
+          'oldPassword': currentPassword,
           'newPassword': newPassword,
         },
       );
@@ -601,6 +601,22 @@ class VideoServerClient {
       }
       final err = jsonDecode(response.body) as Map<String, dynamic>;
       return {'success': false, 'message': err['message'] ?? '修改失敗 (${response.statusCode})'};
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      return {'success': false, 'message': '網路錯誤: $e'};
+    }
+  }
+
+  /// 純 OAuth 帳號首次設定密碼（不需舊密碼）
+  ///
+  /// 端點：POST /api/auth/set-password  body: `{ "newPassword": "..." }`
+  Future<Map<String, dynamic>> setPassword(String newPassword, {bool isRetry = false}) async {
+    try {
+      final response = await _send('POST', '/api/auth/set-password',
+          body: {'newPassword': newPassword});
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      final err = jsonDecode(response.body) as Map<String, dynamic>;
+      return {'success': false, 'message': err['message'] ?? '設定失敗 (${response.statusCode})'};
     } catch (e) {
       if (e is UnauthorizedException) rethrow;
       return {'success': false, 'message': '網路錯誤: $e'};

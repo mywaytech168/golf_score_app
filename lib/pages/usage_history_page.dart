@@ -86,7 +86,7 @@ class _UsageHistoryPageState extends State<UsageHistoryPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           GreenPageHeader(
@@ -256,12 +256,12 @@ class _AnalysisTabState extends State<_AnalysisTab>
                               padding: EdgeInsets.symmetric(vertical: 24),
                               child: Center(child: CircularProgressIndicator()),
                             )
-                          : const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
+                          : Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 24),
                               child: Center(
                                 child: Text('已載入全部紀錄',
                                     style: TextStyle(
-                                        fontSize: 12, color: Colors.grey)),
+                                        fontSize: 12, color: context.textHint)),
                               ),
                             );
                     }
@@ -303,14 +303,9 @@ class _AnalysisSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 8,
-              offset: const Offset(0, 3))
-        ],
+        boxShadow: context.cardShadow,
       ),
       child: Row(
         children: [
@@ -320,7 +315,7 @@ class _AnalysisSummaryCard extends StatelessWidget {
               unit: '次',
               color: kPrimaryGreen),
           Container(
-              width: 1, height: 32, color: Colors.grey[200],
+              width: 1, height: 32, color: context.borderColor,
               margin: const EdgeInsets.symmetric(horizontal: 16)),
           _SummaryCell(
               label: '今日已用',
@@ -349,14 +344,9 @@ class _AnalysisTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 6,
-              offset: const Offset(0, 2))
-        ],
+        boxShadow: context.cardShadow,
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -386,7 +376,7 @@ class _AnalysisTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(srcLabel,
                       style: TextStyle(
-                          fontSize: 12, color: Colors.grey[500])),
+                          fontSize: 12, color: context.textSecondary)),
                 ],
               ),
             ),
@@ -413,7 +403,7 @@ class _AnalysisTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(timeStr,
                     style: TextStyle(
-                        fontSize: 11, color: Colors.grey[400])),
+                        fontSize: 11, color: context.textHint)),
               ],
             ),
           ],
@@ -547,13 +537,13 @@ class _BallsTabState extends State<_BallsTab>
                               child: Center(
                                   child: CircularProgressIndicator()),
                             )
-                          : const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
+                          : Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 24),
                               child: Center(
                                 child: Text('已載入全部紀錄',
                                     style: TextStyle(
                                         fontSize: 12,
-                                        color: Colors.grey)),
+                                        color: context.textHint)),
                               ),
                             );
                     }
@@ -595,14 +585,9 @@ class _BallsSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 8,
-              offset: const Offset(0, 3))
-        ],
+        boxShadow: context.cardShadow,
       ),
       child: Row(
         children: [
@@ -614,7 +599,7 @@ class _BallsSummaryCard extends StatelessWidget {
           Container(
               width: 1,
               height: 32,
-              color: Colors.grey[200],
+              color: context.borderColor,
               margin: const EdgeInsets.symmetric(horizontal: 16)),
           _SummaryCell(
               label: '目前球數',
@@ -651,14 +636,9 @@ class _BallTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 6,
-              offset: const Offset(0, 2))
-        ],
+        boxShadow: context.cardShadow,
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -689,7 +669,7 @@ class _BallTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text('餘額 ${record.balanceAfter} 球',
                       style: TextStyle(
-                          fontSize: 12, color: Colors.grey[500])),
+                          fontSize: 12, color: context.textSecondary)),
                 ],
               ),
             ),
@@ -711,7 +691,7 @@ class _BallTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(timeStr,
                     style: TextStyle(
-                        fontSize: 11, color: Colors.grey[400])),
+                        fontSize: 11, color: context.textHint)),
               ],
             ),
           ],
@@ -759,12 +739,12 @@ class _SummaryCell extends StatelessWidget {
               TextSpan(
                   text: ' $unit',
                   style: TextStyle(
-                      fontSize: 12, color: Colors.grey[600])),
+                      fontSize: 12, color: context.textSecondary)),
             ]),
           ),
           const SizedBox(height: 2),
           Text(label,
-              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              style: TextStyle(fontSize: 11, color: context.textSecondary)),
         ],
       ),
     );
@@ -826,10 +806,10 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.receipt_long_rounded,
-                size: 56, color: Colors.grey[300]),
+                size: 56, color: context.textHint),
             const SizedBox(height: 12),
             Text(text,
-                style: TextStyle(fontSize: 15, color: Colors.grey[400])),
+                style: TextStyle(fontSize: 15, color: context.textHint)),
           ],
         ),
       ),
@@ -850,13 +830,13 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded,
-                size: 48, color: Colors.grey),
+            Icon(Icons.cloud_off_rounded,
+                size: 48, color: context.textHint),
             const SizedBox(height: 12),
             Text(message,
                 textAlign: TextAlign.center,
                 style:
-                    TextStyle(fontSize: 13, color: Colors.grey[500])),
+                    TextStyle(fontSize: 13, color: context.textSecondary)),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: onRetry,

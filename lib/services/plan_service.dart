@@ -42,7 +42,7 @@ extension UserPlanX on UserPlan {
   int get colorValue {
     switch (this) {
       case UserPlan.free:  return 0xFF78909C;
-      case UserPlan.pro:   return 0xFF1E8E5A;
+      case UserPlan.pro:   return 0xFF1AA87C;
       case UserPlan.elite: return 0xFFB8860B;
     }
   }

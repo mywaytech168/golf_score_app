@@ -144,7 +144,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get validationPasswordTooShort =>
-      'Password must be at least 6 characters';
+      'Password must be 8+ characters with uppercase, lowercase and a digit';
 
   @override
   String get validationPasswordMismatch => 'Passwords do not match';
@@ -518,6 +518,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsPasswordChanged => 'Password changed';
 
   @override
+  String get settingsSetPassword => 'Set Password';
+
+  @override
+  String get settingsSetPasswordDesc =>
+      'Set a password to also sign in with email';
+
+  @override
+  String get settingsPasswordSet => 'Password set';
+
+  @override
   String get settingsGoogleLogin => 'Google Sign-In';
 
   @override
@@ -555,6 +565,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsLanguage => 'Language';
+
+  @override
+  String get settingsTheme => 'Appearance';
+
+  @override
+  String get settingsThemeSystem => 'Follow system';
+
+  @override
+  String get settingsThemeLight => 'Light';
+
+  @override
+  String get settingsThemeDark => 'Dark';
 
   @override
   String get settingsCheckUpdate => 'Check for Updates';

@@ -279,7 +279,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: isLeft
-                  ? const Color(0xFF1E8E5A).withAlpha(200)
+                  ? const Color(0xFF1AA87C).withAlpha(200)
                   : const Color(0xFF1565C0).withAlpha(200),
               borderRadius: BorderRadius.circular(8),
             ),
@@ -313,7 +313,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
               trackHeight: 3,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
               overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: const Color(0xFF1E8E5A),
+              activeTrackColor: const Color(0xFF1AA87C),
               thumbColor: Colors.white,
               inactiveTrackColor: Colors.white24,
               overlayColor: Colors.white24,
@@ -352,7 +352,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
                 child: Container(
                   width: 44, height: 44,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1E8E5A),
+                    color: Color(0xFF1AA87C),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(

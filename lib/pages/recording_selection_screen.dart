@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
 
 import '../recording/record_screen.dart';
+import '../theme/app_theme.dart';
 import '../recording/shot_record_screen.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
@@ -348,27 +349,27 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: context.bgPage,
       body: _isImporting ? _buildLoadingOverlay() : _buildSelectionUI(),
     );
   }
 
   Widget _buildLoadingOverlay() {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(
+          const CircularProgressIndicator(
             valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7C3AED)),
             strokeWidth: 3,
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           Text(
             '正在導入影片...',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black54),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: context.textSecondary),
           ),
-          SizedBox(height: 8),
-          Text('請勿關閉應用', style: TextStyle(fontSize: 14, color: Colors.black38)),
+          const SizedBox(height: 8),
+          Text('請勿關閉應用', style: TextStyle(fontSize: 14, color: context.textHint)),
         ],
       ),
     );
@@ -390,7 +391,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                   icon: Icons.flash_on_rounded,
                   title: '即時揮桿模式',
                   subtitle: '揮桿自動偵測並切片，無需錄長影片',
-                  color: const Color(0xFF1E8E5A),
+                  color: const Color(0xFF1AA87C),
                   onTap: _startShotMode,
                   badge: '新功能',
                 ),
@@ -468,7 +469,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     String? badge,
   }) {
     return Material(
-      color: Colors.white,
+      color: context.bgCard,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
@@ -507,7 +508,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                             title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.black87),
+                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: context.textPrimary),
                           ),
                         ),
                         if (badge != null) ...[
@@ -529,7 +530,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 13, color: Colors.grey[600], height: 1.3),
+                      style: TextStyle(fontSize: 13, color: context.textSecondary, height: 1.3),
                     ),
                   ],
                 ),

@@ -91,7 +91,7 @@ class AudioWaveformStrip extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   if (spectralCentroid != null) ...[
-                    _chip('清脆度 $_crispScore', const Color(0xFF1E8E5A)),
+                    _chip('清脆度 $_crispScore', const Color(0xFF1AA87C)),
                     const SizedBox(width: 5),
                     _chip('峰值 $_peakLabel', _peakColor),
                     const SizedBox(width: 5),
@@ -186,7 +186,7 @@ class _WaveformPainter extends CustomPainter {
         ? ((hitSecond! / totalSeconds) * numBars).floor().clamp(0, numBars - 1)
         : -1;
 
-    final paintPlayed = Paint()..color = const Color(0xFF1E8E5A);
+    final paintPlayed = Paint()..color = const Color(0xFF1AA87C);
     final paintFuture = Paint()..color = Colors.white.withValues(alpha: 0.22);
     final paintHit    = Paint()..color = const Color(0xFFFF8F00);
     final paintGlow   = Paint()

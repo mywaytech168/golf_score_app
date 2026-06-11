@@ -256,7 +256,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: context.bgPage,
       appBar: AppBar(
         backgroundColor: kPrimaryGreen,
         foregroundColor: Colors.white,
@@ -514,11 +514,9 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2)),
-        ],
+        boxShadow: context.cardShadow,
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -526,7 +524,7 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
         children: [
           Row(
             children: const [
-              Icon(Icons.person_rounded, color: Color(0xFF1E8E5A), size: 18),
+              Icon(Icons.person_rounded, color: Color(0xFF1AA87C), size: 18),
               SizedBox(width: 8),
               Text('骨架預覽',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
@@ -543,7 +541,7 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
               height: 80,
               child: Center(
                 child: Text('骨架預覽載入失敗',
-                    style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                    style: TextStyle(color: context.textHint, fontSize: 13)),
               ),
             )
           else
@@ -695,14 +693,14 @@ class _ChartCardState extends State<_ChartCard> {
                 fontWeight: FontWeight.w700,
               )),
               const SizedBox(width: 8),
-              Text(widget.subtitle, style: const TextStyle(
-                color: Colors.black38,
+              Text(widget.subtitle, style: TextStyle(
+                color: context.textHint,
                 fontSize: 11,
               )),
               const Spacer(),
               Text(
                 '${widget.points.length} 點',
-                style: const TextStyle(color: Colors.black38, fontSize: 11),
+                style: TextStyle(color: context.textHint, fontSize: 11),
               ),
             ]),
             const SizedBox(height: 12),
@@ -735,19 +733,19 @@ class _ChartCardState extends State<_ChartCard> {
                     drawVerticalLine: true,
                     horizontalInterval: (_maxY - _minY + 1) / 4,
                     getDrawingHorizontalLine: (_) => FlLine(
-                      color: Colors.black.withValues(alpha: 0.06),
+                      color: context.borderColor.withValues(alpha: 0.45),
                       strokeWidth: 1,
                     ),
                     getDrawingVerticalLine: (_) => FlLine(
-                      color: Colors.black.withValues(alpha: 0.06),
+                      color: context.borderColor.withValues(alpha: 0.45),
                       strokeWidth: 1,
                     ),
                   ),
                   borderData: FlBorderData(
                     show: true,
                     border: Border(
-                      bottom: BorderSide(color: Colors.black.withValues(alpha: 0.15)),
-                      left:   BorderSide(color: Colors.black.withValues(alpha: 0.15)),
+                      bottom: BorderSide(color: context.borderColor),
+                      left:   BorderSide(color: context.borderColor),
                     ),
                   ),
                   titlesData: FlTitlesData(
@@ -758,7 +756,7 @@ class _ChartCardState extends State<_ChartCard> {
                         interval: (_maxY - _minY + 1) / 4,
                         getTitlesWidget: (val, meta) => Text(
                           widget.yLabel(_toRaw(val)),
-                          style: const TextStyle(fontSize: 9, color: Colors.black45),
+                          style: TextStyle(fontSize: 9, color: context.textSecondary),
                         ),
                       ),
                     ),
@@ -769,7 +767,7 @@ class _ChartCardState extends State<_ChartCard> {
                         interval: (_maxX - _minX) / 4,
                         getTitlesWidget: (val, meta) => Text(
                           '${val.toStringAsFixed(1)}s',
-                          style: const TextStyle(fontSize: 9, color: Colors.black45),
+                          style: TextStyle(fontSize: 9, color: context.textSecondary),
                         ),
                       ),
                     ),
@@ -890,7 +888,7 @@ class _StatChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(fontSize: 10, color: Colors.black38)),
+        Text(label, style: TextStyle(fontSize: 10, color: context.textHint)),
         const SizedBox(height: 2),
         Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
       ],
@@ -916,11 +914,11 @@ class _MissingDataCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 28),
         child: Column(
           children: [
-            const Icon(Icons.bar_chart_outlined, color: Colors.black26, size: 36),
+            Icon(Icons.bar_chart_outlined, color: context.textHint, size: 36),
             const SizedBox(height: 8),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black45)),
+            Text(label, style: TextStyle(fontWeight: FontWeight.w600, color: context.textSecondary)),
             const SizedBox(height: 4),
-            Text(hint, style: const TextStyle(fontSize: 12, color: Colors.black26)),
+            Text(hint, style: TextStyle(fontSize: 12, color: context.textHint)),
           ],
         ),
       ),
@@ -933,15 +931,15 @@ class _NoDataView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.bar_chart_outlined, size: 64, color: Colors.black26),
-          SizedBox(height: 16),
-          Text('尚無圖表資料', style: TextStyle(fontSize: 16, color: Colors.black45, fontWeight: FontWeight.w600)),
-          SizedBox(height: 8),
-          Text('請先完成音頻分析與姿勢分析', style: TextStyle(fontSize: 13, color: Colors.black38)),
+          Icon(Icons.bar_chart_outlined, size: 64, color: context.textHint),
+          const SizedBox(height: 16),
+          Text('尚無圖表資料', style: TextStyle(fontSize: 16, color: context.textSecondary, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('請先完成音頻分析與姿勢分析', style: TextStyle(fontSize: 13, color: context.textHint)),
         ],
       ),
     );
@@ -964,7 +962,7 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: 12),
             const Text('載入失敗', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
-            Text(message, style: const TextStyle(fontSize: 12, color: Colors.black45), textAlign: TextAlign.center),
+            Text(message, style: TextStyle(fontSize: 12, color: context.textSecondary), textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -1064,7 +1062,7 @@ class _AudioFeaturesCard extends StatelessWidget {
                             decoration: BoxDecoration(
                               color: i < passCount
                                   ? (isGood ? kPrimaryGreen : const Color(0xFFE05252))
-                                  : const Color(0xFFE0E4EA),
+                                  : context.bgInset,
                               borderRadius: BorderRadius.circular(3),
                             ),
                           ),
@@ -1088,7 +1086,7 @@ class _AudioFeaturesCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               '$passCount / 5 項特徵符合甜蜜點範圍',
-              style: const TextStyle(color: Color(0xFF6F7B86), fontSize: 11),
+              style: TextStyle(color: context.textSecondary, fontSize: 11),
             ),
             const SizedBox(height: 14),
             // 每個特徵一行
@@ -1156,7 +1154,7 @@ class _AudioFeatureGaugeRow extends StatelessWidget {
         SizedBox(
           width: 36,
           child: Text(label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.textPrimary)),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -1171,7 +1169,7 @@ class _AudioFeatureGaugeRow extends StatelessWidget {
                   Positioned.fill(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.07),
+                        color: context.bgInset,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -1379,7 +1377,7 @@ class _OnnxPostureCardState extends State<_OnnxPostureCard> {
               child: LinearProgressIndicator(
                 value: score,
                 minHeight: 8,
-                backgroundColor: Colors.grey.shade200,
+                backgroundColor: context.bgInset,
                 valueColor: AlwaysStoppedAnimation(color),
               ),
             ),
@@ -1470,9 +1468,9 @@ class _SwingPhasesCardState extends State<_SwingPhasesCard> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))],
+        boxShadow: context.cardShadow,
       ),
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -1562,10 +1560,14 @@ class _PhaseChip extends StatelessWidget {
           Container(
             height: 42,
             decoration: BoxDecoration(
-              color: sec != null ? const Color(0xFFF0FAF4) : const Color(0xFFF5F5F5),
+              color: sec != null
+                  ? (context.isDarkMode
+                      ? kPrimaryGreen.withValues(alpha: 0.12)
+                      : const Color(0xFFF0FAF4))
+                  : context.bgInset,
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: sec != null ? kPrimaryGreen.withValues(alpha: 0.35) : const Color(0xFFDDDDDD),
+                color: sec != null ? kPrimaryGreen.withValues(alpha: 0.35) : context.borderColor,
               ),
             ),
             child: Center(
@@ -1578,13 +1580,13 @@ class _PhaseChip extends StatelessWidget {
                         color: kPrimaryGreen,
                       ),
                     )
-                  : const Icon(Icons.hourglass_empty_rounded, color: Color(0xFFCCCCCC), size: 16),
+                  : Icon(Icons.hourglass_empty_rounded, color: context.textHint, size: 16),
             ),
           ),
           const SizedBox(height: 3),
           Text(
             label,
-            style: const TextStyle(fontSize: 9, color: Color(0xFF777777), fontWeight: FontWeight.w500),
+            style: TextStyle(fontSize: 9, color: context.textSecondary, fontWeight: FontWeight.w500),
             textAlign: TextAlign.center,
           ),
         ],
@@ -1696,13 +1698,13 @@ class _OptionTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     option.desc,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
+                    style: TextStyle(fontSize: 12, color: context.textSecondary),
                   ),
                 ],
               ),
             ),
             // 箭頭
-            const Icon(Icons.chevron_right_rounded, color: Color(0xFFCCCCCC)),
+            Icon(Icons.chevron_right_rounded, color: context.textHint),
           ],
         ),
       ),

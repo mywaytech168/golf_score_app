@@ -13,10 +13,12 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/export_quality.dart';
+import '../providers/app_state_provider.dart';
 import '../providers/user_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
+import '../theme/app_theme.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/update_dialog.dart';
 import 'login_page.dart';
@@ -49,6 +51,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _displayName = '';
   String _email = '';
   bool _googleLinked = false;
+  bool _hasPassword = true; // 預設 true，避免載入期間誤顯示「設定密碼」
   ExportQuality _quality = ExportQuality.standard;  bool _isLoadingProfile = true;
   bool _isCheckingUpdate = false;
   String _appVersion = '';
@@ -81,6 +84,7 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() {
           _email       = me['email'] as String? ?? '';
           _googleLinked = me['googleLinked'] as bool? ?? false;
+          _hasPassword  = me['hasPassword'] as bool? ?? true;
           _displayName = me['displayName'] as String? ?? _displayName;
         });
       }
@@ -147,11 +151,11 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, null),
-            child: Text(l.commonCancel, style: const TextStyle(color: Color(0xFF6B7280))),
+            child: Text(l.commonCancel, style: TextStyle(color: ctx.textSecondary)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1E8E5A),
+              backgroundColor: const Color(0xFF1AA87C),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
@@ -160,7 +164,8 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
-    controller.dispose();
+    // dialog 退場動畫期間 TextField 仍會讀取 controller，延後 dispose 避免紅屏
+    Future.delayed(const Duration(milliseconds: 400), controller.dispose);
     if (result == null || result.isEmpty || result == _displayName) return;
 
     // 本地先更新（即時）
@@ -169,14 +174,28 @@ class _SettingsPageState extends State<SettingsPage> {
     await context.read<UserProvider>().updateDisplayName(result);
     setState(() => _displayName = result);
 
-    // 伺服器同步（背景，失敗不影響）
-    VideoServerClient.instance.updateProfileName(result).ignore();
-    if (mounted) _showSnack(AppLocalizations.of(context).settingsNameUpdated);
+    // 伺服器同步
+    final ok = await VideoServerClient.instance.updateProfileName(result);
+    if (!mounted) return;
+    if (ok) {
+      _showSnack(AppLocalizations.of(context).settingsNameUpdated);
+    } else {
+      _showSnack('名稱已更新，但伺服器同步失敗', isError: true);
+    }
   }
 
-  // ── 修改密碼 ──────────────────────────────────────────────────
+  /// 密碼強度規則（與 server 一致：≥8 + 大寫 + 小寫 + 數字）
+  static bool _isStrongPassword(String? v) =>
+      v != null &&
+      v.length >= 8 &&
+      RegExp(r'[A-Z]').hasMatch(v) &&
+      RegExp(r'[a-z]').hasMatch(v) &&
+      RegExp(r'[0-9]').hasMatch(v);
+
+  // ── 修改密碼 / 設定密碼（純 Google 帳號無舊密碼）──────────────
   Future<void> _showChangePasswordDialog() async {
     final l = AppLocalizations.of(context);
+    final isSetMode = !_hasPassword;
     final formKey = GlobalKey<FormState>();
     final curCtrl  = TextEditingController();
     final newCtrl  = TextEditingController();
@@ -196,18 +215,25 @@ class _SettingsPageState extends State<SettingsPage> {
           contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
           actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
           title: Row(children: [
-            const Icon(Icons.lock_outline_rounded, color: Color(0xFF1E8E5A), size: 20),
+            const Icon(Icons.lock_outline_rounded, color: Color(0xFF1AA87C), size: 20),
             const SizedBox(width: 8),
-            Text(l.settingsChangePassword, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(isSetMode ? l.settingsSetPassword : l.settingsChangePassword,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           ]),
           content: Form(
             key: formKey,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              _pwField(l.settingsCurrentPassword, curCtrl, obscureCur, () => setS(() => obscureCur = !obscureCur),
-                  validator: (v) => (v == null || v.isEmpty) ? l.settingsCurrentPasswordRequired : null),
-              const SizedBox(height: 10),
+              if (isSetMode) ...[
+                Text(l.settingsSetPasswordDesc,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                const SizedBox(height: 12),
+              ] else ...[
+                _pwField(l.settingsCurrentPassword, curCtrl, obscureCur, () => setS(() => obscureCur = !obscureCur),
+                    validator: (v) => (v == null || v.isEmpty) ? l.settingsCurrentPasswordRequired : null),
+                const SizedBox(height: 10),
+              ],
               _pwField(l.settingsNewPassword, newCtrl, obscureNew, () => setS(() => obscureNew = !obscureNew),
-                  validator: (v) => (v == null || v.length < 6) ? l.validationPasswordTooShort : null),
+                  validator: (v) => _isStrongPassword(v) ? null : l.validationPasswordTooShort),
               const SizedBox(height: 10),
               _pwField(l.settingsConfirmNewPassword, confCtrl, obscureConf, () => setS(() => obscureConf = !obscureConf),
                   validator: (v) => v != newCtrl.text ? l.validationPasswordMismatch : null),
@@ -216,20 +242,22 @@ class _SettingsPageState extends State<SettingsPage> {
           actions: [
             TextButton(
               onPressed: isLoading ? null : () => Navigator.pop(ctx),
-              child: Text(l.commonCancel, style: const TextStyle(color: Color(0xFF6B7280))),
+              child: Text(l.commonCancel, style: TextStyle(color: ctx.textSecondary)),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1E8E5A),
+                backgroundColor: const Color(0xFF1AA87C),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: isLoading ? null : () async {
                 if (!formKey.currentState!.validate()) return;
                 setS(() => isLoading = true);
-                final res = await VideoServerClient.instance.changePassword(
-                  currentPassword: curCtrl.text,
-                  newPassword: newCtrl.text,
-                );
+                final res = isSetMode
+                    ? await VideoServerClient.instance.setPassword(newCtrl.text)
+                    : await VideoServerClient.instance.changePassword(
+                        currentPassword: curCtrl.text,
+                        newPassword: newCtrl.text,
+                      );
                 setS(() => isLoading = false);
                 if (!ctx.mounted) return;
                 if (res['success'] == false) {
@@ -239,7 +267,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   ));
                 } else {
                   Navigator.pop(ctx);
-                  if (mounted) _showSnack(l.settingsPasswordChanged);
+                  if (mounted) {
+                    if (isSetMode) setState(() => _hasPassword = true);
+                    _showSnack(isSetMode ? l.settingsPasswordSet : l.settingsPasswordChanged);
+                  }
                 }
               },
               child: isLoading
@@ -250,7 +281,10 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }),
     );
-    curCtrl.dispose(); newCtrl.dispose(); confCtrl.dispose();
+    // 同上：等 dialog 退場動畫結束再 dispose
+    Future.delayed(const Duration(milliseconds: 400), () {
+      curCtrl.dispose(); newCtrl.dispose(); confCtrl.dispose();
+    });
   }
 
   Widget _pwField(String label, TextEditingController ctrl, bool obscure, VoidCallback toggle,
@@ -325,24 +359,24 @@ class _SettingsPageState extends State<SettingsPage> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: ctx.bgCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(color: const Color(0xFFDDE1E7), borderRadius: BorderRadius.circular(2))),
+                decoration: BoxDecoration(color: ctx.borderColor, borderRadius: BorderRadius.circular(2))),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(l.settingsAnalysisQuality,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E))),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.textPrimary)),
             ),
             const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(l.settingsQualityHint,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                  style: TextStyle(fontSize: 12, color: ctx.textSecondary)),
             ),
             const SizedBox(height: 14),
             ...ExportQuality.values.map((q) {
@@ -354,31 +388,31 @@ class _SettingsPageState extends State<SettingsPage> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF1E8E5A).withValues(alpha: 0.07) : const Color(0xFFF4F6F9),
+                    color: isSelected ? const Color(0xFF1AA87C).withValues(alpha: 0.07) : ctx.bgInset,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: isSelected ? const Color(0xFF1E8E5A) : const Color(0xFFDDE1E7),
+                      color: isSelected ? const Color(0xFF1AA87C) : ctx.borderColor,
                       width: isSelected ? 1.5 : 1.0,
                     ),
                   ),
                   child: Row(children: [
                     Icon(
                       isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                      color: isSelected ? const Color(0xFF1E8E5A) : const Color(0xFFB0B8C1),
+                      color: isSelected ? const Color(0xFF1AA87C) : ctx.textHint,
                       size: 20,
                     ),
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(q.label, style: TextStyle(
                         fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: isSelected ? const Color(0xFF1E8E5A) : const Color(0xFF1A1A2E),
+                        color: isSelected ? const Color(0xFF1AA87C) : ctx.textPrimary,
                       )),
                       const SizedBox(height: 2),
-                      Text(q.sizeHint, style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                      Text(q.sizeHint, style: TextStyle(fontSize: 12, color: ctx.textSecondary)),
                     ])),
                     Text(q.bitrateHint, style: TextStyle(
                       fontSize: 11, fontWeight: FontWeight.w500,
-                      color: isSelected ? const Color(0xFF1E8E5A) : const Color(0xFFB0B8C1),
+                      color: isSelected ? const Color(0xFF1AA87C) : ctx.textHint,
                     )),
                   ]),
                 ),
@@ -389,7 +423,7 @@ class _SettingsPageState extends State<SettingsPage> {
               width: double.infinity,
               child: FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E8E5A),
+                  backgroundColor: const Color(0xFF1AA87C),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -408,6 +442,92 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) _showSnack(AppLocalizations.of(context).settingsQualityUpdated(result.label));
   }
 
+  // ── 外觀主題 ──────────────────────────────────────────────────
+  String _themeModeLabel(AppLocalizations l, ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return l.settingsThemeLight;
+      case ThemeMode.dark:
+        return l.settingsThemeDark;
+      case ThemeMode.system:
+        return l.settingsThemeSystem;
+    }
+  }
+
+  IconData _themeModeIcon(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return Icons.light_mode_rounded;
+      case ThemeMode.dark:
+        return Icons.dark_mode_rounded;
+      case ThemeMode.system:
+        return Icons.brightness_auto_rounded;
+    }
+  }
+
+  Future<void> _showThemePicker() async {
+    final l = AppLocalizations.of(context);
+    final appState = context.read<AppStateProvider>();
+    final result = await showModalBottomSheet<ThemeMode>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final current = appState.themeMode;
+        return Container(
+          decoration: BoxDecoration(
+            color: ctx.bgCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(color: ctx.borderColor, borderRadius: BorderRadius.circular(2))),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(l.settingsTheme,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ctx.textPrimary)),
+            ),
+            const SizedBox(height: 14),
+            ...[ThemeMode.system, ThemeMode.light, ThemeMode.dark].map((mode) {
+              final isSelected = current == mode;
+              return GestureDetector(
+                onTap: () => Navigator.pop(ctx, mode),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? const Color(0xFF1AA87C).withValues(alpha: 0.07) : ctx.bgInset,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected ? const Color(0xFF1AA87C) : ctx.borderColor,
+                      width: isSelected ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(children: [
+                    Icon(_themeModeIcon(mode),
+                        color: isSelected ? const Color(0xFF1AA87C) : ctx.textHint, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(_themeModeLabel(l, mode), style: TextStyle(
+                        fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                        color: isSelected ? const Color(0xFF1AA87C) : ctx.textPrimary,
+                      )),
+                    ),
+                    if (isSelected)
+                      const Icon(Icons.check_circle_rounded, color: Color(0xFF1AA87C), size: 18),
+                  ]),
+                ),
+              );
+            }),
+          ]),
+        );
+      },
+    );
+
+    if (result == null || !mounted) return;
+    appState.setThemeMode(result);
+  }
+
   // ── 登出 ─────────────────────────────────────────────────────
   Future<void> _logout() async {
     final l = AppLocalizations.of(context);
@@ -420,7 +540,7 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(l.commonCancel, style: const TextStyle(color: Color(0xFF6B7280))),
+            child: Text(l.commonCancel, style: TextStyle(color: ctx.textSecondary)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -458,7 +578,7 @@ class _SettingsPageState extends State<SettingsPage> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(l.commonCancel,
-                style: const TextStyle(color: Color(0xFF6B7280))),
+                style: TextStyle(color: ctx.textSecondary)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -509,7 +629,7 @@ class _SettingsPageState extends State<SettingsPage> {
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: Text(l.commonCancel,
-                    style: const TextStyle(color: Color(0xFF6B7280))),
+                    style: TextStyle(color: ctx.textSecondary)),
               ),
               FilledButton(
                 style: FilledButton.styleFrom(
@@ -582,7 +702,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? Colors.red : const Color(0xFF1E8E5A),
+      backgroundColor: isError ? Colors.red : const Color(0xFF1AA87C),
       duration: const Duration(seconds: 2),
     ));
   }
@@ -595,10 +715,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final l = AppLocalizations.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: context.bgPage,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E8E5A),
-        foregroundColor: Colors.white,
+        backgroundColor: context.isDarkMode ? context.bgPage : const Color(0xFF1AA87C),
+        foregroundColor: context.isDarkMode ? context.textPrimary : Colors.white,
         elevation: 0,
         title: Text(l.settingsTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         centerTitle: true,
@@ -628,17 +748,18 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingsTile(
             icon: Icons.lock_outline_rounded,
             iconColor: const Color(0xFF7C3AED),
-            title: l.settingsChangePassword,
+            title: _hasPassword ? l.settingsChangePassword : l.settingsSetPassword,
+            subtitle: _hasPassword ? null : l.settingsSetPasswordDesc,
             onTap: _showChangePasswordDialog,
           ),
           _SettingsTile(
             icon: Icons.g_mobiledata_rounded,
-            iconColor: const Color(0xFF1E8E5A),
+            iconColor: const Color(0xFF1AA87C),
             title: l.settingsGoogleLogin,
             subtitle: _googleLinked ? l.settingsGoogleLinked : l.settingsGoogleNotLinked,
-            subtitleColor: _googleLinked ? const Color(0xFF1E8E5A) : const Color(0xFF9AA6B2),
+            subtitleColor: _googleLinked ? const Color(0xFF1AA87C) : context.textHint,
             trailing: _googleLinked
-                ? const Icon(Icons.check_circle_rounded, color: Color(0xFF1E8E5A), size: 18)
+                ? const Icon(Icons.check_circle_rounded, color: Color(0xFF1AA87C), size: 18)
                 : null,
             onTap: _googleLinked ? null : _linkGoogle,
           ),
@@ -674,13 +795,20 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: () => LanguageSelectorSheet.show(context),
           ),
           _SettingsTile(
+            icon: Icons.dark_mode_outlined,
+            iconColor: const Color(0xFF5C6BC0),
+            title: l.settingsTheme,
+            subtitle: _themeModeLabel(l, context.watch<AppStateProvider>().themeMode),
+            onTap: _showThemePicker,
+          ),
+          _SettingsTile(
             icon: Icons.system_update_rounded,
-            iconColor: const Color(0xFF1E8E5A),
+            iconColor: const Color(0xFF1AA87C),
             title: l.settingsCheckUpdate,
             trailing: _isCheckingUpdate
                 ? const SizedBox(
                     width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1E8E5A)),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1AA87C)),
                   )
                 : null,
             onTap: _isCheckingUpdate ? null : _checkUpdate,
@@ -721,7 +849,7 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: _appVersion.isEmpty ? null : _appVersion,
             trailing: _appVersion.isEmpty
                 ? const SizedBox.shrink()
-                : const Icon(Icons.copy_rounded, color: Color(0xFFB0B8C1), size: 16),
+                : Icon(Icons.copy_rounded, color: context.textHint, size: 16),
             onTap: _appVersion.isEmpty
                 ? null
                 : () async {
@@ -753,7 +881,7 @@ class _SettingsPageState extends State<SettingsPage> {
               icon: const Icon(Icons.delete_forever_rounded, size: 18),
               label: Text(l.settingsDeleteAccount),
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF9AA6B2),
+                foregroundColor: context.textHint,
                 padding: const EdgeInsets.symmetric(vertical: 10),
               ),
               onPressed: _deleteAccount,
@@ -788,7 +916,7 @@ class _ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: const Color(0xFF1E8E5A),
+      color: const Color(0xFF1AA87C),
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
       child: Column(children: [
         // ── 大頭貼 ──
@@ -813,7 +941,7 @@ class _ProfileCard extends StatelessWidget {
               decoration: const BoxDecoration(
                 color: Colors.white, shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.camera_alt_rounded, size: 14, color: Color(0xFF1E8E5A)),
+              child: const Icon(Icons.camera_alt_rounded, size: 14, color: Color(0xFF1AA87C)),
             ),
           ]),
         ),
@@ -839,16 +967,16 @@ class _ProfileCard extends StatelessWidget {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: context.bgCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 14),
-              decoration: BoxDecoration(color: const Color(0xFFDDE1E7), borderRadius: BorderRadius.circular(2))),
+              decoration: BoxDecoration(color: context.borderColor, borderRadius: BorderRadius.circular(2))),
           ListTile(
-            leading: const Icon(Icons.photo_library_rounded, color: Color(0xFF1E8E5A)),
+            leading: const Icon(Icons.photo_library_rounded, color: Color(0xFF1AA87C)),
             title: Text(AppLocalizations.of(context).settingsPickFromGallery),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             onTap: () { Navigator.pop(context); onTapAvatar(); },
@@ -875,9 +1003,9 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
     child: Text(title,
-        style: const TextStyle(
+        style: TextStyle(
             fontSize: 12, fontWeight: FontWeight.w700,
-            color: Color(0xFF9AA6B2), letterSpacing: 0.5)),
+            color: context.textSecondary, letterSpacing: 0.5)),
   );
 }
 
@@ -906,7 +1034,7 @@ class _SettingsTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 2),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
@@ -919,12 +1047,12 @@ class _SettingsTile extends StatelessWidget {
           ),
           child: Icon(icon, color: iconColor, size: 18),
         ),
-        title: Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: Color(0xFF1A1A2E))),
+        title: Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: context.textPrimary)),
         subtitle: subtitle != null
-            ? Text(subtitle!, style: TextStyle(fontSize: 12.5, color: subtitleColor ?? const Color(0xFF6B7280)))
+            ? Text(subtitle!, style: TextStyle(fontSize: 12.5, color: subtitleColor ?? context.textSecondary))
             : null,
         trailing: trailing ?? (onTap != null
-            ? const Icon(Icons.chevron_right_rounded, color: Color(0xFFB0B8C1), size: 20)
+            ? Icon(Icons.chevron_right_rounded, color: context.textHint, size: 20)
             : null),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         onTap: onTap,

@@ -49,7 +49,8 @@ extension _PlanX on _Plan {
     }
   }
 
-  Color get bgColor {
+  Color bgColorIn(BuildContext context) {
+    if (context.isDarkMode) return primaryColor.withValues(alpha: 0.18);
     switch (this) {
       case _Plan.free:  return const Color(0xFFF4F6F9);
       case _Plan.pro:   return const Color(0xFFE8F5EE);
@@ -143,7 +144,7 @@ class _UpgradePageState extends State<UpgradePage> {
   Widget build(BuildContext context) {
     final currentPlan = context.watch<PlanProvider>().plan;
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           GreenPageHeader(
@@ -177,7 +178,7 @@ class _UpgradePageState extends State<UpgradePage> {
   void _onBuyBalls(BuildContext context, _BallPack pack) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: context.bgCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -198,7 +199,7 @@ class _UpgradePageState extends State<UpgradePage> {
   void _showPaySheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: context.bgCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -224,9 +225,9 @@ class _PlanToggle extends StatelessWidget {
       child: Container(
         height: 44,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.bgCard,
           borderRadius: BorderRadius.circular(22),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, 2))],
+          boxShadow: context.cardShadow,
         ),
         child: Row(
           children: _Plan.values.map((plan) {
@@ -245,7 +246,7 @@ class _PlanToggle extends StatelessWidget {
                     child: Text(
                       plan.label,
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.black54,
+                        color: isSelected ? Colors.white : context.textSecondary,
                         fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                         fontSize: 14,
                       ),
@@ -285,7 +286,7 @@ class _SelectedPlanCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 24),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: plan.primaryColor.withValues(alpha: 0.4), width: 1.5),
         boxShadow: [BoxShadow(color: plan.primaryColor.withValues(alpha: 0.12), blurRadius: 16, offset: const Offset(0, 6))],
@@ -299,7 +300,7 @@ class _SelectedPlanCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: plan.bgColor,
+                  color: plan.bgColorIn(context),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: plan.primaryColor.withValues(alpha: 0.3)),
                 ),
@@ -326,7 +327,7 @@ class _SelectedPlanCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(plan.price, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: plan.primaryColor)),
-                  Text(plan.period, style: const TextStyle(fontSize: 12, color: Colors.black45)),
+                  Text(plan.period, style: TextStyle(fontSize: 12, color: context.textSecondary)),
                 ],
               ),
             ],
@@ -341,7 +342,7 @@ class _SelectedPlanCard extends StatelessWidget {
               children: [
                 Icon(Icons.check_circle_rounded, color: plan.primaryColor, size: 16),
                 const SizedBox(width: 8),
-                Text(h, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                Text(h, style: TextStyle(fontSize: 13, color: context.textPrimary)),
               ],
             ),
           )),
@@ -380,14 +381,14 @@ class _FeatureTable extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 8, bottom: 10),
                 child: Text(
                   AppLocalizations.of(context).upgradeFullComparison,
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey[800]),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: context.textPrimary),
                 ),
               ),
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.bgCard,
                   borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 12, offset: const Offset(0, 4))],
+                  boxShadow: context.cardShadow,
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
@@ -402,7 +403,7 @@ class _FeatureTable extends StatelessWidget {
                             children: [
                               _headerCell(AppLocalizations.of(context).upgradeFeatureColumn, null),
                               ..._features.asMap().entries.map((e) =>
-                                _featureNameCell(e.value.name, e.key.isOdd),
+                                _featureNameCell(context, e.value.name, e.key.isOdd),
                               ),
                             ],
                           ),
@@ -444,15 +445,15 @@ class _FeatureTable extends StatelessWidget {
     );
   }
 
-  Widget _featureNameCell(String name, bool isOdd) {
+  Widget _featureNameCell(BuildContext context, String name, bool isOdd) {
     return Container(
       height: _rowH,
-      color: isOdd ? const Color(0xFFF9FAFB) : Colors.white,
+      color: isOdd ? context.bgInset : context.bgCard,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       alignment: Alignment.centerLeft,
       child: Text(
         name,
-        style: const TextStyle(fontSize: 11.5, color: Color(0xFF2C3E50)),
+        style: TextStyle(fontSize: 11.5, color: context.textPrimary),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
@@ -492,7 +493,7 @@ class _PlanColumn extends StatelessWidget {
       width: colW,
       decoration: highlight
           ? BoxDecoration(
-              color: plan.bgColor,
+              color: plan.bgColorIn(context),
               border: Border(
                 left:  BorderSide(color: color.withValues(alpha: 0.3)),
                 right: BorderSide(color: color.withValues(alpha: 0.3)),
@@ -553,9 +554,11 @@ class _ValueCell extends StatelessWidget {
     final color = plan.primaryColor;
     Color? bg;
     if (isHighlighted) {
-      bg = isOdd ? plan.bgColor.withValues(alpha: 0.6) : plan.bgColor;
+      bg = isOdd
+          ? plan.bgColorIn(context).withValues(alpha: 0.6)
+          : plan.bgColorIn(context);
     } else {
-      bg = isOdd ? const Color(0xFFF9FAFB) : Colors.white;
+      bg = isOdd ? context.bgInset : context.bgCard;
     }
 
     Widget content;
@@ -567,14 +570,14 @@ class _ValueCell extends StatelessWidget {
       content = Icon(Icons.check_rounded, color: color, size: 18);
     } else if (value == '有') {
       // 廣告
-      content = const Text('有', style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)));
+      content = Text('有', style: TextStyle(fontSize: 11, color: context.textSecondary));
     } else {
       // 文字說明
       content = Text(
         value!,
         style: TextStyle(
           fontSize: 10.5,
-          color: isHighlighted ? color : const Color(0xFF546E7A),
+          color: isHighlighted ? color : context.textSecondary,
           fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.normal,
         ),
         textAlign: TextAlign.center,
@@ -794,7 +797,7 @@ class _PaySheetState extends State<_PaySheet> {
             Center(
               child: Text(
                 '訂閱後可隨時在 ${Platform.isIOS ? "App Store" : "Google Play"} 管理或取消',
-                style: const TextStyle(fontSize: 11, color: Colors.black45),
+                style: TextStyle(fontSize: 11, color: context.textSecondary),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -828,13 +831,15 @@ class _BallShopSection extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(
                   '單買球數',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.grey[800]),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: context.textPrimary),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5EE),
+                    color: context.isDarkMode
+                        ? kPrimaryGreen.withValues(alpha: 0.18)
+                        : const Color(0xFFE8F5EE),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: kPrimaryGreen.withValues(alpha: 0.4)),
                   ),
@@ -860,9 +865,9 @@ class _BallPackTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: context.cardShadow,
       ),
       child: Material(
         color: Colors.transparent,
@@ -879,7 +884,9 @@ class _BallPackTile extends StatelessWidget {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5EE),
+                    color: context.isDarkMode
+                        ? kPrimaryGreen.withValues(alpha: 0.18)
+                        : const Color(0xFFE8F5EE),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Icon(Icons.sports_golf_rounded, color: kPrimaryGreen, size: 22),
@@ -894,7 +901,7 @@ class _BallPackTile extends StatelessWidget {
                         children: [
                           Text(
                             '${pack.balls} 球',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF1A3A2A)),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.textPrimary),
                           ),
                           if (pack.badge != null) ...[
                             const SizedBox(width: 8),
@@ -912,7 +919,7 @@ class _BallPackTile extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         '永久有效，隨時使用',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        style: TextStyle(fontSize: 11, color: context.textSecondary),
                       ),
                     ],
                   ),
@@ -1039,7 +1046,7 @@ class _BallBuySheetState extends State<_BallBuySheet> {
             const SizedBox(height: 10),
             Text(
               '球數永久有效，不限時間使用。用完每日配額後自動消耗。',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 12, color: context.textSecondary),
             ),
             const SizedBox(height: 16),
             const Divider(),

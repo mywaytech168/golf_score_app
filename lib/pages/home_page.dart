@@ -249,7 +249,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgPage,
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           // ── 綠色頂部面板 ─────────────────────────────────────
@@ -393,7 +393,7 @@ class _HomePageState extends State<HomePage> {
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: planColor == const Color(0xFF1E8E5A)
+          color: planColor == const Color(0xFF1AA87C)
               ? Colors.white
               : Color(plan.colorValue),
         ),
@@ -681,7 +681,10 @@ class _MetricMini extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: kSpaceSM, vertical: kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusMD),
+      decoration: kCardDecoration(
+          color: context.bgCard,
+          radius: kRadiusMD,
+          shadow: context.cardShadow),
       child: loading
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -699,7 +702,7 @@ class _MetricMini extends StatelessWidget {
                   width: 40,
                   height: 14,
                   decoration: BoxDecoration(
-                    color: kTextHint.withValues(alpha: 0.3),
+                    color: context.textHint.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
@@ -727,13 +730,13 @@ class _MetricMini extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: value == '--' ? kTextHint : color,
+                          color: value == '--' ? context.textHint : color,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(label,
-                          style: const TextStyle(
-                              fontSize: 10, color: kTextSecondary),
+                          style: TextStyle(
+                              fontSize: 10, color: context.textSecondary),
                           overflow: TextOverflow.ellipsis),
                     ],
                   ),
@@ -765,7 +768,10 @@ class _PracticeSuggestionsCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(kSpaceLG),
-      decoration: kCardDecoration(radius: kRadiusLG),
+      decoration: kCardDecoration(
+          color: context.bgCard,
+          radius: kRadiusLG,
+          shadow: context.cardShadow),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -774,13 +780,13 @@ class _PracticeSuggestionsCard extends StatelessWidget {
               const Icon(Icons.sports_golf_rounded,
                   color: kPrimaryGreen, size: 20),
               const SizedBox(width: kSpaceSM),
-              const Expanded(
+              Expanded(
                 child: Text(
                   '目前訓練建議',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
-                    color: kTextPrimary,
+                    color: context.textPrimary,
                   ),
                 ),
               ),
@@ -821,8 +827,8 @@ class _PracticeSuggestionsCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       '下次目標：$goal',
-                      style: const TextStyle(
-                          fontSize: 12, color: kTextSecondary),
+                      style: TextStyle(
+                          fontSize: 12, color: context.textSecondary),
                     ),
                   ),
                 ],
@@ -850,7 +856,7 @@ class _SuggestionTile extends StatelessWidget {
     final titleStyle = TextStyle(
       fontSize: 14,
       fontWeight: FontWeight.w600,
-      color: done ? kTextHint : kTextPrimary,
+      color: done ? context.textHint : context.textPrimary,
       decoration: done ? TextDecoration.lineThrough : null,
     );
 
@@ -898,7 +904,7 @@ class _SuggestionTile extends StatelessWidget {
                         suggestion.instruction,
                         style: TextStyle(
                           fontSize: 12,
-                          color: done ? kTextHint : kTextSecondary,
+                          color: done ? context.textHint : context.textSecondary,
                         ),
                       ),
                     ),
@@ -929,7 +935,7 @@ class _Dot extends StatelessWidget {
         ),
         const SizedBox(width: kSpaceXS),
         Text(label,
-            style: const TextStyle(fontSize: 12, color: kTextSecondary)),
+            style: TextStyle(fontSize: 12, color: context.textSecondary)),
       ],
     );
   }

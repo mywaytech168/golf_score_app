@@ -65,7 +65,7 @@ class _AnnouncementPageState extends State<AnnouncementPage> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FA),
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           GreenPageHeader(
@@ -138,7 +138,7 @@ class _AnnouncementCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: kSpaceSM),
       child: Material(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(kRadiusMD),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -196,8 +196,8 @@ class _AnnouncementCard extends StatelessWidget {
                             // 日期
                             Text(
                               _formatDate(context, item.publishedAt),
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.black38),
+                              style: TextStyle(
+                                  fontSize: 11, color: context.textHint),
                             ),
                           ],
                         ),
@@ -209,8 +209,8 @@ class _AnnouncementCard extends StatelessWidget {
                             fontWeight:
                                 isRead ? FontWeight.w500 : FontWeight.w700,
                             color: isRead
-                                ? const Color(0xFF5A6A7A)
-                                : const Color(0xFF1A2A3A),
+                                ? context.textSecondary
+                                : context.textPrimary,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -218,8 +218,8 @@ class _AnnouncementCard extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           item.body,
-                          style: const TextStyle(
-                              fontSize: 13, color: Color(0xFF7A8A9A), height: 1.4),
+                          style: TextStyle(
+                              fontSize: 13, color: context.textSecondary, height: 1.4),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -227,10 +227,10 @@ class _AnnouncementCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.only(right: 8),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
                   child: Icon(Icons.chevron_right_rounded,
-                      color: Colors.black26, size: 20),
+                      color: context.textHint, size: 20),
                 ),
               ],
             ),
@@ -268,7 +268,7 @@ class _AnnouncementDetailPage extends StatelessWidget {
     final color = type.color;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FA),
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           GreenPageHeader(
@@ -311,8 +311,8 @@ class _AnnouncementDetailPage extends StatelessWidget {
                       const SizedBox(width: 10),
                       Text(
                         _fullDate(item.publishedAt),
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.black45),
+                        style: TextStyle(
+                            fontSize: 12, color: context.textSecondary),
                       ),
                     ],
                   ),
@@ -320,10 +320,10 @@ class _AnnouncementDetailPage extends StatelessWidget {
                   // 標題
                   Text(
                     item.title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A2A3A),
+                      color: context.textPrimary,
                       height: 1.3,
                     ),
                   ),
@@ -355,9 +355,9 @@ class _AnnouncementDetailPage extends StatelessWidget {
                   // 內文
                   Text(
                     item.body,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
-                      color: Color(0xFF2A3A4A),
+                      color: context.textPrimary,
                       height: 1.7,
                     ),
                   ),
@@ -413,16 +413,16 @@ class _EmptyView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.campaign_outlined, size: 64, color: Colors.black12),
+          Icon(Icons.campaign_outlined, size: 64, color: context.textHint),
           const SizedBox(height: 16),
           Text(l.annEmpty,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
-                  color: Colors.black38)),
+                  color: context.textSecondary)),
           const SizedBox(height: 6),
           Text(l.annEmptySubtitle,
-              style: const TextStyle(fontSize: 13, color: Colors.black26)),
+              style: TextStyle(fontSize: 13, color: context.textHint)),
         ],
       ),
     );
@@ -441,11 +441,11 @@ class _ErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.wifi_off_rounded, size: 52, color: Colors.black26),
+          Icon(Icons.wifi_off_rounded, size: 52, color: context.textHint),
           const SizedBox(height: 16),
           Text(message,
               style:
-                  const TextStyle(fontSize: 14, color: Colors.black45)),
+                  TextStyle(fontSize: 14, color: context.textSecondary)),
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: onRetry,

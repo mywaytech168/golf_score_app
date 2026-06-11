@@ -429,9 +429,12 @@ class _LoginPageState extends State<LoginPage> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [kPrimaryGreen, kPrimaryDark],
+            // 深色模式用深綠→墨黑，避免黑卡片浮在亮綠背景上
+            colors: context.isDarkMode
+                ? const [Color(0xFF0E2B22), kOrviaInk]
+                : const [kPrimaryGreen, kPrimaryDark],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -510,7 +513,8 @@ class _LoginPageState extends State<LoginPage> {
       children: [
         Text(l10n.authLoginTitle,
             style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold, color: kPrimaryDark)),
+              fontWeight: FontWeight.bold,
+              color: context.isDarkMode ? kPrimaryLight : kPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _identifierController,
@@ -622,7 +626,8 @@ class _LoginPageState extends State<LoginPage> {
       children: [
         Text(l10n.authRegisterTitle,
             style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold, color: kPrimaryDark)),
+              fontWeight: FontWeight.bold,
+              color: context.isDarkMode ? kPrimaryLight : kPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _usernameController,
@@ -678,7 +683,13 @@ class _LoginPageState extends State<LoginPage> {
           ),
           validator: (v) {
             if (v == null || v.isEmpty) return l10n.validationEnterPassword;
-            if (v.length < 6) return l10n.validationPasswordTooShort;
+            // 與 server 註冊規則一致：≥8 + 大寫 + 小寫 + 數字
+            if (v.length < 8 ||
+                !RegExp(r'[A-Z]').hasMatch(v) ||
+                !RegExp(r'[a-z]').hasMatch(v) ||
+                !RegExp(r'[0-9]').hasMatch(v)) {
+              return l10n.validationPasswordTooShort;
+            }
             return null;
           },
         ),
@@ -705,12 +716,12 @@ class _LoginPageState extends State<LoginPage> {
 
         // ── 邀請碼（可選）────────────────────────────────────────
         Row(children: [
-          const Expanded(child: Divider(color: Color(0xFFE0E0E0))),
+          Expanded(child: Divider(color: context.borderColor)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Text('選填', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+            child: Text('選填', style: TextStyle(fontSize: 11, color: context.textHint)),
           ),
-          const Expanded(child: Divider(color: Color(0xFFE0E0E0))),
+          Expanded(child: Divider(color: context.borderColor)),
         ]),
         const SizedBox(height: 12),
         TextFormField(
@@ -727,7 +738,7 @@ class _LoginPageState extends State<LoginPage> {
               borderSide: const BorderSide(color: Color(0xFFFF6B35), width: 1.5),
             ),
             helperText: '填寫邀請碼，雙方各獲得 +5 球獎勵',
-            helperStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            helperStyle: TextStyle(fontSize: 11, color: context.textHint),
             counterText: '',
           ),
         ),
@@ -761,14 +772,14 @@ class _LoginPageState extends State<LoginPage> {
   Widget _buildDivider(String label, ThemeData theme) {
     return Row(
       children: [
-        const Expanded(child: Divider(color: Color(0xFFE0E0E0))),
+        Expanded(child: Divider(color: context.borderColor)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Text(label,
               style: theme.textTheme.labelMedium?.copyWith(
-                color: const Color(0xFF5F6368), fontWeight: FontWeight.w600)),
+                color: context.textSecondary, fontWeight: FontWeight.w600)),
         ),
-        const Expanded(child: Divider(color: Color(0xFFE0E0E0))),
+        Expanded(child: Divider(color: context.borderColor)),
       ],
     );
   }
@@ -1060,9 +1071,9 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: context.bgCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
         child: Column(
@@ -1074,7 +1085,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
               child: Container(
                 width: 36, height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: context.borderColor,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1086,8 +1097,8 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
               const SizedBox(width: 10),
               Text(
                 _step == 0 ? '忘記密碼' : '輸入驗證碼',
-                style: const TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF123B70)),
+                style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w700, color: context.textPrimary),
               ),
             ]),
             const SizedBox(height: 6),
@@ -1095,7 +1106,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
               _step == 0
                   ? '輸入您的 Email，我們將寄送 6 位數驗證碼'
                   : '驗證碼已寄至 ${_emailCtrl.text.trim()}',
-              style: const TextStyle(fontSize: 13, color: Color(0xFF6F7B86)),
+              style: TextStyle(fontSize: 13, color: context.textSecondary),
             ),
             const SizedBox(height: 20),
 
@@ -1205,8 +1216,8 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                     _confirmCtrl.clear();
                     _errorMsg = null;
                   }),
-                  child: const Text('重新輸入 Email',
-                      style: TextStyle(color: Color(0xFF9AA6B2))),
+                  child: Text('重新輸入 Email',
+                      style: TextStyle(color: context.textHint)),
                 ),
               ),
             ],

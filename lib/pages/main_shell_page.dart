@@ -232,9 +232,11 @@ class _MainShellPageState extends State<MainShellPage> {
     final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))],
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        boxShadow: context.isDarkMode
+            ? const []
+            : const [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,

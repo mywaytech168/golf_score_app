@@ -140,12 +140,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ChangeNotifierProvider(create: (_) => VideoProvider()),
         ChangeNotifierProvider(create: (_) => PlanProvider()),
       ],
-      child: Consumer<LocaleProvider>(
-        builder: (context, localeProvider, _) {
+      child: Consumer2<LocaleProvider, AppStateProvider>(
+        builder: (context, localeProvider, appState, _) {
           return MaterialApp(
             navigatorKey: _navigatorKey,
             title: 'ORVIA',
             theme: buildAppTheme(),
+            darkTheme: buildAppDarkTheme(),
+            themeMode: appState.themeMode,
             locale: localeProvider.locale,
             supportedLocales: LocaleProvider.supportedLocales,
             localizationsDelegates: const [

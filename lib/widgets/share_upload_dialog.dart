@@ -164,7 +164,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        LinearProgressIndicator(value: null, backgroundColor: Colors.white12, color: const Color(0xFF1E8E5A)),
+        LinearProgressIndicator(value: null, backgroundColor: Colors.white12, color: const Color(0xFF1AA87C)),
         const SizedBox(height: 12),
         Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
       ],
@@ -178,7 +178,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
         LinearProgressIndicator(
           value: _uploadProgress,
           backgroundColor: Colors.white12,
-          color: const Color(0xFF1E8E5A),
+          color: const Color(0xFF1AA87C),
         ),
         const SizedBox(height: 12),
         Text(
@@ -203,7 +203,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
             ),
             if (_isReused) ...[
               const SizedBox(width: 6),
-              const Icon(Icons.recycling, color: Color(0xFF1E8E5A), size: 14),
+              const Icon(Icons.recycling, color: Color(0xFF1AA87C), size: 14),
             ],
           ],
         ),
@@ -252,7 +252,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
           onPressed: () {
             Share.share('高爾夫揮桿分享碼：$_shareCode\n（有效 1 天，請在 App 中輸入此碼取得影片）');
           },
-          child: const Text('系統分享', style: TextStyle(color: Color(0xFF1E8E5A))),
+          child: const Text('系統分享', style: TextStyle(color: Color(0xFF1AA87C))),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context),

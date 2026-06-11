@@ -17,7 +17,7 @@ enum AnnouncementType {
     info      => const Color(0xFF2E8EFF),
     important => const Color(0xFFE05252),
     event     => const Color(0xFFFF9800),
-    update    => const Color(0xFF1E8E5A),
+    update    => const Color(0xFF1AA87C),
   };
 
   IconData get icon => switch (this) {

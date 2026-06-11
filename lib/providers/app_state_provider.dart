@@ -1,16 +1,17 @@
 import 'package:flutter/foundation.dart';
-
-/// 應用主題模式
-enum ThemeMode {
-  light,
-  dark,
-  system,
-}
+import 'package:flutter/material.dart' show ThemeMode;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 應用全局狀態提供者
 /// 
 /// 管理應用級別的狀態（主題、語言、通知設置等）
 class AppStateProvider with ChangeNotifier {
+  static const _kThemeMode = 'theme_mode';
+
+  AppStateProvider() {
+    _loadThemeMode();
+  }
+
   // 主題和語言設置
   ThemeMode _themeMode = ThemeMode.system;
   String _languageCode = 'zh'; // 'zh' 或 'en'
@@ -44,6 +45,19 @@ class AppStateProvider with ChangeNotifier {
   /// 設置主題模式
   void setThemeMode(ThemeMode mode) {
     _themeMode = mode;
+    notifyListeners();
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_kThemeMode, mode.name));
+  }
+
+  Future<void> _loadThemeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_kThemeMode);
+    if (saved == null) return;
+    _themeMode = ThemeMode.values.firstWhere(
+      (m) => m.name == saved,
+      orElse: () => ThemeMode.system,
+    );
     notifyListeners();
   }
 

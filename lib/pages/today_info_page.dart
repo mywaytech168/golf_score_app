@@ -124,10 +124,15 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
       lastDate: DateTime.now(),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: kPrimaryGreen,
-            onPrimary: Colors.white,
-          ),
+          colorScheme: context.isDarkMode
+              ? const ColorScheme.dark(
+                  primary: kOrviaMint,
+                  onPrimary: Color(0xFF00261A),
+                )
+              : const ColorScheme.light(
+                  primary: kPrimaryGreen,
+                  onPrimary: Colors.white,
+                ),
         ),
         child: child!,
       ),
@@ -161,7 +166,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
     final canGoNext = !isToday;
 
     return Scaffold(
-      backgroundColor: kBgPage,
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           // ── 靜態 Header ─────────────────────────────────────
@@ -308,7 +313,7 @@ class _DatePickerRow extends StatelessWidget {
         '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}';
 
     return Container(
-      color: Colors.white,
+      color: context.bgCard,
       padding: const EdgeInsets.symmetric(horizontal: kSpaceSM, vertical: kSpaceXS),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -325,7 +330,7 @@ class _DatePickerRow extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: kSpaceMD, vertical: kSpaceXS),
               decoration: BoxDecoration(
-                color: kBgPage,
+                color: context.bgInset,
                 borderRadius: BorderRadius.circular(kRadiusSM),
               ),
               child: Row(
@@ -336,10 +341,10 @@ class _DatePickerRow extends StatelessWidget {
                   const SizedBox(width: kSpaceXS),
                   Text(
                     label,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: kTextPrimary,
+                      color: context.textPrimary,
                     ),
                   ),
                 ],
@@ -349,7 +354,7 @@ class _DatePickerRow extends StatelessWidget {
           IconButton(
             onPressed: canGoNext ? onNext : null,
             icon: const Icon(Icons.chevron_right_rounded),
-            color: canGoNext ? kPrimaryGreen : kTextHint,
+            color: canGoNext ? kPrimaryGreen : context.textHint,
             iconSize: 28,
             splashRadius: 20,
           ),
@@ -380,7 +385,10 @@ class _SummaryBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusLG),
+      decoration: kCardDecoration(
+          color: context.bgCard,
+          radius: kRadiusLG,
+          shadow: context.cardShadow),
       child: loading
           ? const _SkeletonRow()
           : Builder(builder: (ctx) {
@@ -465,7 +473,7 @@ class _BannerStat extends StatelessWidget {
           ),
         ),
         const SizedBox(height: kSpaceXS),
-        Text(label, style: const TextStyle(fontSize: 12, color: kTextSecondary)),
+        Text(label, style: TextStyle(fontSize: 12, color: context.textSecondary)),
       ],
     );
   }
@@ -474,7 +482,7 @@ class _BannerStat extends StatelessWidget {
 class _VertDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
-      Container(width: 1, height: 60, color: kTextHint.withValues(alpha: 0.4));
+      Container(width: 1, height: 60, color: context.textHint.withValues(alpha: 0.4));
 }
 
 // ── 指標網格 ─────────────────────────────────────────────────────
@@ -556,7 +564,10 @@ class _MetricCardWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: kSpaceSM, vertical: kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusMD),
+      decoration: kCardDecoration(
+          color: context.bgCard,
+          radius: kRadiusMD,
+          shadow: context.cardShadow),
       child: Row(
         children: [
           Container(
@@ -579,13 +590,13 @@ class _MetricCardWidget extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: item.value == '--' ? kTextHint : item.color,
+                    color: item.value == '--' ? context.textHint : item.color,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   item.label,
-                  style: const TextStyle(fontSize: 10, color: kTextSecondary),
+                  style: TextStyle(fontSize: 10, color: context.textSecondary),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -614,7 +625,7 @@ class _LegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: kSpaceXS),
-        Text(label, style: const TextStyle(fontSize: 12, color: kTextSecondary)),
+        Text(label, style: TextStyle(fontSize: 12, color: context.textSecondary)),
       ],
     );
   }
@@ -634,7 +645,7 @@ class _SkeletonBox extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: kTextHint.withValues(alpha: 0.3),
+        color: context.textHint.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(radius),
       ),
     );
@@ -671,7 +682,10 @@ class _SkeletonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: kSpaceSM, vertical: kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusMD),
+      decoration: kCardDecoration(
+          color: context.bgCard,
+          radius: kRadiusMD,
+          shadow: context.cardShadow),
       child: const Row(
         children: [
           _SkeletonBox(width: 28, height: 28, radius: 8),

@@ -75,7 +75,7 @@ class _RewardPageState extends State<RewardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: context.bgPage,
       body: Column(
         children: [
           GreenPageHeader(
@@ -169,23 +169,23 @@ class _BonusSummaryBar extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.07), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: context.cardShadow,
       ),
       child: Row(
         children: [
           _StatCell(label: '累積獎勵', value: '${status.bonusBalls}', unit: '球', color: kPrimaryGreen),
-          _divider(),
+          _divider(context),
           _StatCell(label: '今日廣告', value: '${status.adClaimedToday}', unit: '/ 5 次', color: const Color(0xFF4285F4)),
-          _divider(),
+          _divider(context),
           _StatCell(label: '邀請好友', value: '${status.inviteCount}', unit: '位', color: const Color(0xFFFF6B35)),
         ],
       ),
     );
   }
 
-  Widget _divider() => Container(height: 36, width: 1, color: Colors.grey[200], margin: const EdgeInsets.symmetric(horizontal: 12));
+  Widget _divider(BuildContext context) => Container(height: 36, width: 1, color: context.borderColor, margin: const EdgeInsets.symmetric(horizontal: 12));
 }
 
 class _StatCell extends StatelessWidget {
@@ -206,13 +206,13 @@ class _StatCell extends StatelessWidget {
             textAlign: TextAlign.center,
             text: TextSpan(children: [
               TextSpan(text: value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
-              TextSpan(text: ' $unit', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+              TextSpan(text: ' $unit', style: TextStyle(fontSize: 11, color: context.textSecondary)),
             ]),
           ),
           const SizedBox(height: 2),
           Text(
             label,
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 11, color: context.textSecondary),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
@@ -263,9 +263,9 @@ class _RewardCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.bgCard,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: context.cardShadow,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -290,7 +290,7 @@ class _RewardCard extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         description,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        style: TextStyle(fontSize: 12, color: context.textSecondary),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -322,14 +322,14 @@ class _RewardCard extends StatelessWidget {
                   Expanded(
                     child: LinearProgressIndicator(
                       value: (usedToday ?? 0) / dailyCap!,
-                      backgroundColor: Colors.grey[200],
+                      backgroundColor: context.bgInset,
                       color: iconBg,
                       borderRadius: BorderRadius.circular(4),
                       minHeight: 6,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('${usedToday ?? 0} / $dailyCap 次', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                  Text('${usedToday ?? 0} / $dailyCap 次', style: TextStyle(fontSize: 11, color: context.textSecondary)),
                 ],
               ),
             ],
@@ -542,12 +542,14 @@ class _InviteCardState extends State<_InviteCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ── 邀請碼顯示 ────────────────────────────────
-                    Text('你的邀請碼', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                    Text('你的邀請碼', style: TextStyle(fontSize: 11, color: context.textSecondary)),
                     const SizedBox(height: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFF3EE),
+                        color: context.isDarkMode
+                  ? const Color(0xFFFF6B35).withValues(alpha: 0.16)
+                  : const Color(0xFFFFF3EE),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.3)),
                       ),
@@ -659,12 +661,12 @@ class _EmptyFriendsList extends StatelessWidget {
       alignment: Alignment.center,
       child: Column(
         children: [
-          Icon(Icons.person_search_rounded, size: 36, color: Colors.grey[300]),
+          Icon(Icons.person_search_rounded, size: 36, color: context.textHint),
           const SizedBox(height: 8),
-          Text('尚無邀請紀錄', style: TextStyle(fontSize: 13, color: Colors.grey[400])),
+          Text('尚無邀請紀錄', style: TextStyle(fontSize: 13, color: context.textHint)),
           const SizedBox(height: 4),
           Text('分享你的邀請碼，邀請好友一起練習！',
-              style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+              style: TextStyle(fontSize: 11, color: context.textHint)),
         ],
       ),
     );
@@ -685,7 +687,7 @@ class _FriendsList extends StatelessWidget {
         final f = entry.value;
         return Column(
           children: [
-            if (i > 0) Divider(height: 1, color: Colors.grey[100]),
+            if (i > 0) Divider(height: 1, color: context.borderColor),
             _FriendTile(friend: f, index: i + 1),
           ],
         );
@@ -752,9 +754,9 @@ class _FriendTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(Icons.calendar_today_rounded, size: 11, color: Colors.grey[400]),
+                    Icon(Icons.calendar_today_rounded, size: 11, color: context.textHint),
                     const SizedBox(width: 3),
-                    Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                    Text(dateStr, style: TextStyle(fontSize: 11, color: context.textSecondary)),
                   ],
                 ),
               ],
@@ -765,7 +767,9 @@ class _FriendTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF3EE),
+              color: context.isDarkMode
+                  ? const Color(0xFFFF6B35).withValues(alpha: 0.16)
+                  : const Color(0xFFFFF3EE),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.3)),
             ),
@@ -872,7 +876,9 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
                       letterSpacing: 3,
                     ),
                     filled: true,
-                    fillColor: const Color(0xFFF3F0FF),
+                    fillColor: context.isDarkMode
+                        ? const Color(0xFFB39DDB).withValues(alpha: 0.14)
+                        : const Color(0xFFF3F0FF),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: const BorderSide(color: Color(0xFFB39DDB)),
@@ -1094,7 +1100,9 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                     hintText: '請詳細描述你的回饋...',
                     hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
                     filled: true,
-                    fillColor: const Color(0xFFF9F4FC),
+                    fillColor: context.isDarkMode
+                        ? const Color(0xFFCE93D8).withValues(alpha: 0.14)
+                        : const Color(0xFFF9F4FC),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Color(0xFFCE93D8)),
@@ -1135,7 +1143,9 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF3E5F5),
+                      color: context.isDarkMode
+                          ? const Color(0xFFCE93D8).withValues(alpha: 0.16)
+                          : const Color(0xFFF3E5F5),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFFCE93D8)),
                     ),
@@ -1204,7 +1214,9 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF3E5F5),
+                      color: context.isDarkMode
+                          ? const Color(0xFFCE93D8).withValues(alpha: 0.16)
+                          : const Color(0xFFF3E5F5),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFFCE93D8)),
                     ),
@@ -1314,17 +1326,17 @@ class _TypeChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF9C27B0).withValues(alpha: 0.12) : Colors.grey[100],
+          color: isSelected ? const Color(0xFF9C27B0).withValues(alpha: 0.12) : context.bgInset,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? const Color(0xFF9C27B0) : Colors.grey[300]!,
+            color: isSelected ? const Color(0xFF9C27B0) : context.borderColor,
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11,
-            color: isSelected ? const Color(0xFF9C27B0) : Colors.grey[600],
+            color: isSelected ? const Color(0xFF9C27B0) : context.textSecondary,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
@@ -1349,9 +1361,9 @@ class _VideoPickerSheet extends StatelessWidget {
       ..sort((a, b) => b.sortTime.compareTo(a.sortTime));
 
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.65,
@@ -1365,31 +1377,31 @@ class _VideoPickerSheet extends StatelessWidget {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: context.borderColor,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
               children: [
-                Icon(Icons.videocam_rounded,
+                const Icon(Icons.videocam_rounded,
                     color: Color(0xFF9C27B0), size: 18),
-                SizedBox(width: 8),
+                const SizedBox(width: 8),
                 Text('選擇影片',
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF123B70))),
+                        color: context.textPrimary)),
               ],
             ),
           ),
           const Divider(height: 1),
           if (usable.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
+            Padding(
+              padding: const EdgeInsets.all(24),
               child: Text('尚無歷史錄影',
-                  style: TextStyle(color: Color(0xFF9AA6B2), fontSize: 13)),
+                  style: TextStyle(color: context.textSecondary, fontSize: 13)),
             )
           else
             Flexible(
@@ -1422,24 +1434,24 @@ class _VideoPickerSheet extends StatelessWidget {
                               children: [
                                 Text(
                                   e.displayTitle,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
-                                      color: Color(0xFF123B70)),
+                                      color: context.textPrimary),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
                                   '$durStr · ${e.durationSeconds > 5 && e.durationSeconds <= 600 ? '長影片' : '短影片'}',
-                                  style: const TextStyle(
-                                      fontSize: 11, color: Color(0xFF9AA6B2)),
+                                  style: TextStyle(
+                                      fontSize: 11, color: context.textSecondary),
                                 ),
                               ],
                             ),
                           ),
-                          const Icon(Icons.chevron_right_rounded,
-                              color: Color(0xFF9AA6B2), size: 18),
+                          Icon(Icons.chevron_right_rounded,
+                              color: context.textHint, size: 18),
                         ],
                       ),
                     ),
@@ -1473,11 +1485,11 @@ class _MiniThumb extends StatelessWidget {
       width: 52,
       height: 36,
       decoration: BoxDecoration(
-        color: const Color(0xFFE5EBF5),
+        color: context.bgInset,
         borderRadius: BorderRadius.circular(6),
       ),
-      child: const Icon(Icons.videocam_outlined,
-          size: 18, color: Color(0xFF9AA6B2)),
+      child: Icon(Icons.videocam_outlined,
+          size: 18, color: context.textHint),
     );
   }
 }
@@ -1597,7 +1609,9 @@ class _UploadCardState extends State<_UploadCard> {
           : Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFE0F2F1),
+                color: context.isDarkMode
+                    ? const Color(0xFF00897B).withValues(alpha: 0.18)
+                    : const Color(0xFFE0F2F1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(children: [
@@ -1613,7 +1627,7 @@ class _UploadCardState extends State<_UploadCard> {
                         fontSize: 12,
                         color: canUpload
                             ? const Color(0xFF00695C)
-                            : Colors.grey[600]),
+                            : context.textSecondary),
                   ),
                 ),
               ]),
@@ -1656,9 +1670,9 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
       minChildSize:     0.40,
       maxChildSize:     0.90,
       builder: (_, scrollCtrl) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: context.bgCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
           children: [
@@ -1668,7 +1682,7 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                 margin: const EdgeInsets.only(top: 10, bottom: 6),
                 width: 40, height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[300],
+                  color: context.borderColor,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1682,7 +1696,7 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                   const Icon(Icons.cloud_upload_rounded,
                       color: Color(0xFF00897B), size: 22),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1690,10 +1704,10 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                             style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF1A2E20))),
+                                color: context.textPrimary)),
                         Text('選擇一筆後按「確認上傳」獲得獎勵',
                             style: TextStyle(
-                                fontSize: 12, color: Colors.grey)),
+                                fontSize: 12, color: context.textSecondary)),
                       ],
                     ),
                   ),
@@ -1731,7 +1745,7 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                     Text(
                       _selectedPath == null ? '尚未選擇' : '已選 1 筆',
                       style: TextStyle(
-                          fontSize: 13, color: Colors.grey[600]),
+                          fontSize: 13, color: context.textSecondary),
                     ),
                     const Spacer(),
                     TextButton(
@@ -1788,9 +1802,9 @@ class _UploadCandidateTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected
               ? color.withValues(alpha: 0.06)
-              : Colors.white,
+              : context.bgCard,
           border: Border.all(
-            color: selected ? color : Colors.grey.shade200,
+            color: selected ? color : context.borderColor,
             width: selected ? 1.5 : 1,
           ),
           borderRadius: BorderRadius.circular(12),
@@ -1804,7 +1818,7 @@ class _UploadCandidateTile extends StatelessWidget {
               decoration: BoxDecoration(
                 color: selected ? color : Colors.transparent,
                 border: Border.all(
-                  color: selected ? color : Colors.grey.shade400,
+                  color: selected ? color : context.textHint,
                   width: 1.5,
                 ),
                 shape: BoxShape.circle,
@@ -1818,7 +1832,7 @@ class _UploadCandidateTile extends StatelessWidget {
             // 縮圖
             ClipRRect(
               borderRadius: BorderRadius.circular(7),
-              child: _buildThumb(),
+              child: _buildThumb(context),
             ),
             const SizedBox(width: 10),
 
@@ -1837,11 +1851,11 @@ class _UploadCandidateTile extends StatelessWidget {
                   const SizedBox(height: 3),
                   Row(children: [
                     Icon(Icons.access_time_rounded,
-                        size: 11, color: Colors.grey[400]),
+                        size: 11, color: context.textHint),
                     const SizedBox(width: 3),
                     Text('${entry.durationSeconds} 秒',
                         style: TextStyle(
-                            fontSize: 11, color: Colors.grey[500])),
+                            fontSize: 11, color: context.textSecondary)),
                     if (entry.isAnalyzed) ...[
                       const SizedBox(width: 8),
                       Container(
@@ -1873,7 +1887,7 @@ class _UploadCandidateTile extends StatelessWidget {
     );
   }
 
-  Widget _buildThumb() {
+  Widget _buildThumb(BuildContext context) {
     final tp = entry.thumbnailPath;
     if (tp != null && File(tp).existsSync()) {
       return Image.file(File(tp),
@@ -1881,9 +1895,9 @@ class _UploadCandidateTile extends StatelessWidget {
     }
     return Container(
       width: 56, height: 42,
-      color: Colors.grey[200],
-      child: const Icon(Icons.videocam_rounded,
-          color: Colors.grey, size: 22),
+      color: context.bgInset,
+      child: Icon(Icons.videocam_rounded,
+          color: context.textHint, size: 22),
     );
   }
 }

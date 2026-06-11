@@ -22,7 +22,11 @@ class PostureBreakdownCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(kSpaceMD),
-      decoration: kCardDecoration(radius: kRadiusMD),
+      decoration: BoxDecoration(
+        color: context.bgCard,
+        borderRadius: BorderRadius.circular(kRadiusMD),
+        boxShadow: context.cardShadow,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -35,17 +39,17 @@ class PostureBreakdownCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title ?? '姿勢分析',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
-                    color: kTextPrimary,
+                    color: context.textPrimary,
                   ),
                 ),
               ),
               if (!_hasData)
-                const Text(
+                Text(
                   '尚無 AI 分析資料',
-                  style: TextStyle(fontSize: 11, color: kTextHint),
+                  style: TextStyle(fontSize: 11, color: context.textHint),
                 ),
             ],
           ),
@@ -83,7 +87,7 @@ class _PostureTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isPerfect = SwingPosture.isPerfect(label);
-    final color = count > 0 ? SwingPosture.color(label) : kTextHint;
+    final color = count > 0 ? SwingPosture.color(label) : context.textHint;
     final bgColor = color.withAlpha(isPerfect ? 30 : 20);
 
     return Container(
@@ -106,13 +110,13 @@ class _PostureTile extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: count > 0 ? color : kTextHint,
+              color: count > 0 ? color : context.textHint,
             ),
           ),
           const SizedBox(height: 2),
           Text(
             SwingPosture.zhName(label),
-            style: const TextStyle(fontSize: 10, color: kTextSecondary),
+            style: TextStyle(fontSize: 10, color: context.textSecondary),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
