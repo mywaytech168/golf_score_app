@@ -420,6 +420,10 @@ namespace UploadServer.Migrations
                         .HasColumnType("double")
                         .HasColumnName("hit_sec");
 
+                    b.Property<DateTime?>("NextRetryAt")
+                        .HasColumnType("datetime")
+                        .HasColumnName("next_retry_at");
+
                     b.Property<int>("RetryCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")

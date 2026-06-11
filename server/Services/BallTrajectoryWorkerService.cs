@@ -66,8 +66,10 @@ public class BallTrajectoryWorkerService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<VideoDbContext>();
 
+        var now = DateTime.UtcNow;
         var analysis = await db.BallTrajectoryAnalyses
-            .Where(a => a.Status == "queued" && a.RetryCount < MaxRetry)
+            .Where(a => a.Status == "queued" && a.RetryCount < MaxRetry &&
+                        (a.NextRetryAt == null || a.NextRetryAt <= now))
             .OrderBy(a => a.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
@@ -113,7 +115,10 @@ public class BallTrajectoryWorkerService : BackgroundService
             analysis.RetryCount++;
             analysis.ErrorMessage = ex.Message;
             analysis.Status       = analysis.RetryCount >= MaxRetry ? "failed" : "queued";
-            _logger.LogError(ex, "球軌跡分析失敗: {Id} retry={R}", analysis.Id, analysis.RetryCount);
+            // 指數退避：10s → 20s → 40s（5s × 2^RetryCount）
+            analysis.NextRetryAt  = DateTime.UtcNow.AddSeconds(5 * Math.Pow(2, analysis.RetryCount));
+            _logger.LogError(ex, "球軌跡分析失敗: {Id} retry={R} nextRetryAt={Next:O}",
+                analysis.Id, analysis.RetryCount, analysis.NextRetryAt);
         }
 
         await db.SaveChangesAsync(ct);

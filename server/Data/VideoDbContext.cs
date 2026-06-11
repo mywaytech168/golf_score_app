@@ -822,6 +822,7 @@ namespace UploadServer.Data
                 entity.Property(e => e.VideoRotation).HasColumnName("video_rotation");
                 entity.Property(e => e.ErrorMessage).HasColumnName("error_message").HasMaxLength(1024);
                 entity.Property(e => e.RetryCount) .HasColumnName("retry_count").HasDefaultValue(0);
+                entity.Property(e => e.NextRetryAt).HasColumnName("next_retry_at").HasColumnType("datetime");
                 entity.Property(e => e.CreatedAt)  .HasColumnName("created_at").HasColumnType("datetime");
                 entity.Property(e => e.CompletedAt).HasColumnName("completed_at").HasColumnType("datetime");
 

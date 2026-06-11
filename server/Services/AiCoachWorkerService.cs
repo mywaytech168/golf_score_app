@@ -229,7 +229,10 @@ namespace UploadServer.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "AI Coach 分析扣球失敗: {Id} user={User}", analysis.Id, chargeUserId);
+                    // BILLING_FAILURE：分析已交付但未扣費，需人工補帳（NLog 告警規則以此標記過濾）
+                    _logger.LogCritical(ex,
+                        "BILLING_FAILURE AI Coach 分析扣球失敗（分析已交付未扣費）: {Id} user={User}",
+                        analysis.Id, chargeUserId);
                 }
             }
         }

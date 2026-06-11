@@ -48,6 +48,9 @@ public class BallTrajectoryAnalysis
 
     public int RetryCount { get; set; } = 0;
 
+    /// <summary>指數退避：失敗後下次允許重試的時間（null = 立即可重試）</summary>
+    public DateTime? NextRetryAt { get; set; }
+
     public DateTime CreatedAt  { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 
