@@ -527,11 +527,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       .sampleAt(ctrl.value.position.inMilliseconds / 1000.0);
                   if (pose == null) return const SizedBox.shrink();
                   return CustomPaint(
-                    painter: SkeletonPainter(
-                      pose: pose,
-                      // 線寬以影片像素為基準，對齊燒錄版視覺粗細
-                      videoShortSide: ctrl.value.size.shortestSide,
-                    ),
+                    painter: SkeletonPainter(pose: pose),
                   );
                 }),
               ),

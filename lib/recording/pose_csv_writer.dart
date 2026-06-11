@@ -23,12 +23,26 @@ class PoseCsvWriter {
     return h;
   }
 
+  /// CSV 對時偏移（秒）：影片 t=0（第一個編碼幀）晚於 rec.start() 的量。
+  /// flush 時整體前移，使 CSV 時鐘與影片時鐘一致（負值幀剔除）。
+  double timeOffsetSec = 0.0;
+
   void addFrame(PoseFrameModel frame) => _rows.add(frame.toCsvRow());
 
   Future<void> flush() async {
     final file = File(outputPath);
     await file.parent.create(recursive: true);
-    final csv = const ListToCsvConverter().convert([header, ..._rows]);
+    var rows = _rows;
+    if (timeOffsetSec != 0.0) {
+      rows = [];
+      for (final r in _rows) {
+        final t = double.tryParse(r[1] as String) ?? 0.0;
+        final shifted = t - timeOffsetSec;
+        if (shifted < -0.05) continue; // 影片開始前的幀直接剔除
+        rows.add([r[0], shifted.clamp(0.0, double.infinity).toStringAsFixed(6), ...r.sublist(2)]);
+      }
+    }
+    final csv = const ListToCsvConverter().convert([header, ...rows]);
     await file.writeAsString(csv);
   }
 }

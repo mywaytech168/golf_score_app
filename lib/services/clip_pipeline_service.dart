@@ -147,6 +147,11 @@ class ClipPipelineService {
     // 格式：'16x9_hd', '16x9_fhd', '4x3_hd', '4x3_fhd', '4x3_sd'
     // 舊格式相容：'hd', 'fhd'
     final (tw, th) = _targetSize(sourceEntry.recordedAspectRatio);
+    // 前鏡頭水平翻轉（僅 Android：iOS 在擷取階段已 isVideoMirrored，
+    // 來源檔本身就是鏡像，再翻會雙重翻轉）。
+    // ★ clip 影片與 clip CSV 必須同步翻轉（來源 swing.mp4 與其 CSV 都未翻轉）。
+    final flipClip = sourceEntry.isFrontCamera &&
+        defaultTargetPlatform == TargetPlatform.android;
     final trimResult = await VideoClipService.trimClip(
       srcPath:        srcVideoPath,
       dstPath:        clipPath,
@@ -154,10 +159,7 @@ class ClipPipelineService {
       endSec:         hit.endSec,
       targetWidth:    tw,
       targetHeight:   th,
-      // 前鏡頭水平翻轉（僅 Android：iOS 在擷取階段已 isVideoMirrored，
-      // 來源檔本身就是鏡像，再翻會雙重翻轉）
-      flipHorizontal: sourceEntry.isFrontCamera &&
-          defaultTargetPlatform == TargetPlatform.android,
+      flipHorizontal: flipClip,
     );
     if (trimResult == null) {
       debugPrint('[Pipeline] hit ${hit.hitIndex} → ❌ 裁切失敗');
@@ -225,6 +227,7 @@ class ClipPipelineService {
         dstCsvPath:    dstCsvPath,
         clipStartSec:  clipActualStartSec,
         clipEndSec:    hit.endSec,
+        mirrorX:       flipClip,
       );
     } else {
       await _sliceCsv(
@@ -232,6 +235,7 @@ class ClipPipelineService {
         dstCsvPath: dstCsvPath,
         startSec: clipActualStartSec,
         endSec: hit.endSec,
+        mirrorX: flipClip,
       );
     }
 
@@ -330,11 +334,13 @@ class ClipPipelineService {
   ///
   /// SkeletonOverlayRenderer 以 csvFrameIdx = (clipTimeSec * 1000 / 67).round() 查表，
   /// 所以 clip CSV 的 frame 欄位必須是 0-based 的連續整數，time_sec 也重置為 0-based。
+  /// [mirrorX]：clip 影片水平翻轉時（Android 前鏡頭），CSV x 座標同步鏡像。
   static Future<void> _sliceCsv({
     required String srcCsvPath,
     required String dstCsvPath,
     required double startSec,
     required double endSec,
+    bool mirrorX = false,
   }) async {
     final src = File(srcCsvPath);
     if (!await src.exists()) {
@@ -365,13 +371,47 @@ class ClipPipelineService {
       if (timeSec > endSec + eps) break;
 
       final relTime = (timeSec - startSec).clamp(0.0, double.infinity);
-      // 只替換前兩欄（frame, time_sec），其餘原樣保留
-      buffer
-        ..write(newFrameIdx)
-        ..write(',')
-        ..write(relTime.toStringAsFixed(6))
-        ..write(line.substring(secondComma)) // 從第二個逗號開始（含），保留後續所有欄位
-        ..writeln();
+      if (!mirrorX) {
+        // 只替換前兩欄（frame, time_sec），其餘原樣保留
+        buffer
+          ..write(newFrameIdx)
+          ..write(',')
+          ..write(relTime.toStringAsFixed(6))
+          ..write(line.substring(secondComma)) // 從第二個逗號開始（含），保留後續所有欄位
+          ..writeln();
+      } else {
+        // 鏡像 x：欄位 = frame,time_sec,pose_update_id + 33×(x_norm,y_norm,z,vis,x_px,y_px)
+        final cells = line.split(',');
+        final out = StringBuffer()
+          ..write(newFrameIdx)
+          ..write(',')
+          ..write(relTime.toStringAsFixed(6));
+        for (int c = 2; c < cells.length; c++) {
+          out.write(',');
+          final lmField = c - 3; // 第一個 landmark 欄位的相對索引
+          final fieldInLm = lmField >= 0 ? lmField % 6 : -1;
+          if (fieldInLm == 0 || fieldInLm == 4) {
+            // x_norm 或 x_px
+            final v = double.tryParse(cells[c]);
+            final vis = double.tryParse(
+                    cells[(c - fieldInLm + 3).clamp(0, cells.length - 1)]) ??
+                0.0;
+            if (v == null || vis <= 0.0) {
+              out.write(cells[c]); // 無效幀不動，避免 0.0 → 1.0 假座標
+            } else if (fieldInLm == 0) {
+              out.write((1.0 - v).toStringAsFixed(6));
+            } else {
+              // x_px = x_norm × 幀寬；用同列 x_norm 反推幀寬
+              final xn = double.tryParse(cells[c - 4]) ?? 0.0;
+              final w = xn > 1e-6 ? v / xn : 640.0;
+              out.write((w - v).toStringAsFixed(2));
+            }
+          } else {
+            out.write(cells[c]);
+          }
+        }
+        buffer.writeln(out);
+      }
       newFrameIdx++;
     }
 
@@ -400,6 +440,7 @@ class ClipPipelineService {
     required String dstCsvPath,
     required double clipStartSec,
     required double clipEndSec,
+    bool mirrorX = false,
   }) async {
     final allFrames =
         (jsonDecode(skeletonJson) as List).cast<Map<String, dynamic>>();
@@ -432,12 +473,21 @@ class ClipPipelineService {
         if (lm == null) {
           row.addAll([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         } else {
+          final vis   = (lm['vis']   as num?)?.toDouble() ?? 0.0;
+          var   xNorm = (lm['xNorm'] as num?)?.toDouble() ?? 0.0;
+          var   xPx   = (lm['x']     as num?)?.toDouble() ?? 0.0;
+          if (mirrorX && vis > 0.0) {
+            // clip 影片已水平翻轉 → x 同步鏡像；幀寬由 xPx/xNorm 反推
+            final w = xNorm > 1e-6 ? xPx / xNorm : 640.0;
+            xNorm = 1.0 - xNorm;
+            xPx   = w - xPx;
+          }
           row.addAll([
-            (lm['xNorm'] as num?)?.toDouble() ?? 0.0,
+            xNorm,
             (lm['yNorm'] as num?)?.toDouble() ?? 0.0,
             (lm['z']     as num?)?.toDouble() ?? 0.0,
-            (lm['vis']   as num?)?.toDouble() ?? 0.0,
-            (lm['x']     as num?)?.toDouble() ?? 0.0,
+            vis,
+            xPx,
             (lm['y']     as num?)?.toDouble() ?? 0.0,
           ]);
         }

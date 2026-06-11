@@ -117,6 +117,7 @@ class CameraRecorderChannel(
     @Volatile private var analysisReader : ImageReader?          = null  // AI 分析
     @Volatile private var mediaRecorder  : MediaRecorder?        = null
     @Volatile private var isRecording     = false
+    @Volatile private var recordStartTsMs = 0L   // rec.start() 的 elapsedRealtime（CSV 對時用）
     // preparedRecPath 已移至 camera operation serialization 區塊
 
     private var currentFacing         = CameraCharacteristics.LENS_FACING_BACK
@@ -720,6 +721,8 @@ class CameraRecorderChannel(
                 // ★ 錄影起點時間戳（BOOTTIME，與 analysis 幀的 sensor timestamp 同時鐘）：
                 //   Dart 端 CSV 用「幀擷取時間 − 此起點」對時，消除推論延遲造成的骨架慢半拍
                 val startTsMs = SystemClock.elapsedRealtime()
+                recordStartTsMs = startTsMs
+                firstRecordFrameTsMs = 0L
                 isRecording = true
                 preparedRecPath = null
                 releaseOp("startRecording")
@@ -760,6 +763,8 @@ class CameraRecorderChannel(
                     issueRecordRequest(s, cam, pr.surface, recSurface)
                     rec.start(); isRecording = true
                     val startTsMs = SystemClock.elapsedRealtime()
+                    recordStartTsMs = startTsMs
+                    firstRecordFrameTsMs = 0L
                     releaseOp("startRecording")
                     Log.d(TAG, "startRecording (fallback 2-stream): $path ${recordW}×${recordH} startTs=$startTsMs")
                     mainHandler.post { result.success(mapOf("startTsMs" to startTsMs)) }
@@ -879,6 +884,9 @@ class CameraRecorderChannel(
     //   用來確認 recorder surface 是否真的有收到 frame（-1007 = muxer 沒收到任何 frame）。
     @Volatile private var recordCaptureCount = 0
     @Volatile private var recordBufferLost   = 0
+    // 第一個「rec.start() 之後擷取」的 record-request 幀 sensor timestamp（ms，BOOTTIME）。
+    // ≈ 影片檔第一幀的擷取時間，用於 CSV 對時（csvOffset = T0 − start − 視訊軌首幀PTS）。
+    @Volatile private var firstRecordFrameTsMs = 0L
     private val recordCaptureCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureCompleted(
             session: CameraCaptureSession,
@@ -886,6 +894,11 @@ class CameraRecorderChannel(
             result: android.hardware.camera2.TotalCaptureResult,
         ) {
             val n = ++recordCaptureCount
+            if (firstRecordFrameTsMs == 0L && isRecording && recordStartTsMs > 0L) {
+                val ts = result.get(android.hardware.camera2.CaptureResult.SENSOR_TIMESTAMP)
+                    ?.let { it / 1_000_000L } ?: 0L
+                if (ts >= recordStartTsMs) firstRecordFrameTsMs = ts
+            }
             if (n == 1 || n % 30 == 0) Log.d(TAG, "recordCapture: completed=$n lost=$recordBufferLost")
         }
         override fun onCaptureBufferLost(
@@ -922,6 +935,7 @@ class CameraRecorderChannel(
         val fin = recordingFinalPath
         var recordOk = false
         var stopThrew = false   // ★ stop() 拋例外 = recorder/HAL 異常封口，session 已不可信
+        val stopTsMs = SystemClock.elapsedRealtime()
         try {
             rec?.stop()
             recordOk = true
@@ -958,11 +972,54 @@ class CameraRecorderChannel(
         }
         recordingTmpPath = null; recordingFinalPath = null
 
-        // 回報真實結果給 Dart：成功回 success(true)，失敗回 error，讓上層不要播放/上傳壞檔
+        // ★ CSV 對時偏移：影片 t=0 = 第一個編碼幀（session 重設 + recorder 啟動延遲，
+        //   實測 ~0.2s 晚於 rec.start()）。offset = 錄影 wall 時長 − 影片實際時長，
+        //   Dart 端把 CSV 時間整體前移 offset，使 CSV 時鐘 = 影片時鐘。
+        //   精確式：影片容器時間 t 對應擷取時間 capT 的關係為 t = capT − offset，
+        //   offset = (第一個編碼幀的擷取時間 T0 − rec.start) − 視訊軌首幀 PTS S0。
+        //   實測 ZenFone 8：T0−start ≈ 0.3s（2-stream 重設），S0 ≈ 0.13s → offset ≈ 0.17s。
+        var csvOffsetMs = 0L
+        if (recordOk && fin != null && recordStartTsMs > 0L) {
+            // 視訊軌首幀 PTS（S0，MediaRecorder 自帶 lead-in）
+            val s0Ms = runCatching {
+                val ex = android.media.MediaExtractor()
+                try {
+                    ex.setDataSource(fin)
+                    var v = -1
+                    for (i in 0 until ex.trackCount) {
+                        val mime = ex.getTrackFormat(i)
+                            .getString(android.media.MediaFormat.KEY_MIME) ?: ""
+                        if (mime.startsWith("video/")) { v = i; break }
+                    }
+                    if (v >= 0) { ex.selectTrack(v); ex.sampleTime / 1000L } else -1L
+                } finally { ex.release() }
+            }.getOrNull() ?: -1L
+
+            val t0Delta = firstRecordFrameTsMs - recordStartTsMs
+            csvOffsetMs = if (firstRecordFrameTsMs > 0L && s0Ms >= 0L) {
+                (t0Delta - s0Ms).coerceIn(0L, 1500L)
+            } else {
+                // fallback：容器時長法（≈音軌啟動延遲）+ S0
+                val durMs = runCatching {
+                    android.media.MediaMetadataRetriever().use { mmr ->
+                        mmr.setDataSource(fin)
+                        mmr.extractMetadata(
+                            android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                        )?.toLongOrNull()
+                    }
+                }.getOrNull() ?: 0L
+                (((stopTsMs - recordStartTsMs) - durMs) + maxOf(s0Ms, 0L)).coerceIn(0L, 1500L)
+            }
+            Log.i(TAG, "stopRecording: t0Delta=${t0Delta}ms s0=${s0Ms}ms csvOffset=${csvOffsetMs}ms")
+        }
+        recordStartTsMs = 0L
+        firstRecordFrameTsMs = 0L
+
+        // 回報真實結果給 Dart：成功回 map（ok + csvOffsetMs），失敗回 error
         fun reply() {
             mainHandler.post {
                 runCatching {
-                    if (recordOk) result?.success(true)
+                    if (recordOk) result?.success(mapOf("ok" to true, "csvOffsetMs" to csvOffsetMs))
                     else result?.error("record_failed", "Recording produced no valid frames", null)
                 }
             }

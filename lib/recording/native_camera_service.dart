@@ -23,8 +23,8 @@ class NativeCameraService {
   bool  _supportsStabilization = false;
   bool  _stabilizationEnabled  = true;
 
-  double _minZoom = 1.0;
-  double _maxZoom = 1.0;
+  final double _minZoom = 1.0;
+  final double _maxZoom = 1.0;
 
   StreamSubscription<dynamic>? _poseSub;
   final _poseController = StreamController<NativePoseResult>.broadcast();
@@ -117,9 +117,18 @@ class NativeCameraService {
 
   /// 停止錄製。回傳 true 表示影片已成功封口可播放；
   /// 丟出 PlatformException(record_failed) 表示本次錄製未產生有效影格（壞檔已被 native 刪除）。
+  /// 最近一次錄影的 CSV 對時偏移（ms）：影片 t=0（第一個編碼幀）晚於
+  /// rec.start() 的量。CSV 時間需整體減去此值才會與影片時鐘一致。
+  int lastRecordCsvOffsetMs = 0;
+
   Future<bool> stopRecording() async {
-    final ok = await _kMethodChannel.invokeMethod<bool>('stopRecording');
-    return ok ?? true;
+    final res = await _kMethodChannel.invokeMethod<dynamic>('stopRecording');
+    if (res is Map) {
+      lastRecordCsvOffsetMs = (res['csvOffsetMs'] as num?)?.toInt() ?? 0;
+      return (res['ok'] as bool?) ?? true;
+    }
+    lastRecordCsvOffsetMs = 0;
+    return (res as bool?) ?? true;
   }
 
   // ── 縮放 ─────────────────────────────────────────────────────────────────

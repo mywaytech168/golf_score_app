@@ -478,8 +478,21 @@ class _RecordScreenState extends State<RecordScreen> {
   Future<void> _finishRecording() async {
     final duration = _elapsed.inSeconds.clamp(1, 86400);
 
+    // CSV 時鐘 → 影片時鐘（影片 t=0 = 第一個編碼幀，晚於 rec.start() ~0.2s）
+    final csvOffsetSec = _camera.lastRecordCsvOffsetMs / 1000.0;
+    _csvWriter?.timeOffsetSec = csvOffsetSec;
     try { await _csvWriter?.flush(); } catch (e) {
       debugPrint('[RecordScreen] CSV flush error: $e');
+    }
+    if (csvOffsetSec != 0.0 && _liveImpacts.isNotEmpty) {
+      // 即時擊球時間同屬 CSV 時鐘，需一併平移
+      final shifted = _liveImpacts
+          .map((t) => t - csvOffsetSec)
+          .where((t) => t >= 0)
+          .toList();
+      _liveImpacts
+        ..clear()
+        ..addAll(shifted);
     }
 
     List<String>? audioTags;

@@ -38,18 +38,12 @@ class SkeletonPainter extends CustomPainter {
   final NativePoseResult pose;
   final bool isFrontCamera;
 
-  /// 影片短邊像素（如 1080）。原生燒錄版的線寬/半徑是在影片像素空間
-  /// 計算再 clamp，若直接拿 Flutter 邏輯像素套同公式，骨架會粗 2~3 倍。
-  /// 提供此值時：先在影片空間算出 px，再換算回 canvas 邏輯像素。
-  final double? videoShortSide;
-
   // 對齊原生燒錄版：visibility 門檻 0.3
   static const double minVisibility = 0.3;
 
   const SkeletonPainter({
     required this.pose,
     this.isFrontCamera = false,
-    this.videoShortSide,
   });
 
   @override
@@ -57,13 +51,12 @@ class SkeletonPainter extends CustomPainter {
     if (pose.isEmpty) return;
     final lms = pose.landmarks;
 
-    // 線寬 / 點半徑：與原生燒錄版同公式（SkeletonOverlayRenderer 0.8-3 / 1.5-5）
+    // 線寬 / 點半徑：以原生即時預覽為基準（SkeletonRenderer.kt 在 360px 短邊
+    // 的 preview bitmap 上用線寬 6 / 節點 10 / 右腕 18）再縮細 75%，按短邊比例縮放
     final shortSide = size.shortestSide;
-    final vs = videoShortSide;
-    final refShort = (vs != null && vs > 0) ? vs : shortSide;
-    final toCanvas = shortSide / refShort;
-    final strokeWidth = (refShort / 120).clamp(0.8, 3.0) * toCanvas;
-    final radius = (refShort / 100).clamp(1.5, 5.0) * toCanvas;
+    final strokeWidth = shortSide * (4.5 / 360.0);
+    final radius = shortSide * (7.5 / 360.0);
+    final wristRadius = shortSide * (13.5 / 360.0);
 
     final linePaint = Paint()
       ..strokeWidth = strokeWidth
@@ -84,7 +77,7 @@ class SkeletonPainter extends CustomPainter {
       final lm = lms[i];
       if (lm.visibility < minVisibility) continue;
       dotPaint.color = _dotColor(i);
-      canvas.drawCircle(_toOffset(lm, size), radius, dotPaint);
+      canvas.drawCircle(_toOffset(lm, size), i == 16 ? wristRadius : radius, dotPaint);
     }
   }
 
@@ -110,7 +103,5 @@ class SkeletonPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(SkeletonPainter old) =>
-      old.pose != pose ||
-      old.isFrontCamera != isFrontCamera ||
-      old.videoShortSide != videoShortSide;
+      old.pose != pose || old.isFrontCamera != isFrontCamera;
 }

@@ -1,6 +1,3 @@
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
-
 import 'pose_result.dart';
 
 class PoseFrameModel {
@@ -29,13 +26,10 @@ class PoseFrameModel {
     final lms = List<LandmarkData>.generate(33, (i) {
       if (i >= pose.landmarks.length) return LandmarkData.empty();
       final lm = pose.landmarks[i];
-      // 前鏡頭（僅 Android）：clip 影片在切片時已水平翻轉燒進像素，CSV 座標必須
-      // 同步鏡像，否則播放頁/燒錄的骨架疊層左右相反。
-      // iOS 在擷取階段就 isVideoMirrored=true，影片與 landmarks 已同為鏡像空間，
-      // 再鏡像會變雙重翻轉 → 只在 Android 套用。
-      final mirror =
-          isFrontCamera && defaultTargetPlatform == TargetPlatform.android;
-      final x = mirror ? (1.0 - lm.x) : lm.x;
+      // 注意：此處「不做」前鏡頭鏡像——CSV 必須與未翻轉的 swing.mp4 來源一致
+      // （錄製模式會保留完整場次）。clip 的水平翻轉在切片階段與影片一起套用
+      // （ClipPipelineService._sliceCsv mirrorX）。
+      final x = lm.x;
       return LandmarkData(
         xNorm:      x,
         yNorm:      lm.y,

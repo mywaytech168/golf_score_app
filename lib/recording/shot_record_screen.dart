@@ -498,6 +498,12 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   Future<void> _finishShotRecording() async {
     _logVideoSize(_videoPath);
 
+    // CSV 時鐘 → 影片時鐘（影片 t=0 = 第一個編碼幀，晚於 rec.start() ~0.2s）
+    final csvOffsetSec = _camera.lastRecordCsvOffsetMs / 1000.0;
+    _csvWriter?.timeOffsetSec = csvOffsetSec;
+    if (csvOffsetSec != 0.0 && _impactTimeSec != null) {
+      _impactTimeSec = (_impactTimeSec! - csvOffsetSec).clamp(0.0, 3600.0);
+    }
     try { await _csvWriter?.flush(); } catch (e) {
       debugPrint('[ShotRecord] CSV flush: $e');
     }
@@ -892,7 +898,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.65),
+        color: Colors.black.withValues(alpha: 0.65),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
