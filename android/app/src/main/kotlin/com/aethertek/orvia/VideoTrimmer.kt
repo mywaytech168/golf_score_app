@@ -212,6 +212,10 @@ class VideoTrimmer(private val context: android.content.Context) {
         vFmt.setInteger(MediaFormat.KEY_ROTATION, 0)
         decoder.configure(vFmt, decoderOutputSurface, null, 0)
         decoder.start()
+        // ★ 診斷側轉問題：codec 實作不同（c2.qti vs c2.android…）對剝除 KEY_ROTATION
+        //   的行為可能不一致 → 留名比對正常/側轉兩種輸出
+        Log.i(TAG, "[Surface] decoder=${decoder.name} rot=$rotation needEgl=$needEgl " +
+                   "src=${width}x${height} enc=${encWidth}x${encHeight}")
 
         // ── Muxer ────────────────────────────────────────────────────────
         File(dstPath).parentFile?.mkdirs()

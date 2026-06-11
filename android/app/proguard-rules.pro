@@ -42,3 +42,9 @@
 -keepattributes *Annotation*
 -keepattributes Signature
 -keepattributes Exceptions
+
+# R8 missing classes: AutoValue / JavaPoet annotation processor only
+# javax.lang.model 是 Java 編譯期 API，Android runtime 不提供；實際 app 執行通常不會用到
+-dontwarn javax.lang.model.**
+-dontwarn autovalue.shaded.com.squareup.javapoet$.$**
+-dontwarn com.google.auto.value.processor.**

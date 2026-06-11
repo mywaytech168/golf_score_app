@@ -713,9 +713,23 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         ? DateTime.now().difference(_addressingStart!).inMilliseconds / 1000.0
         : 0.0;
     // 影片時鐘（錄製起算）—— CSV 與擊球時間都以此為準，與 mp4 同步。
-    final videoSec = _recordingStart != null
-        ? DateTime.now().difference(_recordingStart!).inMilliseconds / 1000.0
-        : 0.0;
+    // ★ 優先用「幀擷取時間戳 − 原生錄影起點」（同 BOOTTIME 時鐘）：
+    //   到達時間含推論延遲（2 幀 in-flight + 22-39ms），會讓骨架慢半拍。
+    double videoSec = 0.0;
+    if (_recordingStart != null) {
+      final wallSec =
+          DateTime.now().difference(_recordingStart!).inMilliseconds / 1000.0;
+      final startTs = _camera.lastRecordStartTsMs;
+      if (startTs > 0 && pose.timestampMs > 0) {
+        final capSec = (pose.timestampMs - startTs) / 1000.0;
+        // 時鐘來源異常（差異 >2s）時退回到達時間
+        videoSec = ((capSec - wallSec).abs() < 2.0 && capSec >= 0)
+            ? capSec
+            : wallSec;
+      } else {
+        videoSec = wallSec;
+      }
+    }
 
     // ── addressing：尚未錄影，做校準 + 站姿偵測（提示音不會入檔）──────────────
     if (_state == ShotState.addressing) {
@@ -1014,7 +1028,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
             },
             icon: const Icon(Icons.sports_golf_rounded),
             label: Text('下一桿 ($_autoNextCountdown)'),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1E8E5A)),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1AA87C)),
           ),
         ]),
       ])),
@@ -1041,7 +1055,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
               child: Column(mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  const Icon(Icons.settings_rounded, color: Color(0xFF1E8E5A), size: 20),
+                  const Icon(Icons.settings_rounded, color: Color(0xFF1AA87C), size: 20),
                   const SizedBox(width: 8),
                   const Text('錄製設定', style: TextStyle(color: Colors.white,
                       fontSize: 16, fontWeight: FontWeight.w700)),
@@ -1081,7 +1095,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                   const Text('錄製音訊', style: TextStyle(color: Colors.white54, fontSize: 12)),
                   const Spacer(),
                   Switch(value: pendingA, onChanged: (v) => setSheet(() => pendingA = v),
-                    activeThumbColor: const Color(0xFF1E8E5A),
+                    activeThumbColor: const Color(0xFF1AA87C),
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                 ]),
                 const SizedBox(height: 16),
@@ -1089,7 +1103,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 SizedBox(width: double.infinity,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E8E5A),
+                      backgroundColor: const Color(0xFF1AA87C),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),

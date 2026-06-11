@@ -166,10 +166,12 @@ import UIKit
         let args = call.arguments as? [String: Any]
         switch call.method {
         case "openCamera":
-            let facing  = args?["facing"] as? Int ?? 1
+            let facing  = args?["facing"] as? Int ?? 0
             let quality = args?["quality"] as? String ?? "hd"
             let fps     = args?["fps"] as? Int ?? 30
-            isFront = (facing == 0)
+            // Dart NativeCameraService 慣例：0=後鏡頭、1=前鏡頭（Android 端才轉換成
+            // LENS_FACING_*，iOS 收到的是原始慣例）。先前 (facing == 0) 把前後鏡頭反了。
+            isFront = (facing == 1)
             targetFps = (fps >= 60) ? 60 : 30
             openCamera(quality: quality, result: result)
 
@@ -467,7 +469,10 @@ import UIKit
             self.audioWriterInput  = aInput
             self.isRecording       = true
             self.recordingStarted  = false
-            DispatchQueue.main.async { result(nil) }
+            // ★ 錄影起點時間戳（與 pose "ts" 同為 CACurrentMediaTime 時鐘）：
+            //   Dart 端 CSV 用「幀時間戳 − 此起點」對時（與 Android startTsMs 對齊）
+            let startTsMs = Int(CACurrentMediaTime() * 1000)
+            DispatchQueue.main.async { result(["startTsMs": startTsMs]) }
         }
     }
 

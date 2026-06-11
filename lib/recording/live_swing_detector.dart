@@ -130,6 +130,15 @@ class LiveSwingDetector {
       } else if (speed < _peakSpeed * 0.80) {
         _fallFrames++;
         if (_fallFrames >= _minFallFrames) {
+          // 邊際峰值（< 門檻 1.5 倍）視為小動作誤觸，不開火
+          if (_peakSpeed < thr * 1.5) {
+            debugPrint('[LiveSwing] 忽略邊際峰值 peak=${_peakSpeed.toStringAsFixed(4)} '
+                'thr=${thr.toStringAsFixed(4)}（< thr×1.5）');
+            _state      = SwingDetectState.listening;
+            _peakSpeed  = 0;
+            _fallFrames = 0;
+            return;
+          }
           _state          = SwingDetectState.fired;
           _cooldownEndTime = timeSec + cooldownSec;
           debugPrint('[LiveSwing] ✅ 撞擊 t=${_peakTimeSec.toStringAsFixed(2)}s '
@@ -144,11 +153,14 @@ class LiveSwingDetector {
     }
   }
 
-  // 動態 threshold（歸一化速度）：80th percentile × 1.8，最低 0.005（≈ 2px/400px）
+  // 動態 threshold（歸一化速度）：80th percentile × 1.8，最低 0.012
+  // （floor 0.005 時安靜期門檻過低，輕微手部移動即觸發 → 錄影 1-4 秒就被停掉）
+  static const double _minThreshold = 0.012;
+
   double _threshold() {
-    if (_speedBuf.length < 5) return 0.005;
+    if (_speedBuf.length < 5) return _minThreshold;
     final sorted = _speedBuf.toList()..sort();
     final idx = (0.80 * (sorted.length - 1)).round().clamp(0, sorted.length - 1);
-    return math.max(0.005, sorted[idx] * 1.8);
+    return math.max(_minThreshold, sorted[idx] * 1.8);
   }
 }

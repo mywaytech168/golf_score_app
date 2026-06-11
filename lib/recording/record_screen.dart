@@ -587,9 +587,22 @@ class _RecordScreenState extends State<RecordScreen> {
     setState(() {});
 
     if (_isRecording) {
-      final timeSec = _recordingStart != null
-          ? DateTime.now().difference(_recordingStart!).inMilliseconds / 1000.0
-          : 0.0;
+      // ★ 優先用「幀擷取時間戳 − 原生錄影起點」（同 BOOTTIME 時鐘），
+      //   消除推論延遲（2 幀 in-flight + 推論 22-39ms）造成的骨架慢半拍
+      double timeSec = 0.0;
+      if (_recordingStart != null) {
+        final wallSec =
+            DateTime.now().difference(_recordingStart!).inMilliseconds / 1000.0;
+        final startTs = _camera.lastRecordStartTsMs;
+        if (startTs > 0 && pose.timestampMs > 0) {
+          final capSec = (pose.timestampMs - startTs) / 1000.0;
+          timeSec = ((capSec - wallSec).abs() < 2.0 && capSec >= 0)
+              ? capSec
+              : wallSec;
+        } else {
+          timeSec = wallSec;
+        }
+      }
       // 即時揮桿偵測（影片時鐘；前 3 秒為偵測器校準期，漏掉的桿由音訊峰值補）
       _liveDetector.feed(pose, timeSec);
       if (pose.isEmpty) return;
@@ -633,7 +646,7 @@ class _RecordScreenState extends State<RecordScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    const Icon(Icons.videocam_rounded, color: Color(0xFF1E8E5A), size: 20),
+                    const Icon(Icons.videocam_rounded, color: Color(0xFF1AA87C), size: 20),
                     const SizedBox(width: 8),
                     const Text('錄製設定',
                         style: TextStyle(color: Colors.white, fontSize: 16,
@@ -680,7 +693,7 @@ class _RecordScreenState extends State<RecordScreen> {
                     Switch(
                       value: pendingAudio,
                       onChanged: (v) => setSheet(() => pendingAudio = v),
-                      activeThumbColor: const Color(0xFF1E8E5A),
+                      activeThumbColor: const Color(0xFF1AA87C),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ]),
@@ -690,7 +703,7 @@ class _RecordScreenState extends State<RecordScreen> {
                     width: double.infinity,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF1E8E5A),
+                        backgroundColor: const Color(0xFF1AA87C),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                         padding: const EdgeInsets.symmetric(vertical: 14),

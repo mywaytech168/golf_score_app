@@ -59,6 +59,7 @@ class EglSurfaceProcessor(private val encoderInputSurface: Surface) {
 
     private val frameAvailable = AtomicBoolean(false)
     private val texMatrix = FloatArray(16)
+    private var texMatrixLogged = false
 
     // ── 初始化 EGL + SurfaceTexture ────────────────────────────────────────
 
@@ -130,6 +131,13 @@ class EglSurfaceProcessor(private val encoderInputSurface: Surface) {
         }
         surfaceTexture.updateTexImage()
         surfaceTexture.getTransformMatrix(texMatrix)
+        if (!texMatrixLogged) {
+            texMatrixLogged = true
+            // 首幀 texMatrix：若 [0][1]/[1][0] 出現 ±1（而非對角線）＝ decoder 把旋轉
+            // 塞進 transform matrix → 與 MVP 疊加成雙重旋轉（側轉根因診斷）
+            Log.i(TAG, "first-frame texMatrix=${texMatrix.joinToString(",") { "%.1f".format(it) }} " +
+                       "mvpRot=${-rotationDeg} flip=$flipHorizontal")
+        }
 
         GLES20.glViewport(0, 0, dstWidth, dstHeight)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -147,11 +155,15 @@ class EglSurfaceProcessor(private val encoderInputSurface: Surface) {
         //   rotation=0（純縮放）不受符號影響。
         val mvp = FloatArray(16)
         Matrix.setIdentityM(mvp, 0)
-        Matrix.rotateM(mvp, 0, -rotationDeg.toFloat(), 0f, 0f, 1f)
+        // ★ 翻轉必須乘在旋轉「之前」（= 作用在顯示空間、旋轉之後）：
+        //   rotateM 後才 scaleM 等於在來源空間翻轉，R(-θ)·S ≡ S·R(+θ)，
+        //   會把旋轉方向整個反掉 → 前鏡頭（flip=true）clip 側轉（2026-06-11 實測定罪：
+        //   rot=270+flip=true 輸出側轉，rot=90+flip=false 一向正確）。
         if (flipHorizontal) {
-            // X 軸 scale = -1 → 水平翻轉
+            // X 軸 scale = -1 → 水平翻轉（顯示空間）
             Matrix.scaleM(mvp, 0, -1f, 1f, 1f)
         }
+        Matrix.rotateM(mvp, 0, -rotationDeg.toFloat(), 0f, 0f, 1f)
 
         // Vertex buffer
         val vBuf = ByteBuffer.allocateDirect(QUAD_VERTS.size * 4)

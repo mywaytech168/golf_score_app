@@ -717,11 +717,14 @@ class CameraRecorderChannel(
                 Log.d(TAG, "startRecordingOnCamera: before rec.start")
                 rec.start()
                 Log.d(TAG, "startRecordingOnCamera: after rec.start")
+                // ★ 錄影起點時間戳（BOOTTIME，與 analysis 幀的 sensor timestamp 同時鐘）：
+                //   Dart 端 CSV 用「幀擷取時間 − 此起點」對時，消除推論延遲造成的骨架慢半拍
+                val startTsMs = SystemClock.elapsedRealtime()
                 isRecording = true
                 preparedRecPath = null
                 releaseOp("startRecording")
-                Log.d(TAG, "startRecording ✅ (no-flash, pre-warmed): $path")
-                mainHandler.post { result.success(null) }
+                Log.d(TAG, "startRecording ✅ (no-flash, pre-warmed): $path startTs=$startTsMs")
+                mainHandler.post { result.success(mapOf("startTsMs" to startTsMs)) }
             } catch (e: Exception) {
                 releaseOp("startRecording")
                 Log.e(TAG, "startRecording (pre-warmed) failed: $e")
@@ -756,9 +759,10 @@ class CameraRecorderChannel(
                     analysisFallbackFromPreview = true
                     issueRecordRequest(s, cam, pr.surface, recSurface)
                     rec.start(); isRecording = true
+                    val startTsMs = SystemClock.elapsedRealtime()
                     releaseOp("startRecording")
-                    Log.d(TAG, "startRecording (fallback 2-stream): $path ${recordW}×${recordH}")
-                    mainHandler.post { result.success(null) }
+                    Log.d(TAG, "startRecording (fallback 2-stream): $path ${recordW}×${recordH} startTs=$startTsMs")
+                    mainHandler.post { result.success(mapOf("startTsMs" to startTsMs)) }
                 }
                 override fun onConfigureFailed(s: CameraCaptureSession) {
                     runCatching { rec.release() }; mediaRecorder = null

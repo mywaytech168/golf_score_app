@@ -104,8 +104,16 @@ class NativeCameraService {
     }
   }
 
-  Future<void> startRecording({required String path}) =>
-      _kMethodChannel.invokeMethod('startRecording', {'path': path});
+  /// 最近一次錄影起點的原生時間戳（ms，BOOTTIME，與 pose.timestampMs 同時鐘）。
+  /// iOS / 舊版原生未回傳時為 0。
+  int lastRecordStartTsMs = 0;
+
+  Future<void> startRecording({required String path}) async {
+    final result =
+        await _kMethodChannel.invokeMethod('startRecording', {'path': path});
+    lastRecordStartTsMs =
+        (result is Map ? (result['startTsMs'] as num?)?.toInt() : null) ?? 0;
+  }
 
   /// 停止錄製。回傳 true 表示影片已成功封口可播放；
   /// 丟出 PlatformException(record_failed) 表示本次錄製未產生有效影格（壞檔已被 native 刪除）。

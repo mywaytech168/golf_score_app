@@ -39,10 +39,10 @@ class SettingChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF1E8E5A) : const Color(0xFF2A2A2A),
+            color: selected ? const Color(0xFF1AA87C) : const Color(0xFF2A2A2A),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: selected ? const Color(0xFF1E8E5A) : Colors.white12),
+                color: selected ? const Color(0xFF1AA87C) : Colors.white12),
           ),
           alignment: Alignment.center,
           child: Text(
