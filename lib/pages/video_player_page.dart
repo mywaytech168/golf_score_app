@@ -17,6 +17,7 @@ import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../services/skeleton_csv_locator.dart';
+import '../services/swing_stats_service.dart';
 import '../theme/app_theme.dart';
 import 'ai_coach_page.dart';
 
@@ -51,6 +52,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   // Charts panel state
   bool _chartsExpanded = false;
+  bool _statsExpanded = false;
   int _chartTabIndex = 0;  // 0=聲音峰值 1=手腕Y 2=速度 3=姿勢 4=音頻特徵
   ChartDataSet? _chartData;
   bool _chartsLoading = false;
@@ -235,6 +237,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     }
   }
 
+  void _toggleStats() {
+    setState(() => _statsExpanded = !_statsExpanded);
+    // 軌跡 lazy-load：未載入時補載，載完 setState 自動刷新面板
+    if (_statsExpanded && _trajTrack == null) _ensureTrajectoryTrack();
+  }
+
   void _toggleAi() {
     setState(() => _aiExpanded = !_aiExpanded);
     if (_aiExpanded && _aiStatus == null && !_aiLoading) {
@@ -364,6 +372,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             if (_initialized) _buildOverlayToggles(),
             if (_initialized) _buildControls(),
             if (_initialized && _phases != null) _buildPhaseStrip(),
+            _buildStatsPanel(),
             _buildChartsPanel(),
             _buildAiPanel(),
           ],
@@ -666,6 +675,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   style: const TextStyle(color: Colors.white54, fontSize: 12)),
               const SizedBox(width: 8),
               GestureDetector(
+                onTap: _toggleStats,
+                child: Icon(
+                  Icons.query_stats_rounded,
+                  color: _statsExpanded
+                      ? const Color(0xFFFFD21E)
+                      : Colors.white54,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
                 onTap: _toggleCharts,
                 child: AnimatedRotation(
                   turns: _chartsExpanded ? 0.5 : 0,
@@ -795,6 +815,87 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           );
         },
       ),
+    );
+  }
+
+  // ── 揮桿統計面板（發射角 / 節奏 / 飛行時間）────────────────────
+
+  Widget _buildStatsPanel() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeInOut,
+      height: _statsExpanded ? 96 : 0,
+      color: const Color(0xFF121212),
+      child: ClipRect(child: _buildStatsContent()),
+    );
+  }
+
+  Widget _buildStatsContent() {
+    final stats = SwingStats.compute(track: _trajTrack, phases: _phases);
+    if (stats.isEmpty) {
+      return const Center(
+        child: Text('尚無統計資料（需軌跡或階段分析）',
+            style: TextStyle(color: Colors.white38, fontSize: 12)),
+      );
+    }
+
+    Widget stat(String label, String value, {Color? color}) {
+      return Expanded(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(value,
+                style: TextStyle(
+                  color: color ?? Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                )),
+            const SizedBox(height: 3),
+            Text(label,
+                style: const TextStyle(color: Colors.white38, fontSize: 10)),
+          ],
+        ),
+      );
+    }
+
+    // 節奏比顯著偏離 3:1 時提示色（職業選手約 3.0，2.5-3.5 視為理想區間）
+    Color? tempoColor;
+    if (stats.tempoRatio != null) {
+      final t = stats.tempoRatio!;
+      tempoColor = (t >= 2.5 && t <= 3.5)
+          ? const Color(0xFF1AA87C)
+          : const Color(0xFFFFB74D);
+    }
+
+    return Row(
+      children: [
+        stat(
+          '發射角',
+          stats.launchAngleDeg != null
+              ? '${stats.launchAngleDeg!.toStringAsFixed(1)}°'
+              : '--',
+          color: const Color(0xFFFFD21E),
+        ),
+        stat(
+          '節奏 (上桿:下桿)',
+          stats.tempoRatio != null
+              ? '${stats.tempoRatio!.toStringAsFixed(1)} : 1'
+              : '--',
+          color: tempoColor,
+        ),
+        stat(
+          '上桿 / 下桿',
+          (stats.backswingSec != null && stats.downswingSec != null)
+              ? '${stats.backswingSec!.toStringAsFixed(2)}s / ${stats.downswingSec!.toStringAsFixed(2)}s'
+              : '--',
+        ),
+        stat(
+          '入鏡飛行',
+          stats.flightTimeSec != null
+              ? '${stats.flightTimeSec!.toStringAsFixed(2)}s'
+              : '--',
+        ),
+      ],
     );
   }
 
