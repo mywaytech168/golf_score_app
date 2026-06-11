@@ -570,10 +570,7 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
                     VideoPlayer(ctrl),
                     if (pose != null)
                       CustomPaint(
-                        painter: SkeletonPainter(
-                          pose: pose,
-                          videoShortSide: ctrl.value.size.shortestSide,
-                        ),
+                        painter: SkeletonPainter(pose: pose),
                       ),
                     // 點擊播放/暫停
                     Material(

@@ -57,9 +57,9 @@ const kTextPrimaryDark   = Color(0xFFE6EAEE);
 const kTextSecondaryDark = Color(0xFF9AA4AE);
 const kTextHintDark      = Color(0xFF5C6670);
 const kBgInsetLight = Color(0xFFF4F6F9); // 淺灰填底(chip/欄位)
-const kBgInsetDark  = Color(0xFF1E1E28);
+const kBgInsetDark  = Color(0xFF272733); // 比卡片再亮一階，維持 chip/欄位層次
 const kBorderLight  = Color(0xFFDDE1E7);
-const kBorderDark   = Color(0xFF2A2A36);
+const kBorderDark   = Color(0xFF34343F);
 const kMintTintLight = Color(0xFFF0FBF6); // 薄荷淡底(提示框/頭像底)
 const kMintTintDark  = Color(0xFF12352B);
 
@@ -197,7 +197,7 @@ ThemeData buildAppTheme() {
 
 // ── 深色 ThemeData(ORVIA 品牌主色)──────────────────────────────
 const kBgPageDark = kOrviaInk;
-const kBgCardDark = Color(0xFF16161E);
+const kBgCardDark = Color(0xFF1C1C26); // 與 kBgPageDark(#0A0A0F) 拉開對比，暗色下卡片才看得出區塊
 
 ThemeData buildAppDarkTheme() {
   final cs = ColorScheme.fromSeed(

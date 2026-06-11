@@ -377,7 +377,10 @@ class _HomePageState extends State<HomePage> {
               borderRadius: BorderRadius.circular(11),
               child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
             )
-          : const Icon(Icons.golf_course_rounded, color: Colors.white, size: 22),
+          : Padding(
+              padding: const EdgeInsets.all(7),
+              child: Image.asset('assets/branding/logo_icon.png', fit: BoxFit.contain),
+            ),
     );
 
     // 方案 badge
@@ -492,10 +495,10 @@ class _TodayOverviewCard extends StatelessWidget {
         '${weekdays[now.weekday - 1]}  ${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
 
     return Container(
-      decoration: const BoxDecoration(
-        gradient: kPrimaryGradient,
-        borderRadius: BorderRadius.all(Radius.circular(kRadiusLG)),
-      ),
+      decoration: kCardDecoration(
+          color: context.bgCard,
+          radius: kRadiusLG,
+          shadow: context.cardShadow),
       padding: const EdgeInsets.all(kSpaceLG),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,8 +510,8 @@ class _TodayOverviewCard extends StatelessWidget {
                   l.homeTodayOverview,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: context.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
@@ -516,13 +519,13 @@ class _TodayOverviewCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(label,
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 12)),
+                  style: TextStyle(
+                      color: context.textSecondary, fontSize: 12)),
             ],
           ),
           const SizedBox(height: kSpaceLG),
           loading
-              ? _buildSkeleton()
+              ? _buildSkeleton(context)
               : Row(
                   children: [
                     _OverviewStat(
@@ -551,7 +554,7 @@ class _TodayOverviewCard extends StatelessWidget {
     );
   }
 
-  Widget _buildSkeleton() {
+  Widget _buildSkeleton(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: List.generate(
@@ -562,7 +565,7 @@ class _TodayOverviewCard extends StatelessWidget {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.25),
+                color: context.bgInset,
                 shape: BoxShape.circle,
               ),
             ),
@@ -571,7 +574,7 @@ class _TodayOverviewCard extends StatelessWidget {
               width: 28,
               height: 18,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.25),
+                color: context.bgInset,
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -594,16 +597,16 @@ class _OverviewStat extends StatelessWidget {
     return Expanded(
       child: Column(
         children: [
-          Icon(icon, color: Colors.white70, size: 22),
+          Icon(icon, color: context.textSecondary, size: 22),
           const SizedBox(height: kSpaceXS),
           Text(value,
-              style: const TextStyle(
-                  color: Colors.white,
+              style: TextStyle(
+                  color: context.textPrimary,
                   fontSize: 24,
                   fontWeight: FontWeight.bold)),
           const SizedBox(height: 2),
           Text(label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              style: TextStyle(color: context.textSecondary, fontSize: 12)),
         ],
       ),
     );
@@ -615,7 +618,7 @@ class _WhiteDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      Container(width: 1, height: 52, color: Colors.white24);
+      Container(width: 1, height: 52, color: context.borderColor);
 }
 
 // ── 三項核心指標橫排 ──────────────────────────────────────────────
