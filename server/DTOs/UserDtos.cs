@@ -1,6 +1,25 @@
 namespace UploadServer.DTOs
 {
     // ════════════════════════════════════════════════════════════════
+    // 個人資料
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>GET /api/user/me 回應</summary>
+    public record MeResponse(
+        string Id,
+        string Username,
+        string Email,
+        string DisplayName,
+        /// <summary>是否已綁定 Google 登入</summary>
+        bool GoogleLinked,
+        /// <summary>是否已設定本地密碼（false = 純 OAuth 帳號）</summary>
+        bool HasPassword
+    );
+
+    /// <summary>PATCH /api/user/me 請求</summary>
+    public record UpdateMeRequest(string? DisplayName);
+
+    // ════════════════════════════════════════════════════════════════
     // 方案相關
     // ════════════════════════════════════════════════════════════════
 

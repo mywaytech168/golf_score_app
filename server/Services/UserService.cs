@@ -44,6 +44,61 @@ namespace UploadServer.Services
         };
 
         // ════════════════════════════════════════════════════════════════
+        // 個人資料
+        // ════════════════════════════════════════════════════════════════
+
+        public async Task<MeResponse?> GetMeAsync(string userId)
+        {
+            var user = await _db.Users
+                .Include(u => u.UserAuths)
+                .FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null) return null;
+
+            return new MeResponse(
+                Id:           user.Id,
+                Username:     user.Username,
+                Email:        user.Email,
+                DisplayName:  user.DisplayName,
+                GoogleLinked: user.UserAuths.Any(a => a.Provider == AuthProvider.Google),
+                HasPassword:  user.UserAuths.Any(a => a.Provider == AuthProvider.Local)
+            );
+        }
+
+        public async Task<bool> UpdateDisplayNameAsync(string userId, string displayName)
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return false;
+
+            user.DisplayName = displayName;
+            user.UpdatedAt   = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            return true;
+        }
+
+        /// <summary>
+        /// 軟刪除帳號：標記 deleted、移除所有登入憑證（之後無法再登入），
+        /// 並匿名化 email/username 釋出該信箱供重新註冊。
+        /// </summary>
+        public async Task<bool> DeleteAccountAsync(string userId)
+        {
+            var user = await _db.Users
+                .Include(u => u.UserAuths)
+                .FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null) return false;
+
+            _db.UserAuths.RemoveRange(user.UserAuths);
+            user.Status      = "deleted";
+            user.Email       = $"deleted_{user.Id}@deleted.local";
+            user.Username    = $"deleted_{user.Id}";
+            user.DisplayName = "已刪除帳號";
+            user.UpdatedAt   = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("🗑️ 帳號已軟刪除: UserId={UserId}", userId);
+            return true;
+        }
+
+        // ════════════════════════════════════════════════════════════════
         // 方案
         // ════════════════════════════════════════════════════════════════
 

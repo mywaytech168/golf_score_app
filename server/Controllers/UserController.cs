@@ -36,6 +36,62 @@ namespace UploadServer.Controllers
             User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         // ════════════════════════════════════════════════════════════════
+        // 個人資料
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/user/me — 取得個人資料（email、displayName、googleLinked、hasPassword）
+        /// </summary>
+        [HttpGet("me")]
+        public async Task<IActionResult> GetMe()
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.GetMeAsync(userId);
+            if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { data = result });
+        }
+
+        /// <summary>
+        /// PATCH /api/user/me — 更新個人資料
+        /// Body: { "displayName": "..." }
+        /// </summary>
+        [HttpPatch("me")]
+        public async Task<IActionResult> UpdateMe([FromBody] UpdateMeRequest req)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var name = req?.DisplayName?.Trim();
+            if (string.IsNullOrEmpty(name))
+                return BadRequest(new { message = "顯示名稱不得為空" });
+            if (name.Length > 30)
+                return BadRequest(new { message = "顯示名稱最多 30 字" });
+
+            var ok = await _userService.UpdateDisplayNameAsync(userId, name);
+            if (!ok) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { success = true });
+        }
+
+        /// <summary>
+        /// DELETE /api/user/me — 刪除帳號（軟刪除：標記 deleted、移除登入憑證）
+        /// </summary>
+        [HttpDelete("me")]
+        public async Task<IActionResult> DeleteMe()
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var ok = await _userService.DeleteAccountAsync(userId);
+            if (!ok) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { success = true });
+        }
+
+        // ════════════════════════════════════════════════════════════════
         // 方案
         // ════════════════════════════════════════════════════════════════
 

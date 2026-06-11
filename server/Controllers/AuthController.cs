@@ -297,6 +297,51 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// 綁定 Google 帳號至當前登入用戶
+        /// POST: /api/auth/google/link  body: { "idToken": "..." }
+        /// </summary>
+        [HttpPost("google/link")]
+        [Authorize]
+        public async Task<IActionResult> LinkGoogle([FromBody] GoogleLinkRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized(new { success = false, message = "無效的身份驗證" });
+
+                if (request == null || string.IsNullOrEmpty(request.IdToken))
+                    return BadRequest(new { success = false, message = "Google ID Token 為必需" });
+
+                GoogleJsonWebSignature.Payload payload;
+                try
+                {
+                    var clientId = _config["Google:AndroidClientId"]
+                        ?? throw new InvalidOperationException("Google:AndroidClientId 未設定");
+                    payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken,
+                        new GoogleJsonWebSignature.ValidationSettings { Audience = new List<string> { clientId } });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Google Token 驗證失敗 (link)");
+                    return Unauthorized(new { success = false, message = "無效的 Google ID Token" });
+                }
+
+                var (success, error) = await _authService.LinkGoogleAsync(userId, payload.Subject);
+                if (!success)
+                    return BadRequest(new { success = false, message = error });
+
+                _logger.LogInformation($"✅ Google 帳號已綁定: UserId={userId}, GoogleId={payload.Subject}");
+                return Ok(new { success = true, message = "Google 帳號綁定成功" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Google 綁定失敗");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// 刷新 Token
         /// POST: /api/auth/refresh-token
         /// </summary>
@@ -399,6 +444,47 @@ namespace UploadServer.Controllers
                 });
             }
         }
+
+        /// <summary>
+        /// 設定密碼（純 OAuth 帳號首次建立本地密碼，JWT 已驗證身分故不需舊密碼）
+        /// POST: /api/auth/set-password
+        /// </summary>
+        [HttpPost("set-password")]
+        [Authorize]
+        public async Task<IActionResult> SetPassword([FromBody] SetPasswordRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized(new ChangePasswordResponse { Success = false, Message = "無效的身份驗證" });
+
+                if (!IsStrongPassword(request?.NewPassword))
+                {
+                    return BadRequest(new ChangePasswordResponse
+                    {
+                        Success = false,
+                        Message = "新密碼須至少 8 位且包含大寫字母、小寫字母及數字",
+                    });
+                }
+
+                var (success, error) = await _authService.SetPasswordAsync(userId, request.NewPassword);
+                if (!success)
+                    return BadRequest(new ChangePasswordResponse { Success = false, Message = error });
+
+                _logger.LogInformation($"✅ 密碼已設定: UserId={userId}");
+                return Ok(new ChangePasswordResponse { Success = true, Message = "密碼已成功設定" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ 設定密碼失敗");
+                return StatusCode(500, new ChangePasswordResponse { Success = false, Message = ex.Message });
+            }
+        }
+
+        private static bool IsStrongPassword(string? pw) =>
+            !string.IsNullOrEmpty(pw) && pw.Length >= 8 &&
+            Regex.IsMatch(pw, @"[A-Z]") && Regex.IsMatch(pw, @"[a-z]") && Regex.IsMatch(pw, @"[0-9]");
 
         /// <summary>
         /// 忘記密碼：寄送 6 位驗證碼至信箱

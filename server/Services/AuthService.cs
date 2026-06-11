@@ -294,6 +294,88 @@ namespace UploadServer.Services
         }
 
         // ============================================================
+        // Google 帳號綁定（設定頁主動綁定，與登入時的 email 自動合併互補）
+        // ============================================================
+        public async Task<(bool Success, string Error)> LinkGoogleAsync(string userId, string googleId)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                    return (false, "用戶不存在");
+
+                var existing = await _context.UserAuths
+                    .FirstOrDefaultAsync(a => a.Provider == AuthProvider.Google && a.ProviderUserId == googleId);
+                if (existing != null)
+                {
+                    // 同一用戶重複綁定視為成功（冪等）
+                    if (existing.UserId == userId) return (true, null);
+                    return (false, "此 Google 帳號已綁定其他帳號");
+                }
+
+                var alreadyLinked = await _context.UserAuths
+                    .AnyAsync(a => a.UserId == userId && a.Provider == AuthProvider.Google);
+                if (alreadyLinked)
+                    return (false, "此帳號已綁定其他 Google 帳號");
+
+                _context.UserAuths.Add(new UserAuth
+                {
+                    UserId         = userId,
+                    Provider       = AuthProvider.Google,
+                    ProviderUserId = googleId,
+                    CreatedAt      = DateTime.UtcNow,
+                    LastUsedAt     = DateTime.UtcNow,
+                });
+                user.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Google 綁定失敗");
+                return (false, ex.Message);
+            }
+        }
+
+        // ============================================================
+        // 設定密碼（純 OAuth 帳號首次建立本地密碼，不需舊密碼）
+        // ============================================================
+        public async Task<(bool Success, string Error)> SetPasswordAsync(
+            string userId, string newPassword)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                    return (false, "用戶不存在");
+
+                var existing = await _context.UserAuths
+                    .FirstOrDefaultAsync(a => a.UserId == userId && a.Provider == AuthProvider.Local);
+                if (existing != null)
+                    return (false, "此帳號已設定密碼，請使用修改密碼");
+
+                _context.UserAuths.Add(new UserAuth
+                {
+                    UserId         = userId,
+                    Provider       = AuthProvider.Local,
+                    ProviderUserId = user.Email,
+                    CredentialHash = BCrypt.Net.BCrypt.HashPassword(newPassword),
+                    CreatedAt      = DateTime.UtcNow,
+                });
+                user.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ 用戶已設定本地密碼: UserId={UserId}", userId);
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ 設定密碼失敗");
+                return (false, ex.Message);
+            }
+        }
+
+        // ============================================================
         // Token 生成
         // ============================================================
         public (string Token, string RefreshToken) GenerateTokens(User user, List<string> providers)

@@ -147,6 +147,18 @@ namespace UploadServer.DTOs
         public string Message { get; set; }
     }
 
+    /// <summary>純 OAuth 帳號首次設定密碼（不需舊密碼）</summary>
+    public class SetPasswordRequest
+    {
+        public string NewPassword { get; set; }
+    }
+
+    /// <summary>POST /api/auth/google/link 請求</summary>
+    public class GoogleLinkRequest
+    {
+        public string IdToken { get; set; }
+    }
+
     // ============================================================
     // 忘記密碼 / 重設密碼
     // ============================================================
