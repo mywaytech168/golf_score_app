@@ -7,7 +7,7 @@
 
 :root {
     /* Colors from Figma */
-    --color-primary: #38BDF8;
+    --color-primary: #2BD9A0;
     --color-dark-bg: #020617;
     --color-dark-bg-light: #0F172A;
     --color-white: #FFFFFF;
@@ -17,8 +17,9 @@
     --color-blue: #1D4ED8;
     --color-green: #059669;
     --color-yellow: #F59E0B;
-    --color-gradient-start: #4CAC74;
-    --color-gradient-end: #F0CF40;
+    --color-gradient-start: #2BD9A0;
+    --color-gradient-mid: #38B6E8;
+    --color-gradient-end: #5B5BE8;
     
     /* Typography */
     --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -160,7 +161,7 @@ img[alt]:after {
     font-family: var(--font-family-heading);
     font-size: 3.8rem;
     font-weight: 700;
-    background: linear-gradient(124deg, #4CAC74 27%, #F0CF40 77%);
+    background: linear-gradient(124deg, #2BD9A0 20%, #38B6E8 50%, #5B5BE8 80%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -228,25 +229,25 @@ img[alt]:after {
 
 .btn-primary {
     background: var(--color-primary);
-    color: var(--color-white);
+    color: #00261A;
     border: 1.5px solid var(--color-primary);
 }
 
 .btn-primary:hover {
-    background: #0EA5E9;
-    border-color: #0EA5E9;
+    background: #38B6E8;
+    border-color: #38B6E8;
     transform: translateY(-2px);
 }
 
 .btn-outline {
     background: transparent;
-    color: #FFE4E4;
+    color: var(--color-white);
     border: 1.5px solid var(--color-primary);
 }
 
 .btn-outline:hover {
     background: var(--color-primary);
-    color: var(--color-white);
+    color: #00261A;
     transform: translateY(-2px);
 }
 
@@ -271,23 +272,23 @@ img[alt]:after {
 }
 
 .tag-hardware {
-    background: rgba(17, 0, 255, 0.1);
-    color: #1100FF;
-    border: 1px solid #E5E7EB;
+    background: rgba(91, 91, 232, 0.12);
+    color: #5B5BE8;
+    border: 1px solid rgba(91, 91, 232, 0.3);
 }
 
 .tag-ai {
-    background: rgba(56, 189, 248, 0.1);
+    background: rgba(43, 217, 160, 0.1);
     color: var(--color-primary);
 }
 
 .tag-app {
-    background: rgba(56, 189, 248, 0.1);
+    background: rgba(43, 217, 160, 0.1);
     color: var(--color-primary);
 }
 
 .tag-market {
-    background: rgba(56, 189, 248, 0.1);
+    background: rgba(43, 217, 160, 0.1);
     color: var(--color-primary);
 }
 

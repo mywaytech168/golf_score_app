@@ -3,11 +3,45 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ORVIA — AI Golf Swing Analysis</title>
-<meta name="description" content="ORVIA：AI 驅動的高爾夫揮桿分析 App。錄製揮桿影片，AI 自動分析動作、追蹤球軌跡、給出教練建議。">
-<meta property="og:title" content="ORVIA — AI Golf Swing Analysis">
-<meta property="og:description" content="Human Motion Intelligence. 錄製揮桿影片，AI 自動分析動作、追蹤球軌跡、給出教練建議。">
-<meta property="og:image" content="images/og-banner.png">
+<title>ORVIA｜AI 高爾夫揮桿分析與動作智慧教練 App</title>
+<meta name="description" content="ORVIA 是 AI 高爾夫動作分析平台，結合影片、骨架分析與擊球聲音判斷，協助球員改善揮桿動作、追蹤練習成果。支援 Android 與 iOS 的高爾夫練習 App。">
+<link rel="canonical" href="https://orvia.atk.tw/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://orvia.atk.tw/">
+<meta property="og:title" content="ORVIA｜AI 高爾夫揮桿分析與動作智慧教練 App">
+<meta property="og:description" content="AI 高爾夫教練：影片骨架分析 + 擊球聲音分析,改善揮桿動作、追蹤練習成果。Golf swing analysis app powered by AI.">
+<meta property="og:image" content="https://orvia.atk.tw/images/og-banner.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://orvia.atk.tw/#org",
+      "name": "Aethertek Technology Co., Ltd.",
+      "url": "https://orvia.atk.tw",
+      "logo": "https://orvia.atk.tw/images/brand-icon.png"
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://orvia.atk.tw/#website",
+      "name": "ORVIA",
+      "url": "https://orvia.atk.tw",
+      "publisher": { "@id": "https://orvia.atk.tw/#org" },
+      "inLanguage": "zh-TW"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "ORVIA",
+      "applicationCategory": "SportsApplication",
+      "operatingSystem": "iOS, Android",
+      "description": "AI golf swing analysis and coaching app using video, skeleton analysis, and impact sound analysis.",
+      "url": "https://orvia.atk.tw",
+      "publisher": { "@id": "https://orvia.atk.tw/#org" }
+    }
+  ]
+}
+</script>
 <link rel="icon" type="image/png" href="images/brand-icon.png">
 <link rel="apple-touch-icon" href="images/brand-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,7 +54,7 @@
   --card:#1A1A1A;
   --border:#262626;
   --border-bright:#3a3a3a;
-  --green:#2DD4BF;
+  --green:#2BD9A0;
   --green-dim:rgba(45,212,191,.12);
   --text:#F5F5F5;
   --muted:#8a8a8a;
@@ -309,7 +343,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
 <nav>
   <div class="nav-inner">
     <a class="brand" href="#top">
-      <img class="brand-logo" src="images/orvia-logo.png" alt="ORVIA">
+      <img class="brand-logo" src="images/brand-icon.png" alt="ORVIA">ORVIA
     </a>
     <div class="lang-switch" role="group" aria-label="Language">
       <button data-lang="zh">繁</button>
@@ -325,7 +359,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
     <div>
       <img class="hero-logo" src="images/orvia-logo.png" alt="ORVIA — Human Motion Intelligence">
       <span class="eyebrow" data-i18n="hero.eyebrow"></span>
-      <h1>Your AI Golf Coach,<br><span class="accent">In Your Pocket.</span></h1>
+      <h1>AI 高爾夫揮桿分析 App<br><span class="accent">Your AI Golf Coach, In Your Pocket.</span></h1>
       <p class="lead" data-i18n="hero.lead"></p>
       <div class="hero-ctas">
         <a class="btn btn-primary" href="#download">
@@ -350,12 +384,12 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
           <div class="ps-canvas">
             <svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">
               <!-- ball trajectory -->
-              <path d="M55 235 Q 115 60 195 95" fill="none" stroke="#2DD4BF" stroke-width="2" stroke-dasharray="5 6" opacity=".8"/>
+              <path d="M55 235 Q 115 60 195 95" fill="none" stroke="#2BD9A0" stroke-width="2" stroke-dasharray="5 6" opacity=".8"/>
               <circle cx="55" cy="235" r="4" fill="#fff"/>
-              <circle cx="118" cy="118" r="2.5" fill="#2DD4BF" opacity=".7"/>
-              <circle cx="160" cy="96" r="2.5" fill="#2DD4BF" opacity=".5"/>
+              <circle cx="118" cy="118" r="2.5" fill="#2BD9A0" opacity=".7"/>
+              <circle cx="160" cy="96" r="2.5" fill="#2BD9A0" opacity=".5"/>
               <!-- skeleton -->
-              <g stroke="#2DD4BF" stroke-width="2.4" stroke-linecap="round">
+              <g stroke="#2BD9A0" stroke-width="2.4" stroke-linecap="round">
                 <line x1="85" y1="120" x2="85" y2="170"/>
                 <line x1="85" y1="130" x2="62" y2="155"/>
                 <line x1="62" y1="155" x2="48" y2="125"/>
@@ -368,7 +402,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
               </g>
               <!-- club -->
               <line x1="48" y1="125" x2="40" y2="78" stroke="#9ca3af" stroke-width="1.8"/>
-              <g fill="#2DD4BF">
+              <g fill="#2BD9A0">
                 <circle cx="85" cy="108" r="7"/>
                 <circle cx="85" cy="130" r="3.4"/><circle cx="62" cy="155" r="3.4"/>
                 <circle cx="48" cy="125" r="3.4"/><circle cx="106" cy="150" r="3.4"/>
@@ -445,7 +479,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
         <div class="mini-phone"><div class="mini-screen">
           <svg viewBox="0 0 190 380">
             <rect x="16" y="30" width="158" height="84" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <polygon points="88,60 104,72 88,84" fill="#2DD4BF"/>
+            <polygon points="88,60 104,72 88,84" fill="#2BD9A0"/>
             <!-- audio waveform with impact peaks -->
             <rect x="16" y="126" width="158" height="40" rx="8" fill="#0f140f" stroke="#1f2a1f"/>
             <g stroke="#3a463a" stroke-width="2" stroke-linecap="round">
@@ -459,18 +493,18 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
               <line x1="132" y1="144" x2="132" y2="148"/><line x1="144" y1="142" x2="144" y2="150"/>
               <line x1="150" y1="143" x2="150" y2="149"/><line x1="162" y1="144" x2="162" y2="148"/>
             </g>
-            <g stroke="#2DD4BF" stroke-width="2.4" stroke-linecap="round">
+            <g stroke="#2BD9A0" stroke-width="2.4" stroke-linecap="round">
               <line x1="54" y1="132" x2="54" y2="160"/>
               <line x1="102" y1="130" x2="102" y2="162"/>
               <line x1="138" y1="133" x2="138" y2="159"/>
             </g>
-            <g fill="#2DD4BF">
+            <g fill="#2BD9A0">
               <circle cx="54" cy="128" r="2"/><circle cx="102" cy="126" r="2"/><circle cx="138" cy="129" r="2"/>
             </g>
             <g font-family="Inter,sans-serif" font-size="9" fill="#8a8a8a">
               <text x="16" y="185">Clip 1 · 00:42</text><text x="16" y="242">Clip 2 · 01:15</text><text x="16" y="299">Clip 3 · 02:03</text>
             </g>
-            <rect x="16" y="192" width="158" height="36" rx="8" fill="#141a14" stroke="#2DD4BF" stroke-opacity=".5"/>
+            <rect x="16" y="192" width="158" height="36" rx="8" fill="#141a14" stroke="#2BD9A0" stroke-opacity=".5"/>
             <rect x="16" y="249" width="158" height="36" rx="8" fill="#141a14" stroke="#1f2a1f"/>
             <rect x="16" y="306" width="158" height="36" rx="8" fill="#141a14" stroke="#1f2a1f"/>
           </svg>
@@ -490,7 +524,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
           <svg viewBox="0 0 190 380">
             <!-- top bar: A / B titles -->
             <rect x="10" y="30" width="170" height="24" rx="6" fill="#141414"/>
-            <rect x="38" y="36" width="56" height="12" rx="6" fill="#1E8E5A"/>
+            <rect x="38" y="36" width="56" height="12" rx="6" fill="#2BD9A0"/>
             <text x="50" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing A</text>
             <rect x="104" y="36" width="56" height="12" rx="6" fill="#1565C0"/>
             <text x="116" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing B</text>
@@ -499,11 +533,11 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <line x1="95" y1="60" x2="95" y2="260" stroke="#fff" stroke-width="1"/>
             <text x="16" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:12 / 00:34</text>
             <text x="101" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:08 / 00:21</text>
-            <g stroke="#1E8E5A" stroke-width="2" stroke-linecap="round">
+            <g stroke="#2BD9A0" stroke-width="2" stroke-linecap="round">
               <line x1="52" y1="120" x2="52" y2="165"/><line x1="52" y1="132" x2="34" y2="150"/><line x1="52" y1="132" x2="68" y2="148"/>
               <line x1="52" y1="165" x2="42" y2="200"/><line x1="52" y1="165" x2="62" y2="200"/>
             </g>
-            <circle cx="52" cy="110" r="6" fill="#1E8E5A"/>
+            <circle cx="52" cy="110" r="6" fill="#2BD9A0"/>
             <g stroke="#1565C0" stroke-width="2" stroke-linecap="round">
               <line x1="138" y1="120" x2="138" y2="165"/><line x1="138" y1="132" x2="118" y2="142"/><line x1="138" y1="132" x2="156" y2="146"/>
               <line x1="138" y1="165" x2="128" y2="200"/><line x1="138" y1="165" x2="148" y2="200"/>
@@ -512,12 +546,12 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <!-- controls: progress slider -->
             <rect x="10" y="260" width="170" height="80" rx="0" fill="#141414"/>
             <rect x="22" y="278" width="146" height="5" rx="2.5" fill="#3a3a3a"/>
-            <rect x="22" y="278" width="86" height="5" rx="2.5" fill="#1E8E5A"/>
+            <rect x="22" y="278" width="86" height="5" rx="2.5" fill="#2BD9A0"/>
             <circle cx="108" cy="280.5" r="6" fill="#fff"/>
             <!-- playback row: time / -1% play +1% / time -->
             <text x="22" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:12</text>
             <text x="62" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">-1%</text>
-            <circle cx="95" cy="313" r="13" fill="#1E8E5A"/>
+            <circle cx="95" cy="313" r="13" fill="#2BD9A0"/>
             <polygon points="91,306 103,313 91,320" fill="#fff"/>
             <text x="113" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">+1%</text>
             <text x="148" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:34</text>
@@ -541,7 +575,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <text x="18" y="44" font-family="Inter,sans-serif" font-size="11" fill="#8a8a8a">‹</text>
             <!-- summary card: posture label + severity badge -->
             <rect x="14" y="58" width="162" height="74" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <rect x="24" y="68" width="58" height="14" rx="7" fill="#1E8E5A"/>
+            <rect x="24" y="68" width="58" height="14" rx="7" fill="#2BD9A0"/>
             <text x="31" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">早期伸展</text>
             <rect x="88" y="68" width="30" height="14" rx="7" fill="#f97316"/>
             <text x="95" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">中等</text>
@@ -554,29 +588,29 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <rect x="118" y="149" width="44" height="13" rx="6.5" fill="#7C3AED"/>
             <text x="124" y="158.5" font-family="Inter,sans-serif" font-size="6.5" fill="#fff" font-weight="700">甜蜜點+</text>
             <g>
-              <rect x="24" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
-              <rect x="53" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
-              <rect x="82" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
-              <rect x="111" y="168" width="26" height="7" rx="3.5" fill="#2DD4BF"/>
+              <rect x="24" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
+              <rect x="53" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
+              <rect x="82" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
+              <rect x="111" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
               <rect x="140" y="168" width="26" height="7" rx="3.5" fill="#2a342a"/>
             </g>
-            <line x1="24" y1="184" x2="24" y2="196" stroke="#1E8E5A" stroke-width="2.4"/>
+            <line x1="24" y1="184" x2="24" y2="196" stroke="#2BD9A0" stroke-width="2.4"/>
             <rect x="30" y="186" width="118" height="6" rx="3" fill="#1f2a1f"/>
             <!-- coach feedback card: green arrow bullets -->
             <rect x="14" y="214" width="162" height="64" rx="10" fill="#141a14" stroke="#1f2a1f"/>
             <text x="24" y="231" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">教練回饋</text>
-            <text x="24" y="248" font-family="Inter,sans-serif" font-size="8" fill="#2DD4BF">›</text>
+            <text x="24" y="248" font-family="Inter,sans-serif" font-size="8" fill="#2BD9A0">›</text>
             <rect x="34" y="242" width="126" height="6" rx="3" fill="#2a342a"/>
-            <text x="24" y="264" font-family="Inter,sans-serif" font-size="8" fill="#2DD4BF">›</text>
+            <text x="24" y="264" font-family="Inter,sans-serif" font-size="8" fill="#2BD9A0">›</text>
             <rect x="34" y="258" width="108" height="6" rx="3" fill="#1f2a1f"/>
             <!-- practice suggestions card: numbered drills -->
             <rect x="14" y="288" width="162" height="60" rx="10" fill="#141a14" stroke="#1f2a1f"/>
             <text x="24" y="305" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">練習建議</text>
-            <circle cx="29" cy="320" r="6" fill="none" stroke="#1E8E5A" stroke-width="1.4"/>
-            <text x="26.6" y="323" font-family="Inter,sans-serif" font-size="7" fill="#2DD4BF">1</text>
+            <circle cx="29" cy="320" r="6" fill="none" stroke="#2BD9A0" stroke-width="1.4"/>
+            <text x="26.6" y="323" font-family="Inter,sans-serif" font-size="7" fill="#2BD9A0">1</text>
             <rect x="42" y="317" width="110" height="6" rx="3" fill="#2a342a"/>
-            <circle cx="29" cy="336" r="6" fill="none" stroke="#1E8E5A" stroke-width="1.4"/>
-            <text x="26.6" y="339" font-family="Inter,sans-serif" font-size="7" fill="#2DD4BF">2</text>
+            <circle cx="29" cy="336" r="6" fill="none" stroke="#2BD9A0" stroke-width="1.4"/>
+            <text x="26.6" y="339" font-family="Inter,sans-serif" font-size="7" fill="#2BD9A0">2</text>
             <rect x="42" y="333" width="92" height="6" rx="3" fill="#1f2a1f"/>
           </svg>
         </div></div>
@@ -597,7 +631,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <circle cx="32" cy="47" r="5" fill="none" stroke="#8a8a8a" stroke-width="1.6"/>
             <line x1="36" y1="51" x2="40" y2="55" stroke="#8a8a8a" stroke-width="1.6"/>
             <g font-family="Inter,sans-serif" font-size="8">
-              <rect x="16" y="70" width="52" height="18" rx="9" fill="#2DD4BF"/>
+              <rect x="16" y="70" width="52" height="18" rx="9" fill="#2BD9A0"/>
               <text x="29" y="82" fill="#042f2a" font-weight="700">All</text>
               <rect x="74" y="70" width="52" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
               <text x="82" y="82" fill="#8a8a8a">Analyzed</text>
@@ -609,11 +643,11 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
               <rect x="99" y="100" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
               <rect x="16" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
               <rect x="99" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
-              <polygon points="48,142 60,150 48,158" fill="#2DD4BF"/>
-              <polygon points="131,142 143,150 131,158" fill="#2DD4BF"/>
-              <polygon points="48,250 60,258 48,266" fill="#2DD4BF"/>
-              <polygon points="131,250 143,258 131,266" fill="#2DD4BF"/>
-              <rect x="22" y="180" width="40" height="12" rx="6" fill="#0f1a12" stroke="#2DD4BF" stroke-opacity=".5"/>
+              <polygon points="48,142 60,150 48,158" fill="#2BD9A0"/>
+              <polygon points="131,142 143,150 131,158" fill="#2BD9A0"/>
+              <polygon points="48,250 60,258 48,266" fill="#2BD9A0"/>
+              <polygon points="131,250 143,258 131,266" fill="#2BD9A0"/>
+              <rect x="22" y="180" width="40" height="12" rx="6" fill="#0f1a12" stroke="#2BD9A0" stroke-opacity=".5"/>
               <rect x="105" y="180" width="40" height="12" rx="6" fill="#1c1c1c"/>
             </g>
           </svg>
@@ -720,6 +754,12 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
         <img class="brand-logo" src="images/orvia-logo.png" alt="ORVIA">
       </a>
       <div class="footer-links">
+        <a href="golf-swing-analysis.html">揮桿分析</a>
+        <a href="ai-golf-coach.html">AI 教練</a>
+        <a href="skeleton-analysis.html">骨架分析</a>
+        <a href="audio-impact-analysis.html">聲音分析</a>
+        <a href="app.html">App</a>
+        <a href="pricing.html">方案</a>
         <a href="privacy.html" data-i18n="footer.privacy"></a>
         <a href="terms.html" data-i18n="footer.terms"></a>
         <a href="mailto:support@aethertek.com">support@aethertek.com</a>
