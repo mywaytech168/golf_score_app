@@ -559,4 +559,104 @@ Java_com_aethertek_orvia_NativeLib_blobDiffAndMorphOpen(
     free(binary);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// nv21ToRgbaLetterbox
+//
+// 即時骨架推論的轉換直通：NV21 → 旋轉 → nearest 縮放 → letterbox → RGBA，
+// 單趟完成，輸出寫入 direct ByteBuffer（餵 MediaPipe ByteBufferImageBuilder）。
+// 取代舊路徑「NV21 → JPEG 編碼 → JPEG 解碼 → Bitmap 旋轉 → 縮放 → letterbox
+// canvas」（~25ms + 每幀 5 個 Bitmap 配置）。
+//
+// 座標流程（與 MediaPipePoseHelper 的逆還原參數一致）：
+//   output(ox,oy) ∈ [lboxSize]² → 扣 pad → 等比映射至 portrait(px,py)
+//   → 依 rotation 映射回 NV21 來源 (sx,sy) → YUV→RGB
+//
+// rotation：相機 sensorOrientation（0/90/180/270），90 = 順時針轉 90° 得直式。
+// pad 區域填黑（alpha 255）。
+// ─────────────────────────────────────────────────────────────────────────────
+JNIEXPORT void JNICALL
+Java_com_aethertek_orvia_NativeLib_nv21ToRgbaLetterbox(
+        JNIEnv* env, jclass /*clazz*/,
+        jbyteArray nv21Array,
+        jint srcW, jint srcH,
+        jint rotation,
+        jint lboxSize,
+        jint contentW, jint contentH,
+        jint padX, jint padY,
+        jobject outBuf)
+{
+    uint8_t* out = (uint8_t*) env->GetDirectBufferAddress(outBuf);
+    if (out == nullptr) return;
+    const jlong cap = env->GetDirectBufferCapacity(outBuf);
+    if (cap < (jlong) lboxSize * lboxSize * 4) return;
+
+    // 預計算 content → portrait 的 nearest 映射表（必須在 Critical 區前 malloc）
+    const int pw = (rotation == 90 || rotation == 270) ? srcH : srcW;
+    const int ph = (rotation == 90 || rotation == 270) ? srcW : srcH;
+    int* pxMap = (int*) malloc(sizeof(int) * (size_t) contentW);
+    int* pyMap = (int*) malloc(sizeof(int) * (size_t) contentH);
+    if (pxMap == nullptr || pyMap == nullptr) { free(pxMap); free(pyMap); return; }
+    for (int i = 0; i < contentW; i++) {
+        int v = (int)(((int64_t) i * pw) / contentW);
+        pxMap[i] = v < pw ? v : pw - 1;
+    }
+    for (int i = 0; i < contentH; i++) {
+        int v = (int)(((int64_t) i * ph) / contentH);
+        pyMap[i] = v < ph ? v : ph - 1;
+    }
+
+    const uint8_t* nv21 =
+        (const uint8_t*) env->GetPrimitiveArrayCritical(nv21Array, nullptr);
+    if (nv21 == nullptr) { free(pxMap); free(pyMap); return; }
+
+    const uint8_t* yPlane  = nv21;
+    const uint8_t* uvPlane = nv21 + (size_t) srcW * srcH;
+
+    // 整片填黑（R=G=B=0, A=255）；little-endian RGBA = 0xFF000000
+    uint32_t* out32 = (uint32_t*) out;
+    const int total = lboxSize * lboxSize;
+    for (int i = 0; i < total; i++) out32[i] = 0xFF000000u;
+
+    for (int cy = 0; cy < contentH; cy++) {
+        const int py = pyMap[cy];
+        uint8_t* row = out + ((size_t)(padY + cy) * lboxSize + padX) * 4;
+        for (int cx = 0; cx < contentW; cx++) {
+            const int px = pxMap[cx];
+            int sx, sy;
+            switch (rotation) {
+                case 90:   // 順時針 90°：dst(x,y) = src(y, srcH-1-x)
+                    sx = py;            sy = srcH - 1 - px; break;
+                case 180:
+                    sx = srcW - 1 - px; sy = srcH - 1 - py; break;
+                case 270:  // 逆時針 90°：dst(x,y) = src(srcW-1-y, x)
+                    sx = srcW - 1 - py; sy = px;            break;
+                default:
+                    sx = px;            sy = py;            break;
+            }
+            const int Y = yPlane[(size_t) sy * srcW + sx];
+            const size_t uvOff = ((size_t)(sy >> 1) * srcW) + (size_t)(sx & ~1);
+            const int V = uvPlane[uvOff]     - 128;   // NV21：V 在前
+            const int U = uvPlane[uvOff + 1] - 128;
+
+            // BT.601 full-range（與 YuvImage JPEG 路徑一致），定點 <<10
+            int r = Y + ((1436 * V) >> 10);                    // 1.402
+            int g = Y - ((352 * U + 731 * V) >> 10);           // 0.344, 0.714
+            int b = Y + ((1815 * U) >> 10);                    // 1.772
+            if (r < 0) r = 0; else if (r > 255) r = 255;
+            if (g < 0) g = 0; else if (g > 255) g = 255;
+            if (b < 0) b = 0; else if (b > 255) b = 255;
+
+            row[0] = (uint8_t) r;
+            row[1] = (uint8_t) g;
+            row[2] = (uint8_t) b;
+            row[3] = 255;
+            row += 4;
+        }
+    }
+
+    free(pxMap);
+    free(pyMap);
+    env->ReleasePrimitiveArrayCritical(nv21Array, (void*) nv21, JNI_ABORT);
+}
+
 } // extern "C"

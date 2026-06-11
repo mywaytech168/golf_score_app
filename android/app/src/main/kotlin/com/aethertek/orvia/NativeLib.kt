@@ -120,6 +120,30 @@ object NativeLib {
     )
 
     /**
+     * NV21 → 旋轉 → nearest 縮放 → letterbox → RGBA（direct ByteBuffer），單趟完成。
+     *
+     * 即時骨架推論的轉換直通，取代「NV21→JPEG→Bitmap→旋轉→縮放→letterbox」
+     * （~25ms + 每幀 5 個 Bitmap）→ ~2-3ms、零 JVM 配置。
+     * 輸出餵 MediaPipe ByteBufferImageBuilder(IMAGE_FORMAT_RGBA)。
+     *
+     * @param nv21      來源（srcW×srcH×3/2）
+     * @param rotation  0/90/180/270（90 = 順時針轉 90° 得直式）
+     * @param lboxSize  輸出正方形邊長（256）
+     * @param contentW/H, padX/Y  letterbox 內容區與黑邊（Kotlin 端先算好，
+     *        與 MediaPipePoseHelper 座標逆還原參數一致）
+     * @param out       direct ByteBuffer，容量 ≥ lboxSize² × 4
+     */
+    external fun nv21ToRgbaLetterbox(
+        nv21: ByteArray,
+        srcW: Int, srcH: Int,
+        rotation: Int,
+        lboxSize: Int,
+        contentW: Int, contentH: Int,
+        padX: Int, padY: Int,
+        out: java.nio.ByteBuffer,
+    )
+
+    /**
      * 將 ARGB_8888 Bitmap overlay alpha-blend 合成進 NV12 緩衝區。
      *
      * 等價於 SkeletonOverlayRenderer.compositeSkeleton()

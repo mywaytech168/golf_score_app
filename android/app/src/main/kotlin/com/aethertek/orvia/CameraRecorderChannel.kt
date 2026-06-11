@@ -75,8 +75,15 @@ class CameraRecorderChannel(
         private const val JPEG_QUALITY_PREVIEW = 35
         private const val JPEG_QUALITY_ANALYSIS = 35
         // analysisReader 超過此毫秒數沒輸出 → 判定 stale，改由 preview 補 MediaPipe。
-        // 每幀都嘗試送進 MediaPipe，isAnalyzing 做 back-pressure（忙時自動跳過）。
+        // 每幀都嘗試送進 MediaPipe，analysisInFlight permit 做 back-pressure（忙時自動跳過）。
         private const val ANALYSIS_STALE_MS = 1000L
+        // ★ 2 幀 in-flight：CPU 轉換（~24ms）與 GPU 推論（~33ms）pipeline 重疊，
+        //   吞吐上限從 convert+infer+空轉(~105ms) 變成 max(convert, infer)(~33ms)。
+        //   實測 9-10fps → 預期 20-25fps。LIVE_STREAM 內部 queue 可吸收 2 幀。
+        private const val MAX_ANALYSIS_IN_FLIGHT = 2
+        // permit 全滿且超過此毫秒無任何釋放 → 判定 MediaPipe 靜默丟幀（FlowLimiter
+        // 不回呼）造成 permit 洩漏，強制歸零重啟管線。
+        private const val PERMIT_STALL_RESET_MS = 2000L
     }
 
     // ── Flutter channels ──────────────────────────────────────────────────────
@@ -95,6 +102,11 @@ class CameraRecorderChannel(
     //   → waitUntilIdle 無法完成 → 畫面卡在第一幀（deadlock）。
     private val imageThread   = HandlerThread("ImageThread").also { it.start() }
     private val imageHandler  = Handler(imageThread.looper)
+    // ★ analysisThread：專用於分析幀轉換（NV21→Bitmap→detectAsync）。
+    //   與 renderThread 分離：預覽繪製（onDisplayNv21）不再與分析轉換互搶，
+    //   且單一 looper 序列執行保證 detectAsync 時間戳單調遞增。
+    private val analysisThread  = HandlerThread("AnalysisThread").also { it.start() }
+    private val analysisHandler = Handler(analysisThread.looper)
     private val mainHandler   = Handler(Looper.getMainLooper())
 
     // ── Camera2 objects ───────────────────────────────────────────────────────
@@ -137,7 +149,7 @@ class CameraRecorderChannel(
             val sink = poseSink ?: return@MediaPipePoseHelper
             mainHandler.post { sink.success(mapOf("landmarks" to lms, "ts" to ts)) }
         },
-        onFrameDone = { isAnalyzing = false },
+        onFrameDone = { releaseAnalysisPermit() },
     )
 
     // ── Rendering state ───────────────────────────────────────────────────────
@@ -400,9 +412,9 @@ class CameraRecorderChannel(
                             Log.w(TAG, "analysis stale/fallback: from preview, " +
                                 "stale=${nowMs - lastAnalysisFrameAtMs}ms recording=$isRecording")
                         }
-                        if (!isAnalyzing) {
-                            isAnalyzing = true
-                            renderHandler.post {
+                        watchdogResetStalledPermits()
+                        if (tryAcquireAnalysisPermit()) {
+                            analysisHandler.post {
                                 onAnalysisNv21(data, imgW, imgH, sensorOrientation, isFront, tsNs)
                             }
                         }
@@ -420,6 +432,14 @@ class CameraRecorderChannel(
                     var imgW = 0; var imgH = 0
                     try {
                         img = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                        // ★ gate 前移：permits 用盡時直接丟幀（仍須 acquire+close 排空佇列），
+                        //   不做 NV21 複製 — 省下被丟幀的 1.5-3.5ms CPU 與 346KB 配置。
+                        lastAnalysisFrameAtMs = SystemClock.uptimeMillis()
+                        analysisFallbackFromPreview = false
+                        watchdogResetStalledPermits()
+                        if (analysisInFlight.get() >= MAX_ANALYSIS_IN_FLIGHT) {
+                            return@setOnImageAvailableListener
+                        }
                         imgTimestampNs = img.timestamp
                         imgW = img.width; imgH = img.height
                         nv21 = yuv420ToNv21Fast(img)
@@ -430,13 +450,9 @@ class CameraRecorderChannel(
                     }
                     val data = nv21 ?: return@setOnImageAvailableListener
 
-                    lastAnalysisFrameAtMs = SystemClock.uptimeMillis()
-                    analysisFallbackFromPreview = false
-
-                    if (!isAnalyzing) {
-                        isAnalyzing = true
+                    if (tryAcquireAnalysisPermit()) {
                         val tsNs = imgTimestampNs
-                        renderHandler.post {
+                        analysisHandler.post {
                             onAnalysisNv21(data, imgW, imgH, sensorOrientation, isFront, tsNs)
                         }
                     }
@@ -773,12 +789,18 @@ class CameraRecorderChannel(
         recordingFinalPath = finalPath
         recordingTmpPath   = tmpPath
         MediaRecorder().apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
+            // ★ CAMCORDER 音源（錄影調諧、減少 AGC 把底噪拉滿）；
+            //   不設定取樣率/位元率時 MediaRecorder 預設為 8kHz/12kbps，
+            //   擊球瞬態會被噪音淹沒、無法用於音訊擊球偵測。
+            setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(tmpPath)
             setVideoEncoder(MediaRecorder.VideoEncoder.H264)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setAudioSamplingRate(44100)
+            setAudioEncodingBitRate(128_000)
+            setAudioChannels(1)
             setVideoSize(recordW, recordH)         // 橫式：1920×1080 或 1280×720
             setVideoFrameRate(recordFps)
             setVideoEncodingBitRate(if (recordW >= 1920) 15_000_000 else 8_000_000)
@@ -1049,7 +1071,50 @@ class CameraRecorderChannel(
     // ── Analysis path：NV21 → Bitmap → MediaPipe ──────────────────────────────
     // 獨立於顯示路徑，輸入已是 640×360 小幀，轉換負擔低
 
-    @Volatile private var isAnalyzing   = false
+    // ── Analysis in-flight permits（取代舊 isAnalyzing boolean gate）──────────
+    // 允許 MAX_ANALYSIS_IN_FLIGHT 幀同時在管線內：一幀在 analysisThread 轉換時，
+    // 上一幀可同時在 GPU 推論 → CPU/GPU 重疊，吞吐 ≈ 1/max(convert, infer)。
+    private val analysisInFlight = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var lastPermitChangeMs = 0L
+
+    private fun tryAcquireAnalysisPermit(): Boolean {
+        while (true) {
+            val cur = analysisInFlight.get()
+            if (cur >= MAX_ANALYSIS_IN_FLIGHT) return false
+            if (analysisInFlight.compareAndSet(cur, cur + 1)) {
+                lastPermitChangeMs = SystemClock.uptimeMillis()
+                return true
+            }
+        }
+    }
+
+    private fun releaseAnalysisPermit() {
+        // 下限 0：重複釋放（error listener 與 result listener 雙回呼等）不得使計數變負
+        while (true) {
+            val cur = analysisInFlight.get()
+            if (cur <= 0) return
+            if (analysisInFlight.compareAndSet(cur, cur - 1)) {
+                lastPermitChangeMs = SystemClock.uptimeMillis()
+                return
+            }
+        }
+    }
+
+    /**
+     * Watchdog：permit 全滿且超過 PERMIT_STALL_RESET_MS 無任何變化
+     * → MediaPipe 靜默丟幀（FlowLimiter 不回呼任何 listener）造成洩漏，強制歸零。
+     * 在 image listener（每幀都會進來）呼叫，無需額外 timer。
+     */
+    private fun watchdogResetStalledPermits() {
+        if (analysisInFlight.get() < MAX_ANALYSIS_IN_FLIGHT) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastPermitChangeMs <= PERMIT_STALL_RESET_MS) return
+        Log.w(TAG, "analysis permits stalled ${now - lastPermitChangeMs}ms → force reset " +
+            "(MediaPipe 疑似丟幀未回呼)")
+        analysisInFlight.set(0)
+        lastPermitChangeMs = now
+    }
+
     // ★ 單調遞增時間戳：確保跨 Normal/Shot 模式、跨錄製 session，MediaPipe PTS 絕不歸零或倒退
     //   使用感測器硬體時間戳（img.timestamp，開機後奈秒），比 System.currentTimeMillis() 更可靠
     @Volatile private var lastAnalysisTsMs = 0L
@@ -1059,9 +1124,11 @@ class CameraRecorderChannel(
         rotation: Int, isFront: Boolean,
         imgTimestampNs: Long = 0L,   // ★ 感測器時間戳（ns）；0 表示使用 SystemClock fallback
     ) {
-        // ★ isAnalyzing 已由 image listener 設為 true（throttle gate），此處不再重複檢查/設定，
-        //   否則 early-return 會跳過 finally，使 isAnalyzing 永久卡 true → 骨架永遠不更新。
+        // ★ permit 已由 image listener 取得（tryAcquireAnalysisPermit）。
+        //   釋放契約：本函式內任何「未把幀送進 detectAsync」的路徑（例外、decode
+        //   失敗）都必須自行 releaseAnalysisPermit()；成功送出後由 poseHelper.onFrameDone 釋放。
         try {
+            val t0 = SystemClock.uptimeMillis()
             // ★ PTS 計算：確保跨切片、跨 Shot 模式時間戳線性遞增
             //   優先使用感測器時間戳（最可靠），fallback 到 SystemClock.uptimeMillis()
             //   嚴禁使用 System.currentTimeMillis()（可能因 NTP 修正向後跳）
@@ -1074,30 +1141,42 @@ class CameraRecorderChannel(
             val monotonicTsMs = maxOf(tsMs, lastAnalysisTsMs + 1L)
             lastAnalysisTsMs = monotonicTsMs
 
-            // 640×360 NV21 → JPEG → Bitmap（quality 50 ≈ 2ms，比 1280×720 快 4×）
-            val yuvImg = YuvImage(nv21, ImageFormat.NV21, imgW, imgH, null)
-            val out    = ByteArrayOutputStream()
-            yuvImg.compressToJpeg(Rect(0, 0, imgW, imgH), JPEG_QUALITY_PREVIEW, out)
-            val raw = BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size()) ?: return
+            // ★ JNI 直出：NV21 → 旋轉 → 縮放 → letterbox → RGBA 一步完成（~2-3ms），
+            //   取代 JPEG 往返 + 多次 Bitmap 配置（~25ms）。前鏡頭不做水平翻轉，
+            //   landmarks 在繪圖時補 mirrorX（與舊路徑一致）。
+            val lbox = MediaPipePoseHelper.LBOX_SIZE
+            val pw = if (rotation == 90 || rotation == 270) imgH else imgW
+            val ph = if (rotation == 90 || rotation == 270) imgW else imgH
+            val scale = minOf(lbox.toFloat() / pw, lbox.toFloat() / ph)
+            val contentW = (pw * scale).toInt().coerceAtLeast(1)
+            val contentH = (ph * scale).toInt().coerceAtLeast(1)
+            val padX = (lbox - contentW) / 2
+            val padY = (lbox - contentH) / 2
 
-            // 旋轉至直式（640×360 → 360×640）；前鏡頭不做水平翻轉，landmarks 在繪圖時補 mirrorX
-            val portraitBmp = if (rotation == 0) raw else {
-                val m = Matrix().apply { postRotate(rotation.toFloat()) }
-                Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
-                    .also { raw.recycle() }
+            val rgbaBuf = poseHelper.acquireRgbaBuffer()
+            try {
+                NativeLib.nv21ToRgbaLetterbox(
+                    nv21, imgW, imgH, rotation,
+                    lbox, contentW, contentH, padX, padY, rgbaBuf,
+                )
+            } catch (e: Throwable) {
+                // JNI 失敗：buffer 歸還 + 釋放 permit（幀不會進 detectAsyncRgba）
+                poseHelper.releaseRgbaBuffer(rgbaBuf)
+                Log.w(TAG, "nv21ToRgbaLetterbox: $e")
+                releaseAnalysisPermit()
+                return
             }
-            // portraitBmp: 360×640 直式（剛好可等比縮至 POSE_W×POSE_H = 270×480）
 
-            // 縮至 AI 分析尺寸（由 poseHelper 管理生命週期，勿在此 recycle）
-            val analysisBmp = Bitmap.createScaledBitmap(portraitBmp, POSE_W, POSE_H, false)
-            portraitBmp.recycle()
+            // 轉換段 timing（JNI 直出），統計由 poseHelper 彙整輸出
+            poseHelper.noteConvertMs(SystemClock.uptimeMillis() - t0)
 
-            poseHelper.detectAsync(analysisBmp, monotonicTsMs)   // Letterbox 在 helper 內完成
-            // ★ isAnalyzing 由 poseHelper.onFrameDone 在推論完成後清除，不在此處清除
+            poseHelper.detectAsyncRgba(
+                rgbaBuf, contentW, contentH, padX, padY, monotonicTsMs)
+            // ★ permit 由 poseHelper.onFrameDone 釋放（detectAsyncRgba 內所有路徑均保證回呼）
 
         } catch (e: Exception) {
             Log.w(TAG, "onAnalysisNv21: $e")
-            isAnalyzing = false  // 例外路徑：detectAsync 未送出，需在此清除
+            releaseAnalysisPermit()  // 例外路徑：detectAsync 未送出，需在此釋放
         }
     }
 
@@ -1242,6 +1321,7 @@ class CameraRecorderChannel(
         }
         runCatching { imageThread.quitSafely() }
         runCatching { renderThread.quitSafely() }
+        runCatching { analysisThread.quitSafely() }
         runCatching { cameraThread.quitSafely() }
     }
 

@@ -57,7 +57,56 @@ import UIKit
     private var poseLandmarker: PoseLandmarker?
     private var lastLandmarks: [[String: Double]] = []
     private var lastLandmarkLock = NSLock()
-    private var poseFrameCount = 0          // every frame — LIVE_STREAM self-throttles on ANE
+    private var poseFrameCount = 0
+
+    // ── Analysis in-flight permits（與 Android analysisInFlight 對齊）─────────
+    // 允許 2 幀同時在管線內（letterbox 與推論重疊）；permits 用盡時直接丟幀，
+    // 不付 letterbox 成本（每幀含整張 frame 的 CGImage 拷貝，~5-10ms）。
+    // 釋放契約：detectAsync 成功 → delegate 回呼（含 error/empty）釋放；
+    // detectAsync throw → catch 路徑釋放。watchdog 防 MediaPipe 靜默丟幀洩漏。
+    let permitLock = NSLock()
+    var analysisInFlight = 0
+    var lastPermitChangeMs: Double = 0
+    static let maxAnalysisInFlight = 2
+    static let permitStallResetMs: Double = 2000
+
+    func tryAcquireAnalysisPermit() -> Bool {
+        permitLock.lock(); defer { permitLock.unlock() }
+        if analysisInFlight >= Self.maxAnalysisInFlight { return false }
+        analysisInFlight += 1
+        lastPermitChangeMs = CACurrentMediaTime() * 1000
+        return true
+    }
+
+    func releaseAnalysisPermit() {
+        permitLock.lock(); defer { permitLock.unlock() }
+        if analysisInFlight > 0 {
+            analysisInFlight -= 1
+            lastPermitChangeMs = CACurrentMediaTime() * 1000
+        }
+    }
+
+    /// permits 全滿且超過 2 秒無變化 → MediaPipe 丟幀未回呼造成洩漏，強制歸零。
+    func watchdogResetStalledPermits() {
+        permitLock.lock(); defer { permitLock.unlock() }
+        guard analysisInFlight >= Self.maxAnalysisInFlight else { return }
+        let now = CACurrentMediaTime() * 1000
+        guard now - lastPermitChangeMs > Self.permitStallResetMs else { return }
+        print("[MediaPipeCamera] analysis permits stalled → force reset")
+        analysisInFlight = 0
+        lastPermitChangeMs = now
+    }
+
+    // ── 單調時間戳（detectAsync 要求嚴格遞增；同毫秒兩幀會 throw 丟幀）──────────
+    var lastAnalysisTsMs = 0
+
+    // ── 分段 timing 統計（每 30 幀彙整輸出，與 Android TIMING log 對齊）────────
+    let statLock = NSLock()
+    var submitAtMs: [Int: Double] = [:]   // ts → detectAsync 送出時刻
+    var statConvertMs: Double = 0
+    var statInferMs: Double = 0
+    var statCount = 0
+    var statWindowStart: Double = 0
 
     // ── State ──────────────────────────────────────────────────────────────────
     private var isFront = false
@@ -527,6 +576,14 @@ import UIKit
             self.preparedPath = nil
         }
         poseLandmarker = nil
+        // 重置 permits / timing（重開相機時從乾淨狀態開始）
+        permitLock.lock()
+        analysisInFlight = 0
+        permitLock.unlock()
+        statLock.lock()
+        submitAtMs.removeAll()
+        statConvertMs = 0; statInferMs = 0; statCount = 0; statWindowStart = 0
+        statLock.unlock()
         if textureId != -1 {
             registry.unregisterTexture(textureId)
             textureId = -1
@@ -598,16 +655,38 @@ extension MediaPipeCameraChannel: AVCaptureVideoDataOutputSampleBufferDelegate,
         // ── 4. MediaPipe pose detection with Letterboxing ────────────────────
         //    CVPixelBuffer (BGRA portrait) → letterbox 256×256 → MPImage → detectAsync
         //    逆座標還原在 poseLandmarker(_:didFinishDetection:) delegate 中執行
+        //    ★ permit gate 前移（與 Android 對齊）：2 幀 in-flight，忙碌時直接
+        //      丟幀，不付 letterbox 成本；watchdog 防 MediaPipe 靜默丟幀洩漏。
         poseFrameCount += 1
-        let tsMs = Int(CACurrentMediaTime() * 1000)
-        if let lboxBuffer = letterboxPixelBuffer(pixelBuffer, targetSize: lboxSize) {
-            lastLandmarkLock.lock()
-            lastLboxParams = currentLboxParams
-            lastLandmarkLock.unlock()
-            do {
-                let mpImage = try MPImage(pixelBuffer: lboxBuffer)
-                try poseLandmarker?.detectAsync(image: mpImage, timestampInMilliseconds: tsMs)
-            } catch { /* ignore */ }
+        watchdogResetStalledPermits()
+        guard tryAcquireAnalysisPermit() else { return }
+
+        let convertStart = CACurrentMediaTime() * 1000
+        // 單調遞增時間戳（同毫秒兩幀會讓 detectAsync throw → 丟幀 + permit 洩漏）
+        let tsMs = max(Int(convertStart), lastAnalysisTsMs + 1)
+        lastAnalysisTsMs = tsMs
+
+        guard let lboxBuffer = letterboxPixelBuffer(pixelBuffer, targetSize: lboxSize) else {
+            releaseAnalysisPermit()   // 幀不會進 detectAsync → 在此釋放
+            return
+        }
+        lastLandmarkLock.lock()
+        lastLboxParams = currentLboxParams
+        lastLandmarkLock.unlock()
+
+        let now = CACurrentMediaTime() * 1000
+        statLock.lock()
+        statConvertMs += now - convertStart
+        submitAtMs[tsMs] = now
+        statLock.unlock()
+
+        do {
+            let mpImage = try MPImage(pixelBuffer: lboxBuffer)
+            try poseLandmarker?.detectAsync(image: mpImage, timestampInMilliseconds: tsMs)
+        } catch {
+            // detectAsync 失敗：delegate 不會回呼 → 必須在此釋放 permit
+            statLock.lock(); submitAtMs.removeValue(forKey: tsMs); statLock.unlock()
+            releaseAnalysisPermit()
         }
     }
 
@@ -809,6 +888,31 @@ extension MediaPipeCameraChannel: PoseLandmarkerLiveStreamDelegate {
                         didFinishDetection result: PoseLandmarkerResult?,
                         timestampInMilliseconds: Int,
                         error: Error?) {
+        // ★ permit 釋放 + timing：本 delegate 是 detectAsync 的唯一回呼點，
+        //   無論成功 / error / empty 都必須恰好釋放一次（與 Android onFrameDone 契約一致）。
+        releaseAnalysisPermit()
+        let now = CACurrentMediaTime() * 1000
+        statLock.lock()
+        if let submitted = submitAtMs.removeValue(forKey: timestampInMilliseconds) {
+            statInferMs += now - submitted
+            statCount += 1
+            if statWindowStart == 0 { statWindowStart = now }
+            if statCount >= 30 {
+                let winSec = (now - statWindowStart) / 1000
+                let fps = winSec > 0 ? Double(statCount) / winSec : 0
+                print(String(format: "[MediaPipeCamera] TIMING n=%d convert=%.0fms infer=%.0fms effFps=%.1f",
+                             statCount, statConvertMs / Double(statCount),
+                             statInferMs / Double(statCount), fps))
+                statConvertMs = 0; statInferMs = 0; statCount = 0; statWindowStart = now
+            }
+            // 防 map 無限增長（MediaPipe 丟幀不回呼的殘留項）
+            if submitAtMs.count > 8 {
+                let cutoff = now - 3000
+                submitAtMs = submitAtMs.filter { $0.value >= cutoff }
+            }
+        }
+        statLock.unlock()
+
         guard let result = result, !result.landmarks.isEmpty else {
             lastLandmarkLock.lock()
             lastLandmarks = []
