@@ -323,3 +323,6 @@ flutter_fhd_record_ref/
 mediapipe-samples-main/
 
 tmp_analysis/
+
+server.Tests/bin/
+server.Tests/obj/
