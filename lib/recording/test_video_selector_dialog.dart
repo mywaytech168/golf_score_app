@@ -171,7 +171,7 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
                             ),
                             trailing: Container(
                               decoration: BoxDecoration(
-                                color: Colors.green.withOpacity(0.2),
+                                color: Colors.green.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               padding: const EdgeInsets.symmetric(

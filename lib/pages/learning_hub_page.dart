@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
 class LearningHubPage extends StatelessWidget {
@@ -44,7 +44,7 @@ class LearningHubPage extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => LearningDetailPage(content: c)),
+                MaterialPageRoute(builder: (_) => _LearningDetailPage(content: c)),
               ),
             ),
           );
@@ -54,9 +54,9 @@ class LearningHubPage extends StatelessWidget {
   }
 }
 
-class LearningDetailPage extends StatelessWidget {
+class _LearningDetailPage extends StatelessWidget {
   final _LearningContent content;
-  const LearningDetailPage({super.key, required this.content});
+  const _LearningDetailPage({required this.content});
 
   @override
   Widget build(BuildContext context) {

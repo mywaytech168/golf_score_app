@@ -1680,7 +1680,7 @@ class _OptionTile extends StatelessWidget {
             Container(
               width: 42, height: 42,
               decoration: BoxDecoration(
-                color: kPrimaryGreen.withOpacity(0.1),
+                color: kPrimaryGreen.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(option.icon, color: kPrimaryGreen, size: 22),

@@ -1,4 +1,5 @@
 #!/usr/bin/env dart
+// ignore_for_file: avoid_print  (獨立 CLI 測試工具，print 即輸出)
 
 import 'dart:io';
 import 'dart:math' as math;

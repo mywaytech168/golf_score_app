@@ -177,6 +177,7 @@ class _MainShellPageState extends State<MainShellPage> {
         onPageChanged: (index) {
           setState(() => _currentIndex = index);
         },
+        physics: const NeverScrollableScrollPhysics(),
         children: [
           // 第 0 頁：首頁
           const HomePage(),
@@ -220,8 +221,7 @@ class _MainShellPageState extends State<MainShellPage> {
           
           // 第 4 頁：升級頁
           const UpgradePage(),
-        ],
-        physics: const NeverScrollableScrollPhysics(), // 禁用滑動切換，只允許底部導覽點擊
+        ], // 禁用滑動切換，只允許底部導覽點擊
       ),
       
       bottomNavigationBar: _buildBottomBar(),

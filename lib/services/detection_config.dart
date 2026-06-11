@@ -1,3 +1,5 @@
+// ignore_for_file: constant_identifier_names
+// 偵測常數與 Python tracker 同名同步（SCREAMING_CASE 刻意保留）
 // ============================================================
 // 動態檢測配置計算 (Python → Android/Dart 遷移)
 // 

@@ -153,12 +153,10 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
   // ── 資料取值 ──────────────────────────────────────────────────
   int get _rounds    => _stats?.roundCount    ?? 0;
   int get _practices => _stats?.practiceCount ?? 0;
-  int get _practice  => _stats?.totalCount    ?? 0;
   int get _good      => _stats?.goodShot      ?? 0;
   int get _bad => _stats?.badShot ?? 0;
   double? get _speed => (_stats?.peakValue.maximum ?? 0) > 0 ? _stats!.peakValue.maximum : null;
   double? get _sweet => (_stats?.sweetSpotPercentage ?? 0) > 0 ? _stats!.sweetSpotPercentage : null;
-  double? get _crisp => (_stats?.audioCrispness.average ?? 0) > 0 ? _stats!.audioCrispness.average : null;
 
   @override
   Widget build(BuildContext context) {
@@ -605,28 +603,6 @@ class _MetricCardWidget extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: kSpaceXS),
-        Text(label, style: TextStyle(fontSize: 12, color: context.textSecondary)),
-      ],
     );
   }
 }

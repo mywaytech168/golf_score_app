@@ -23,11 +23,11 @@ class RecordingHistoryTabs extends StatefulWidget {
   final Function(RecordingHistoryEntry)? onEntryTapped;
 
   const RecordingHistoryTabs({
-    Key? key,
+    super.key,
     required this.entries,
     required this.itemBuilder,
     this.onEntryTapped,
-  }) : super(key: key);
+  });
 
   @override
   State<RecordingHistoryTabs> createState() => _RecordingHistoryTabsState();

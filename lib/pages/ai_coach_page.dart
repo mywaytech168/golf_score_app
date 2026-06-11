@@ -181,6 +181,8 @@ class _AiCoachPageState extends State<AiCoachPage> {
     }
   }
 
+  // 重新分析入口暫時下架（appBar actions 已清空），流程保留供回復
+  // ignore: unused_element
   Future<void> _reanalyze() async {
     _timer?.cancel();
     final vid  = widget.videoId;

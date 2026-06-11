@@ -174,13 +174,13 @@ extension DurationExtension on Duration {
   /// 取得描述性文本
   String get description {
     if (inDays > 0) {
-      return '${inDays}天';
+      return '$inDays天';
     } else if (inHours > 0) {
-      return '${inHours}小時';
+      return '$inHours小時';
     } else if (inMinutes > 0) {
-      return '${inMinutes}分鐘';
+      return '$inMinutes分鐘';
     } else {
-      return '${inSeconds}秒';
+      return '$inSeconds秒';
     }
   }
 }

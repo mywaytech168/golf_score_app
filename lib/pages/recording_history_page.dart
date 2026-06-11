@@ -1,7 +1,6 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -659,7 +658,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (_datePreset == 'custom' && _customDateFrom != null) {
       final df = _customDateFrom!;
       final dt = _customDateTo ?? _customDateFrom!;
-      final fmt = (DateTime d) => '${d.month}/${d.day}';
+      String fmt(DateTime d) => '${d.month}/${d.day}';
       items.add(('${fmt(df)}–${fmt(dt)}', const Color(0xFF2196F3)));
     }
     if (_sortBy != _SortBy.date)    items.add((_sortBy.label, const Color(0xFF1565C0)));
@@ -1298,19 +1297,19 @@ class _HistoryTileState extends State<_HistoryTile> {
         // 監聽 native EventChannel 進度，即時更新對話框進度條
         final progressSvc = AnalysisProgressService.instance;
         progressSvc.reset('V2 音訊掃描中...');
-        void _listenV2() {
+        void listenV2() {
           final (pct, label) = progressSvc.progress.value;
           // V2 audio peaks 佔整體進度的 0~0.6，裁切佔 0.6~1.0
           progressNotifier.value = (pct * 0.6, label);
         }
-        progressSvc.progress.addListener(_listenV2);
+        progressSvc.progress.addListener(listenV2);
 
         final peakMs = await GolfAnalysisService.findAudioPeaks(
           videoPath: widget.entry.filePath,
           searchStartMs: 500,
           minGapMs: 2000,
         );
-        progressSvc.progress.removeListener(_listenV2);
+        progressSvc.progress.removeListener(listenV2);
         if (cancelToken.isCancelled) return;
         debugPrint('[偵測擊球 V2] 音訊峰值: $peakMs');
 
@@ -2070,6 +2069,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       // ignore: use_build_context_synchronously
       await AdService.showAiCoachInterstitial();
+      if (!mounted) return;
       var aiCallbackFired = false;
       await AiCoachPage.submitAndPush(
         context:          context,
@@ -3281,6 +3281,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
       // ignore: use_build_context_synchronously
       await AdService.showAiCoachInterstitial();
+      if (!mounted) return;
       var aiCallbackFired = false;
       await AiCoachPage.submitAndPush(
         context:          context,
@@ -3926,7 +3927,7 @@ class _DateRangeChip extends StatelessWidget {
     if (!selected || dateFrom == null) return '自訂日期';
     final from = dateFrom!;
     final to   = dateTo ?? from;
-    final fmt  = (DateTime d) => '${d.month}/${d.day}';
+    String fmt(DateTime d) => '${d.month}/${d.day}';
     return '${fmt(from)} – ${fmt(to)}';
   }
 
@@ -4669,8 +4670,8 @@ class _CancelToken {
 /// 這是 fire-and-forget：不需等待回應，Kotlin 會在下一個幀邊界停止。
 Future<void> _cancelNativeAnalysis() async {
   try {
-    const _ch = MethodChannel('com.example.golf_score_app/pose_analyzer');
-    await _ch.invokeMethod<void>('cancel');
+    const ch = MethodChannel('com.example.golf_score_app/pose_analyzer');
+    await ch.invokeMethod<void>('cancel');
   } catch (e) {
     debugPrint('[Cancel] native cancel failed: $e');
   }

@@ -1,5 +1,6 @@
+// ignore_for_file: non_constant_identifier_names
+// Kalman 矩陣沿用數學慣例命名（P/A/Q/R）
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 // ============================================================
@@ -145,7 +146,9 @@ class Kalman2D {
       0, 0, 0, 120,
     ]);
     // P = 1000 × I
-    for (int i = 0; i < 4; i++) _P[i * 4 + i] = 1000;
+    for (int i = 0; i < 4; i++) {
+      _P[i * 4 + i] = 1000;
+    }
   }
 
   /// 從兩個已知點初始化（對應 Python initialize_from_two_points）
@@ -155,7 +158,9 @@ class Kalman2D {
     _x[2] = (p1x - p0x) / safeDt;
     _x[3] = (p1y - p0y) / safeDt;
     // P = diag([80, 80, 900, 900])
-    for (int i = 0; i < 16; i++) _P[i] = 0;
+    for (int i = 0; i < 16; i++) {
+      _P[i] = 0;
+    }
     _P[0] = 80; _P[5] = 80; _P[10] = 900; _P[15] = 900;
     initialized = true;
   }
@@ -167,7 +172,9 @@ class Kalman2D {
     final AP = _mat44(_A, _P);
     final AT = _mat44T(_A);
     final APAT = _mat44(AP, AT);
-    for (int i = 0; i < 16; i++) _P[i] = APAT[i] + _Q[i];
+    for (int i = 0; i < 16; i++) {
+      _P[i] = APAT[i] + _Q[i];
+    }
   }
 
   /// 更新步（Python: update）
@@ -220,7 +227,9 @@ class Kalman2D {
     final r = Float64List(4);
     for (int i = 0; i < 4; i++) {
       double s = 0;
-      for (int k = 0; k < 4; k++) s += A[i * 4 + k] * v[k];
+      for (int k = 0; k < 4; k++) {
+        s += A[i * 4 + k] * v[k];
+      }
       r[i] = s;
     }
     return r;
@@ -231,7 +240,9 @@ class Kalman2D {
     for (int i = 0; i < 4; i++) {
       for (int j = 0; j < 4; j++) {
         double s = 0;
-        for (int k = 0; k < 4; k++) s += A[i * 4 + k] * B[k * 4 + j];
+        for (int k = 0; k < 4; k++) {
+          s += A[i * 4 + k] * B[k * 4 + j];
+        }
         C[i * 4 + j] = s;
       }
     }
@@ -241,7 +252,9 @@ class Kalman2D {
   static Float64List _mat44T(Float64List A) {
     final B = Float64List(16);
     for (int i = 0; i < 4; i++) {
-      for (int j = 0; j < 4; j++) B[i * 4 + j] = A[j * 4 + i];
+      for (int j = 0; j < 4; j++) {
+        B[i * 4 + j] = A[j * 4 + i];
+      }
     }
     return B;
   }
@@ -901,7 +914,7 @@ class BallTracker {
       _state      = _TrackState.waitP1;
       _p0FrameIdx = frameIdx;
       _waitFrames = 0;
-      debugPrint('[waitP0] P0 seeded from YOLO @ frame $frameIdx (${_seedP0X},${_seedP0Y})');
+      debugPrint('[waitP0] P0 seeded from YOLO @ frame $frameIdx ($_seedP0X,$_seedP0Y)');
       return;
     }
 

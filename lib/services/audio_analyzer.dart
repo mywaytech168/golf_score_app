@@ -1,3 +1,5 @@
+// ignore_for_file: non_constant_identifier_names
+// 音訊特徵變數沿用論文/Python 命名（Fe/Fo）
 import 'dart:io';
 import 'dart:math';
 
@@ -85,9 +87,13 @@ List<_Complex> _dft(List<_Complex> x) {
 // zero-pad to next power of two
 List<_Complex> _toComplexPadded(List<double> y) {
   int n = 1;
-  while (n < y.length) n <<= 1;
+  while (n < y.length) {
+    n <<= 1;
+  }
   final out = List<_Complex>.generate(n, (i) => _Complex(0, 0));
-  for (int i = 0; i < y.length; i++) out[i].re = y[i];
+  for (int i = 0; i < y.length; i++) {
+    out[i].re = y[i];
+  }
   return out;
 }
 
@@ -109,7 +115,9 @@ AudioFeatures analyzeFromSamples(List<double> samples, int sr,
   final freqs = List<double>.generate(half, (i) => i * sr / spec.length);
   final totalMag = mags.fold(0.0, (a, b) => a + b) + _eps;
   double centroid = 0.0;
-  for (int i = 0; i < half; i++) centroid += freqs[i] * mags[i];
+  for (int i = 0; i < half; i++) {
+    centroid += freqs[i] * mags[i];
+  }
   centroid = centroid / totalMag;
 
   // ear_mask 1k-5k, hi_mask >3k
@@ -204,7 +212,9 @@ Map<String, dynamic> loadReferenceStats(String csvPath) {
     if (vals.isEmpty) { mu[k]= double.nan; sd[k]= double.nan; continue; }
     final mean = vals.reduce((a,b)=>a+b)/vals.length;
     double variance = 0.0;
-    for (final v in vals) variance += (v-mean)*(v-mean);
+    for (final v in vals) {
+      variance += (v-mean)*(v-mean);
+    }
     variance = variance / (vals.length - 1 > 0 ? vals.length -1 : vals.length);
     mu[k]=mean; sd[k]=sqrt(max(variance, _eps));
   }

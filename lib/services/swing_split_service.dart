@@ -316,7 +316,7 @@ class SwingSplitService {
     final int win = math.max(1, (smoothWinSec / math.max(1e-6, dtEst)).round());
     final int minDistSamples = math.max(1, (minIntervalSec / math.max(1e-6, dtEst)).round());
     
-    debugPrint('[DETECT_PEAKS] 參數: 採樣間隔=${dtEst.toStringAsFixed(6)}s, 平滑窗=${win}樣本, 最小距離=${minDistSamples}樣本');
+    debugPrint('[DETECT_PEAKS] 參數: 採樣間隔=${dtEst.toStringAsFixed(6)}s, 平滑窗=$win樣本, 最小距離=$minDistSamples樣本');
 
     // 取 |acc| 並做居中移動平均，模擬 python 版 rolling(center=True)
     final List<double> mag = List<double>.generate(
@@ -326,7 +326,7 @@ class SwingSplitService {
     debugPrint('[DETECT_PEAKS]   ├─ 最小: ${mag.reduce(math.min).toStringAsFixed(2)}G');
     debugPrint('[DETECT_PEAKS]   └─ 最大: ${mag.reduce(math.max).toStringAsFixed(2)}G');
     
-    debugPrint('[DETECT_PEAKS] 執行移動平均平滑 (窗口大小=${win}樣本)...');
+    debugPrint('[DETECT_PEAKS] 執行移動平均平滑 (窗口大小=$win樣本)...');
     final List<double> smooth = List<double>.filled(n, 0);
     double maxSmooth = 0;
     double minSmooth = double.infinity;
@@ -350,9 +350,7 @@ class SwingSplitService {
       if (smooth[i] >= threshG && i > 0 && i < n - 1) {
         final bool isLocalMax = smooth[i] > smooth[i - 1] && smooth[i] > smooth[i + 1];
         if (isLocalMax) {
-          debugPrint('[DETECT_PEAKS]   ├─ 候選峰值 @ i=$i (t=${s.time[i].toStringAsFixed(3)}s): ' +
-              '平滑值=${smooth[i].toStringAsFixed(2)}G, 窗口=[${start}:${end}] (大小=$windowSize), ' +
-              '原始=[${mag[start].toStringAsFixed(2)}-${mag[end].toStringAsFixed(2)}]G');
+          debugPrint('[DETECT_PEAKS]   ├─ 候選峰值 @ i=$i (t=${s.time[i].toStringAsFixed(3)}s): ' '平滑值=${smooth[i].toStringAsFixed(2)}G, 窗口=[$start:$end] (大小=$windowSize), ' '原始=[${mag[start].toStringAsFixed(2)}-${mag[end].toStringAsFixed(2)}]G');
         }
       }
     }

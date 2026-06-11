@@ -63,23 +63,23 @@ class ExternalVideoImporter {
 
         // 監聽 Kotlin sendProgress("transcode") → EventChannel → 更新進度 Dialog
         final progressSvc = AnalysisProgressService.instance;
-        void _onTranscodeProgress() {
+        void onTranscodeProgress() {
           if (progressSvc.currentOp == 'transcode') {
             final (prog, label) = progressSvc.progress.value;
             onProgress?.call(prog, label);
           }
         }
-        progressSvc.progress.addListener(_onTranscodeProgress);
+        progressSvc.progress.addListener(onTranscodeProgress);
 
         try {
-          const _channel = MethodChannel('com.example.golf_score_app/video_transcoder');
-          final transcoded = await _channel.invokeMethod<String>(
+          const channel = MethodChannel('com.example.golf_score_app/video_transcoder');
+          final transcoded = await channel.invokeMethod<String>(
             'transcodeToMp4',
             {'srcPath': sourcePath, 'dstPath': videoPath},
           );
           if (transcoded == null) throw Exception('transcodeToMp4 未回傳路徑');
         } finally {
-          progressSvc.progress.removeListener(_onTranscodeProgress);
+          progressSvc.progress.removeListener(onTranscodeProgress);
         }
       } else {
         videoPath = p.join(sessionDir, 'swing.mp4');

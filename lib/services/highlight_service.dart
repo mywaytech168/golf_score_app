@@ -30,13 +30,13 @@ class HighlightService {
     bool addSlowMo = true,
   }) async {
     // shared debug buffer and writer used by both platform channel and fallback
-    final StringBuffer _debugLog = StringBuffer();
-    Future<void> _writeDebug() async {
-      final String content = _debugLog.toString();
+    final StringBuffer debugLog = StringBuffer();
+    Future<void> writeDebug() async {
+      final String content = debugLog.toString();
       // try write to app temp directory first (so Preview page can read it easily)
       try {
         final tempDir = await getTemporaryDirectory();
-        final debugName = p.basenameWithoutExtension(videoPath) + '_highlight_debug.txt';
+        final debugName = '${p.basenameWithoutExtension(videoPath)}_highlight_debug.txt';
         final tempFile = File(p.join(tempDir.path, debugName));
         await tempFile.writeAsString(content);
       } catch (e) {
@@ -45,7 +45,7 @@ class HighlightService {
 
       // also attempt to write next to the original video file as a fallback for adb inspection
       try {
-        final debugFile = File(p.join(p.dirname(videoPath), p.basenameWithoutExtension(videoPath) + '_highlight_debug.txt'));
+        final debugFile = File(p.join(p.dirname(videoPath), '${p.basenameWithoutExtension(videoPath)}_highlight_debug.txt'));
         await debugFile.writeAsString(content);
       } catch (_) {}
     }
@@ -67,8 +67,8 @@ class HighlightService {
     } catch (e) {
       // Platform channel not implemented or failed, fall back to ffmpeg pipeline
       try {
-        _debugLog.writeln('platform channel error: $e');
-        await _writeDebug();
+        debugLog.writeln('platform channel error: $e');
+        await writeDebug();
       } catch (_) {}
     }
 
@@ -91,21 +91,21 @@ class HighlightService {
             caption: caption,
           );
           if (out != null && out.isNotEmpty) return out;
-          _debugLog.writeln('mobile overlay fallback returned null');
-          await _writeDebug();
+          debugLog.writeln('mobile overlay fallback returned null');
+          await writeDebug();
         } catch (e) {
-          try { _debugLog.writeln('mobile overlay fallback error: $e'); await _writeDebug(); } catch (_) {}
+          try { debugLog.writeln('mobile overlay fallback error: $e'); await writeDebug(); } catch (_) {}
         }
       }
       try {
-        _debugLog.writeln('ffmpeg not found on PATH; desktop fallback unavailable.');
-        await _writeDebug();
+        debugLog.writeln('ffmpeg not found on PATH; desktop fallback unavailable.');
+        await writeDebug();
       } catch (_) {}
       return null;
     }
 
     final String tmpDir = Directory.systemTemp.createTempSync('swing_highlight_').path;
-  final String outPath = p.join(tmpDir, p.basenameWithoutExtension(videoPath) + '_highlight.mp4');
+  final String outPath = p.join(tmpDir, '${p.basenameWithoutExtension(videoPath)}_highlight.mp4');
 
     try {
       // Decide segments: if segments provided, use them; otherwise take first segment from provided video center
@@ -129,10 +129,10 @@ class HighlightService {
       final String withAudio = p.join(tmpDir, 'withbgm.mp4');
 
       // 1) Trim
-  final int rcTrim = await _runFFmpeg(['-y', '-ss', '$trimStart', '-i', videoPath, '-to', '${trimEnd - trimStart}', '-c', 'copy', trimmed], debugLog: _debugLog);
-      _debugLog.writeln('trim rc=$rcTrim');
+  final int rcTrim = await _runFFmpeg(['-y', '-ss', '$trimStart', '-i', videoPath, '-to', '${trimEnd - trimStart}', '-c', 'copy', trimmed], debugLog: debugLog);
+      debugLog.writeln('trim rc=$rcTrim');
       if (rcTrim != 0) {
-        await _writeDebug();
+        await writeDebug();
         return null;
       }
 
@@ -141,16 +141,16 @@ class HighlightService {
       bool didStab = false;
       if (stabilize) {
         // Try vidstab workflow (requires ffmpeg with vidstab)
-  final int rc1 = await _runFFmpeg(['-y', '-i', trimmed, '-vf', 'vidstabdetect=shakiness=10:accuracy=15', '-f', 'null', '-'], workingDir: tmpDir, debugLog: _debugLog);
-        _debugLog.writeln('vidstabdetect rc=$rc1');
+  final int rc1 = await _runFFmpeg(['-y', '-i', trimmed, '-vf', 'vidstabdetect=shakiness=10:accuracy=15', '-f', 'null', '-'], workingDir: tmpDir, debugLog: debugLog);
+        debugLog.writeln('vidstabdetect rc=$rc1');
         if (rc1 == 0) {
-          final int rc2 = await _runFFmpeg(['-y', '-i', trimmed, '-vf', "vidstabtransform=input='transforms.trf':smoothing=30", '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', stabilized], workingDir: tmpDir, debugLog: _debugLog);
-          _debugLog.writeln('vidstabtransform rc=$rc2');
+          final int rc2 = await _runFFmpeg(['-y', '-i', trimmed, '-vf', "vidstabtransform=input='transforms.trf':smoothing=30", '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', stabilized], workingDir: tmpDir, debugLog: debugLog);
+          debugLog.writeln('vidstabtransform rc=$rc2');
           didStab = rc2 == 0;
         } else {
           // fallback: deshake filter
-          final int rc = await _runFFmpeg(['-y', '-i', trimmed, '-vf', 'deshake', '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', stabilized], debugLog: _debugLog);
-          _debugLog.writeln('deshake rc=$rc');
+          final int rc = await _runFFmpeg(['-y', '-i', trimmed, '-vf', 'deshake', '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', stabilized], debugLog: debugLog);
+          debugLog.writeln('deshake rc=$rc');
           didStab = rc == 0;
         }
       }
@@ -168,22 +168,24 @@ class HighlightService {
         final String afterSeg = p.join(tmpDir, 'after.mp4');
 
         // extract before, slow segment, after
-  final int rcBefore = await _runFFmpeg(['-y', '-ss', '$trimStart', '-i', stageInput, '-to', '${smStart - trimStart}', '-c', 'copy', beforeSeg], debugLog: _debugLog);
-  _debugLog.writeln('slowmo before rc=$rcBefore');
-  if (rcBefore != 0) { await _writeDebug(); return null; }
-  final int rcSlow = await _runFFmpeg(['-y', '-ss', '$smStart', '-i', stageInput, '-to', '${smEnd - smStart}', '-an', '-vf', 'setpts=5.0*PTS', slowSeg], debugLog: _debugLog); // 0.2x => setpts=5.0
-  _debugLog.writeln('slowmo segment rc=$rcSlow');
-  if (rcSlow != 0) { await _writeDebug(); return null; }
-  final int rcAfter = await _runFFmpeg(['-y', '-ss', '$smEnd', '-i', stageInput, '-to', '${trimEnd - smEnd}', '-c', 'copy', afterSeg], debugLog: _debugLog);
-  _debugLog.writeln('slowmo after rc=$rcAfter');
-  if (rcAfter != 0) { await _writeDebug(); return null; }
+  final int rcBefore = await _runFFmpeg(['-y', '-ss', '$trimStart', '-i', stageInput, '-to', '${smStart - trimStart}', '-c', 'copy', beforeSeg], debugLog: debugLog);
+  debugLog.writeln('slowmo before rc=$rcBefore');
+  if (rcBefore != 0) { await writeDebug(); return null; }
+  final int rcSlow = await _runFFmpeg(['-y', '-ss', '$smStart', '-i', stageInput, '-to', '${smEnd - smStart}', '-an', '-vf', 'setpts=5.0*PTS', slowSeg], debugLog: debugLog); // 0.2x => setpts=5.0
+  debugLog.writeln('slowmo segment rc=$rcSlow');
+  if (rcSlow != 0) { await writeDebug(); return null; }
+  final int rcAfter = await _runFFmpeg(['-y', '-ss', '$smEnd', '-i', stageInput, '-to', '${trimEnd - smEnd}', '-c', 'copy', afterSeg], debugLog: debugLog);
+  debugLog.writeln('slowmo after rc=$rcAfter');
+  if (rcAfter != 0) { await writeDebug(); return null; }
 
         // concat them
         final String concatList = p.join(tmpDir, 'concat.txt');
-        await File(concatList).writeAsString('file \'' + beforeSeg.replaceAll("'", "\\'") + "'\nfile '" + slowSeg.replaceAll("'", "\\'") + "'\nfile '" + afterSeg.replaceAll("'", "\\'") + "'\n");
-  final int rcConcat = await _runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', slowmo], debugLog: _debugLog);
-  _debugLog.writeln('concat rc=$rcConcat');
-  if (rcConcat != 0) { await _writeDebug(); return null; }
+        String esc(String s) => s.replaceAll("'", "\\'");
+        await File(concatList).writeAsString(
+            "file '${esc(beforeSeg)}'\nfile '${esc(slowSeg)}'\nfile '${esc(afterSeg)}'\n");
+  final int rcConcat = await _runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', slowmo], debugLog: debugLog);
+  debugLog.writeln('concat rc=$rcConcat');
+  if (rcConcat != 0) { await writeDebug(); return null; }
       } else {
         await File(stageInput).copy(slowmo);
       }
@@ -191,9 +193,9 @@ class HighlightService {
       // 4) Add background music: mix audio with ducking
       if (bgmPath != null && await File(bgmPath).exists()) {
         // ensure bgm length >= clip length by looping
-  final int rcBgm = await _runFFmpeg(['-y', '-i', slowmo, '-stream_loop', '-1', '-i', bgmPath, '-filter_complex', '[1:a]volume=0.5[a1];[0:a][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]', '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', withAudio], debugLog: _debugLog);
-  _debugLog.writeln('bgm mix rc=$rcBgm');
-  if (rcBgm != 0) { await _writeDebug(); return null; }
+  final int rcBgm = await _runFFmpeg(['-y', '-i', slowmo, '-stream_loop', '-1', '-i', bgmPath, '-filter_complex', '[1:a]volume=0.5[a1];[0:a][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]', '-map', '0:v', '-map', '[aout]', '-c:v', 'copy', '-c:a', 'aac', withAudio], debugLog: debugLog);
+  debugLog.writeln('bgm mix rc=$rcBgm');
+  if (rcBgm != 0) { await writeDebug(); return null; }
       } else {
         await File(slowmo).copy(withAudio);
       }
@@ -217,7 +219,7 @@ class HighlightService {
         final String logoPath = titleData['logo']!;
         if (await File(logoPath).exists()) {
           // logo overlay top-right
-          final String logoOverlay = "movie=${logoPath},scale=80:-1[logo];[0:v][logo]overlay=W-w-10:10";
+          final String logoOverlay = "movie=$logoPath,scale=80:-1[logo];[0:v][logo]overlay=W-w-10:10";
           vfParts.add(logoOverlay);
         }
       }
@@ -225,10 +227,10 @@ class HighlightService {
       String vf = vfParts.join(',');
       if (vf.isEmpty) vf = 'null';
 
-  final int rc = await _runFFmpeg(['-y', '-i', withAudio, '-vf', vf, '-c:a', 'copy', outPath], debugLog: _debugLog);
-      _debugLog.writeln('final overlay rc=$rc');
+  final int rc = await _runFFmpeg(['-y', '-i', withAudio, '-vf', vf, '-c:a', 'copy', outPath], debugLog: debugLog);
+      debugLog.writeln('final overlay rc=$rc');
       if (rc != 0) {
-        await _writeDebug();
+        await writeDebug();
         return null;
       }
 

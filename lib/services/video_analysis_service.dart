@@ -1,6 +1,5 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -98,13 +97,13 @@ class VideoAnalysisService {
     onProgress?.call(0.05, '分析骨架中...');
     final progressSvc = AnalysisProgressService.instance;
     progressSvc.reset('分析骨架中...');
-    void _listenPose() {
+    void listenPose() {
       final (pct, label) = progressSvc.progress.value;
       if (progressSvc.currentOp == 'analyzePose') {
         onProgress?.call(pct * 0.7, label); // scale to 5%–70% of outer range
       }
     }
-    progressSvc.progress.addListener(_listenPose);
+    progressSvc.progress.addListener(listenPose);
     try {
       final result = await _poseAnalyzerChannel.invokeMethod<Map>(
         'analyzePoseVideo',
@@ -120,7 +119,7 @@ class VideoAnalysisService {
         throw Exception('骨架分析失敗: $result');
       }
     } finally {
-      progressSvc.progress.removeListener(_listenPose);
+      progressSvc.progress.removeListener(listenPose);
     }
     onProgress?.call(0.75, '骨架分析完成');
   }

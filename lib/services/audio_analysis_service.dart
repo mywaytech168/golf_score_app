@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
@@ -55,7 +55,7 @@ class AudioAnalysisService {
 
   /// 規則式評分：對 5 個特徵逐一判斷是否落在好球區間（與 Python 同步）
   /// 通過 >= 3 項 → 'good'（命中）；否則 → 'bad'（未命中）
-  static Future<_AudioScore?> scoreSummary(Map<String, dynamic> summary) async {
+  static Future<AudioScore?> scoreSummary(Map<String, dynamic> summary) async {
     // 提取特徵值
     final Map<String, double> x = {};
     for (final feat in _ruleIntervals.keys) {
@@ -80,7 +80,7 @@ class AudioAnalysisService {
 
     debugPrint('🎵 [AudioScore] passCount=$passCount/5 → $predicted | passes=$passes');
 
-    return _AudioScore(
+    return AudioScore(
       predictedClass: predicted,
       feedbackLabel: isGood ? '命中 $passCount/5' : '未命中 $passCount/5',
       featureValues: x,
@@ -179,7 +179,7 @@ class AudioAnalysisService {
         final Map<String, dynamic> summary = features.toMap();
         debugPrint('🎵 [AudioAnalysis] Extracted features: $summary');
 
-        final _AudioScore? score = await scoreSummary(summary);
+        final AudioScore? score = await scoreSummary(summary);
 
         if (score != null) {
           debugPrint('🎵 [AudioAnalysis] Segment score: ${score.distances}, Predicted class: ${score.predictedClass}');
@@ -308,8 +308,8 @@ class AudioAnalysisService {
   }
 
 }
-class _AudioScore {
-  const _AudioScore({
+class AudioScore {
+  const AudioScore({
     required this.predictedClass,
     required this.feedbackLabel,
     required this.featureValues,

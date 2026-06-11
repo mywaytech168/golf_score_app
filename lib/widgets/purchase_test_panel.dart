@@ -7,9 +7,9 @@ class PurchaseTestPanel extends StatefulWidget {
   final PurchaseService purchaseService;
 
   const PurchaseTestPanel({
-    Key? key,
+    super.key,
     required this.purchaseService,
-  }) : super(key: key);
+  });
 
   @override
   State<PurchaseTestPanel> createState() => _PurchaseTestPanelState();

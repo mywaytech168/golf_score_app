@@ -448,9 +448,12 @@ class _HomePageState extends State<HomePage> {
         IconButton(
           tooltip: l.homeRewardBalls,
           icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const RewardPage()),
-          ).then((_) => context.read<PlanProvider>().refresh()),
+          onPressed: () {
+            final plan = context.read<PlanProvider>();
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RewardPage()),
+            ).then((_) => plan.refresh());
+          },
         ),
         IconButton(
           tooltip: l.settingsTitle,
@@ -918,25 +921,3 @@ class _SuggestionTile extends StatelessWidget {
   }
 }
 
-class _Dot extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _Dot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: kSpaceXS),
-        Text(label,
-            style: TextStyle(fontSize: 12, color: context.textSecondary)),
-      ],
-    );
-  }
-}

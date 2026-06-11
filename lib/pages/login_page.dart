@@ -442,27 +442,6 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── 權限 ────────────────────────────────────────────────────
 
-  void _showPermissionStatusDialog() {
-    final l10n = AppLocalizations.of(context);
-    final statusText = _permissionStatuses.entries
-        .map((e) => '${_permLabel(e.key, l10n)}: ${e.value}')
-        .join('\n');
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(l10n.permStatusTitle),
-        content: Text(statusText.isEmpty ? l10n.permNotChecked : statusText),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.commonClose)),
-          TextButton(
-            onPressed: () async { Navigator.pop(ctx); await openAppSettings(); },
-            child: Text(l10n.commonOpenSettings),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<bool> _ensureBlePermissions() =>
       _requestBlePermissions(showDeniedDialog: true);
 

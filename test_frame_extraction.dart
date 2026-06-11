@@ -1,7 +1,7 @@
 #!/usr/bin/env dart
+// ignore_for_file: avoid_print  (獨立 CLI 測試工具，print 即輸出)
 
 import 'package:flutter/services.dart';
-import 'dart:io';
 
 void main() async {
   print('🧪 Frame Extraction Test Script');

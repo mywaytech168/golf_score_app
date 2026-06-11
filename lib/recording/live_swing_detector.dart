@@ -111,7 +111,9 @@ class LiveSwingDetector {
     }
 
     if (_state != SwingDetectState.listening &&
-        _state != SwingDetectState.triggered) return;
+        _state != SwingDetectState.triggered) {
+      return;
+    }
 
     final thr = _threshold();
 

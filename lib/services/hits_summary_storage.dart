@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:path/path.dart' as p;
 import '../models/hits_summary.dart';
@@ -26,13 +27,13 @@ class HitsSummaryStorage {
         try {
           hitsSummary.add(HitsSummary.fromCsvLine(line));
         } catch (e) {
-          print('Failed to parse hits summary line: $line, error: $e');
+          debugPrint('Failed to parse hits summary line: $line, error: $e');
         }
       }
 
       return hitsSummary;
     } catch (e) {
-      print('Error loading hits summary from $csvPath: $e');
+      debugPrint('Error loading hits summary from $csvPath: $e');
       return [];
     }
   }
@@ -62,7 +63,7 @@ class HitsSummaryStorage {
 
       await file.writeAsString(buf.toString(), encoding: utf8);
     } catch (e) {
-      print('Error saving hits summary to $csvPath: $e');
+      debugPrint('Error saving hits summary to $csvPath: $e');
       rethrow;
     }
   }
@@ -75,7 +76,7 @@ class HitsSummaryStorage {
         await file.delete();
       }
     } catch (e) {
-      print('Error deleting hits summary $csvPath: $e');
+      debugPrint('Error deleting hits summary $csvPath: $e');
     }
   }
 

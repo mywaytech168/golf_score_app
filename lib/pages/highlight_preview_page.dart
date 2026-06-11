@@ -24,7 +24,7 @@ class HighlightPreviewPage extends StatefulWidget {
 
 class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   VideoPlayerController? _ctrl;
-  bool _isProcessingShare = false;
+  final bool _isProcessingShare = false;
   final List<String> _generatedTempFiles = [];
 
   @override
@@ -128,7 +128,7 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
     if (widget.debugText == null || widget.debugText!.isEmpty) return null;
     try {
       final tempDir = await getTemporaryDirectory();
-      final name = p.basenameWithoutExtension(widget.videoPath) + '_highlight_debug.txt';
+      final name = '${p.basenameWithoutExtension(widget.videoPath)}_highlight_debug.txt';
       final f = File(p.join(tempDir.path, name));
       await f.writeAsString(widget.debugText!, flush: true);
       return f;
@@ -140,7 +140,9 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   Future<void> _shareDebugFile() async {
     final f = await _ensureDebugTempFile();
     if (f == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法建立 debug 檔')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法建立 debug 檔')));
+      }
       return;
     }
     await Share.shareXFiles([XFile(f.path)], text: 'Highlight debug log');
@@ -149,7 +151,9 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   Future<void> _exportDebugToDownloads() async {
     final f = await _ensureDebugTempFile();
     if (f == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法建立 debug 檔')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法建立 debug 檔')));
+      }
       return;
     }
 
@@ -164,21 +168,29 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
       if (Platform.isAndroid) {
         final status = await Permission.manageExternalStorage.request();
         if (!status.isGranted && !status.isLimited) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要儲存權限以匯出至下載資料夾')));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要儲存權限以匯出至下載資料夾')));
+          }
           return;
         }
       }
 
       final downloadsDir = await _getDownloadsDirectory();
       if (downloadsDir == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到下載資料夾')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到下載資料夾')));
+        }
         return;
       }
       final dest = File(p.join(downloadsDir.path, p.basename(f.path)));
       await f.copy(dest.path);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已另存至：${dest.path}')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已另存至：${dest.path}')));
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗：$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗：$e')));
+      }
     }
   }
 
