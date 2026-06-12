@@ -603,6 +603,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsCheckUpdate => 'Check for Updates';
 
   @override
+  String get settingsAnalytics => 'Usage Analytics';
+
+  @override
+  String get settingsAnalyticsDesc =>
+      'Anonymous usage statistics to help improve the app';
+
+  @override
   String get settingsPrivacyPolicy => 'Privacy Policy';
 
   @override
@@ -708,6 +715,41 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get homeRewardBalls => 'Reward Balls';
+
+  @override
+  String get homeGreetingQuestion => 'Ready to start today\'s swing goals?';
+
+  @override
+  String get homeTodayQuota => 'Today\'s Usage';
+
+  @override
+  String homeQuotaBalls(int used, int total) {
+    return '$used / $total balls';
+  }
+
+  @override
+  String get homeHitAnalysis => 'Shot Analysis';
+
+  @override
+  String get homeHitRecordsLabel => 'shots recorded';
+
+  @override
+  String homeImprovedVsAvg(String pct) {
+    return 'Keep it up! Today is $pct% above your average.';
+  }
+
+  @override
+  String get homeTrainingFocus => 'Training Focus';
+
+  @override
+  String get homeViewNow => 'View';
+
+  @override
+  String get homeNoShotsToday => 'No shots recorded today — go record a swing!';
+
+  @override
+  String get homeEmptyHint =>
+      'Record your first swing to start building your stats';
 
   @override
   String get weekdayMon => 'Mon';
@@ -901,4 +943,120 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get learningKeyMarkers => 'Key Markers';
+
+  @override
+  String get myFeedbackTitle => 'My Feedback';
+
+  @override
+  String get myFeedbackSubtitle => 'Submitted feedback & official replies';
+
+  @override
+  String get myFeedbackEntry => 'View My Feedback';
+
+  @override
+  String get myFeedbackEmpty => 'No feedback yet';
+
+  @override
+  String get myFeedbackLoadFailed => 'Failed to load. Pull down to retry.';
+
+  @override
+  String get myFeedbackAllLoaded => 'All feedback loaded';
+
+  @override
+  String get myFeedbackTypeBug => 'Bug Report';
+
+  @override
+  String get myFeedbackTypeFeature => 'Feature Request';
+
+  @override
+  String get myFeedbackTypeOther => 'Other';
+
+  @override
+  String get myFeedbackAdminReply => 'Official Reply';
+
+  @override
+  String get myFeedbackNoReply => 'Awaiting reply';
+
+  @override
+  String get myFeedbackAttachedVideo => 'Video attached';
+
+  @override
+  String get onboardingSkip => 'Skip';
+
+  @override
+  String get onboardingNext => 'Next';
+
+  @override
+  String get onboardingStart => 'Get Started';
+
+  @override
+  String get onboardingRecordTitle => 'Record Your Swing';
+
+  @override
+  String get onboardingRecordDesc =>
+      'Tap the record button at the bottom center to start filming. ORVIA detects each ball strike while you record.';
+
+  @override
+  String get onboardingClipTitle => 'Automatic Clipping';
+
+  @override
+  String get onboardingClipDesc =>
+      'After recording, each swing is automatically cut into a 5-second clip. Review every clip on the history page.';
+
+  @override
+  String get onboardingAiTitle => 'AI Analysis';
+
+  @override
+  String get onboardingAiDesc =>
+      'Send a clip to the AI coach to analyze your posture, the 8 swing phases, and the ball trajectory.';
+
+  @override
+  String get onboardingBallsTitle => 'Balls & Rewards';
+
+  @override
+  String get onboardingBallsDesc =>
+      'Analysis costs balls. Get a free daily quota, and earn more by watching ads, sending feedback, or inviting friends.';
+
+  @override
+  String get settingsReplayTutorial => 'Replay Tutorial';
+
+  @override
+  String recFrameCount(int count) {
+    return '$count frames';
+  }
+
+  @override
+  String recDetectedShots(int count) {
+    return '$count detected';
+  }
+
+  @override
+  String get privacySettingsTitle => 'Privacy & Analytics';
+
+  @override
+  String get privacySectionDataCollection => 'DATA COLLECTION';
+
+  @override
+  String get privacyDataCollectionDesc =>
+      'Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.';
+
+  @override
+  String get privacySectionPolicies => 'POLICIES';
+
+  @override
+  String get privacySectionUpload => 'ANALYSIS DATA UPLOAD';
+
+  @override
+  String get privacyUploadDesc =>
+      'You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.';
+
+  @override
+  String get privacyUploadStatusEntry => 'View My Upload Review Status';
+
+  @override
+  String get privacySectionAccount => 'ACCOUNT';
+
+  @override
+  String get privacyDeleteAccountSubtitle =>
+      'Soft delete: you can no longer sign in and your data is anonymized';
 }

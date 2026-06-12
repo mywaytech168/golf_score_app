@@ -592,6 +592,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsCheckUpdate => '檢查更新';
 
   @override
+  String get settingsAnalytics => '使用統計追蹤';
+
+  @override
+  String get settingsAnalyticsDesc => '匿名使用統計，協助改善 App 體驗';
+
+  @override
   String get settingsPrivacyPolicy => '隱私權政策';
 
   @override
@@ -692,6 +698,40 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get homeRewardBalls => '獎勵球數';
+
+  @override
+  String get homeGreetingQuestion => '今天的揮桿目標，準備開始了嗎？';
+
+  @override
+  String get homeTodayQuota => '今日用量';
+
+  @override
+  String homeQuotaBalls(int used, int total) {
+    return '$used / $total 球';
+  }
+
+  @override
+  String get homeHitAnalysis => '擊球分析';
+
+  @override
+  String get homeHitRecordsLabel => '筆擊球紀錄';
+
+  @override
+  String homeImprovedVsAvg(String pct) {
+    return '持續進步中！本次表現較平均提升 $pct%。';
+  }
+
+  @override
+  String get homeTrainingFocus => '訓練重點';
+
+  @override
+  String get homeViewNow => '立刻查看';
+
+  @override
+  String get homeNoShotsToday => '今天還沒有擊球紀錄，去錄一桿吧！';
+
+  @override
+  String get homeEmptyHint => '錄下第一桿，開始累積你的數據';
 
   @override
   String get weekdayMon => '週一';
@@ -878,6 +918,117 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get learningKeyMarkers => '關鍵標記';
+
+  @override
+  String get myFeedbackTitle => '我的回饋';
+
+  @override
+  String get myFeedbackSubtitle => '已送出的回饋與官方回覆';
+
+  @override
+  String get myFeedbackEntry => '查看我的回饋';
+
+  @override
+  String get myFeedbackEmpty => '尚無回饋紀錄';
+
+  @override
+  String get myFeedbackLoadFailed => '載入失敗，請下拉重試';
+
+  @override
+  String get myFeedbackAllLoaded => '已載入全部回饋';
+
+  @override
+  String get myFeedbackTypeBug => '問題回報';
+
+  @override
+  String get myFeedbackTypeFeature => '功能建議';
+
+  @override
+  String get myFeedbackTypeOther => '其他';
+
+  @override
+  String get myFeedbackAdminReply => '官方回覆';
+
+  @override
+  String get myFeedbackNoReply => '等待回覆中';
+
+  @override
+  String get myFeedbackAttachedVideo => '已附影片';
+
+  @override
+  String get onboardingSkip => '跳過';
+
+  @override
+  String get onboardingNext => '下一步';
+
+  @override
+  String get onboardingStart => '開始使用';
+
+  @override
+  String get onboardingRecordTitle => '錄製你的揮桿';
+
+  @override
+  String get onboardingRecordDesc => '點選底部中央的錄製按鈕開始錄影，ORVIA 會邊錄邊自動偵測每一次擊球。';
+
+  @override
+  String get onboardingClipTitle => '自動切片';
+
+  @override
+  String get onboardingClipDesc => '錄影結束後，每一桿會自動切成 5 秒片段，可在歷史頁逐段檢查。';
+
+  @override
+  String get onboardingAiTitle => 'AI 分析';
+
+  @override
+  String get onboardingAiDesc => '將切片送交 AI 教練，分析姿勢、8 階段揮桿與球體軌跡。';
+
+  @override
+  String get onboardingBallsTitle => '球數與獎勵';
+
+  @override
+  String get onboardingBallsDesc => '分析需要消耗球數。每天有免費額度，也可透過看廣告、提交回饋或邀請好友賺取更多。';
+
+  @override
+  String get settingsReplayTutorial => '重看教學引導';
+
+  @override
+  String recFrameCount(int count) {
+    return '$count 幀';
+  }
+
+  @override
+  String recDetectedShots(int count) {
+    return '已偵測 $count 桿';
+  }
+
+  @override
+  String get privacySettingsTitle => '隱私與分析';
+
+  @override
+  String get privacySectionDataCollection => '資料蒐集說明';
+
+  @override
+  String get privacyDataCollectionDesc =>
+      '你的影片與分析資料只會在你主動操作時上傳——AI 分析、分享、上傳獎勵或回饋附件。ORVIA 沒有背景上傳，也沒有隱藏的遙測。';
+
+  @override
+  String get privacySectionPolicies => '政策文件';
+
+  @override
+  String get privacySectionUpload => '分析資料上傳';
+
+  @override
+  String get privacyUploadDesc =>
+      '你可以自願提交揮桿影片與感測 CSV 資料，協助改善揮桿偵測模型。每筆提交都會人工審核，通過後發放獎勵球。';
+
+  @override
+  String get privacyUploadStatusEntry => '查看我的上傳審核狀態';
+
+  @override
+  String get privacySectionAccount => '帳號';
+
+  @override
+  String get privacyDeleteAccountSubtitle => '軟刪除：將無法再登入，資料會被匿名化';
 }
 
 /// The translations for Chinese, as used in China (`zh_CN`).
@@ -1468,6 +1619,12 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get settingsCheckUpdate => '检查更新';
 
   @override
+  String get settingsAnalytics => '使用统计追踪';
+
+  @override
+  String get settingsAnalyticsDesc => '匿名使用统计，协助改善 App 体验';
+
+  @override
   String get settingsPrivacyPolicy => '隐私政策';
 
   @override
@@ -1568,6 +1725,40 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get homeRewardBalls => '奖励球数';
+
+  @override
+  String get homeGreetingQuestion => '今天的挥杆目标，准备开始了吗？';
+
+  @override
+  String get homeTodayQuota => '今日用量';
+
+  @override
+  String homeQuotaBalls(int used, int total) {
+    return '$used / $total 球';
+  }
+
+  @override
+  String get homeHitAnalysis => '击球分析';
+
+  @override
+  String get homeHitRecordsLabel => '笔击球记录';
+
+  @override
+  String homeImprovedVsAvg(String pct) {
+    return '持续进步中！本次表现较平均提升 $pct%。';
+  }
+
+  @override
+  String get homeTrainingFocus => '训练重点';
+
+  @override
+  String get homeViewNow => '立即查看';
+
+  @override
+  String get homeNoShotsToday => '今天还没有击球记录，去录一杆吧！';
+
+  @override
+  String get homeEmptyHint => '录下第一杆，开始累积你的数据';
 
   @override
   String get weekdayMon => '周一';
@@ -1754,6 +1945,117 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get learningKeyMarkers => '关键标记';
+
+  @override
+  String get myFeedbackTitle => '我的反馈';
+
+  @override
+  String get myFeedbackSubtitle => '已提交的反馈与官方回复';
+
+  @override
+  String get myFeedbackEntry => '查看我的反馈';
+
+  @override
+  String get myFeedbackEmpty => '尚无反馈记录';
+
+  @override
+  String get myFeedbackLoadFailed => '加载失败，请下拉重试';
+
+  @override
+  String get myFeedbackAllLoaded => '已加载全部反馈';
+
+  @override
+  String get myFeedbackTypeBug => '问题反馈';
+
+  @override
+  String get myFeedbackTypeFeature => '功能建议';
+
+  @override
+  String get myFeedbackTypeOther => '其他';
+
+  @override
+  String get myFeedbackAdminReply => '官方回复';
+
+  @override
+  String get myFeedbackNoReply => '等待回复中';
+
+  @override
+  String get myFeedbackAttachedVideo => '已附视频';
+
+  @override
+  String get onboardingSkip => '跳过';
+
+  @override
+  String get onboardingNext => '下一步';
+
+  @override
+  String get onboardingStart => '开始使用';
+
+  @override
+  String get onboardingRecordTitle => '录制你的挥杆';
+
+  @override
+  String get onboardingRecordDesc => '点击底部中央的录制按钮开始录像，ORVIA 会边录边自动检测每一次击球。';
+
+  @override
+  String get onboardingClipTitle => '自动切片';
+
+  @override
+  String get onboardingClipDesc => '录像结束后，每一杆会自动切成 5 秒片段，可在历史页逐段检查。';
+
+  @override
+  String get onboardingAiTitle => 'AI 分析';
+
+  @override
+  String get onboardingAiDesc => '将切片发送给 AI 教练，分析姿势、8 阶段挥杆与球体轨迹。';
+
+  @override
+  String get onboardingBallsTitle => '球数与奖励';
+
+  @override
+  String get onboardingBallsDesc => '分析需要消耗球数。每天有免费额度，也可通过看广告、提交反馈或邀请好友赚取更多。';
+
+  @override
+  String get settingsReplayTutorial => '重看教学引导';
+
+  @override
+  String recFrameCount(int count) {
+    return '$count 帧';
+  }
+
+  @override
+  String recDetectedShots(int count) {
+    return '已检测 $count 杆';
+  }
+
+  @override
+  String get privacySettingsTitle => '隐私与分析';
+
+  @override
+  String get privacySectionDataCollection => '数据收集说明';
+
+  @override
+  String get privacyDataCollectionDesc =>
+      '你的视频与分析数据只会在你主动操作时上传——AI 分析、分享、上传奖励或反馈附件。ORVIA 没有后台上传，也没有隐藏的遥测。';
+
+  @override
+  String get privacySectionPolicies => '政策文件';
+
+  @override
+  String get privacySectionUpload => '分析数据上传';
+
+  @override
+  String get privacyUploadDesc =>
+      '你可以自愿提交挥杆视频与传感 CSV 数据，帮助改善挥杆检测模型。每笔提交都会人工审核，通过后发放奖励球。';
+
+  @override
+  String get privacyUploadStatusEntry => '查看我的上传审核状态';
+
+  @override
+  String get privacySectionAccount => '账号';
+
+  @override
+  String get privacyDeleteAccountSubtitle => '软删除：将无法再登录，数据会被匿名化';
 }
 
 /// The translations for Chinese, as used in Taiwan (`zh_TW`).
@@ -2344,6 +2646,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsCheckUpdate => '檢查更新';
 
   @override
+  String get settingsAnalytics => '使用統計追蹤';
+
+  @override
+  String get settingsAnalyticsDesc => '匿名使用統計，協助改善 App 體驗';
+
+  @override
   String get settingsPrivacyPolicy => '隱私權政策';
 
   @override
@@ -2444,6 +2752,40 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get homeRewardBalls => '獎勵球數';
+
+  @override
+  String get homeGreetingQuestion => '今天的揮桿目標，準備開始了嗎？';
+
+  @override
+  String get homeTodayQuota => '今日用量';
+
+  @override
+  String homeQuotaBalls(int used, int total) {
+    return '$used / $total 球';
+  }
+
+  @override
+  String get homeHitAnalysis => '擊球分析';
+
+  @override
+  String get homeHitRecordsLabel => '筆擊球紀錄';
+
+  @override
+  String homeImprovedVsAvg(String pct) {
+    return '持續進步中！本次表現較平均提升 $pct%。';
+  }
+
+  @override
+  String get homeTrainingFocus => '訓練重點';
+
+  @override
+  String get homeViewNow => '立刻查看';
+
+  @override
+  String get homeNoShotsToday => '今天還沒有擊球紀錄，去錄一桿吧！';
+
+  @override
+  String get homeEmptyHint => '錄下第一桿，開始累積你的數據';
 
   @override
   String get weekdayMon => '週一';
@@ -2630,4 +2972,115 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get learningKeyMarkers => '關鍵標記';
+
+  @override
+  String get myFeedbackTitle => '我的回饋';
+
+  @override
+  String get myFeedbackSubtitle => '已送出的回饋與官方回覆';
+
+  @override
+  String get myFeedbackEntry => '查看我的回饋';
+
+  @override
+  String get myFeedbackEmpty => '尚無回饋紀錄';
+
+  @override
+  String get myFeedbackLoadFailed => '載入失敗，請下拉重試';
+
+  @override
+  String get myFeedbackAllLoaded => '已載入全部回饋';
+
+  @override
+  String get myFeedbackTypeBug => '問題回報';
+
+  @override
+  String get myFeedbackTypeFeature => '功能建議';
+
+  @override
+  String get myFeedbackTypeOther => '其他';
+
+  @override
+  String get myFeedbackAdminReply => '官方回覆';
+
+  @override
+  String get myFeedbackNoReply => '等待回覆中';
+
+  @override
+  String get myFeedbackAttachedVideo => '已附影片';
+
+  @override
+  String get onboardingSkip => '跳過';
+
+  @override
+  String get onboardingNext => '下一步';
+
+  @override
+  String get onboardingStart => '開始使用';
+
+  @override
+  String get onboardingRecordTitle => '錄製你的揮桿';
+
+  @override
+  String get onboardingRecordDesc => '點選底部中央的錄製按鈕開始錄影，ORVIA 會邊錄邊自動偵測每一次擊球。';
+
+  @override
+  String get onboardingClipTitle => '自動切片';
+
+  @override
+  String get onboardingClipDesc => '錄影結束後，每一桿會自動切成 5 秒片段，可在歷史頁逐段檢查。';
+
+  @override
+  String get onboardingAiTitle => 'AI 分析';
+
+  @override
+  String get onboardingAiDesc => '將切片送交 AI 教練，分析姿勢、8 階段揮桿與球體軌跡。';
+
+  @override
+  String get onboardingBallsTitle => '球數與獎勵';
+
+  @override
+  String get onboardingBallsDesc => '分析需要消耗球數。每天有免費額度，也可透過看廣告、提交回饋或邀請好友賺取更多。';
+
+  @override
+  String get settingsReplayTutorial => '重看教學引導';
+
+  @override
+  String recFrameCount(int count) {
+    return '$count 幀';
+  }
+
+  @override
+  String recDetectedShots(int count) {
+    return '已偵測 $count 桿';
+  }
+
+  @override
+  String get privacySettingsTitle => '隱私與分析';
+
+  @override
+  String get privacySectionDataCollection => '資料蒐集說明';
+
+  @override
+  String get privacyDataCollectionDesc =>
+      '你的影片與分析資料只會在你主動操作時上傳——AI 分析、分享、上傳獎勵或回饋附件。ORVIA 沒有背景上傳，也沒有隱藏的遙測。';
+
+  @override
+  String get privacySectionPolicies => '政策文件';
+
+  @override
+  String get privacySectionUpload => '分析資料上傳';
+
+  @override
+  String get privacyUploadDesc =>
+      '你可以自願提交揮桿影片與感測 CSV 資料，協助改善揮桿偵測模型。每筆提交都會人工審核，通過後發放獎勵球。';
+
+  @override
+  String get privacyUploadStatusEntry => '查看我的上傳審核狀態';
+
+  @override
+  String get privacySectionAccount => '帳號';
+
+  @override
+  String get privacyDeleteAccountSubtitle => '軟刪除：將無法再登入，資料會被匿名化';
 }

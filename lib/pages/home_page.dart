@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,7 @@ import '../services/video_server_client.dart';
 import '../services/statistics_service.dart';
 import '../services/purchase_service.dart';
 import '../services/announcement_service.dart';
+import '../services/reward_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../widgets/audio_feature_pass_row.dart';
 import '../widgets/green_page_header.dart';
@@ -40,6 +42,7 @@ class _HomePageState extends State<HomePage> {
 
   int _unreadAnnouncements = 0;
   Map<String, double>? _featurePassRates;
+  RewardStatus? _rewardStatus;
 
   @override
   void initState() {
@@ -48,12 +51,22 @@ class _HomePageState extends State<HomePage> {
     _initializeStatistics();
     _initializePurchaseService();
     _loadUnreadCount();
+    _loadRewardStatus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PlanProvider>().refresh();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserProvider>().loadProfile();
     });
+  }
+
+  Future<void> _loadRewardStatus() async {
+    try {
+      final status = await RewardService.getStatus();
+      if (mounted) setState(() => _rewardStatus = status);
+    } catch (e) {
+      debugPrint('⚠️ [HomePage] 載入獎勵狀態失敗: $e');
+    }
   }
 
   Future<void> _loadUnreadCount() async {
@@ -268,43 +281,50 @@ class _HomePageState extends State<HomePage> {
                     final today = _statisticsService.todayStatistics;
                     final isLoading = loadingSnap.data?.isLoading ?? false;
 
+                    final l = AppLocalizations.of(context);
                     return RefreshIndicator(
-                      onRefresh: _initializeStatistics,
+                      onRefresh: () async {
+                        await _initializeStatistics();
+                        await _loadRewardStatus();
+                      },
                       color: kPrimaryGreen,
                       child: SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(
-                            kSpaceMD, kSpaceSM, kSpaceMD, kSpaceXL),
+                            kSpaceMD, kSpaceMD, kSpaceMD, kSpaceXL),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _TodayOverviewCard(
-                              rounds: today?.roundCount ?? 0,
-                              practices: today?.practiceCount ?? 0,
-                              good: today?.goodShot ?? 0,
-                              bad: today?.badShot ?? 0,
+                            _buildGreeting(context),
+                            const SizedBox(height: kSpaceLG),
+                            _buildQuotaRows(context),
+                            const SizedBox(height: kSpaceLG),
+                            _buildStatsRow(context, today, isLoading),
+                            const SizedBox(height: kSpaceLG),
+                            _HitAnalysisCard(
+                              today: today,
+                              overall: statsSnap.data,
                               loading: isLoading,
+                              onTap: () => _showAnalysisDetailSheet(
+                                  context, today, isLoading),
                             ),
                             const SizedBox(height: kSpaceMD),
-                            _KeyMetricsRow(stats: today, loading: isLoading),
-                            if (!isLoading) ...[
-                              const SizedBox(height: kSpaceSM),
-                              AudioFeaturePassRow(passRates: _featurePassRates),
-                            ],
-                            if (!isLoading) ...[
-                              const SizedBox(height: kSpaceMD),
-                              PostureBreakdownCard(
-                                breakdown: today?.postureBreakdown ?? {},
-                                title: AppLocalizations.of(context).homeTodayPosture,
+                            if (_currentSuggestionEntry == null &&
+                                !isLoading &&
+                                ((today?.goodShot ?? 0) +
+                                        (today?.badShot ?? 0)) ==
+                                    0)
+                              Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: kSpaceSM),
+                                  child: Text(
+                                    l.homeEmptyHint,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: context.textHint),
+                                  ),
+                                ),
                               ),
-                            ],
-                            if (_currentSuggestionEntry != null) ...[
-                              const SizedBox(height: kSpaceMD),
-                              _PracticeSuggestionsCard(
-                                entry: _currentSuggestionEntry!,
-                                onToggle: _toggleSuggestion,
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -314,40 +334,186 @@ class _HomePageState extends State<HomePage> {
               },
             ),
           ),
+
+          // ── 訓練重點 banner（固定在底部導覽列上方）──────────────
+          if (_currentSuggestionEntry != null)
+            _FocusBanner(
+              entry: _currentSuggestionEntry!,
+              onTap: () => _showSuggestionsSheet(context),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildGreenHeader(BuildContext context) {
+  // ── 問候語區塊 ───────────────────────────────────────────────
+
+  Widget _buildGreeting(BuildContext context) {
     final l = AppLocalizations.of(context);
+    return Consumer<UserProvider>(
+      builder: (context, user, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l.homeHi(user.displayName),
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              height: 1.3,
+              color: context.textPrimary,
+            ),
+          ),
+          Text(
+            l.homeGreetingQuestion,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              height: 1.3,
+              color: context.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    return Consumer2<UserProvider, PlanProvider>(
-      builder: (context, user, planProvider, _) {
-        final planStatus = planProvider.status;
-        final plan      = planStatus.plan;
-        final used      = planStatus.todayUsed;
-        final baseLimit = planStatus.dailyLimit;
-        final total     = planStatus.totalLimit;
-        final planColor = Color(plan.colorValue);
+  // ── 今日用量 / 獎勵球數 兩列 ─────────────────────────────────
 
-        final overLimit = !plan.isUnlimited && used >= total;
-        String quotaText;
-        if (plan.isUnlimited) {
-          quotaText = l.homeTodayUnlimited;
-        } else if (overLimit) {
-          quotaText = '${l.homeTodayUsage(used, baseLimit)}  ${l.homeTodayLimit}';
-        } else {
-          quotaText = l.homeTodayUsage(used, baseLimit);
+  Widget _buildQuotaRows(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Consumer<PlanProvider>(
+      builder: (context, planProvider, _) {
+        final s = planProvider.status;
+        final quotaValue = s.plan.isUnlimited
+            ? l.homeTodayUnlimited
+            : l.homeQuotaBalls(s.todayUsed, s.dailyLimit);
+        final adCap = RewardType.watchAd.dailyCap;
+        final rewardValue =
+            l.homeQuotaBalls(_rewardStatus?.adClaimedToday ?? 0, adCap);
+        void openRewards() {
+          Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const RewardPage()))
+              .then((_) {
+            planProvider.refresh();
+            _loadRewardStatus();
+          });
         }
 
+        return Column(
+          children: [
+            _QuotaRow(
+              icon: Icons.adjust_rounded,
+              label: l.homeTodayQuota,
+              value: quotaValue,
+              onTap: openRewards,
+            ),
+            const SizedBox(height: kSpaceSM),
+            _QuotaRow(
+              icon: Icons.smart_display_rounded,
+              label: l.homeRewardBalls,
+              value: rewardValue,
+              onTap: openRewards,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ── 四格統計（無卡片、貼底色）────────────────────────────────
+
+  Widget _buildStatsRow(
+      BuildContext context, StatisticsResponse? today, bool loading) {
+    final l = AppLocalizations.of(context);
+    String v(int? n) => loading ? '–' : (n ?? 0).toString();
+    return Row(
+      children: [
+        _PlainStat(label: l.homeRounds, value: v(today?.roundCount)),
+        _PlainStat(label: l.homePractices, value: v(today?.practiceCount)),
+        _PlainStat(label: l.homeGoodShot, value: v(today?.goodShot)),
+        _PlainStat(label: l.homeBadShot, value: v(today?.badShot)),
+      ],
+    );
+  }
+
+  // ── 擊球分析細節 sheet（速度/甜蜜點、音訊特徵、姿勢分解）──────
+
+  void _showAnalysisDetailSheet(
+      BuildContext context, StatisticsResponse? today, bool loading) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.bgPage,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(kRadiusLG)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(kSpaceMD),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _KeyMetricsRow(stats: today, loading: loading),
+              const SizedBox(height: kSpaceSM),
+              AudioFeaturePassRow(passRates: _featurePassRates),
+              const SizedBox(height: kSpaceMD),
+              PostureBreakdownCard(
+                breakdown: today?.postureBreakdown ?? {},
+                title: AppLocalizations.of(context).homeTodayPosture,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── 訓練建議 sheet ───────────────────────────────────────────
+
+  void _showSuggestionsSheet(BuildContext context) {
+    final entry = _currentSuggestionEntry;
+    if (entry == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.bgPage,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(kRadiusLG)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          // 取最新版 entry（勾選後 _recordingHistory 內容已更新）
+          final cur = _recordingHistory.firstWhere(
+            (e) => e.filePath == entry.filePath,
+            orElse: () => entry,
+          );
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(kSpaceMD),
+              child: _PracticeSuggestionsCard(
+                entry: cur,
+                onToggle: (e, i, done) async {
+                  await _toggleSuggestion(e, i, done);
+                  setSheetState(() {});
+                },
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildGreenHeader(BuildContext context) {
+    return Consumer2<UserProvider, PlanProvider>(
+      builder: (context, user, planProvider, _) {
+        final plan = planProvider.status.plan;
         return _buildGreenHeaderContent(
           context: context,
           user: user,
           plan: plan,
-          planColor: planColor,
-          quotaText: quotaText,
-          overLimit: overLimit,
+          planColor: Color(plan.colorValue),
         );
       },
     );
@@ -358,8 +524,6 @@ class _HomePageState extends State<HomePage> {
     required UserProvider user,
     required UserPlan plan,
     required Color planColor,
-    required String quotaText,
-    required bool overLimit,
   }) {
     final l = AppLocalizations.of(context);
 
@@ -408,8 +572,7 @@ class _HomePageState extends State<HomePage> {
         padding: const EdgeInsets.only(left: kSpaceMD, right: kSpaceSM),
         child: avatar,
       ),
-      title: l.homeHi(user.displayName),
-      subtitle: quotaText,
+      title: '',
       actions: [
         planBadge,
         // 公告鈴鐺
@@ -470,155 +633,339 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ── 今日快覽卡片 ──────────────────────────────────────────────────
+// ── 今日用量 / 獎勵球數 列 ────────────────────────────────────────
 
-class _TodayOverviewCard extends StatelessWidget {
-  final int rounds;
-  final int practices;
-  final int good;
-  final int bad;
-  final bool loading;
-  const _TodayOverviewCard({
-    required this.rounds,
-    required this.practices,
-    required this.good,
-    required this.bad,
-    required this.loading,
+class _QuotaRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+  const _QuotaRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final l   = AppLocalizations.of(context);
-    final now = DateTime.now();
-    final weekdays = [l.weekdayMon, l.weekdayTue, l.weekdayWed, l.weekdayThu, l.weekdayFri, l.weekdaySat, l.weekdaySun];
-    final label =
-        '${weekdays[now.weekday - 1]}  ${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}';
-
-    return Container(
-      decoration: kCardDecoration(
-          color: context.bgCard,
-          radius: kRadiusLG,
-          shadow: context.cardShadow),
-      padding: const EdgeInsets.all(kSpaceLG),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Material(
+      color: context.bgInset,
+      borderRadius: BorderRadius.circular(kRadiusMD),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(kRadiusMD),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: kSpaceMD, vertical: 14),
+          child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  l.homeTodayOverview,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: context.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+              Icon(icon, size: 20, color: context.textPrimary),
+              const SizedBox(width: kSpaceSM),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: context.textPrimary,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: TextStyle(
-                      color: context.textSecondary, fontSize: 12)),
+              const Spacer(),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: context.textSecondary,
+                ),
+              ),
+              const SizedBox(width: kSpaceXS),
+              Icon(Icons.chevron_right_rounded,
+                  size: 20, color: context.textHint),
             ],
           ),
-          const SizedBox(height: kSpaceLG),
-          loading
-              ? _buildSkeleton(context)
-              : Row(
-                  children: [
-                    _OverviewStat(
-                        label: l.homeRounds,
-                        value: rounds.toString(),
-                        icon: Icons.videocam_rounded),
-                    const _WhiteDivider(),
-                    _OverviewStat(
-                        label: l.homePractices,
-                        value: practices.toString(),
-                        icon: Icons.sports_golf_rounded),
-                    const _WhiteDivider(),
-                    _OverviewStat(
-                        label: l.homeGoodShot,
-                        value: good.toString(),
-                        icon: Icons.thumb_up_rounded),
-                    const _WhiteDivider(),
-                    _OverviewStat(
-                        label: l.homeBadShot,
-                        value: bad.toString(),
-                        icon: Icons.thumb_down_rounded),
-                  ],
-                ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSkeleton(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: List.generate(
-        4,
-        (_) => Column(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: context.bgInset,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(height: kSpaceSM),
-            Container(
-              width: 28,
-              height: 18,
-              decoration: BoxDecoration(
-                color: context.bgInset,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ],
         ),
       ),
     );
   }
 }
 
-class _OverviewStat extends StatelessWidget {
+// ── 四格統計（無卡片）────────────────────────────────────────────
+
+class _PlainStat extends StatelessWidget {
   final String label;
   final String value;
-  final IconData icon;
-  const _OverviewStat(
-      {required this.label, required this.value, required this.icon});
+  const _PlainStat({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: context.textSecondary, size: 22),
+          Text(label,
+              style: TextStyle(color: context.textSecondary, fontSize: 12)),
           const SizedBox(height: kSpaceXS),
           Text(value,
               style: TextStyle(
                   color: context.textPrimary,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: TextStyle(color: context.textSecondary, fontSize: 12)),
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800)),
         ],
       ),
     );
   }
 }
 
-class _WhiteDivider extends StatelessWidget {
-  const _WhiteDivider();
+// ── 擊球分析卡片（甜蜜點圓環）────────────────────────────────────
+
+class _HitAnalysisCard extends StatelessWidget {
+  final StatisticsResponse? today;
+  final StatisticsResponse? overall;
+  final bool loading;
+  final VoidCallback onTap;
+  const _HitAnalysisCard({
+    required this.today,
+    required this.overall,
+    required this.loading,
+    required this.onTap,
+  });
 
   @override
-  Widget build(BuildContext context) =>
-      Container(width: 1, height: 52, color: context.borderColor);
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final shots = (today?.goodShot ?? 0) + (today?.badShot ?? 0);
+    final sweet = today?.sweetSpotPercentage ?? 0.0;
+    final avgSweet = overall?.sweetSpotPercentage ?? 0.0;
+    final delta = sweet - avgSweet;
+
+    return Material(
+      color: context.bgCard,
+      borderRadius: BorderRadius.circular(kRadiusLG),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(kRadiusLG),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(kSpaceLG),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(kRadiusLG),
+            border: Border.all(color: context.borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l.homeHitAnalysis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: context.textPrimary,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: context.textHint),
+                ],
+              ),
+              if (!loading && shots > 0 && delta >= 1) ...[
+                const SizedBox(height: kSpaceXS),
+                Text(
+                  l.homeImprovedVsAvg(delta.toStringAsFixed(0)),
+                  style: TextStyle(
+                      fontSize: 13, color: context.textSecondary),
+                ),
+              ],
+              const SizedBox(height: kSpaceMD),
+              SizedBox(
+                height: 180,
+                child: loading
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                            color: kPrimaryGreen))
+                    : shots == 0
+                        ? Center(
+                            child: Text(
+                              l.homeNoShotsToday,
+                              style: TextStyle(
+                                  fontSize: 13, color: context.textHint),
+                            ),
+                          )
+                        : _buildDonut(context, l, shots, sweet),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDonut(BuildContext context, AppLocalizations l, int shots,
+      double sweetPct) {
+    final sweet = sweetPct.clamp(0.0, 100.0);
+    final rest = 100.0 - sweet;
+    const sweetColor = kCrispColor;            // 橘
+    const restColor  = Color(0xFFF06292);      // 粉
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        PieChart(
+          PieChartData(
+            sectionsSpace: 2,
+            centerSpaceRadius: 56,
+            startDegreeOffset: -90,
+            sections: [
+              PieChartSectionData(
+                value: sweet > 0 ? sweet : 0.001,
+                color: sweetColor,
+                radius: 26,
+                title: '${sweet.toStringAsFixed(1)}%',
+                titlePositionPercentageOffset: 1.6,
+                titleStyle: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: context.textSecondary,
+                ),
+              ),
+              if (rest > 0.5)
+                PieChartSectionData(
+                  value: rest,
+                  color: restColor,
+                  radius: 26,
+                  showTitle: false,
+                ),
+            ],
+          ),
+        ),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$shots',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: context.textPrimary,
+              ),
+            ),
+            Text(
+              l.homeHitRecordsLabel,
+              style:
+                  TextStyle(fontSize: 11, color: context.textSecondary),
+            ),
+          ],
+        ),
+        Positioned(
+          bottom: 0,
+          right: 0,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _LegendDot(color: sweetColor, label: l.homeSweetSpot),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8, height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(label,
+            style: TextStyle(fontSize: 11, color: context.textSecondary)),
+      ],
+    );
+  }
+}
+
+// ── 訓練重點 banner ──────────────────────────────────────────────
+
+class _FocusBanner extends StatelessWidget {
+  final RecordingHistoryEntry entry;
+  final VoidCallback onTap;
+  const _FocusBanner({required this.entry, required this.onTap});
+
+  String? get _focusText {
+    final suggestions = entry.practiceSuggestions ?? const [];
+    for (final s in suggestions) {
+      if (!s.done && s.drill.trim().isNotEmpty) return s.drill.trim();
+    }
+    final goal = entry.nextTrainingGoal?.trim();
+    if (goal != null && goal.isNotEmpty) return goal;
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final text = _focusText;
+    if (text == null) return const SizedBox.shrink();
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding:
+            const EdgeInsets.fromLTRB(kSpaceMD, 0, kSpaceMD, kSpaceSM),
+        child: Material(
+          color: context.mintTint,
+          borderRadius: BorderRadius.circular(kRadiusMD),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(kRadiusMD),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: kSpaceMD, vertical: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded,
+                      size: 18, color: kPrimaryGreen),
+                  const SizedBox(width: kSpaceSM),
+                  Expanded(
+                    child: Text(
+                      '${l.homeTrainingFocus}：$text',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.textPrimary,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    l.homeViewNow,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: kPrimaryGreen,
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded,
+                      size: 18, color: kPrimaryGreen),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ── 三項核心指標橫排 ──────────────────────────────────────────────

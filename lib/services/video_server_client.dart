@@ -745,10 +745,63 @@ class VideoServerClient {
     }
   }
 
-  /// 上傳本地分析資料並認領獎勵
+  /// 分頁查詢自己提交的回饋（含管理員回覆）
+  ///
+  /// 回傳格式：
+  /// ```json
+  /// { "total": 3, "page": 1, "pageSize": 20, "items": [
+  ///   { "id", "type", "text", "videoId", "imageUrl",
+  ///     "adminReply", "repliedAt", "createdAt" }, ...
+  /// ]}
+  /// ```
+  Future<Map<String, dynamic>?> getMyFeedbacks({
+    int page = 1,
+    int pageSize = 20,
+    bool isRetry = false,
+  }) async {
+    try {
+      final response = await _send(
+          'GET', '/api/user/feedbacks?page=$page&pageSize=$pageSize');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      }
+      return null;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 我的回饋查詢異常: $e');
+      return null;
+    }
+  }
+
+  /// 取得資料集檔案上傳 URL（上傳獎勵真實傳檔用）
+  ///
+  /// 回傳格式：
+  /// `{ "uploadId": "...", "videoUploadUrl": "...", "csvUploadUrl": "..." }`
+  Future<Map<String, dynamic>?> prepareDatasetUpload({
+    bool isRetry = false,
+  }) async {
+    try {
+      final response = await _send('POST', '/api/user/rewards/upload/prepare');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      }
+      debugPrint('❌ 資料集上傳 prepare 失敗: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 資料集上傳 prepare 異常: $e');
+      return null;
+    }
+  }
+
+  /// 上傳本地分析資料送審（審核制：審核通過後才發球）
   ///
   /// [sessions] = 精簡錄影記錄清單（不含影片二進位）
-  /// 回傳格式：`{ "balls": 3, "uploaded": 5 }`
+  /// 回傳格式：`{ "balls": 0, "pending": 1 }`（pending = 本次新建立的待審核筆數）
   Future<Map<String, dynamic>?> claimUploadReward({
     required List<Map<String, dynamic>> sessions,
     bool isRetry = false,
@@ -769,6 +822,33 @@ class VideoServerClient {
     } catch (e) {
       if (e is UnauthorizedException) rethrow;
       debugPrint('❌ 上傳獎勵異常: $e');
+      return null;
+    }
+  }
+
+  /// 分頁查詢自己的資料上傳審核狀態
+  ///
+  /// 回傳格式：
+  /// `{ "total": n, "pendingCount": n, "approvedCount": n, "page": 1,
+  ///    "pageSize": 20, "items": [ { "id", "clientFilePath", "status",
+  ///    "createdAt", "reviewedAt", "note" } ] }`
+  Future<Map<String, dynamic>?> getMyDatasetUploads({
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    try {
+      final response = await _send(
+          'GET', '/api/user/rewards/uploads?page=$page&pageSize=$pageSize');
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return (json['data'] as Map<String, dynamic>?) ?? json;
+      }
+      debugPrint('❌ 上傳審核狀態查詢失敗: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      debugPrint('❌ 上傳審核狀態查詢異常: $e');
       return null;
     }
   }

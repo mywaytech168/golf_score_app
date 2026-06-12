@@ -47,6 +47,12 @@ class TermsOfServicePage extends StatefulWidget {
     await prefs.setBool('analytics_consent', analyticsConsent);
   }
 
+  /// 設定頁可隨時變更使用統計追蹤偏好
+  static Future<void> setAnalyticsConsent(bool granted) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('analytics_consent', granted);
+  }
+
   /// 取得使用者是否同意使用統計追蹤
   static Future<bool> analyticsConsentGranted() async {
     final prefs = await SharedPreferences.getInstance();

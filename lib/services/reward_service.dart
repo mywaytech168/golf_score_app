@@ -1,6 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/recording_history_entry.dart';
+import 'skeleton_csv_locator.dart';
 import 'video_server_client.dart';
 
 // ════════════════════════════════════════════════════════════════
@@ -245,7 +251,68 @@ class RewardService {
 
   // ── 上傳資料獎勵 ─────────────────────────────────────────────
 
+  /// 真實上傳該筆錄影的影片 + 骨架 CSV 到伺服器（presigned PUT）。
+  ///
+  /// - entry 已上傳過或做過 AI 分析（檔案已在伺服器）→ 回 null，不重傳。
+  /// - 否則：prepare 取得 uploadId 與 PUT URL → 上傳影片（entry.filePath）
+  ///   與 CSV（同目錄 pose_landmarks.csv，找不到就略過）→ 回 uploadId。
+  /// - 任一步失敗（含 prepare / 影片 PUT）丟例外。
+  static Future<String?> uploadSessionFiles(RecordingHistoryEntry entry) async {
+    if (entry.isEffectivelyUploaded) return null;
+
+    final videoFile = File(entry.filePath);
+    if (!videoFile.existsSync()) {
+      throw Exception('找不到影片檔案：${entry.filePath}');
+    }
+
+    final prep = await VideoServerClient.instance.prepareDatasetUpload();
+    if (prep == null) {
+      throw Exception('無法取得上傳授權，請稍後再試');
+    }
+    final uploadId = prep['uploadId'] as String?;
+    final videoUrl = prep['videoUploadUrl'] as String?;
+    final csvUrl   = prep['csvUploadUrl'] as String?;
+    if (uploadId == null || videoUrl == null) {
+      throw Exception('上傳授權回應格式錯誤');
+    }
+
+    // 影片直傳（presigned PUT）
+    await _putFile(videoUrl, videoFile, 'video/mp4');
+    debugPrint('$_tag ✅ 資料集影片上傳完成 ($uploadId)');
+
+    // CSV 直傳（可能不存在，略過）
+    final csvPath = resolveSkeletonCsv(p.dirname(entry.filePath));
+    if (csvPath != null && csvUrl != null) {
+      try {
+        await _putFile(csvUrl, File(csvPath), 'text/csv');
+        debugPrint('$_tag ✅ 資料集 CSV 上傳完成 ($uploadId)');
+      } catch (e) {
+        debugPrint('$_tag ⚠️ 資料集 CSV 上傳失敗（略過）: $e');
+      }
+    }
+
+    return uploadId;
+  }
+
+  static Future<void> _putFile(
+      String url, File file, String contentType) async {
+    final bytes = await file.readAsBytes();
+    final resp = await http
+        .put(
+          Uri.parse(url),
+          headers: {'Content-Type': contentType},
+          body: bytes,
+        )
+        .timeout(const Duration(minutes: 5));
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception('檔案上傳失敗 (HTTP ${resp.statusCode})');
+    }
+  }
+
   /// [sessions] = 精簡的錄影記錄清單（不含影片二進位）
+  ///
+  /// 審核制：送出後建立待審核紀錄，審核通過後才發球。
+  /// 回傳本次新建立的待審核筆數（重複提交 = 0）。
   static Future<int> claimUploadReward({
     required List<Map<String, dynamic>> sessions,
   }) async {
@@ -254,16 +321,32 @@ class RewardService {
         sessions: sessions,
       );
       if (result != null) {
-        final balls = (result['balls'] as int?) ?? 0;
-        debugPrint('$_tag ✅ 上傳獎勵: +$balls 球');
-        return balls;
+        final pending = (result['pending'] as int?) ?? 0;
+        debugPrint('$_tag ✅ 上傳送審: $pending 筆待審核');
+        return pending;
       }
     } on UnauthorizedException {
       rethrow;
     } catch (e) {
-      debugPrint('$_tag ❌ 上傳獎勵失敗: $e');
+      debugPrint('$_tag ❌ 上傳送審失敗: $e');
     }
     return 0;
+  }
+
+  /// 查詢自己的資料上傳審核狀態（審核中 / 已通過筆數摘要）
+  static Future<Map<String, dynamic>?> getUploadReviewStatus({
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    try {
+      return await VideoServerClient.instance
+          .getMyDatasetUploads(page: page, pageSize: pageSize);
+    } on UnauthorizedException {
+      rethrow;
+    } catch (e) {
+      debugPrint('$_tag ❌ 審核狀態查詢失敗: $e');
+      return null;
+    }
   }
 
   // ── 本地快取 ─────────────────────────────────────────────────

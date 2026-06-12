@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/recording_history_entry.dart';
@@ -17,6 +18,7 @@ import '../services/reward_service.dart';
 import '../services/video_server_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
+import 'my_feedback_page.dart';
 import 'usage_history_page.dart';
 
 // ════════════════════════════════════════════════════════════════
@@ -63,6 +65,20 @@ class _RewardPageState extends State<RewardPage> {
       ),
     );
     _load(); // 重整狀態
+  }
+
+  void _showUploadSubmitted(int pending) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(pending > 0
+            ? '已送出 $pending 筆審核，通過後將發放球數獎勵'
+            : '資料已提交（重複資料不再送審）'),
+        backgroundColor: kPrimaryGreen,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+    _load();
   }
 
   void _showError(String msg) {
@@ -139,10 +155,29 @@ class _RewardPageState extends State<RewardPage> {
                     onEarned: (b) => _showEarned(b, '問題回饋'),
                     onError: _showError,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 6),
+
+                  // 我的回饋（查看歷史與官方回覆）
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const MyFeedbackPage()),
+                      ),
+                      icon: const Icon(Icons.history_rounded,
+                          size: 16, color: Color(0xFF9C27B0)),
+                      label: Text(
+                        AppLocalizations.of(context).myFeedbackEntry,
+                        style: const TextStyle(
+                            fontSize: 13, color: Color(0xFF9C27B0)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
                   _UploadCard(
                     status: _status,
-                    onEarned: (b) => _showEarned(b, '上傳資料'),
+                    onSubmitted: _showUploadSubmitted,
                     onError: _showError,
                   ),
                 ],
@@ -1500,10 +1535,12 @@ class _MiniThumb extends StatelessWidget {
 
 class _UploadCard extends StatefulWidget {
   final RewardStatus status;
-  final void Function(int balls) onEarned;
+
+  /// 審核制：送出後回傳本次新建立的待審核筆數（不立即發球）
+  final void Function(int pending) onSubmitted;
   final void Function(String) onError;
 
-  const _UploadCard({required this.status, required this.onEarned, required this.onError});
+  const _UploadCard({required this.status, required this.onSubmitted, required this.onError});
 
   @override
   State<_UploadCard> createState() => _UploadCardState();
@@ -1514,11 +1551,27 @@ class _UploadCardState extends State<_UploadCard> {
   bool _loaded       = false;
   List<RecordingHistoryEntry> _uploadable = [];   // 可選取
   int  _alreadyCount = 0;                          // 已上傳數
+  int? _pendingCount;                              // 審核中筆數（server）
+  int? _approvedCount;                             // 已通過筆數（server）
 
   @override
   void initState() {
     super.initState();
     _loadCandidates();
+    _loadReviewStatus();
+  }
+
+  /// 取得伺服器端審核狀態摘要（審核中 / 已通過）
+  Future<void> _loadReviewStatus() async {
+    try {
+      final r = await RewardService.getUploadReviewStatus(pageSize: 1);
+      if (r != null && mounted) {
+        setState(() {
+          _pendingCount  = (r['pendingCount'] as int?) ?? 0;
+          _approvedCount = (r['approvedCount'] as int?) ?? 0;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadCandidates() async {
@@ -1558,20 +1611,45 @@ class _UploadCardState extends State<_UploadCard> {
 
     setState(() => _busy = true);
     try {
-      final payload = selected.map(_entryToJson).toList();
-      final balls   = await RewardService.claimUploadReward(sessions: payload);
-
-      // 標記為已上傳，精確更新各筆記錄
+      // 逐筆真實上傳影片 + CSV；任一筆失敗就略過該筆
+      final uploaded = <RecordingHistoryEntry>[];
+      final payload  = <Map<String, dynamic>>[];
+      var failed = 0;
       for (final e in selected) {
+        try {
+          final uploadId = await RewardService.uploadSessionFiles(e);
+          uploaded.add(e);
+          payload.add(_entryToJson(e, uploadId));
+        } catch (err) {
+          failed++;
+          debugPrint('上傳資料集失敗（略過）: ${e.filePath} → $err');
+        }
+      }
+
+      if (payload.isEmpty) {
+        if (mounted) widget.onError('上傳失敗，請稍後再試');
+        return;
+      }
+      if (failed > 0 && mounted) {
+        widget.onError('$failed 筆上傳失敗，已略過');
+      }
+
+      final pending = await RewardService.claimUploadReward(sessions: payload);
+
+      // 標記為已上傳（防重複提交）。
+      // 若日後被審核拒絕，server 允許同 filePath 重新提交，
+      // 但 App 端的重送流程暫不實作（需先清除 isUploaded 標記）。
+      for (final e in uploaded) {
         await RecordingHistoryStorage.instance.upsertEntry(
           e.copyWith(isUploaded: true),
         );
       }
 
-      // 重新計算可上傳數
+      // 重新計算可上傳數與審核狀態
       await _loadCandidates();
+      await _loadReviewStatus();
 
-      if (mounted) widget.onEarned(balls);
+      if (mounted) widget.onSubmitted(pending);
     } catch (e) {
       if (mounted) widget.onError('上傳失敗：$e');
     } finally {
@@ -1579,7 +1657,8 @@ class _UploadCardState extends State<_UploadCard> {
     }
   }
 
-  static Map<String, dynamic> _entryToJson(RecordingHistoryEntry e) => {
+  static Map<String, dynamic> _entryToJson(
+      RecordingHistoryEntry e, String? uploadId) => {
     'filePath':        e.filePath,
     'recordedAt':      e.recordedAt.toIso8601String(),
     'durationSeconds': e.durationSeconds,
@@ -1587,6 +1666,7 @@ class _UploadCardState extends State<_UploadCard> {
     'audioCrispness':  e.audioCrispness,
     'audioLabel':      e.audioLabel,
     'videoType':       e.videoType.name,
+    'uploadId':        uploadId,
   };
 
   @override
@@ -1619,15 +1699,28 @@ class _UploadCardState extends State<_UploadCard> {
                     color: Color(0xFF00897B), size: 18),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    canUpload
-                        ? '可上傳 ${_uploadable.length} 筆，已上傳 $_alreadyCount 筆'
-                        : '所有分析資料已上傳（共 $_alreadyCount 筆）',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: canUpload
-                            ? const Color(0xFF00695C)
-                            : context.textSecondary),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        canUpload
+                            ? '可上傳 ${_uploadable.length} 筆，已上傳 $_alreadyCount 筆'
+                            : '所有分析資料已上傳（共 $_alreadyCount 筆）',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: canUpload
+                                ? const Color(0xFF00695C)
+                                : context.textSecondary),
+                      ),
+                      if (_pendingCount != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          '審核中 $_pendingCount 筆 / 已通過 $_approvedCount 筆',
+                          style: TextStyle(
+                              fontSize: 11, color: context.textSecondary),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ]),

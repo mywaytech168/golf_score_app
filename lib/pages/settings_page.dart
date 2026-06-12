@@ -22,6 +22,8 @@ import '../theme/app_theme.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/update_dialog.dart';
 import 'login_page.dart';
+import 'onboarding_page.dart';
+import 'privacy_settings_page.dart';
 import 'terms_of_service_page.dart';
 import 'upgrade_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
@@ -55,6 +57,7 @@ class _SettingsPageState extends State<SettingsPage> {
   ExportQuality _quality = ExportQuality.standard;  bool _isLoadingProfile = true;
   bool _isCheckingUpdate = false;
   String _appVersion = '';
+  bool _analyticsConsent = false;
 
   @override
   void initState() {
@@ -74,6 +77,10 @@ class _SettingsPageState extends State<SettingsPage> {
       final info = await PackageInfo.fromPlatform();
       if (mounted) setState(() => _appVersion = 'v${info.version} (${info.buildNumber})');
     } catch (_) {}
+
+    // 1c. 使用統計追蹤偏好
+    final consent = await TermsOfServicePage.analyticsConsentGranted();
+    if (mounted) setState(() => _analyticsConsent = consent);
 
     // 2. 上次選的輸出品質
     _quality = await _SkipHelperQuality.savedQuality();
@@ -773,6 +780,15 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: _quality.label,
             onTap: _showQualityPicker,
           ),
+          _SettingsTile(
+            icon: Icons.shield_outlined,
+            iconColor: const Color(0xFF607D8B),
+            title: l.privacySettingsTitle,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PrivacySettingsPage()),
+            ),
+          ),
           const SizedBox(height: 16),
           // ── 訂閱 ────────────────────────────────────────────
           _SectionHeader(l.settingsSectionSubscription),
@@ -802,6 +818,12 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _showThemePicker,
           ),
           _SettingsTile(
+            icon: Icons.school_outlined,
+            iconColor: const Color(0xFF26A69A),
+            title: l.settingsReplayTutorial,
+            onTap: () => OnboardingPage.show(context),
+          ),
+          _SettingsTile(
             icon: Icons.system_update_rounded,
             iconColor: const Color(0xFF1AA87C),
             title: l.settingsCheckUpdate,
@@ -812,6 +834,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   )
                 : null,
             onTap: _isCheckingUpdate ? null : _checkUpdate,
+          ),
+          _SettingsTile(
+            icon: Icons.analytics_outlined,
+            iconColor: const Color(0xFF8D6E63),
+            title: l.settingsAnalytics,
+            subtitle: l.settingsAnalyticsDesc,
+            trailing: Switch(
+              value: _analyticsConsent,
+              onChanged: (v) async {
+                setState(() => _analyticsConsent = v);
+                await TermsOfServicePage.setAnalyticsConsent(v);
+              },
+            ),
           ),
           _SettingsTile(
             icon: Icons.privacy_tip_outlined,

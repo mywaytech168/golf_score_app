@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../theme/app_theme.dart';
 import 'home_page.dart';
+import 'onboarding_page.dart';
 import 'today_info_page.dart';
 import 'upgrade_page.dart';
 import 'recording_history_page.dart';
@@ -36,8 +38,15 @@ class _MainShellPageState extends State<MainShellPage> {
     super.initState();
     _pageController = PageController(initialPage: 0);
     _loadHistory();
-    // 在首幀繪製完成後才做版本檢查，避免阻塞 UI
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+    // 在首幀繪製完成後才做教學引導 / 版本檢查，避免阻塞 UI
+    WidgetsBinding.instance.addPostFrameCallback((_) => _runPostFrameChecks());
+  }
+
+  /// 首幀後流程：先顯示初次教學引導（若未看過），再做版本檢查
+  Future<void> _runPostFrameChecks() async {
+    if (!mounted) return;
+    await OnboardingPage.maybeShow(context);
+    await _checkForUpdate();
   }
 
   /// 向後端查詢更新，依結果決定顯示強制 / 非強制對話框
@@ -144,6 +153,8 @@ class _MainShellPageState extends State<MainShellPage> {
         audioLabel: audioLabel,
         recordedAspectRatio: aspectRatioMode,
         audioTags: audioTags,
+        recordedPlatform:
+            defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
       );
       
       await RecordingHistoryStorage.instance.upsertEntry(entry);

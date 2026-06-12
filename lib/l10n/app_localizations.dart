@@ -1234,6 +1234,18 @@ abstract class AppLocalizations {
   /// **'Check for Updates'**
   String get settingsCheckUpdate;
 
+  /// No description provided for @settingsAnalytics.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage Analytics'**
+  String get settingsAnalytics;
+
+  /// No description provided for @settingsAnalyticsDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Anonymous usage statistics to help improve the app'**
+  String get settingsAnalyticsDesc;
+
   /// No description provided for @settingsPrivacyPolicy.
   ///
   /// In en, this message translates to:
@@ -1419,6 +1431,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reward Balls'**
   String get homeRewardBalls;
+
+  /// No description provided for @homeGreetingQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready to start today\'s swing goals?'**
+  String get homeGreetingQuestion;
+
+  /// No description provided for @homeTodayQuota.
+  ///
+  /// In en, this message translates to:
+  /// **'Today\'s Usage'**
+  String get homeTodayQuota;
+
+  /// No description provided for @homeQuotaBalls.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} / {total} balls'**
+  String homeQuotaBalls(int used, int total);
+
+  /// No description provided for @homeHitAnalysis.
+  ///
+  /// In en, this message translates to:
+  /// **'Shot Analysis'**
+  String get homeHitAnalysis;
+
+  /// No description provided for @homeHitRecordsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'shots recorded'**
+  String get homeHitRecordsLabel;
+
+  /// No description provided for @homeImprovedVsAvg.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep it up! Today is {pct}% above your average.'**
+  String homeImprovedVsAvg(String pct);
+
+  /// No description provided for @homeTrainingFocus.
+  ///
+  /// In en, this message translates to:
+  /// **'Training Focus'**
+  String get homeTrainingFocus;
+
+  /// No description provided for @homeViewNow.
+  ///
+  /// In en, this message translates to:
+  /// **'View'**
+  String get homeViewNow;
+
+  /// No description provided for @homeNoShotsToday.
+  ///
+  /// In en, this message translates to:
+  /// **'No shots recorded today — go record a swing!'**
+  String get homeNoShotsToday;
+
+  /// No description provided for @homeEmptyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Record your first swing to start building your stats'**
+  String get homeEmptyHint;
 
   /// No description provided for @weekdayMon.
   ///
@@ -1767,6 +1839,216 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Key Markers'**
   String get learningKeyMarkers;
+
+  /// No description provided for @myFeedbackTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'My Feedback'**
+  String get myFeedbackTitle;
+
+  /// No description provided for @myFeedbackSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Submitted feedback & official replies'**
+  String get myFeedbackSubtitle;
+
+  /// No description provided for @myFeedbackEntry.
+  ///
+  /// In en, this message translates to:
+  /// **'View My Feedback'**
+  String get myFeedbackEntry;
+
+  /// No description provided for @myFeedbackEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No feedback yet'**
+  String get myFeedbackEmpty;
+
+  /// No description provided for @myFeedbackLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load. Pull down to retry.'**
+  String get myFeedbackLoadFailed;
+
+  /// No description provided for @myFeedbackAllLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'All feedback loaded'**
+  String get myFeedbackAllLoaded;
+
+  /// No description provided for @myFeedbackTypeBug.
+  ///
+  /// In en, this message translates to:
+  /// **'Bug Report'**
+  String get myFeedbackTypeBug;
+
+  /// No description provided for @myFeedbackTypeFeature.
+  ///
+  /// In en, this message translates to:
+  /// **'Feature Request'**
+  String get myFeedbackTypeFeature;
+
+  /// No description provided for @myFeedbackTypeOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get myFeedbackTypeOther;
+
+  /// No description provided for @myFeedbackAdminReply.
+  ///
+  /// In en, this message translates to:
+  /// **'Official Reply'**
+  String get myFeedbackAdminReply;
+
+  /// No description provided for @myFeedbackNoReply.
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting reply'**
+  String get myFeedbackNoReply;
+
+  /// No description provided for @myFeedbackAttachedVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video attached'**
+  String get myFeedbackAttachedVideo;
+
+  /// No description provided for @onboardingSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get onboardingSkip;
+
+  /// No description provided for @onboardingNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get onboardingNext;
+
+  /// No description provided for @onboardingStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Get Started'**
+  String get onboardingStart;
+
+  /// No description provided for @onboardingRecordTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Record Your Swing'**
+  String get onboardingRecordTitle;
+
+  /// No description provided for @onboardingRecordDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap the record button at the bottom center to start filming. ORVIA detects each ball strike while you record.'**
+  String get onboardingRecordDesc;
+
+  /// No description provided for @onboardingClipTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic Clipping'**
+  String get onboardingClipTitle;
+
+  /// No description provided for @onboardingClipDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'After recording, each swing is automatically cut into a 5-second clip. Review every clip on the history page.'**
+  String get onboardingClipDesc;
+
+  /// No description provided for @onboardingAiTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'AI Analysis'**
+  String get onboardingAiTitle;
+
+  /// No description provided for @onboardingAiDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Send a clip to the AI coach to analyze your posture, the 8 swing phases, and the ball trajectory.'**
+  String get onboardingAiDesc;
+
+  /// No description provided for @onboardingBallsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Balls & Rewards'**
+  String get onboardingBallsTitle;
+
+  /// No description provided for @onboardingBallsDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Analysis costs balls. Get a free daily quota, and earn more by watching ads, sending feedback, or inviting friends.'**
+  String get onboardingBallsDesc;
+
+  /// No description provided for @settingsReplayTutorial.
+  ///
+  /// In en, this message translates to:
+  /// **'Replay Tutorial'**
+  String get settingsReplayTutorial;
+
+  /// No description provided for @recFrameCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} frames'**
+  String recFrameCount(int count);
+
+  /// No description provided for @recDetectedShots.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} detected'**
+  String recDetectedShots(int count);
+
+  /// No description provided for @privacySettingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy & Analytics'**
+  String get privacySettingsTitle;
+
+  /// No description provided for @privacySectionDataCollection.
+  ///
+  /// In en, this message translates to:
+  /// **'DATA COLLECTION'**
+  String get privacySectionDataCollection;
+
+  /// No description provided for @privacyDataCollectionDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.'**
+  String get privacyDataCollectionDesc;
+
+  /// No description provided for @privacySectionPolicies.
+  ///
+  /// In en, this message translates to:
+  /// **'POLICIES'**
+  String get privacySectionPolicies;
+
+  /// No description provided for @privacySectionUpload.
+  ///
+  /// In en, this message translates to:
+  /// **'ANALYSIS DATA UPLOAD'**
+  String get privacySectionUpload;
+
+  /// No description provided for @privacyUploadDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.'**
+  String get privacyUploadDesc;
+
+  /// No description provided for @privacyUploadStatusEntry.
+  ///
+  /// In en, this message translates to:
+  /// **'View My Upload Review Status'**
+  String get privacyUploadStatusEntry;
+
+  /// No description provided for @privacySectionAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'ACCOUNT'**
+  String get privacySectionAccount;
+
+  /// No description provided for @privacyDeleteAccountSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Soft delete: you can no longer sign in and your data is anonymized'**
+  String get privacyDeleteAccountSubtitle;
 }
 
 class _AppLocalizationsDelegate

@@ -241,6 +241,8 @@
   "settingsThemeLight": "Light",
   "settingsThemeDark": "Dark",
   "settingsCheckUpdate": "Check for Updates",
+  "settingsAnalytics": "Usage Analytics",
+  "settingsAnalyticsDesc": "Anonymous usage statistics to help improve the app",
   "settingsPrivacyPolicy": "Privacy Policy",
   "settingsTermsOfService": "Terms & Conditions",
   "settingsVersion": "Version",
@@ -285,6 +287,22 @@
   "homeCrispness": "Crispness",
   "homeAnnouncements": "Announcements",
   "homeRewardBalls": "Reward Balls",
+  "homeGreetingQuestion": "Ready to start today's swing goals?",
+  "homeTodayQuota": "Today's Usage",
+  "homeQuotaBalls": "{used} / {total} balls",
+  "@homeQuotaBalls": {
+    "placeholders": { "used": {"type": "int"}, "total": {"type": "int"} }
+  },
+  "homeHitAnalysis": "Shot Analysis",
+  "homeHitRecordsLabel": "shots recorded",
+  "homeImprovedVsAvg": "Keep it up! Today is {pct}% above your average.",
+  "@homeImprovedVsAvg": {
+    "placeholders": { "pct": {"type": "String"} }
+  },
+  "homeTrainingFocus": "Training Focus",
+  "homeViewNow": "View",
+  "homeNoShotsToday": "No shots recorded today — go record a swing!",
+  "homeEmptyHint": "Record your first swing to start building your stats",
   "weekdayMon": "Mon",
   "weekdayTue": "Tue",
   "weekdayWed": "Wed",
@@ -365,5 +383,53 @@
   "learningTitle": "Swing Learning",
   "learningMoreComing": "More courses coming soon",
   "learningVideoComingSoon": "Demo video coming soon. Key points and markers available for reference.",
-  "learningKeyMarkers": "Key Markers"
+  "learningKeyMarkers": "Key Markers",
+
+  "myFeedbackTitle": "My Feedback",
+  "myFeedbackSubtitle": "Submitted feedback & official replies",
+  "myFeedbackEntry": "View My Feedback",
+  "myFeedbackEmpty": "No feedback yet",
+  "myFeedbackLoadFailed": "Failed to load. Pull down to retry.",
+  "myFeedbackAllLoaded": "All feedback loaded",
+  "myFeedbackTypeBug": "Bug Report",
+  "myFeedbackTypeFeature": "Feature Request",
+  "myFeedbackTypeOther": "Other",
+  "myFeedbackAdminReply": "Official Reply",
+  "myFeedbackNoReply": "Awaiting reply",
+  "myFeedbackAttachedVideo": "Video attached",
+
+  "onboardingSkip": "Skip",
+  "onboardingNext": "Next",
+  "onboardingStart": "Get Started",
+  "onboardingRecordTitle": "Record Your Swing",
+  "onboardingRecordDesc": "Tap the record button at the bottom center to start filming. ORVIA detects each ball strike while you record.",
+  "onboardingClipTitle": "Automatic Clipping",
+  "onboardingClipDesc": "After recording, each swing is automatically cut into a 5-second clip. Review every clip on the history page.",
+  "onboardingAiTitle": "AI Analysis",
+  "onboardingAiDesc": "Send a clip to the AI coach to analyze your posture, the 8 swing phases, and the ball trajectory.",
+  "onboardingBallsTitle": "Balls & Rewards",
+  "onboardingBallsDesc": "Analysis costs balls. Get a free daily quota, and earn more by watching ads, sending feedback, or inviting friends.",
+  "settingsReplayTutorial": "Replay Tutorial",
+  "recFrameCount": "{count} frames",
+  "@recFrameCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "recDetectedShots": "{count} detected",
+  "@recDetectedShots": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+
+  "privacySettingsTitle": "Privacy & Analytics",
+  "privacySectionDataCollection": "DATA COLLECTION",
+  "privacyDataCollectionDesc": "Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.",
+  "privacySectionPolicies": "POLICIES",
+  "privacySectionUpload": "ANALYSIS DATA UPLOAD",
+  "privacyUploadDesc": "You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.",
+  "privacyUploadStatusEntry": "View My Upload Review Status",
+  "privacySectionAccount": "ACCOUNT",
+  "privacyDeleteAccountSubtitle": "Soft delete: you can no longer sign in and your data is anonymized"
 }
