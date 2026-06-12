@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -26,6 +27,7 @@ import 'pose_frame_model.dart';
 import 'pose_result.dart';
 import 'recording_config.dart';
 import 'recording_widgets.dart';
+import 'widgets/recording_indicator.dart';
 
 const int _autoNextShotDelaySec = 3;
 
@@ -557,6 +559,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       videoType:           VideoType.original,
       recordedAspectRatio: _config.aspectRatioMode,
       isFrontCamera:       _isFront,
+      recordedPlatform:
+          defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
     );
 
     if (mounted) setState(() => _processingLabel = '切片中…');
@@ -949,7 +953,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   // ── recording（站姿已確認、實際錄影中）──────────────────────────────────────
   List<Widget> _recordingOverlay() => [
     Positioned(top: 16, right: 16,
-        child: RecordingBadge(elapsed: _elapsed, frameCount: _frameCount)),
+        child: RecordingIndicator(elapsed: _elapsed, frameCount: _frameCount)),
     Positioned(
       bottom: 130, left: 0, right: 0,
       child: Center(child: _promptChip('⚡ 偵測中…請揮桿',
@@ -974,7 +978,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   // ── postImpact ────────────────────────────────────────────────────────────
   List<Widget> _postImpactOverlay() => [
     Positioned(top: 16, right: 16,
-        child: RecordingBadge(elapsed: _elapsed, frameCount: _frameCount)),
+        child: RecordingIndicator(elapsed: _elapsed, frameCount: _frameCount)),
     Positioned(
       bottom: 130, left: 0, right: 0,
       child: Center(child: _promptChip(

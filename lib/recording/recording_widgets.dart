@@ -97,46 +97,6 @@ class _RecordingBorderOverlayState extends State<RecordingBorderOverlay>
       );
 }
 
-/// 錄製中右上角的時間 + 幀數徽章。
-class RecordingBadge extends StatelessWidget {
-  final Duration elapsed;
-  final int frameCount;
-  const RecordingBadge({
-    super.key,
-    required this.elapsed,
-    required this.frameCount,
-  });
-
-  String get _timeStr {
-    final m = elapsed.inMinutes.toString().padLeft(2, '0');
-    final s = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.red.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration:
-                const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 6),
-          Text('$_timeStr  $frameCount 幀',
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
-        ]),
-      );
-}
-
 /// 左側垂直縮放滑桿（0.0 = 最廣）。
 class ZoomSlider extends StatelessWidget {
   final double zoom;

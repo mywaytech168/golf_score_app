@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
@@ -44,6 +45,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     with TickerProviderStateMixin {
   VideoPlayerController? _controller;
   bool _initialized = false;
+
+  // 60Hz 播放頭（骨架/軌跡疊圖專用，見 _onTick）
+  final ValueNotifier<double> _playheadSec = ValueNotifier(0.0);
+  Ticker? _playheadTicker;
+  Duration _lastReportedPos = Duration.zero;
+  DateTime? _lastReportAt;
 
   /// 是否為長影片（原始錄製 > 5 秒），長影片無骨架/分析 Tab 及 AI，但可顯示圖表
   bool get _isLongVideo =>
@@ -118,6 +125,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
+    _playheadTicker = createTicker(_onTick)..start();
 
     // ── 單一影片 + checkbox 疊層（取代舊 原始/骨架/分析 Tab 切換）──────────
     // base 影片優先乾淨 clip.mp4（與 CSV/trajectory 時間軸對齊），
@@ -207,8 +215,33 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   void _onUpdate() {
     if (!mounted) return;
+    // 記錄最近一次平台回報的位置與時刻，供 ticker 在兩次回報之間插值
+    final ctrl = _controller;
+    if (ctrl != null && ctrl.value.isInitialized) {
+      _lastReportedPos = ctrl.value.position;
+      _lastReportAt = DateTime.now();
+      _playheadSec.value = _lastReportedPos.inMilliseconds / 1000.0;
+    }
     _checkImpactTrigger();
     setState(() {});
+  }
+
+  /// 60Hz 播放頭：video_player 的 position listener 僅 ~2Hz 回報，
+  /// 直接用它驅動骨架/軌跡疊圖會階梯跳動且視覺落後。
+  /// ticker 在兩次回報之間以 wall-clock 外插，疊圖以此 notifier 重繪。
+  void _onTick(Duration _) {
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    if (!ctrl.value.isPlaying) return;
+    final reportAt = _lastReportAt;
+    if (reportAt == null) return;
+    final elapsed =
+        DateTime.now().difference(reportAt).inMilliseconds *
+            ctrl.value.playbackSpeed;
+    final durMs = ctrl.value.duration.inMilliseconds;
+    final est = (_lastReportedPos.inMilliseconds + elapsed)
+        .clamp(0.0, durMs.toDouble());
+    _playheadSec.value = est / 1000.0;
   }
 
   void _checkImpactTrigger() {
@@ -310,6 +343,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   @override
   void dispose() {
+    _playheadTicker?.dispose();
+    _playheadSec.dispose();
     _impactAnim.dispose();
     _controller?.removeListener(_onUpdate);
     _controller?.dispose();
@@ -519,25 +554,31 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         child: Stack(
           children: [
             VideoPlayer(ctrl),
-            // 骨架疊圖：依播放位置即時取樣 CSV（offset=0，CSV 為 clip 相對時間）
+            // 骨架疊圖：60Hz 播放頭取樣 CSV（offset=0，CSV 為 clip 相對時間）。
+            // position listener 僅 ~2Hz，改用 _playheadSec 外插避免階梯跳動。
             if (_showSkeleton && _skeletonTrack != null)
               Positioned.fill(
-                child: Builder(builder: (_) {
-                  final pose = _skeletonTrack!
-                      .sampleAt(ctrl.value.position.inMilliseconds / 1000.0);
-                  if (pose == null) return const SizedBox.shrink();
-                  return CustomPaint(
-                    painter: SkeletonPainter(pose: pose),
-                  );
-                }),
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _playheadSec,
+                  builder: (_, posSec, __) {
+                    final pose = _skeletonTrack!.sampleAt(posSec);
+                    if (pose == null) return const SizedBox.shrink();
+                    return CustomPaint(
+                      painter: SkeletonPainter(pose: pose),
+                    );
+                  },
+                ),
               ),
             // 球軌跡疊圖：只畫 pts ≤ 播放位置的軌跡
             if (_showTrajectory && _trajTrack != null)
               Positioned.fill(
-                child: CustomPaint(
-                  painter: TrajectoryPainter(
-                    track: _trajTrack!,
-                    positionSec: ctrl.value.position.inMilliseconds / 1000.0,
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _playheadSec,
+                  builder: (_, posSec, __) => CustomPaint(
+                    painter: TrajectoryPainter(
+                      track: _trajTrack!,
+                      positionSec: posSec,
+                    ),
                   ),
                 ),
               ),
