@@ -469,6 +469,108 @@ namespace UploadServer.Controllers
         }
 
         // ════════════════════════════════════════════════════════════════
+        // 資料上傳審核（上傳獎勵審核制）
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/admin/dataset-uploads — 資料上傳審核列表
+        /// Query: status (pending|approved|rejected，預設 pending)、page、pageSize
+        /// </summary>
+        [HttpGet("dataset-uploads")]
+        public async Task<IActionResult> GetDatasetUploads(
+            [FromQuery] string status = "pending",
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 50)
+        {
+            if (!IsAdmin())
+                return StatusCode(403, new { message = "需要管理員權限" });
+
+            page     = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 200);
+
+            var query = _db.DatasetUploads.AsQueryable();
+            if (!string.IsNullOrEmpty(status) && status != "all")
+                query = query.Where(d => d.Status == status);
+
+            var total = await query.CountAsync();
+            var rows = await query
+                .OrderByDescending(d => d.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Join(_db.Users,
+                    d => d.UserId,
+                    u => u.Id,
+                    (d, u) => new
+                    {
+                        d.Id,
+                        d.UserId,
+                        Username    = u.Username,
+                        DisplayName = u.DisplayName,
+                        d.ClientFilePath,
+                        d.DurationSeconds,
+                        d.GoodShot,
+                        d.VideoType,
+                        d.Status,
+                        d.ReviewNote,
+                        d.B2VideoKey,
+                        d.B2CsvKey,
+                        d.CreatedAt,
+                        d.ReviewedAt,
+                    })
+                .ToListAsync();
+
+            var items = rows.Select(d => new
+            {
+                d.Id,
+                d.UserId,
+                d.Username,
+                d.DisplayName,
+                d.ClientFilePath,
+                d.DurationSeconds,
+                d.GoodShot,
+                d.VideoType,
+                d.Status,
+                d.ReviewNote,
+                VideoDownloadUrl = d.B2VideoKey != null
+                                   ? _b2.GenerateDownloadUrlForKey(d.B2VideoKey, 60)
+                                   : null,
+                CsvDownloadUrl   = d.B2CsvKey != null
+                                   ? _b2.GenerateDownloadUrlForKey(d.B2CsvKey, 60)
+                                   : null,
+                CreatedAt  = d.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                ReviewedAt = d.ReviewedAt.HasValue
+                             ? d.ReviewedAt.Value.ToString("yyyy-MM-dd HH:mm:ss")
+                             : null,
+            });
+
+            return Ok(new { total, page, pageSize, data = items });
+        }
+
+        /// <summary>
+        /// POST /api/admin/dataset-uploads/{id}/review — 審核資料上傳
+        /// Body: { "approve": true|false, "note": "..." }
+        /// 核准 → 發 +3 球（僅一次）；已審核過回 409 防重複發球
+        /// </summary>
+        [HttpPost("dataset-uploads/{id}/review")]
+        public async Task<IActionResult> ReviewDatasetUpload(
+            string id, [FromBody] AdminDatasetReviewRequest req,
+            [FromServices] UserService userService)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            var (found, reviewed) = await userService.ReviewDatasetUploadAsync(id, req.Approve, req.Note);
+            if (!found)    return NotFound(new { message = "上傳紀錄不存在" });
+            if (!reviewed) return Conflict(new { message = "此筆已審核過，不可重複審核" });
+
+            return Ok(new
+            {
+                message  = req.Approve ? "已核准並發放獎勵" : "已拒絕",
+                uploadId = id,
+                status   = req.Approve ? "approved" : "rejected",
+            });
+        }
+
+        // ════════════════════════════════════════════════════════════════
         // APK 自託管上傳 / 刪除
         // ════════════════════════════════════════════════════════════════
 

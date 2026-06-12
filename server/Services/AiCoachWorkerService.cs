@@ -214,26 +214,40 @@ namespace UploadServer.Services
                 _logger.LogError(ex, "AI Coach 分析失敗: {Id}，重試次數={Retry}", analysis.Id, analysis.RetryCount);
             }
 
-            await db.SaveChangesAsync(ct);
-
-            // 分析已durably存檔後才扣球，避免分析失敗仍扣費；扣球失敗不影響分析結果
             if (chargeUserId != null)
             {
+                // 分析結果與扣球包在同一 transaction 一次提交，
+                // 消除「結果已存檔、扣費前程序中斷」的不一致窗口
+                var userService = scope.ServiceProvider.GetRequiredService<UserService>();
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
                 try
                 {
-                    var userService = scope.ServiceProvider.GetRequiredService<UserService>();
+                    await db.SaveChangesAsync(ct);
                     var usage = await userService.IncrementUsageAsync(chargeUserId);
+                    await tx.CommitAsync(ct);
                     _logger.LogInformation(
                         "AI Coach 分析扣球: {Id} user={User} todayUsed={Used} remaining={Remaining}",
                         analysis.Id, chargeUserId, usage?.TodayUsed, usage?.Remaining);
                 }
                 catch (Exception ex)
                 {
+                    await tx.RollbackAsync(CancellationToken.None);
+
                     // BILLING_FAILURE：分析已交付但未扣費，需人工補帳（NLog 告警規則以此標記過濾）
                     _logger.LogCritical(ex,
                         "BILLING_FAILURE AI Coach 分析扣球失敗（分析已交付未扣費）: {Id} user={User}",
                         analysis.Id, chargeUserId);
+
+                    // 扣球失敗仍要交付分析結果：清掉 rollback 後殘留的扣費追蹤狀態，單獨重存分析
+                    db.ChangeTracker.Clear();
+                    db.AiCoachAnalyses.Attach(analysis);
+                    db.Entry(analysis).State = EntityState.Modified;
+                    await db.SaveChangesAsync(CancellationToken.None);
                 }
+            }
+            else
+            {
+                await db.SaveChangesAsync(ct);
             }
         }
 

@@ -41,4 +41,7 @@ namespace UploadServer.DTOs
     public record AdminAdjustBallsRequest(int Delta);
 
     public record AdminFeedbackReplyRequest(string Reply);
+
+    /// <summary>POST /api/admin/dataset-uploads/{id}/review 請求</summary>
+    public record AdminDatasetReviewRequest(bool Approve, string? Note);
 }

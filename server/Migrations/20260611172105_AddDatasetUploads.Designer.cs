@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using UploadServer.Data;
 
@@ -11,9 +12,11 @@ using UploadServer.Data;
 namespace UploadServer.Migrations
 {
     [DbContext(typeof(VideoDbContext))]
-    partial class VideoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260611172105_AddDatasetUploads")]
+    partial class AddDatasetUploads
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -550,23 +553,6 @@ namespace UploadServer.Migrations
                         .HasColumnType("varchar(40)")
                         .HasColumnName("recorded_at");
 
-                    b.Property<string>("ReviewNote")
-                        .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
-                        .HasColumnName("review_note");
-
-                    b.Property<DateTime?>("ReviewedAt")
-                        .HasColumnType("datetime")
-                        .HasColumnName("reviewed_at");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasDefaultValue("pending")
-                        .HasColumnName("status");
-
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasMaxLength(36)
@@ -580,9 +566,6 @@ namespace UploadServer.Migrations
                         .HasColumnName("video_type");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("Status")
-                        .HasDatabaseName("idx_dataset_status");
 
                     b.HasIndex("UserId", "ClientFilePath")
                         .HasDatabaseName("idx_dataset_user_filepath");

@@ -163,6 +163,9 @@
       <div class="nav-item" :class="{active: tab==='feedbacks'}" @click="switchTab('feedbacks')">
         <span class="nav-icon">💬</span> 用戶回饋
       </div>
+      <div class="nav-item" :class="{active: tab==='datasets'}" @click="switchTab('datasets')">
+        <span class="nav-icon">📦</span> 資料審核
+      </div>
       <div class="nav-item" :class="{active: tab==='balls'}" @click="switchTab('balls')">
         <span class="nav-icon">🏌</span> 球數流水帳
       </div>
@@ -308,6 +311,71 @@
           <button class="btn btn-outline btn-sm" @click="loadFeedbacks(feedbacks.page-1)" :disabled="feedbacks.page<=1">◀</button>
           <span>第 {{ feedbacks.page }} / {{ Math.ceil(feedbacks.total/feedbacks.size) || 1 }} 頁</span>
           <button class="btn btn-outline btn-sm" @click="loadFeedbacks(feedbacks.page+1)" :disabled="feedbacks.page*feedbacks.size>=feedbacks.total">▶</button>
+        </div>
+      </div>
+
+      <!-- ── DATASET UPLOADS（資料審核）── -->
+      <div v-if="tab==='datasets'">
+        <div class="page-title">📦 資料審核</div>
+        <div class="toolbar">
+          <select v-model="datasets.filterStatus" @change="loadDatasets(1)">
+            <option value="pending">待審核 (pending)</option>
+            <option value="approved">已核准 (approved)</option>
+            <option value="rejected">已拒絕 (rejected)</option>
+            <option value="all">全部</option>
+          </select>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ datasets.total }} 筆</span>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="datasets.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>使用者</th><th>檔名</th><th>長度</th><th>好球</th><th>類型</th>
+              <th>狀態</th><th>影片</th><th>CSV</th><th>上傳時間</th><th>操作</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="d in datasets.data" :key="d.id">
+                <td>
+                  {{ d.displayName || d.username }}
+                  <div style="font-size:.72rem;color:var(--muted)">{{ (d.userId||'').slice(0,8) }}…</div>
+                </td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="d.clientFilePath">
+                  {{ fileName(d.clientFilePath) }}
+                </td>
+                <td>{{ d.durationSeconds }}s</td>
+                <td>{{ d.goodShot === true ? '✅' : d.goodShot === false ? '❌' : '—' }}</td>
+                <td>{{ d.videoType }}</td>
+                <td><span class="badge" :class="datasetBadge(d.status)">{{ d.status }}</span></td>
+                <td>
+                  <a v-if="d.videoDownloadUrl" :href="d.videoDownloadUrl" target="_blank" style="color:var(--accent)">🎬 預覽</a>
+                  <span v-else style="color:var(--muted)">—</span>
+                </td>
+                <td>
+                  <a v-if="d.csvDownloadUrl" :href="d.csvDownloadUrl" target="_blank" style="color:var(--accent)">📄 CSV</a>
+                  <span v-else style="color:var(--muted)">—</span>
+                </td>
+                <td style="white-space:nowrap">{{ d.createdAt }}</td>
+                <td>
+                  <div v-if="d.status==='pending'" style="display:flex;gap:6px">
+                    <button class="btn btn-success btn-sm" @click="approveDataset(d)" :disabled="datasets.reviewing===d.id">核准</button>
+                    <button class="btn btn-danger btn-sm" @click="openRejectDataset(d)" :disabled="datasets.reviewing===d.id">拒絕</button>
+                  </div>
+                  <span v-else style="font-size:.78rem;color:var(--muted)" :title="d.reviewNote || ''">
+                    {{ d.reviewedAt || '—' }}
+                  </span>
+                </td>
+              </tr>
+              <tr v-if="!datasets.loading && datasets.data.length===0">
+                <td colspan="10" style="text-align:center;color:var(--muted);padding:28px">沒有符合的資料</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-outline btn-sm" @click="loadDatasets(datasets.page-1)" :disabled="datasets.page<=1">◀</button>
+          <span>第 {{ datasets.page }} / {{ Math.ceil(datasets.total/datasets.size) || 1 }} 頁</span>
+          <button class="btn btn-outline btn-sm" @click="loadDatasets(datasets.page+1)" :disabled="datasets.page*datasets.size>=datasets.total">▶</button>
         </div>
       </div>
 
@@ -570,6 +638,26 @@
     </div>
   </div>
 
+  <!-- ══ MODAL: 拒絕資料上傳 ══ -->
+  <div class="modal-overlay" v-if="modal.rejectDataset" @click.self="modal.rejectDataset=false">
+    <div class="modal">
+      <h2>📦 拒絕資料上傳</h2>
+      <div class="detail-row"><span class="key">使用者：</span>{{ modal.rejectTarget?.displayName || modal.rejectTarget?.username }}</div>
+      <div class="detail-row"><span class="key">檔名：</span>{{ fileName(modal.rejectTarget?.clientFilePath) }}</div>
+      <div class="field" style="margin-top:14px">
+        <label>拒絕原因（選填，使用者可見）</label>
+        <textarea v-model="modal.rejectNote" placeholder="例如：影片模糊 / 非揮桿影片..."></textarea>
+      </div>
+      <div class="err-msg" v-if="modal.rejectError">{{ modal.rejectError }}</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" @click="modal.rejectDataset=false">取消</button>
+        <button class="btn btn-danger" @click="submitRejectDataset" :disabled="modal.rejectLoading">
+          {{ modal.rejectLoading ? '處理中...' : '確認拒絕' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ MODAL: 新增 / 編輯公告 ══ -->
   <div class="modal-overlay" v-if="modal.annForm" @click.self="modal.annForm=false">
     <div class="modal" style="width:560px">
@@ -652,6 +740,7 @@ createApp({
     const analyses  = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterStatus: '', filterUser: '' });
     const feedbacks = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterType: '' });
     const balls     = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterUser: '', filterReason: '' });
+    const datasets  = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterStatus: 'pending', reviewing: null });
     const ann = reactive({
       data: [], loading: false,
       filterType: '', filterActive: '',
@@ -669,6 +758,7 @@ createApp({
       annForm: false, annIsEdit: false, annEditId: null,
       annFormData() { return { title:'', body:'', type:'info', isActive:true, publishedAt:'', expiresAt:'', imageUrl:'' }; },
       annError: '', annLoading: false,
+      rejectDataset: false, rejectTarget: null, rejectNote: '', rejectError: '', rejectLoading: false,
     });
 
     const toast = reactive({ show: false, msg: '' });
@@ -723,6 +813,7 @@ createApp({
       if (t === 'users')     loadUsers(1);
       if (t === 'analyses')  loadAnalyses(1);
       if (t === 'feedbacks') loadFeedbacks(1);
+      if (t === 'datasets')  loadDatasets(1);
       if (t === 'balls')     loadBalls(1);
       if (t === 'version')       loadVersions();
       if (t === 'announcements') loadAnnouncements();
@@ -766,6 +857,60 @@ createApp({
         feedbacks.data  = d.data;
         feedbacks.total = d.total;
       } finally { feedbacks.loading = false; }
+    }
+
+    // ── Dataset Uploads（資料審核）──
+    async function loadDatasets(page) {
+      datasets.loading = true; datasets.page = page;
+      try {
+        const url = `/dataset-uploads?status=${datasets.filterStatus}&page=${page}&pageSize=${datasets.size}`;
+        const res = await api(url);
+        const d   = await res.json();
+        datasets.data  = d.data;
+        datasets.total = d.total;
+      } finally { datasets.loading = false; }
+    }
+
+    async function reviewDataset(item, approve, note) {
+      datasets.reviewing = item.id;
+      try {
+        const res = await api(`/dataset-uploads/${item.id}/review`, {
+          method: 'POST',
+          body: JSON.stringify({ approve, note: note || null }),
+        });
+        const d = await res.json();
+        if (!res.ok) { showToast('❌ ' + (d.message || '審核失敗')); return false; }
+        showToast(approve ? '✅ 已核准並發放 +3 球' : '🚫 已拒絕');
+        // 從清單移除（pending 篩選下審核完即消失）
+        datasets.data = datasets.data.filter(x => x.id !== item.id);
+        datasets.total = Math.max(0, datasets.total - 1);
+        return true;
+      } catch(e) { showToast('❌ 審核失敗：' + e.message); return false; }
+      finally { datasets.reviewing = null; }
+    }
+
+    async function approveDataset(item) {
+      if (!confirm(`核准此筆資料並發放 +3 球給「${item.displayName || item.username}」？`)) return;
+      await reviewDataset(item, true, null);
+    }
+
+    function openRejectDataset(item) {
+      modal.rejectTarget = item; modal.rejectNote = ''; modal.rejectError = '';
+      modal.rejectDataset = true;
+    }
+
+    async function submitRejectDataset() {
+      modal.rejectLoading = true; modal.rejectError = '';
+      try {
+        const ok = await reviewDataset(modal.rejectTarget, false, modal.rejectNote.trim());
+        if (ok) modal.rejectDataset = false;
+      } finally { modal.rejectLoading = false; }
+    }
+
+    function fileName(p) {
+      if (!p) return '—';
+      const parts = String(p).split(/[\\/]/);
+      return parts[parts.length - 1] || p;
     }
 
     // ── Ball Records ──
@@ -1021,15 +1166,17 @@ createApp({
     function typeBadge(t)     { return {bug:'badge-red',feature:'badge-blue',other:'badge-gray'}[t]||'badge-gray'; }
     function reasonBadge(r)   { return {ad:'badge-yellow',feedback:'badge-blue',invite:'badge-purple',upload:'badge-green',analysis:'badge-red',manual:'badge-gray'}[r]||'badge-gray'; }
     function annTypeBadge(t)  { return {info:'badge-blue',important:'badge-red',event:'badge-purple',update:'badge-green'}[t]||'badge-gray'; }
+    function datasetBadge(s)  { return {pending:'badge-yellow',approved:'badge-green',rejected:'badge-red'}[s]||'badge-gray'; }
     function fmtDate(s)       { if (!s) return '—'; const d = new Date(s); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 
     onMounted(() => { if (token.value) switchTab('users'); });
 
     return {
       token, login, tab,
-      users, analyses, feedbacks, balls, version, ann, modal, toast,
+      users, analyses, feedbacks, balls, datasets, version, ann, modal, toast,
       doLogin, logout, switchTab,
       loadUsers, loadAnalyses, loadFeedbacks, loadBalls, loadVersions, saveVersion,
+      loadDatasets, approveDataset, openRejectDataset, submitRejectDataset, fileName, datasetBadge,
       loadApkInfo, uploadApk, deleteApk,
       openAdjustBalls, submitAdjust,
       openReply, submitReply,

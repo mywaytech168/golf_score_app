@@ -198,6 +198,45 @@ namespace UploadServer.Services
             return _s3.GetPreSignedURL(request);
         }
 
+        // ── 訓練資料集（上傳獎勵）路徑規則 ──────────────────────────────
+        public static string DatasetVideoKey(string uploadId) =>
+            $"dataset/{uploadId}/clip.mp4";
+
+        public static string DatasetCsvKey(string uploadId) =>
+            $"dataset/{uploadId}/pose_landmarks.csv";
+
+        /// <summary>產生資料集影片上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
+        public string GenerateDatasetVideoUploadUrl(string uploadId, int expiryMinutes = 30)
+        {
+            var key = DatasetVideoKey(uploadId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "video/mp4",
+            };
+            _logger.LogInformation("產生資料集影片 PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
+        /// <summary>產生資料集 CSV 上傳的 pre-signed PUT URL（Flutter 直傳用）</summary>
+        public string GenerateDatasetCsvUploadUrl(string uploadId, int expiryMinutes = 30)
+        {
+            var key = DatasetCsvKey(uploadId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "text/csv",
+            };
+            _logger.LogInformation("產生資料集 CSV PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
         // ── 問題回饋圖片路徑規則 ────────────────────────────────────────
         public static string FeedbackImageKey(string imageId) =>
             $"feedback_images/{imageId}.jpg";

@@ -426,10 +426,45 @@ namespace UploadServer.Services
             return new FeedbackRewardResponse(FeedbackBalls);
         }
 
+        /// <summary>
+        /// 分頁查詢自己提交的回饋（含管理員回覆）
+        /// </summary>
+        public async Task<MyFeedbacksResponse?> GetMyFeedbacksAsync(
+            string userId, int page, int pageSize)
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            pageSize = Math.Clamp(pageSize, 1, 100);
+            page     = Math.Max(1, page);
+
+            var query = _db.UserFeedbacks
+                .Where(f => f.UserId == userId)
+                .OrderByDescending(f => f.CreatedAt);
+
+            var total = await query.CountAsync();
+
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(f => new MyFeedbackDto(
+                    f.Id, f.Type, f.Text, f.AttachedVideoId,
+                    f.AttachedImageB2Key, f.AdminReply, f.AdminRepliedAt, f.CreatedAt))
+                .ToListAsync();
+
+            return new MyFeedbacksResponse(total, page, pageSize, items);
+        }
+
         // ════════════════════════════════════════════════════════════════
         // 上傳資料獎勵
         // ════════════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// 審核制：提交上傳資料 → 建立 pending 列，不立即發球；
+        /// 後台核准（ReviewDatasetUploadAsync）後才發 +3 球。
+        /// 去重：同 user + ClientFilePath 已有 pending / approved 列 → 跳過；
+        /// rejected 允許重新提交（新列）。
+        /// </summary>
         public async Task<UploadRewardResponse?> ClaimUploadRewardAsync(
             string userId, List<SessionDataDto> sessions)
         {
@@ -439,22 +474,131 @@ namespace UploadServer.Services
             if (sessions.Count == 0)
                 return new UploadRewardResponse(0, 0);
 
-            user.BonusBalls += UploadBalls;
+            // ── 去重：同 user + 同 ClientFilePath 已有 pending / approved 列者跳過 ──
+            var filePaths = sessions.Select(s => s.FilePath).ToList();
+            var existingSet = (await _db.DatasetUploads
+                .Where(d => d.UserId == userId
+                            && filePaths.Contains(d.ClientFilePath)
+                            && d.Status != DatasetUploadStatus.Rejected)
+                .Select(d => d.ClientFilePath)
+                .ToListAsync()).ToHashSet();
 
-            _db.BallRecords.Add(new BallRecord
+            var newSessions = sessions
+                .Where(s => !existingSet.Contains(s.FilePath))
+                .GroupBy(s => s.FilePath)
+                .Select(g => g.First())
+                .ToList();
+
+            if (newSessions.Count == 0)
             {
-                UserId       = userId,
-                Reason       = BallReason.Upload,
-                Delta        = UploadBalls,
-                BalanceAfter = user.BonusBalls,
-                CreatedAt    = DateTime.UtcNow,
-            });
+                _logger.LogInformation("用戶 {UserId} 上傳 {Count} 筆資料均為重複，不建立審核列",
+                    userId, sessions.Count);
+                return new UploadRewardResponse(0, 0);
+            }
+
+            var now = DateTime.UtcNow;
+            foreach (var s in newSessions)
+            {
+                var hasFiles = !string.IsNullOrWhiteSpace(s.UploadId);
+                _db.DatasetUploads.Add(new DatasetUpload
+                {
+                    Id              = hasFiles ? s.UploadId! : Guid.NewGuid().ToString("N"),
+                    UserId          = userId,
+                    B2VideoKey      = hasFiles ? B2Service.DatasetVideoKey(s.UploadId!) : null,
+                    B2CsvKey        = hasFiles ? B2Service.DatasetCsvKey(s.UploadId!) : null,
+                    ClientFilePath  = s.FilePath,
+                    RecordedAt      = s.RecordedAt,
+                    DurationSeconds = s.DurationSeconds,
+                    GoodShot        = s.GoodShot,
+                    AudioCrispness  = s.AudioCrispness,
+                    AudioLabel      = s.AudioLabel,
+                    VideoType       = s.VideoType,
+                    CreatedAt       = now,
+                    Status          = DatasetUploadStatus.Pending,
+                });
+            }
 
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("用戶 {UserId} 上傳 {Count} 筆資料，獎勵 +{Balls} 球",
-                userId, sessions.Count, UploadBalls);
-            return new UploadRewardResponse(UploadBalls, sessions.Count);
+            _logger.LogInformation("用戶 {UserId} 上傳 {Count} 筆資料（新 {New} 筆），已建立待審核列（審核通過後發球）",
+                userId, sessions.Count, newSessions.Count);
+            return new UploadRewardResponse(0, newSessions.Count);
+        }
+
+        /// <summary>
+        /// 後台審核資料上傳：核准 → 發 +3 球（每列僅一次）；拒絕 → 標記 rejected。
+        /// 已審核過的列回 null（呼叫端回 409 防重複發球）。
+        /// 回傳 (found, reviewed)：found=false 表示列不存在。
+        /// </summary>
+        public async Task<(bool Found, bool Reviewed)> ReviewDatasetUploadAsync(
+            string uploadId, bool approve, string? note)
+        {
+            var upload = await _db.DatasetUploads.FindAsync(uploadId);
+            if (upload == null) return (false, false);
+
+            if (upload.Status != DatasetUploadStatus.Pending)
+                return (true, false);   // 已審核過，防重複發球
+
+            var now = DateTime.UtcNow;
+            upload.Status     = approve ? DatasetUploadStatus.Approved : DatasetUploadStatus.Rejected;
+            upload.ReviewedAt = now;
+            upload.ReviewNote = string.IsNullOrWhiteSpace(note)
+                                ? null
+                                : note.Trim()[..Math.Min(500, note.Trim().Length)];
+
+            if (approve)
+            {
+                var user = await _db.Users.FindAsync(upload.UserId);
+                if (user != null)
+                {
+                    user.BonusBalls += UploadBalls;
+                    _db.BallRecords.Add(new BallRecord
+                    {
+                        UserId       = upload.UserId,
+                        Reason       = BallReason.Upload,
+                        Delta        = UploadBalls,
+                        BalanceAfter = user.BonusBalls,
+                        CreatedAt    = now,
+                    });
+                }
+            }
+
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("資料上傳 {UploadId} 審核 {Result}（用戶 {UserId}）",
+                uploadId, approve ? "核准 +3 球" : "拒絕", upload.UserId);
+            return (true, true);
+        }
+
+        /// <summary>
+        /// 分頁查詢自己的資料上傳審核狀態（App 顯示審核中 / 已通過 / 已拒絕）
+        /// </summary>
+        public async Task<MyDatasetUploadsResponse?> GetMyDatasetUploadsAsync(
+            string userId, int page, int pageSize)
+        {
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return null;
+
+            pageSize = Math.Clamp(pageSize, 1, 100);
+            page     = Math.Max(1, page);
+
+            var query = _db.DatasetUploads
+                .Where(d => d.UserId == userId)
+                .OrderByDescending(d => d.CreatedAt);
+
+            var total         = await query.CountAsync();
+            var pendingCount  = await query.CountAsync(d => d.Status == DatasetUploadStatus.Pending);
+            var approvedCount = await query.CountAsync(d => d.Status == DatasetUploadStatus.Approved);
+
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(d => new MyDatasetUploadDto(
+                    d.Id, d.ClientFilePath, d.Status, d.CreatedAt, d.ReviewedAt, d.ReviewNote))
+                .ToListAsync();
+
+            return new MyDatasetUploadsResponse(
+                total, pendingCount, approvedCount, page, pageSize, items);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -699,6 +843,163 @@ namespace UploadServer.Services
             }
         }
 
+        /// <summary>
+        /// 驗證 Google Play 一次性商品（products API，球數包等 consumable）。
+        /// 測試模式下接受 GooglePlay:TestTokens 設定中的 token。
+        /// </summary>
+        public async Task<BallPackValidationResult> ValidateGooglePlayProductAsync(
+            string purchaseToken, string productId)
+        {
+            var testMode   = _config.GetValue<bool>("GooglePlay:TestMode", false);
+            var testTokens = _config.GetSection("GooglePlay:TestTokens").Get<string[]>() ?? [];
+
+            if (testMode && testTokens.Contains(purchaseToken))
+            {
+                _logger.LogInformation("Google Play 測試模式：接受球包測試 token");
+                return new BallPackValidationResult(true, $"test-{Guid.NewGuid()}");
+            }
+
+            var packageName        = _config["GooglePlay:PackageName"];
+            var serviceAccountJson = _config["GooglePlay:ServiceAccountJson"];
+
+            if (string.IsNullOrEmpty(packageName) || string.IsNullOrEmpty(serviceAccountJson))
+            {
+                _logger.LogWarning("Google Play 配置不完整（PackageName / ServiceAccountJson）");
+                return new BallPackValidationResult(false);
+            }
+
+            try
+            {
+                var credential = Google.Apis.Auth.OAuth2.GoogleCredential
+                    .FromJson(serviceAccountJson)
+                    .CreateScoped("https://www.googleapis.com/auth/androidpublisher");
+                var accessToken = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
+
+                var client = _httpClientFactory.CreateClient();
+                client.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", accessToken);
+
+                // products API（一次性商品；訂閱走 subscriptions API）
+                var url = $"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/" +
+                          $"{packageName}/purchases/products/{productId}/tokens/{purchaseToken}";
+                var response = await client.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Google Play 商品 API 回應錯誤: {Status}", response.StatusCode);
+                    return new BallPackValidationResult(false);
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                // purchaseState: 0=purchased, 1=canceled, 2=pending
+                var purchaseState = root.TryGetProperty("purchaseState", out var st) ? st.GetInt32() : -1;
+                if (purchaseState != 0)
+                {
+                    _logger.LogWarning("Google Play 商品購買狀態異常: {State}", purchaseState);
+                    return new BallPackValidationResult(false);
+                }
+
+                var orderId = root.TryGetProperty("orderId", out var oid) ? oid.GetString() : null;
+                return new BallPackValidationResult(true, orderId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Google Play 球包驗證失敗");
+                return new BallPackValidationResult(false);
+            }
+        }
+
+        /// <summary>
+        /// 驗證 Apple App Store 一次性商品（verifyReceipt，於 in_app 陣列中比對 product_id）。
+        /// 回傳該筆交易的 transaction_id 供去重。
+        /// </summary>
+        public async Task<BallPackValidationResult> ValidateAppStoreProductAsync(
+            string receiptData, string productId)
+        {
+            var sharedSecret = _config["AppStore:SharedSecret"];
+            var isSandbox    = _config.GetValue<bool>("AppStore:Sandbox", false);
+
+            if (string.IsNullOrEmpty(sharedSecret))
+            {
+                _logger.LogWarning("App Store 配置不完整（缺少 SharedSecret）");
+                return new BallPackValidationResult(false);
+            }
+
+            try
+            {
+                var client = _httpClientFactory.CreateClient();
+                var body   = new { receipt_data = receiptData, password = sharedSecret };
+
+                var url  = isSandbox
+                    ? "https://sandbox.itunes.apple.com/verifyReceipt"
+                    : "https://buy.itunes.apple.com/verifyReceipt";
+                var resp = await client.PostAsJsonAsync(url, body);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("App Store API 回應錯誤: {Status}", resp.StatusCode);
+                    return new BallPackValidationResult(false);
+                }
+
+                var json = await resp.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var root   = doc.RootElement;
+                var status = root.GetProperty("status").GetInt32();
+
+                // status 21007 = sandbox receipt sent to production → retry sandbox
+                if (status == 21007 && !isSandbox)
+                {
+                    _logger.LogInformation("App Store：偵測到 sandbox 收據，切換重試");
+                    var sr = await client.PostAsJsonAsync(
+                        "https://sandbox.itunes.apple.com/verifyReceipt", body);
+                    if (!sr.IsSuccessStatusCode) return new BallPackValidationResult(false);
+                    using var sd = System.Text.Json.JsonDocument.Parse(await sr.Content.ReadAsStringAsync());
+                    root   = sd.RootElement.Clone();
+                    status = root.GetProperty("status").GetInt32();
+                }
+
+                if (status != 0) return new BallPackValidationResult(false);
+
+                if (!root.TryGetProperty("receipt", out var receipt)
+                    || !receipt.TryGetProperty("in_app", out var inApp))
+                    return new BallPackValidationResult(false);
+
+                // 取該商品最新一筆交易（同 receipt 可能含多次購買，靠 transaction_id 去重）
+                string? latestTxId = null;
+                long latestPurchaseMs = -1;
+                foreach (var item in inApp.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("product_id", out var pid)
+                        || pid.GetString() != productId) continue;
+
+                    var ms = item.TryGetProperty("purchase_date_ms", out var pd)
+                        && long.TryParse(pd.GetString(), out var v) ? v : 0;
+                    if (ms > latestPurchaseMs)
+                    {
+                        latestPurchaseMs = ms;
+                        latestTxId = item.TryGetProperty("transaction_id", out var tid)
+                            ? tid.GetString() : null;
+                    }
+                }
+
+                if (latestTxId == null)
+                {
+                    _logger.LogWarning("App Store 收據中無 {ProductId} 交易", productId);
+                    return new BallPackValidationResult(false);
+                }
+
+                return new BallPackValidationResult(true, latestTxId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "App Store 球包驗證失敗");
+                return new BallPackValidationResult(false);
+            }
+        }
+
         // ════════════════════════════════════════════════════════════════
         // 球數購買
         // ════════════════════════════════════════════════════════════════
@@ -712,13 +1013,84 @@ namespace UploadServer.Services
             ["golf_balls_100"] = 100,
         };
 
+        public record BallPackValidationResult(bool Success, string? TransactionId = null);
+
         public async Task<PurchaseBallsResponse> PurchaseBallsAsync(string userId, PurchaseBallsRequest req)
         {
             if (!_ballPackMap.TryGetValue(req.ProductId, out var balls))
                 return new PurchaseBallsResponse(false, "無效的球包商品", 0, 0);
 
+            if (string.IsNullOrWhiteSpace(req.PurchaseToken)
+                || req.Store is not ("google_play" or "app_store"))
+                return new PurchaseBallsResponse(false, "無效的購買憑證", 0, 0);
+
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return new PurchaseBallsResponse(false, "用戶不存在", 0, 0);
+
+            var testMode = _config.GetValue<bool>("GooglePlay:TestMode", false);
+
+            // 同一 purchaseToken 已入帳 → 冪等回應，避免 client 重試佇列重複加值
+            if (!testMode)
+            {
+                var dupToken = await _db.PurchaseRecords.FirstOrDefaultAsync(r =>
+                    r.Plan == "balls"
+                    && r.PurchaseToken == req.PurchaseToken
+                    && r.Status == PurchaseStatus.Verified);
+                if (dupToken != null)
+                {
+                    if (dupToken.UserId != userId)
+                        return new PurchaseBallsResponse(false, "此購買憑證已被使用", 0, 0);
+                    return new PurchaseBallsResponse(true, "此購買已入帳", 0, user.BonusBalls);
+                }
+            }
+
+            var record = new PurchaseRecord
+            {
+                UserId        = userId,
+                Plan          = "balls",
+                Store         = req.Store,
+                ProductId     = req.ProductId,
+                PurchaseToken = req.PurchaseToken,
+                Status        = PurchaseStatus.Pending,
+                CreatedAt     = DateTime.UtcNow,
+            };
+            _db.PurchaseRecords.Add(record);
+            await _db.SaveChangesAsync();
+
+            var result = req.Store == "google_play"
+                ? await ValidateGooglePlayProductAsync(req.PurchaseToken, req.ProductId)
+                : await ValidateAppStoreProductAsync(req.PurchaseToken, req.ProductId);
+
+            if (!result.Success)
+            {
+                record.Status = PurchaseStatus.Failed;
+                await _db.SaveChangesAsync();
+                _logger.LogWarning("用戶 {UserId} 球包驗證失敗 store={Store} product={ProductId}",
+                    userId, req.Store, req.ProductId);
+                return new PurchaseBallsResponse(false, "球包驗證失敗", 0, 0);
+            }
+
+            // App Store 的 token 是整份 receipt（內容會隨後續購買變動），需另以 transaction_id 去重
+            if (!testMode && result.TransactionId != null)
+            {
+                var dupTx = await _db.PurchaseRecords.FirstOrDefaultAsync(r =>
+                    r.Plan == "balls"
+                    && r.OriginalTransactionId == result.TransactionId
+                    && r.Status == PurchaseStatus.Verified
+                    && r.Id != record.Id);
+                if (dupTx != null)
+                {
+                    record.Status = PurchaseStatus.Failed;
+                    await _db.SaveChangesAsync();
+                    if (dupTx.UserId != userId)
+                        return new PurchaseBallsResponse(false, "此購買憑證已被使用", 0, 0);
+                    return new PurchaseBallsResponse(true, "此購買已入帳", 0, user.BonusBalls);
+                }
+            }
+
+            record.Status                = PurchaseStatus.Verified;
+            record.VerifiedAt            = DateTime.UtcNow;
+            record.OriginalTransactionId = result.TransactionId;
 
             user.BonusBalls += balls;
             user.UpdatedAt   = DateTime.UtcNow;

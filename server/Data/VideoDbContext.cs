@@ -22,6 +22,7 @@ namespace UploadServer.Data
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<AppVersion> AppVersions { get; set; }
         public DbSet<Announcement> Announcements { get; set; }
+        public DbSet<DatasetUpload> DatasetUploads { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -532,6 +533,89 @@ namespace UploadServer.Data
                     .WithMany(u => u.Feedbacks)
                     .HasForeignKey(f => f.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // DatasetUploads
+            // ============================================================
+            modelBuilder.Entity<DatasetUpload>(entity =>
+            {
+                entity.ToTable("dataset_uploads");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.B2VideoKey)
+                    .HasColumnName("b2_video_key")
+                    .HasMaxLength(500)
+                    .IsRequired(false);
+
+                entity.Property(e => e.B2CsvKey)
+                    .HasColumnName("b2_csv_key")
+                    .HasMaxLength(500)
+                    .IsRequired(false);
+
+                entity.Property(e => e.ClientFilePath)
+                    .HasColumnName("client_file_path")
+                    .HasMaxLength(500)
+                    .IsRequired();
+
+                entity.Property(e => e.RecordedAt)
+                    .HasColumnName("recorded_at")
+                    .HasMaxLength(40);
+
+                entity.Property(e => e.DurationSeconds)
+                    .HasColumnName("duration_seconds");
+
+                entity.Property(e => e.GoodShot)
+                    .HasColumnName("good_shot");
+
+                entity.Property(e => e.AudioCrispness)
+                    .HasColumnName("audio_crispness");
+
+                entity.Property(e => e.AudioLabel)
+                    .HasColumnName("audio_label")
+                    .HasMaxLength(50)
+                    .IsRequired(false);
+
+                entity.Property(e => e.VideoType)
+                    .HasColumnName("video_type")
+                    .HasMaxLength(20);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.Status)
+                    .HasColumnName("status")
+                    .HasMaxLength(20)
+                    .HasDefaultValue(DatasetUploadStatus.Pending)
+                    .IsRequired();
+
+                entity.Property(e => e.ReviewedAt)
+                    .HasColumnName("reviewed_at")
+                    .HasColumnType("datetime")
+                    .IsRequired(false);
+
+                entity.Property(e => e.ReviewNote)
+                    .HasColumnName("review_note")
+                    .HasMaxLength(500)
+                    .IsRequired(false);
+
+                entity.HasIndex(e => new { e.UserId, e.ClientFilePath })
+                    .HasDatabaseName("idx_dataset_user_filepath");
+
+                entity.HasIndex(e => e.Status)
+                    .HasDatabaseName("idx_dataset_status");
             });
 
             // ============================================================

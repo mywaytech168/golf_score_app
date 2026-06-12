@@ -266,6 +266,62 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// GET /api/user/feedbacks?page=1&amp;pageSize=20 — 分頁查詢自己提交的回饋（含管理員回覆）
+        /// </summary>
+        [HttpGet("feedbacks")]
+        public async Task<IActionResult> GetMyFeedbacks(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.GetMyFeedbacksAsync(userId, page, pageSize);
+            if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            var items = result.Items.Select(f => new
+            {
+                id         = f.Id,
+                type       = f.Type,
+                text       = f.Text,
+                videoId    = f.VideoId,
+                imageUrl   = f.ImageB2Key != null
+                             ? _b2.GenerateFeedbackImageDownloadUrl(f.ImageB2Key)
+                             : null,
+                adminReply = f.AdminReply,
+                repliedAt  = f.RepliedAt,
+                createdAt  = f.CreatedAt,
+            });
+
+            return Ok(new
+            {
+                data = new
+                {
+                    total    = result.Total,
+                    page     = result.Page,
+                    pageSize = result.PageSize,
+                    items,
+                }
+            });
+        }
+
+        /// <summary>
+        /// POST /api/user/rewards/upload/prepare — 取得資料集檔案上傳 URL
+        /// 回傳 uploadId 與影片 / CSV 的 pre-signed PUT URL（Flutter 直傳 B2 用）
+        /// </summary>
+        [HttpPost("rewards/upload/prepare")]
+        public IActionResult PrepareDatasetUpload()
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var uploadId = Guid.NewGuid().ToString("N");
+            var videoUrl = _b2.GenerateDatasetVideoUploadUrl(uploadId);
+            var csvUrl   = _b2.GenerateDatasetCsvUploadUrl(uploadId);
+            return Ok(new { data = new PrepareDatasetUploadResponse(uploadId, videoUrl, csvUrl) });
+        }
+
+        /// <summary>
         /// POST /api/user/rewards/upload — 上傳本地分析資料並領取獎勵
         /// Body: { "sessions": [...] }
         /// </summary>
@@ -279,6 +335,24 @@ namespace UploadServer.Controllers
                 return BadRequest(new { message = "請提供至少一筆錄影資料" });
 
             var result = await _userService.ClaimUploadRewardAsync(userId, req.Sessions);
+            if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            return Ok(new { data = result });
+        }
+
+        /// <summary>
+        /// GET /api/user/rewards/uploads?page=1&amp;pageSize=20 — 分頁查詢自己的資料上傳審核狀態
+        /// 回 status（pending|approved|rejected）/ createdAt / reviewedAt / note
+        /// </summary>
+        [HttpGet("rewards/uploads")]
+        public async Task<IActionResult> GetMyDatasetUploads(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
+        {
+            var userId = GetUserId();
+            if (userId == null) return Unauthorized();
+
+            var result = await _userService.GetMyDatasetUploadsAsync(userId, page, pageSize);
             if (result == null) return NotFound(new { message = "用戶不存在" });
 
             return Ok(new { data = result });

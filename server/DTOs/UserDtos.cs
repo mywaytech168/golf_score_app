@@ -86,14 +86,42 @@ namespace UploadServer.DTOs
         bool? GoodShot,
         double? AudioCrispness,
         string? AudioLabel,
-        string VideoType
+        string VideoType,
+        string? UploadId = null
     );
 
     /// <summary>POST /api/user/rewards/upload 請求</summary>
     public record UploadSessionsRequest(List<SessionDataDto> Sessions);
 
-    /// <summary>POST /api/user/rewards/upload 回應</summary>
-    public record UploadRewardResponse(int Balls, int Uploaded);
+    /// <summary>
+    /// POST /api/user/rewards/upload 回應（審核制）
+    /// Balls 固定 0（審核通過後才發球）；Pending = 本次新建立的待審核筆數
+    /// </summary>
+    public record UploadRewardResponse(int Balls, int Pending);
+
+    /// <summary>GET /api/user/rewards/uploads — 單筆上傳審核狀態</summary>
+    public record MyDatasetUploadDto(
+        string Id,
+        string ClientFilePath,
+        string Status,
+        DateTime CreatedAt,
+        DateTime? ReviewedAt,
+        string? Note);
+
+    /// <summary>GET /api/user/rewards/uploads 回應</summary>
+    public record MyDatasetUploadsResponse(
+        int Total,
+        int PendingCount,
+        int ApprovedCount,
+        int Page,
+        int PageSize,
+        List<MyDatasetUploadDto> Items);
+
+    /// <summary>POST /api/user/rewards/upload/prepare 回應（presigned PUT URL）</summary>
+    public record PrepareDatasetUploadResponse(
+        string UploadId,
+        string VideoUploadUrl,
+        string CsvUploadUrl);
 
     // ════════════════════════════════════════════════════════════════
     // 付款購買
@@ -158,6 +186,27 @@ namespace UploadServer.DTOs
         int Page,
         int PageSize,
         List<BallRecordDto> Items
+    );
+
+    /// <summary>GET /api/user/feedbacks — 單筆回饋（ImageB2Key 由 Controller 轉成臨時下載 URL）</summary>
+    public record MyFeedbackDto(
+        string Id,
+        /// <summary>"bug" | "feature" | "other"</summary>
+        string Type,
+        string Text,
+        string? VideoId,
+        string? ImageB2Key,
+        string? AdminReply,
+        DateTime? RepliedAt,
+        DateTime CreatedAt
+    );
+
+    /// <summary>GET /api/user/feedbacks 回應</summary>
+    public record MyFeedbacksResponse(
+        int Total,
+        int Page,
+        int PageSize,
+        List<MyFeedbackDto> Items
     );
 
     // ════════════════════════════════════════════════════════════════
