@@ -137,3 +137,26 @@ class ZoomSlider extends StatelessWidget {
         ]),
       );
 }
+
+/// 儲存影片期間的全螢幕鎖定層：吸收所有觸控並顯示進度提示，
+/// 兩種錄影模式（一般錄製 / SHOT）共用，行為一致。
+class SavingScreenLock extends StatelessWidget {
+  final String label;
+  const SavingScreenLock({super.key, this.label = '儲存影片中…'});
+
+  @override
+  Widget build(BuildContext context) => Positioned.fill(
+        child: AbsorbPointer(
+          child: Container(
+            color: Colors.black54,
+            alignment: Alignment.center,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const CircularProgressIndicator(color: Colors.white70),
+              const SizedBox(height: 16),
+              Text(label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 16)),
+            ]),
+          ),
+        ),
+      );
+}

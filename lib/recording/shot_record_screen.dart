@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
@@ -13,6 +12,7 @@ import '../models/swing_hit.dart';
 import '../pages/video_player_page.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/audio_extraction_service.dart';
+import '../services/clip_audio_score_service.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/shot_sound_service.dart';
 import '../services/realtime_audio_service.dart';
@@ -323,15 +323,19 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         }
       },
     );
-    HapticFeedback.selectionClick();   // 輕震動確認已進入準備
     debugPrint('[RecordFlow][Shot] 05 enter addressing (waiting for address)');
     setState(() => _state = ShotState.addressing);
   }
 
-  /// 站姿確認後才真正開始錄影（站姿提示音此時已播完，不會入檔）。
+  /// 站姿確認後才真正開始錄影。
+  /// ★ 確認音採「播完才開錄」物理隔離：提示音不會被麥克風收進 mp4 音軌，
+  ///   避免污染擊球聲分類（人造短音是最響的峰值，會被誤選為擊球段）。
   Future<void> _beginRecording() async {
     if (_state != ShotState.addressing || !mounted) return;
     _addressTimeoutTimer?.cancel();
+    await _soundService.playAddressConfirmedAndWait();
+    // 等待播音期間使用者可能離開/取消，重新驗證狀態。
+    if (_state != ShotState.addressing || !mounted) return;
     debugPrint('[RecordFlow][Shot] 06 address confirmed → startRecording path=$_videoPath');
     try {
       await _camera
@@ -366,7 +370,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       Duration(seconds: _maxRecordingSec),
       () => _stopAndProcess(isTimeout: true),
     );
-    HapticFeedback.heavyImpact();   // 震動確認開始錄影
+    // ★ 不震動：開錄瞬間的馬達嗡聲/機身晃動會進 mp4 音軌與畫面（手機固定於腳架）。
     setState(() => _state = ShotState.recording);
   }
 
@@ -408,8 +412,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     _impactTimeSec = (impactTimeSec - offsetSec).clamp(0.0, double.infinity);
     // ★ 不在錄製中播放擊球快門聲：它正落在音訊分析的 ±0.25s 擊球窗口、且是最響的人造音，
     //   會被麥克風錄進 mp4 音軌 → 誤判為擊球峰值，破壞擊球聲分類。
-    //   改以震動回饋；錄製停止後的 playRecordingDone() 仍會給使用者聽覺確認。
-    HapticFeedback.heavyImpact();   // 偵測到揮桿：震動回饋（戶外不必看螢幕）
+    //   錄製中亦不震動（馬達嗡聲會入軌）；錄製停止後的 playRecordingDone() 給聽覺確認。
     // 倒數需與實際 postImpact 收尾時長一致（3.2s = 2.5s buffer + 封口餘裕）
     setState(() { _state = ShotState.postImpact; _countdown = 3.2; });
     _countdownTick = Timer.periodic(const Duration(milliseconds: 100), (t) {
@@ -518,8 +521,11 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         videoPath: _videoPath,
         outputWavPath: _audioPath,
       );
+      // tags 只有 no_audio 一種消費端（UI 無聲音 badge），對已提取的 wav
+      // 做靜音檢測即可；命中評分由 ClipAudioScoreService（5 特徵）負責。
       if (samples > 0) {
-        audioTags = await _extractAudioTags(_videoPath);  // 直接分析 mp4 音軌
+        audioTags =
+            await AudioAnalysisService.isWavSilent(_audioPath) ? ['no_audio'] : null;
       } else {
         audioTags = ['no_audio'];   // mp4 無音軌
       }
@@ -580,11 +586,27 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     }
 
     final shotNum  = _shotCount + 1;
-    final clipEntry = results.first.entry.copyWith(
+    var clipEntry = results.first.entry.copyWith(
       customName: '即時第$shotNum桿',
       audioTags:  audioTags,
       createdAt:  DateTime.now(),
     );
+
+    // 5 特徵音訊評分（甜蜜點）：clip 的 audio.wav 已由切片流程帶入，
+    // 立即評分讓卡片不需再跑「完整分析」就有命中資訊。失敗不擋存檔。
+    if (mounted) setState(() => _processingLabel = '聲音分析中…');
+    try {
+      final hit = hits.first;
+      final audioScore = await ClipAudioScoreService.analyzeWav(
+        sessionDir: p.dirname(clipEntry.filePath),
+        clipPath: clipEntry.filePath,
+        targetHitTime: (hit.hitSec - hit.startSec).clamp(0.0, 30.0),
+      );
+      clipEntry = ClipAudioScoreService.applyToEntry(clipEntry, audioScore);
+    } catch (e) {
+      debugPrint('[ShotRecord] 音訊評分失敗（略過）: $e');
+    }
+
     await RecordingHistoryStorage.instance.upsertEntry(clipEntry);
     _shotCount++;
 
@@ -628,20 +650,6 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       hitSec: impactSec, startSec: s, endSec: e,
       speedValue: 0.0, audioValue: 0.0,
     );
-  }
-
-  Future<List<String>?> _extractAudioTags(String audioPath) async {
-    try {
-      if (!File(audioPath).existsSync()) return ['no_audio'];
-      final result  = await AudioAnalysisService.analyzeVideo(audioPath);
-      final summary = result['summary'] as Map<String, dynamic>?;
-      final tags    = summary?['tags'] as List<dynamic>?;
-      if (tags != null && tags.isNotEmpty) return tags.whereType<String>().toList();
-      return null;
-    } catch (e) {
-      debugPrint('[ShotRecord] audio tags: $e');
-      return null;
-    }
   }
 
   void _showError(String msg) {
@@ -750,7 +758,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       if (!_addressConfirmed) {
         if (_isGolfAddressPosture(pose)) {
           setState(() => _addressFrames++);   // UI 顯示站姿進度
-          if (_addressFrames == 1) _soundService.playPostureDetected();
+          // 第 1 幀不提示：聽覺提示保留給「站姿確認完成」那一聲（_beginRecording），
+          // 兩聲相同 ding 會讓使用者分不清哪聲才是可以起桿；亦不震動（影響錄影）。
           if (_addressFrames >= _addressThreshold) {
             setState(() { _addressConfirmed = true; _addressFrames = 0; });
             _beginRecording();   // ★ 站姿確認 → 此刻才真正開始錄影
@@ -794,7 +803,10 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // 儲存影片期間禁止返回，避免中斷切片/音訊分析
+      canPop: _state != ShotState.processing,
+      child: Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black87,
@@ -842,7 +854,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                       _state == ShotState.postImpact)
                     const Positioned.fill(child: RecordingBorderOverlay()),
                   ..._buildStateOverlay(),
-                  ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
+                  if (_state != ShotState.processing)
+                    ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
                 ]),
               ),
             ])
@@ -850,6 +863,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
               color: Colors.black,
               child: const Center(child: CircularProgressIndicator(color: Colors.white54)),
             ),
+      ),
     );
   }
 
@@ -989,13 +1003,9 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   ];
 
   // ── processing ────────────────────────────────────────────────────────────
+  // 與一般錄製模式共用 SavingScreenLock：全螢幕吸收觸控，儲存期間鎖定畫面
   List<Widget> _processingOverlay() => [
-    Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const CircularProgressIndicator(color: Colors.white70),
-      const SizedBox(height: 16),
-      Text(_processingLabel,
-          style: const TextStyle(color: Colors.white70, fontSize: 16)),
-    ])),
+    SavingScreenLock(label: _processingLabel),
   ];
 
   // ── result ────────────────────────────────────────────────────────────────

@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'audio_analyzer.dart';
 
 class AudioAnalysisService {
   const AudioAnalysisService();
@@ -44,10 +42,6 @@ class AudioAnalysisService {
   static const int goodBadThreshold = 3;
   // Keep private alias for internal use
   static const int _goodBadThreshold = goodBadThreshold;
-
-  // Approximate Python's PEAK_REL_STRENGTH; used for simple peak counting on waveform envelope.
-  static const double _peakRelStrength = 1.0;
-  static const double _epsilon = 1e-12;
 
   // ------------------- 無聲音檢測閾值 -------------------
   static const double _silenceRmsThreshold = 0.01;    // RMS 閾值
@@ -103,138 +97,18 @@ class AudioAnalysisService {
     return (v is num) ? v.toDouble() : null;
   }
 
-  static Future<Map<String, dynamic>> analyzeVideo(String videoPath) async {
-    final Stopwatch sw = Stopwatch()..start();
-    String? wavPath;
-    try {
-      final MethodChannel ch = const MethodChannel('audio_extractor_channel');
-      final Map<dynamic, dynamic>? resp =
-          await ch.invokeMapMethod<dynamic, dynamic>('extractAudio', <String, dynamic>{'videoPath': videoPath});
-      wavPath = resp?['path'] as String?;
-    } catch (e) {
-      debugPrint('⚠️ [AudioAnalysis] Error extracting audio: $e');
-    }
-
-    if ((wavPath == null || wavPath.isEmpty) && videoPath.toLowerCase().endsWith('.wav')) {
-      wavPath = videoPath;
-    }
-
-    if (wavPath == null || wavPath.isEmpty) {
-      debugPrint('⚠️ [AudioAnalysis] No valid WAV path found.');
-      return <String, dynamic>{
-        'summary': {
-          'audio_class': 'no_audio',
-          'audio_feedback': '無聲音',
-          'tags': ['no_audio'],
-        },
-        'segments': <Map<String, dynamic>>[],
-        'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
-      };
-    }
-
+  /// 判斷 WAV 是否為無聲音（讀檔 + RMS/峰值雙閾值）。
+  /// 供錄影完成後產生 `no_audio` tag 用：擊球命中評分另由
+  /// ClipAudioScoreService（切片 5 特徵）負責，此處不做峰值/特徵分析。
+  /// 檔案不存在或解析失敗視為無聲音。
+  static Future<bool> isWavSilent(String wavPath) async {
     try {
       final _WavData wav = await _readWav(wavPath);
-      if (wav.samples.isEmpty) {
-        debugPrint('⚠️ [AudioAnalysis] WAV file contains no samples.');
-        return <String, dynamic>{
-          'summary': {
-            'audio_class': 'no_audio',
-            'audio_feedback': '無聲音',
-            'tags': ['no_audio'],
-          },
-          'segments': <Map<String, dynamic>>[],
-          'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
-        };
-      }
-
-      // 檢測無聲音
-      final bool isSilent = _isSilentAudio(wav.samples);
-      if (isSilent) {
-        debugPrint('🔇 [AudioAnalysis] Audio is silent (RMS < $_silenceRmsThreshold and Peak < $_silencePeakThreshold).');
-        return <String, dynamic>{
-          'summary': {
-            'audio_class': 'no_audio',
-            'audio_feedback': '無聲音',
-            'tags': ['no_audio'],
-          },
-          'segments': <Map<String, dynamic>>[],
-          'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
-        };
-      }
-
-      // Detect peaks and segment audio
-      final List<int> peakIndices = _detectPeaks(wav.samples, wav.sampleRate);
-      debugPrint('🎵 [AudioAnalysis] Detected ${peakIndices.length} peaks.');
-
-      final List<Map<String, dynamic>> segments = _segmentAudio(wav.samples, wav.sampleRate, peakIndices);
-      debugPrint('🎵 [AudioAnalysis] Created ${segments.length} segments.');
-
-      // Analyze each segment and find the best hit
-      Map<String, dynamic>? bestSegment;
-      double bestScore = double.infinity; // lower distance is better
-
-      for (final segment in segments) {
-        final List<double> segmentSamples = segment['samples'];
-        final AudioFeatures features = analyzeFromSamples(segmentSamples, wav.sampleRate);
-        final Map<String, dynamic> summary = features.toMap();
-        debugPrint('🎵 [AudioAnalysis] Extracted features: $summary');
-
-        final AudioScore? score = await scoreSummary(summary);
-
-        if (score != null) {
-          debugPrint('🎵 [AudioAnalysis] Segment score: ${score.distances}, Predicted class: ${score.predictedClass}');
-          final double segmentScore = score.distances.values.isEmpty
-              ? double.infinity
-              : score.distances.values.reduce((a, b) => a + b);
-          if (segmentScore < bestScore) {
-            bestScore = segmentScore;
-            bestSegment = {
-              'start_time': segment['start_time'],
-              'end_time': segment['end_time'],
-              'audio_class': score.predictedClass,
-              'audio_feedback': score.feedbackLabel,
-              'features': summary,
-              'score': segmentScore,
-              'distances': score.distances,
-              'tags': [score.predictedClass],
-            };
-          }
-        } else {
-          debugPrint('⚠️ [AudioAnalysis] Score for segment is null.');
-        }
-      }
-
-      final double elapsedSeconds = sw.elapsedMilliseconds / 1000.0;
-      
-      // 若未檢測到擊球但有聲音，標記為無有效擊球
-      if (bestSegment == null) {
-        return <String, dynamic>{
-          'summary': {
-            'audio_class': 'no_valid_hits',
-            'audio_feedback': 'No valid hits detected',
-            'tags': ['no_valid_hits'],
-          },
-          'segments': segments,
-          'analysis_seconds': elapsedSeconds,
-        };
-      }
-
-      return <String, dynamic>{
-        'summary': bestSegment,
-        'segments': segments,
-        'analysis_seconds': elapsedSeconds,
-      };
+      if (wav.samples.isEmpty) return true;
+      return _isSilentAudio(wav.samples);
     } catch (e) {
-      debugPrint('❌ [AudioAnalysis] Error during analysis: $e');
-      return <String, dynamic>{
-        'summary': {
-          'audio_class': 'error',
-          'audio_feedback': 'Analysis error',
-          'tags': ['error'],
-        },
-        'segments': <Map<String, dynamic>>[],
-        'analysis_seconds': sw.elapsedMilliseconds / 1000.0,
-      };
+      debugPrint('⚠️ [AudioAnalysis] isWavSilent error: $e');
+      return true;
     }
   }
 
@@ -262,49 +136,6 @@ class AudioAnalysisService {
     }
 
     return isSilent;
-  }
-
-  static List<int> _detectPeaks(List<double> samples, int sampleRate) {
-    final List<int> peaks = [];
-    if (samples.isEmpty) return peaks;
-    final double maxAbs = samples.map((e) => e.abs()).reduce(math.max);
-    final double threshold = math.max(_peakRelStrength * maxAbs, _epsilon);
-    // simple local-max detector with min distance ~0.35s
-    final int minDist = (0.35 * sampleRate).toInt();
-    int lastPeak = -minDist;
-    debugPrint('🎵 [AudioAnalysis] Peak detection threshold: $threshold');
-    for (int i = 1; i < samples.length - 1; i++) {
-      final double v = samples[i].abs();
-      if (v >= threshold && v >= samples[i - 1].abs() && v >= samples[i + 1].abs()) {
-        if (i - lastPeak >= minDist) {
-          peaks.add(i);
-          lastPeak = i;
-          debugPrint('🎵 [AudioAnalysis] Detected peak at index $i with value ${samples[i]}');
-        }
-      }
-    }
-    if (peaks.isEmpty) {
-      debugPrint('⚠️ [AudioAnalysis] No peaks detected. Max sample value: $maxAbs');
-    }
-    return peaks;
-  }
-
-  static List<Map<String, dynamic>> _segmentAudio(List<double> samples, int sampleRate, List<int> peakIndices) {
-    final List<Map<String, dynamic>> segments = [];
-    const double segmentDuration = 0.5; // seconds
-    final int segmentSamples = (segmentDuration * sampleRate).toInt();
-
-    for (final int peak in peakIndices) {
-      final int start = math.max(0, peak - segmentSamples ~/ 2);
-      final int end = math.min(samples.length, peak + segmentSamples ~/ 2);
-      segments.add({
-        'start_time': start / sampleRate,
-        'end_time': end / sampleRate,
-        'samples': samples.sublist(start, end),
-      });
-    }
-
-    return segments;
   }
 
 }

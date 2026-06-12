@@ -202,7 +202,7 @@ namespace UploadServer.Tests
         }
 
         [Fact]
-        public async Task Review_Reject_NoBalls_AllowsResubmit()
+        public async Task Review_Reject_NoBalls_BlocksResubmit()
         {
             await SeedUserAsync("u1");
             await _service.ClaimUploadRewardAsync("u1", [Session("/a/clip.mp4", "id1")]);
@@ -217,10 +217,10 @@ namespace UploadServer.Tests
             Assert.Equal(0, await _db.BallRecords.CountAsync());
             Assert.Equal(0, (await _db.Users.FindAsync("u1"))!.BonusBalls);
 
-            // rejected → 同 filePath 可重新提交（新列）
+            // rejected → 同 filePath 不可重新提交
             var resubmit = await _service.ClaimUploadRewardAsync("u1", [Session("/a/clip.mp4", "id2")]);
-            Assert.Equal(1, resubmit!.Pending);
-            Assert.Equal(2, await _db.DatasetUploads.CountAsync());
+            Assert.Equal(0, resubmit!.Pending);
+            Assert.Equal(1, await _db.DatasetUploads.CountAsync());
         }
 
         [Fact]

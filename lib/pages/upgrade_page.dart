@@ -28,8 +28,16 @@ extension _PlanX on _Plan {
   String get price {
     switch (this) {
       case _Plan.free:  return 'NT\$0';
-      case _Plan.pro:   return 'NT\$299';
-      case _Plan.elite: return 'NT\$599';
+      case _Plan.pro:   return 'NT\$598';
+      case _Plan.elite: return 'NT\$1,198';
+    }
+  }
+
+  String get priceYearly {
+    switch (this) {
+      case _Plan.free:  return 'NT\$0';
+      case _Plan.pro:   return 'NT\$5,980';
+      case _Plan.elite: return 'NT\$11,980';
     }
   }
 
@@ -119,11 +127,11 @@ class _BallPack {
 }
 
 const _ballPacks = <_BallPack>[
-  _BallPack(productId: 'golf_balls_1',   balls: 1,   price: 'NT\$30'),
-  _BallPack(productId: 'golf_balls_5',   balls: 5,   price: 'NT\$120'),
-  _BallPack(productId: 'golf_balls_10',  balls: 10,  price: 'NT\$199',  badge: '熱門'),
-  _BallPack(productId: 'golf_balls_50',  balls: 50,  price: 'NT\$799',  badge: '划算'),
-  _BallPack(productId: 'golf_balls_100', balls: 100, price: 'NT\$1,290', badge: '最優惠'),
+  _BallPack(productId: 'orvia_golf_balls_1',   balls: 1,   price: 'NT\$60'),
+  _BallPack(productId: 'orvia_golf_balls_5',   balls: 5,   price: 'NT\$240'),
+  _BallPack(productId: 'orvia_golf_balls_10',  balls: 10,  price: 'NT\$398',  badge: '熱門'),
+  _BallPack(productId: 'orvia_golf_balls_50',  balls: 50,  price: 'NT\$1,598', badge: '划算'),
+  _BallPack(productId: 'orvia_golf_balls_100', balls: 100, price: 'NT\$2,580', badge: '最優惠'),
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -669,15 +677,26 @@ class _PaySheet extends StatefulWidget {
 
 class _PaySheetState extends State<_PaySheet> {
   bool _loading = false;
-  // 從 Store 動態取得的商品（含正確貨幣價格）
-  ProductDetails? _productDetails;
+  bool _yearly = false;
+  // 從 Store 動態取得的商品（含正確貨幣價格），key = productId
+  final Map<String, ProductDetails> _products = {};
   bool _queryingProduct = true;
 
-  String get _productId => switch (widget.plan) {
-    _Plan.pro   => 'golf_pro_monthly',
-    _Plan.elite => 'golf_elite_monthly',
+  String get _monthlyId => switch (widget.plan) {
+    _Plan.pro   => 'orvia_golf_pro_monthly',
+    _Plan.elite => 'orvia_golf_elite_monthly',
     _Plan.free  => '',
   };
+
+  String get _yearlyId => switch (widget.plan) {
+    _Plan.pro   => 'orvia_golf_pro_yearly',
+    _Plan.elite => 'orvia_golf_elite_yearly',
+    _Plan.free  => '',
+  };
+
+  String get _productId => _yearly ? _yearlyId : _monthlyId;
+
+  ProductDetails? get _productDetails => _products[_productId];
 
   @override
   void initState() {
@@ -685,7 +704,7 @@ class _PaySheetState extends State<_PaySheet> {
     _queryProduct();
   }
 
-  /// 開啟 sheet 時就先 query，取得含當地貨幣的正確價格
+  /// 開啟 sheet 時就先 query 月/年兩個商品，取得含當地貨幣的正確價格
   Future<void> _queryProduct() async {
     setState(() => _queryingProduct = true);
     try {
@@ -694,12 +713,13 @@ class _PaySheetState extends State<_PaySheet> {
         setState(() => _queryingProduct = false);
         return;
       }
-      final response = await InAppPurchase.instance.queryProductDetails({_productId});
+      final response = await InAppPurchase.instance
+          .queryProductDetails({_monthlyId, _yearlyId});
       if (mounted) {
         setState(() {
-          _productDetails = response.productDetails.isNotEmpty
-              ? response.productDetails.first
-              : null;
+          for (final p in response.productDetails) {
+            _products[p.id] = p;
+          }
           _queryingProduct = false;
         });
       }
@@ -729,7 +749,9 @@ class _PaySheetState extends State<_PaySheet> {
   /// 顯示的價格：優先用 Store 回傳的本地貨幣，fallback 用 hardcode
   String get _displayPrice {
     if (_productDetails != null) return _productDetails!.price;
-    return '${widget.plan.price}${widget.plan.period}';
+    return _yearly
+        ? '${widget.plan.priceYearly}/年'
+        : '${widget.plan.price}${widget.plan.period}';
   }
 
   @override
@@ -763,6 +785,25 @@ class _PaySheetState extends State<_PaySheet> {
                   ],
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+            // 月繳 / 年繳 切換
+            Center(
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('月繳')),
+                  ButtonSegment(value: true, label: Text('年繳（享約 2 個月折扣）')),
+                ],
+                selected: {_yearly},
+                onSelectionChanged: _loading
+                    ? null
+                    : (s) => setState(() => _yearly = s.first),
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor:
+                      widget.plan.primaryColor.withValues(alpha: 0.15),
+                  selectedForegroundColor: widget.plan.primaryColor,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             const Divider(),

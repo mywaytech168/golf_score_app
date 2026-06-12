@@ -488,9 +488,10 @@ class MainActivity: FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         val hitSec = call.argument<Double>("hitSec")
+                        val golferBox = call.argument<List<Int>>("golferBox")
                         ballTrajExecutor.execute {
                             try {
-                                val data = ballYoloExtractor.findP0Sahi(inputPath, hitSec = hitSec, onProgress = ::sendProgress)
+                                val data = ballYoloExtractor.findP0Sahi(inputPath, hitSec = hitSec, golferBox = golferBox, onProgress = ::sendProgress)
                                 runOnUiThread { result.success(data) }  // null = 未找到 P0（Dart 端 fallback 不種子）
                             } catch (e: Exception) {
                                 Log.e(logTag, "findBallP0 例外: ${e.message}", e)

@@ -80,7 +80,7 @@ namespace UploadServer.Tests
             var service = CreateService(testMode: true);
 
             var resp = await service.PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_999", "google_play", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_999", "google_play", "test_purchased"));
 
             Assert.False(resp.Success);
         }
@@ -92,7 +92,7 @@ namespace UploadServer.Tests
             var service = CreateService(testMode: true);
 
             var resp = await service.PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_10", "google_play", ""));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "google_play", ""));
 
             Assert.False(resp.Success);
         }
@@ -104,7 +104,7 @@ namespace UploadServer.Tests
             var service = CreateService(testMode: true);
 
             var resp = await service.PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_10", "unknown_store", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "unknown_store", "test_purchased"));
 
             Assert.False(resp.Success);
         }
@@ -116,7 +116,7 @@ namespace UploadServer.Tests
             var service = CreateService(testMode: true);
 
             var resp = await service.PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_10", "google_play", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "google_play", "test_purchased"));
 
             Assert.True(resp.Success);
             Assert.Equal(10, resp.BallsAdded);
@@ -125,7 +125,7 @@ namespace UploadServer.Tests
             var record = await _db.PurchaseRecords.SingleAsync();
             Assert.Equal(PurchaseStatus.Verified, record.Status);
             Assert.Equal("balls", record.Plan);
-            Assert.Equal("golf_balls_10", record.ProductId);
+            Assert.Equal("orvia_golf_balls_10", record.ProductId);
         }
 
         [Fact]
@@ -135,7 +135,7 @@ namespace UploadServer.Tests
             var service = CreateService(testMode: false);  // 無 ServiceAccountJson → 驗證必失敗
 
             var resp = await service.PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_100", "google_play", "fake_token"));
+                new PurchaseBallsRequest("orvia_golf_balls_100", "google_play", "fake_token"));
 
             Assert.False(resp.Success);
             var user = await _db.Users.FindAsync("u1");
@@ -150,12 +150,12 @@ namespace UploadServer.Tests
             await SeedUserAsync();
             // 先以測試模式入帳一筆
             var resp1 = await CreateService(testMode: true).PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_10", "google_play", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "google_play", "test_purchased"));
             Assert.True(resp1.Success);
 
             // 再以正式模式重送同一 token：應冪等回應、不重複加值
             var resp2 = await CreateService(testMode: false).PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_10", "google_play", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "google_play", "test_purchased"));
 
             Assert.True(resp2.Success);
             Assert.Equal(0, resp2.BallsAdded);
@@ -170,11 +170,11 @@ namespace UploadServer.Tests
             await SeedUserAsync("u2");
 
             var resp1 = await CreateService(testMode: true).PurchaseBallsAsync("u1",
-                new PurchaseBallsRequest("golf_balls_10", "google_play", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "google_play", "test_purchased"));
             Assert.True(resp1.Success);
 
             var resp2 = await CreateService(testMode: false).PurchaseBallsAsync("u2",
-                new PurchaseBallsRequest("golf_balls_10", "google_play", "test_purchased"));
+                new PurchaseBallsRequest("orvia_golf_balls_10", "google_play", "test_purchased"));
 
             Assert.False(resp2.Success);
             var u2 = await _db.Users.FindAsync("u2");

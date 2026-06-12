@@ -588,9 +588,10 @@ class ClipPipelineService {
     void listenBlobs() => onProgress?.call(progressSvc.progress.value.$2);
     progressSvc.progress.addListener(listenBlobs);
     final extraction = await BallTrajectoryService.extractBlobs(inputPath: clipPath);
-    progressSvc.progress.removeListener(listenBlobs);
+    // listener 不在此移除：findBallP0（p0-SAHI）也會發進度，避免 UI 在 P0 偵測期間看似卡死
 
     if (extraction == null) {
+      progressSvc.progress.removeListener(listenBlobs);
       debugPrint('[Pipeline.analyze] ❌ blob 提取失敗，略過球軌跡');
     } else {
       debugPrint('[Pipeline.analyze] ✅ blob 提取完成：'
@@ -609,9 +610,12 @@ class ClipPipelineService {
         );
       }
 
+      onProgress?.call('偵測球起點中...');
+      progressSvc.reset('P0 偵測中...');
       final seed = await BallTrajectoryService.findBallP0(
-        inputPath: clipPath, hitSec: hitSec,
+        inputPath: clipPath, hitSec: hitSec, golferBox: golferBox,
       );
+      progressSvc.progress.removeListener(listenBlobs);
 
       final trackPts = BallTracker().track(
         frames:      extraction.frames,

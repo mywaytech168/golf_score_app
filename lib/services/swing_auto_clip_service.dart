@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/recording_history_entry.dart';
 import '../models/swing_hit.dart';
+import 'clip_audio_score_service.dart';
 import 'clip_pipeline_service.dart';
 import 'golf_analysis_service.dart';
 import 'recording_history_storage.dart';
@@ -119,6 +120,7 @@ class SwingAutoClipService {
   }
 
   /// 對單一 5 秒 clip 跑逐幀骨架分析，並以 clip CSV 重新定位精確擊球點與 8 階段。
+  /// 之後對 clip 的 audio.wav 跑 5 特徵音訊評分（甜蜜點），結果寫入 entry。
   /// （公開供「偵測擊球」V2 流程於切片後背景補分析）
   static Future<RecordingHistoryEntry> analyzeClipEntry(
       RecordingHistoryEntry entry) async {
@@ -130,11 +132,13 @@ class SwingAutoClipService {
       sessionDir: clipDir,
       durationSeconds: entry.durationSeconds.clamp(1, 30),
     );
-    if (basic == null || !File(csvPath).existsSync()) return entry;
+    if (basic == null || !File(csvPath).existsSync()) {
+      return scoreClipAudio(entry);
+    }
 
     final phaseHits = await SwingImpactDetector.detect(csvPath: csvPath);
     if (phaseHits.isEmpty) {
-      return entry.copyWith(isAnalyzed: true);
+      return scoreClipAudio(entry.copyWith(isAnalyzed: true));
     }
     final hit = phaseHits.first;
     await ClipPipelineService.savePhasesJson(
@@ -142,7 +146,25 @@ class SwingAutoClipService {
       hit: hit,
       clipActualStartSec: 0.0,  // clip CSV 為 clip 相對時間
     );
-    return entry.copyWith(hitSecond: hit.hitSec, isAnalyzed: true);
+    return scoreClipAudio(
+        entry.copyWith(hitSecond: hit.hitSec, isAnalyzed: true));
+  }
+
+  /// 對 clip 的 audio.wav 跑 5 特徵音訊評分並寫入 entry（失敗回傳原 entry）。
+  static Future<RecordingHistoryEntry> scoreClipAudio(
+      RecordingHistoryEntry entry) async {
+    try {
+      final clipDir = p.dirname(entry.filePath);
+      final result = await ClipAudioScoreService.analyzeWav(
+        sessionDir: clipDir,
+        clipPath: entry.filePath,
+        targetHitTime: entry.hitSecond,
+      );
+      return ClipAudioScoreService.applyToEntry(entry, result);
+    } catch (e) {
+      debugPrint('[AutoClip] 音訊評分失敗（略過）: $e');
+      return entry;
+    }
   }
 
   // ── 候選合併：骨架偵測為主，音訊峰值僅做時間精修 ─────────────────────────

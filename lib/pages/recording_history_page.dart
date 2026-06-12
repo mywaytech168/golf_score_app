@@ -25,9 +25,8 @@ import '../services/clip_pipeline_service.dart';
 import '../services/golf_analysis_service.dart';
 import '../services/analysis_progress_service.dart';
 import '../services/video_analysis_pipeline_service.dart';
-import '../services/audio_export_service.dart';
 import '../services/audio_export_models.dart';
-import '../services/audio_extraction_service.dart';
+import '../services/clip_audio_score_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/ad_service.dart';
 import '../services/reward_service.dart';
@@ -92,80 +91,19 @@ String? _buildAudioAnalysisJson(RecordingHistoryEntry entry) {
 }
 
 /// 讀取 sessionDir/audio.wav（不存在則從 clipPath 萃取），解析 PCM 並回傳音訊分析結果。
-/// [targetHitTime] 為擊球時刻相對 clip 起點的秒數，傳入可提升分析精度。
-/// 失敗或無音訊時回傳 null，內部捕捉例外不向外拋。
+/// 已抽出為 ClipAudioScoreService 共用（SHOT 模式 / 自動切片同套邏輯），此處保留轉呼叫。
 Future<AudioAnalysisResult?> _analyzeWavFile({
   required String sessionDir,
   required String clipPath,
   required void Function(double progress, String message) onProgress,
   double? targetHitTime,
-}) async {
-  final wavFile = File(p.join(sessionDir, 'audio.wav'));
-  var wavExists = await wavFile.exists();
-
-  if (!wavExists) {
-    onProgress(0.72, '提取音頻中...');
-    final samplesExtracted = await AudioExtractionService.extractAudioFromVideo(
-      videoPath: clipPath,
-      outputWavPath: wavFile.path,
-      onProgress: (progress, message) {
-        onProgress(0.72 + progress * 0.08, message);
-      },
-    );
-    if (samplesExtracted > 0) wavExists = await wavFile.exists();
-  }
-
-  if (!wavExists) return null;
-
-  try {
-    final bytes = await wavFile.readAsBytes();
-    if (bytes.length < 44) return null;
-
-    final wavHd        = bytes.buffer.asByteData();
-    final wavChannels  = wavHd.getUint16(22, Endian.little);
-    final wavSampleRate = wavHd.getUint32(24, Endian.little);
-    final wavBlockAlign = wavHd.getUint16(32, Endian.little);
-
-    // 掃描 'data' chunk，跳過可能的中繼 chunks
-    int dataStart = 44;
-    for (int i = 36; i < bytes.length - 8; i++) {
-      if (bytes[i] == 100 && bytes[i+1] == 97 && bytes[i+2] == 116 && bytes[i+3] == 97) {
-        dataStart = i + 8;
-        break;
-      }
-    }
-
-    final stride = wavBlockAlign > 0 ? wavBlockAlign : 2;
-    final audioDataLen = bytes.length - dataStart;
-    final pcmSamples = <double>[];
-    for (int i = 0; i + stride <= audioDataLen; i += stride) {
-      double frameVal = 0.0;
-      for (int ch = 0; ch < wavChannels; ch++) {
-        final offset = dataStart + i + ch * 2;
-        if (offset + 1 >= bytes.length) break;
-        final raw    = bytes[offset] | (bytes[offset + 1] << 8);
-        final signed = (raw > 32767) ? raw - 65536 : raw;
-        frameVal += signed / 32768.0;
-      }
-      pcmSamples.add(frameVal / wavChannels);
-    }
-
-    if (pcmSamples.isEmpty) return null;
-
-    return await AudioExportService.analyzeFromPcm(
-      pcmSamples: pcmSamples,
+}) =>
+    ClipAudioScoreService.analyzeWav(
       sessionDir: sessionDir,
-      sampleRate: wavSampleRate,
-      targetHitTime: targetHitTime?.clamp(0.0, 300.0) ?? 3.0,
-      onProgress: (progress) {
-        onProgress(0.8 + progress.progress * 0.2, progress.message);
-      },
+      clipPath: clipPath,
+      targetHitTime: targetHitTime,
+      onProgress: onProgress,
     );
-  } catch (e) {
-    debugPrint('[音頻分析] 異常：$e');
-    return null;
-  }
-}
 
 /// 錄影歷史獨立頁面：集中顯示所有曾經錄影的檔案，供使用者重播或挑選外部影片
 class RecordingHistoryPage extends StatefulWidget {
@@ -1669,9 +1607,48 @@ class _HistoryTileState extends State<_HistoryTile> {
         return;
       }
 
+      // ── 切片前確認：逐段預覽、勾選保留、自由切片（與 V2/V3 一致）────
+      final totalDur = widget.entry.durationSeconds.toDouble();
+      progressNotifier.value = (0.5, '等待確認片段...');
+      if (!mounted) return;
+      final selection = await showClipCandidatesSheet(
+        context,
+        videoPath: widget.entry.filePath,
+        durationSeconds: totalDur,
+        candidates: [for (final h in hits) (sec: h.hitSec, fromAudio: false)],
+      );
+      if (selection == null || selection.isEmpty) {
+        navigator.pop();
+        if (mounted) setState(() => _isDetecting = false);
+        return;
+      }
+
+      // 以 hitSec 對回原 hit，保留偵測出的速度/階段/幀資訊
+      final keptSecs = selection.candidates.map((c) => c.sec).toSet();
+      final selectedHits = [
+        for (final h in hits)
+          if (keptSecs.contains(h.hitSec)) h,
+      ];
+      // 自由切片區段：直接以使用者選的起迄裁切（無骨架資訊）
+      var nextIndex = selectedHits.isEmpty
+          ? 1
+          : selectedHits.map((h) => h.hitIndex).reduce(math.max) + 1;
+      for (final r in selection.manualRanges) {
+        final mid = (r.startSec + r.endSec) / 2;
+        selectedHits.add(SwingHit(
+          hitIndex:   nextIndex++,
+          hitFrame:   (mid * 30).round(),
+          hitSec:     mid,
+          startSec:   r.startSec,
+          endSec:     r.endSec,
+          speedValue: 0.0,
+          audioValue: 0.0,
+        ));
+      }
+
       // 4. 依序裁切
       final results = await ClipPipelineService.run(
-        hits: hits,
+        hits: selectedHits,
         srcVideoPath: widget.entry.filePath,
         sourceEntry: widget.entry,
         onProgress: (prog) {
@@ -5072,7 +5049,7 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
   Navigator.of(context, rootNavigator: true).pop();
 
   try {
-    await RewardService.claimUploadReward(sessions: [
+    final pending = await RewardService.claimUploadReward(sessions: [
       {
         'filePath':        entry.filePath,
         'recordedAt':      entry.recordedAt.toIso8601String(),
@@ -5084,9 +5061,20 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
         'uploadId':        uploadId,
       },
     ]);
-    // isUploaded 標記：防止重複提交。若該筆日後被審核「拒絕」，
-    // server 端允許同 filePath 重新提交，但 App 端的重送流程暫不實作
-    //（需先清除 isUploaded 標記），先以後台溝通處理。
+    // pending=0 = 送審未建立（網路失敗或同檔已提交過，含被拒絕者——
+    // 審核制不允許重送），不標記 isUploaded，讓使用者可在排除問題後重試。
+    if (pending == 0) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('送審未成功：此影片可能已提交過（含審核未通過者不可重送），'
+              '或網路異常請稍後再試'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return null;
+    }
+    // isUploaded 標記：防止重複提交（被拒絕者依政策不開放重送）。
     final updated = entry.copyWith(isUploaded: true);
     await RecordingHistoryStorage.instance.upsertEntry(updated);
     if (context.mounted) {

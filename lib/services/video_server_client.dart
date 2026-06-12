@@ -353,7 +353,7 @@ class VideoServerClient {
 
   /// 購買球數包（consumable 內購）
   ///
-  /// [productId] - 'golf_balls_1' | 'golf_balls_5' | 'golf_balls_10' | 'golf_balls_50' | 'golf_balls_100'
+  /// [productId] - 'orvia_golf_balls_1' | 'orvia_golf_balls_5' | 'orvia_golf_balls_10' | 'orvia_golf_balls_50' | 'orvia_golf_balls_100'
   /// [store]     - 'google_play' | 'app_store'
   Future<Map<String, dynamic>?> purchaseBalls(
     String productId,

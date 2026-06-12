@@ -10,19 +10,24 @@ import 'video_server_client.dart';
 
 // ── 商品 ID 對照 ────────────────────────────────────────────────
 
-const _kProMonthly   = 'golf_pro_monthly';
-const _kEliteMonthly = 'golf_elite_monthly';
+const _kProMonthly   = 'orvia_golf_pro_monthly';
+const _kEliteMonthly = 'orvia_golf_elite_monthly';
+const _kProYearly    = 'orvia_golf_pro_yearly';
+const _kEliteYearly  = 'orvia_golf_elite_yearly';
 
 // 球數包（consumable）
-const _kBalls1   = 'golf_balls_1';
-const _kBalls5   = 'golf_balls_5';
-const _kBalls10  = 'golf_balls_10';
-const _kBalls50  = 'golf_balls_50';
-const _kBalls100 = 'golf_balls_100';
+const _kBalls1   = 'orvia_golf_balls_1';
+const _kBalls5   = 'orvia_golf_balls_5';
+const _kBalls10  = 'orvia_golf_balls_10';
+const _kBalls50  = 'orvia_golf_balls_50';
+const _kBalls100 = 'orvia_golf_balls_100';
 
 const _kBallPackIds = {_kBalls1, _kBalls5, _kBalls10, _kBalls50, _kBalls100};
 
-const _kProductIds = {_kProMonthly, _kEliteMonthly, ..._kBallPackIds};
+const _kProductIds = {
+  _kProMonthly, _kEliteMonthly, _kProYearly, _kEliteYearly,
+  ..._kBallPackIds,
+};
 
 // ── 事件通知 ────────────────────────────────────────────────────
 
@@ -297,7 +302,9 @@ class InAppPurchaseService {
   }
 
   UserPlan _planFromProductId(String productId) {
-    if (productId == _kEliteMonthly) return UserPlan.elite;
+    if (productId == _kEliteMonthly || productId == _kEliteYearly) {
+      return UserPlan.elite;
+    }
     return UserPlan.pro;
   }
 }

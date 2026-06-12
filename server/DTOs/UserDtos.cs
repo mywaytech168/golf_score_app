@@ -113,6 +113,7 @@ namespace UploadServer.DTOs
         int Total,
         int PendingCount,
         int ApprovedCount,
+        int RejectedCount,
         int Page,
         int PageSize,
         List<MyDatasetUploadDto> Items);
@@ -139,7 +140,7 @@ namespace UploadServer.DTOs
 
     /// <summary>
     /// POST /api/user/balls/purchase 請求
-    /// productId: "golf_balls_1" | "golf_balls_5" | "golf_balls_10" | "golf_balls_50" | "golf_balls_100"
+    /// productId: "orvia_golf_balls_1" | "orvia_golf_balls_5" | "orvia_golf_balls_10" | "orvia_golf_balls_50" | "orvia_golf_balls_100"
     /// store: "google_play" | "app_store"
     /// </summary>
     public record PurchaseBallsRequest(string ProductId, string Store, string PurchaseToken);

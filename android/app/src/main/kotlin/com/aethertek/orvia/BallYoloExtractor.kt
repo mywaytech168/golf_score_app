@@ -508,6 +508,7 @@ class BallYoloExtractor(assetManager: AssetManager) {
     fun findP0Sahi(
         inputPath: String,
         hitSec: Double? = null,
+        golferBox: List<Int>? = null,  // coded 空間 [x1,y1,x2,y2]，提供時掃描範圍縮小到打者附近
         onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
     ): Map<String, Any>? {
         if (!detector.isLoaded) { Log.w(TAG, "[p0Sahi] model not loaded"); return null }
@@ -539,6 +540,24 @@ class BallYoloExtractor(assetManager: AssetManager) {
         val winStart = if (hitFrame >= 0) (hitFrame - preWindow).coerceAtLeast(0) else 0
         val winEnd   = if (hitFrame >= 0) hitFrame else 20
 
+        // seek 到窗口前最近的關鍵幀，省掉從 frame 0 起的整段解碼
+        if (winStart > 0 && fps > 0) {
+            extractor.seekTo((winStart / fps * 1_000_000).toLong(), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        }
+
+        // 掃描範圍：有 golferBox 時只掃打者附近（球在打者腳邊，最遠約半個身高/身寬），
+        // coded 空間方向隨 rotation 而異，故四向對稱外擴最保險；無 box 時整幀。
+        var scanX1 = 0; var scanY1 = 0; var scanX2 = videoW - 1; var scanY2 = videoH - 1
+        if (golferBox != null && golferBox.size == 4) {
+            val bw = (golferBox[2] - golferBox[0]).coerceAtLeast(1)
+            val bh = (golferBox[3] - golferBox[1]).coerceAtLeast(1)
+            scanX1 = (golferBox[0] - bw / 2).coerceAtLeast(0)
+            scanY1 = (golferBox[1] - bh / 2).coerceAtLeast(0)
+            scanX2 = (golferBox[2] + bw / 2).coerceAtMost(videoW - 1)
+            scanY2 = (golferBox[3] + bh / 2).coerceAtMost(videoH - 1)
+            Log.d(TAG, "[p0Sahi] golferBox=$golferBox → scanRect=[$scanX1,$scanY1,$scanX2,$scanY2]")
+        }
+
         val decoder = try { MediaCodec.createDecoderByType(videoMime) }
         catch (e: Exception) { Log.e(TAG, "[p0Sahi] decoder fail: $e"); extractor.release(); return null }
         decoder.configure(inputFormat, null, null, 0)
@@ -550,7 +569,10 @@ class BallYoloExtractor(assetManager: AssetManager) {
         val clusters = mutableListOf<DoubleArray>()
         val bufInfo  = MediaCodec.BufferInfo()
         var inputEos = false
-        var frameCount = 0
+        var scanned  = 0
+        // 隔幀抽樣：群聚判定 4~5 幀已足，再省一半推論
+        val frameStride = 2
+        val totalToScan = ((winEnd - winStart) / frameStride + 1).coerceAtLeast(1)
 
         fun addDet(cx: Float, cy: Float, conf: Float, frame: Int) {
             for (c in clusters) {
@@ -584,18 +606,23 @@ class BallYoloExtractor(assetManager: AssetManager) {
                 val eos = (bufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                 val image = runCatching { decoder.getOutputImage(outIdx) }.getOrNull()
 
-                if (image != null && frameCount in winStart..winEnd) {
+                // seek 後不能從 0 數幀，改由 pts 推回幀號
+                val frameIdx = Math.round(bufInfo.presentationTimeUs * fps / 1_000_000.0).toInt()
+                val inWindow = frameIdx in winStart..winEnd && (frameIdx - winStart) % frameStride == 0
+                if (image != null && inWindow) {
                     try {
                         val yP = image.planes[0]; val uP = image.planes[1]; val vP = image.planes[2]
                         val yb = yP.buffer; val ub = uP.buffer; val vb = vP.buffer
                         val yn = yb.remaining(); if (yRawBuf.size < yn) yRawBuf = ByteArray(yn); yb.get(yRawBuf, 0, yn)
                         val un = ub.remaining(); if (uRawBuf.size < un) uRawBuf = ByteArray(un); ub.get(uRawBuf, 0, un)
                         val vn = vb.remaining(); if (vRawBuf.size < vn) vRawBuf = ByteArray(vn); vb.get(vRawBuf, 0, vn)
-                        // 整幀網格掃描
+                        // 網格掃描（只掃與 scanRect 相交的 tile）
                         var ty = half
                         while (ty <= videoH - half) {
+                            if (ty + half < scanY1 || ty - half > scanY2) { ty += step; continue }
                             var tx = half
                             while (tx <= videoW - half) {
+                                if (tx + half < scanX1 || tx - half > scanX2) { tx += step; continue }
                                 val dets = detector.detect(
                                     yRawBuf, yP.rowStride,
                                     uRawBuf, uP.rowStride, uP.pixelStride,
@@ -604,18 +631,20 @@ class BallYoloExtractor(assetManager: AssetManager) {
                                     confThreshold = 0.20f,
                                     tileEdgeMargin = 20f,
                                 )
-                                for (d in dets) addDet(d[0], d[1], d[4], frameCount)
+                                for (d in dets) addDet(d[0], d[1], d[4], frameIdx)
                                 tx += step
                             }
                             ty += step
                         }
+                        scanned++
+                        onProgress?.invoke("findP0Sahi", scanned.toDouble() / totalToScan,
+                            "P0 偵測中...", scanned, totalToScan)
                     } finally { image.close() }
                 } else {
                     image?.close()
                 }
                 decoder.releaseOutputBuffer(outIdx, false)
-                frameCount++
-                if (frameCount > winEnd || eos) break
+                if (frameIdx >= winEnd || eos) break
             }
         } catch (e: Exception) {
             Log.e(TAG, "[p0Sahi] decode error: $e", e)

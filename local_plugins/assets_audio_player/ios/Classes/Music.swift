@@ -515,15 +515,17 @@ public class Player : NSObject, AVAudioPlayerDelegate {
             print("url: " + url.absoluteString)
             
             /* set session category and mode with options */
-            if #available(iOS 10.0, *) {
-                //try AVAudioSession.sharedInstance().setCategory(category, mode: mode, options: [.mixWithOthers])
-                try AVAudioSession.sharedInstance().setCategory(category, mode: .default, options: [])
-                try AVAudioSession.sharedInstance().setActive(true)
-            } else {
-                
-                try AVAudioSession.sharedInstance().setCategory(category)
-                try AVAudioSession.sharedInstance().setActive(true)
-                
+            // 錄影中（MediaPipeCameraChannel 已設 .playAndRecord + mic 佔用）切換類別會
+            // throw 導致整段 open 失敗、提示聲無聲；此時保留現有 session 直接播放即可。
+            let sharedSession = AVAudioSession.sharedInstance()
+            if sharedSession.category != .playAndRecord {
+                if #available(iOS 10.0, *) {
+                    try sharedSession.setCategory(category, mode: .default, options: [.mixWithOthers])
+                    try sharedSession.setActive(true)
+                } else {
+                    try sharedSession.setCategory(category)
+                    try sharedSession.setActive(true)
+                }
             }
             #endif
             

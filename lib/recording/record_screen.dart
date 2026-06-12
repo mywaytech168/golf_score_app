@@ -64,6 +64,7 @@ class _RecordScreenState extends State<RecordScreen> {
 
   bool _recording  = false;
   bool get _isRecording => _recording;
+  bool _saving     = false;   // 停止錄影後的儲存階段：鎖定整個畫面
   int  _frameCount = 0;
   DateTime? _recordingStart;
   Duration  _elapsed = Duration.zero;
@@ -238,39 +239,45 @@ class _RecordScreenState extends State<RecordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black87,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: const Text('高爾夫揮桿錄製'),
-        actions: [
-          IconButton(
-            tooltip: '輪廓疊加切換',
-            icon: Icon(Icons.person_outline_rounded,
-                color: _showOverlay ? Colors.greenAccent : Colors.white38),
-            onPressed: () => setState(() => _showOverlay = !_showOverlay),
-          ),
-          // Skeleton visibility controlled natively (always shown when pose detected)
-          IconButton(
-            tooltip: '錄製設定',
-            icon: const Icon(Icons.settings_rounded),
-            onPressed: _isRecording ? null : _showSettingsSheet,
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: _cameraReady
-          ? Stack(fit: StackFit.expand, children: [
-              _camera.buildPreviewWidget(),
-              _buildOverlay(),
-            ])
-          : Container(
-              color: Colors.black,
-              child: const Center(
-                  child: CircularProgressIndicator(color: Colors.white54)),
+    return PopScope(
+      // 儲存影片期間禁止返回，避免中斷音訊抽取/縮圖/入庫
+      canPop: !_saving,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black87,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          title: const Text('高爾夫揮桿錄製'),
+          actions: [
+            IconButton(
+              tooltip: '輪廓疊加切換',
+              icon: Icon(Icons.person_outline_rounded,
+                  color: _showOverlay ? Colors.greenAccent : Colors.white38),
+              onPressed:
+                  _saving ? null : () => setState(() => _showOverlay = !_showOverlay),
             ),
+            // Skeleton visibility controlled natively (always shown when pose detected)
+            IconButton(
+              tooltip: '錄製設定',
+              icon: const Icon(Icons.settings_rounded),
+              onPressed: (_isRecording || _saving) ? null : _showSettingsSheet,
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+        body: _cameraReady
+            ? Stack(fit: StackFit.expand, children: [
+                _camera.buildPreviewWidget(),
+                _buildOverlay(),
+                if (_saving) const SavingScreenLock(),
+              ])
+            : Container(
+                color: Colors.black,
+                child: const Center(
+                    child: CircularProgressIndicator(color: Colors.white54)),
+              ),
+      ),
     );
   }
 
@@ -449,6 +456,7 @@ class _RecordScreenState extends State<RecordScreen> {
     }
     _elapsedTimer?.cancel();
     _recording = false;
+    if (mounted) setState(() => _saving = true);   // 停止→儲存完成前鎖定畫面
     var recordOk = true;
     try {
       recordOk = await _camera
@@ -467,6 +475,7 @@ class _RecordScreenState extends State<RecordScreen> {
     if (!recordOk) {
       // 丟棄 CSV/audio，提示重錄，並重新 pre-warm 下一次
       try { await _audioService.stop(); } catch (_) {}
+      if (mounted) setState(() => _saving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('本次錄製失敗（未取得有效影像），請重新錄製'),
@@ -509,8 +518,11 @@ class _RecordScreenState extends State<RecordScreen> {
         videoPath: _videoPath,
         outputWavPath: _audioPath,
       );
+      // tags 只有 no_audio 一種消費端（UI 無聲音 badge），對已提取的 wav
+      // 做靜音檢測即可；命中評分由切片流程的 5 特徵分析負責。
       if (samples > 0) {
-        audioTags = await _extractAudioTags(_videoPath);  // 直接分析 mp4 音軌
+        audioTags =
+            await AudioAnalysisService.isWavSilent(_audioPath) ? ['no_audio'] : null;
       } else {
         audioTags = ['no_audio'];   // mp4 無音軌
       }
@@ -559,25 +571,12 @@ class _RecordScreenState extends State<RecordScreen> {
     } catch (e) {
       debugPrint('[RecordScreen] finishRecording error: $e');
     } finally {
+      if (mounted) setState(() => _saving = false);
       // 錄製完全結束後，才準備下一次 pre-warm。
       // 不能在 startRecording 前做，否則會覆蓋 native preparedRecPath。
       if (mounted && !_recording) {
         unawaited(_preWarmRecordingSession());
       }
-    }
-  }
-
-  Future<List<String>?> _extractAudioTags(String audioPath) async {
-    try {
-      if (!File(audioPath).existsSync()) return ['no_audio'];
-      final result  = await AudioAnalysisService.analyzeVideo(audioPath);
-      final summary = result['summary'] as Map<String, dynamic>?;
-      final tags    = summary?['tags'] as List<dynamic>?;
-      if (tags != null && tags.isNotEmpty) return tags.whereType<String>().toList();
-      return null;
-    } catch (e) {
-      debugPrint('[RecordScreen] audio tag error: $e');
-      return null;
     }
   }
 

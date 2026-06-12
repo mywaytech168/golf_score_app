@@ -384,13 +384,6 @@ namespace UploadServer.Services
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return null;
 
-            var today = Today;
-            if (user.FeedbackClaimedDate == today)
-            {
-                _logger.LogWarning("用戶 {UserId} 今日已提交回饋", userId);
-                return new FeedbackRewardResponse(0);
-            }
-
             if (string.IsNullOrWhiteSpace(text) || text.Length > 2000)
                 return new FeedbackRewardResponse(0);
 
@@ -408,22 +401,29 @@ namespace UploadServer.Services
                 AttachedImageB2Key  = safeImageB2Key,
             });
 
-            user.FeedbackClaimedDate = today;
-            user.BonusBalls         += FeedbackBalls;
-
-            _db.BallRecords.Add(new BallRecord
+            // 回饋永遠可提交並儲存；獎勵每日僅發一次（已領過 → balls=0 但照存）
+            var today        = Today;
+            var rewardBalls  = 0;
+            if (user.FeedbackClaimedDate != today)
             {
-                UserId       = userId,
-                Reason       = BallReason.Feedback,
-                Delta        = FeedbackBalls,
-                BalanceAfter = user.BonusBalls,
-                CreatedAt    = DateTime.UtcNow,
-            });
+                user.FeedbackClaimedDate = today;
+                user.BonusBalls         += FeedbackBalls;
+                rewardBalls              = FeedbackBalls;
+
+                _db.BallRecords.Add(new BallRecord
+                {
+                    UserId       = userId,
+                    Reason       = BallReason.Feedback,
+                    Delta        = FeedbackBalls,
+                    BalanceAfter = user.BonusBalls,
+                    CreatedAt    = DateTime.UtcNow,
+                });
+            }
 
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("用戶 {UserId} 回饋獎勵 +{Balls} 球", userId, FeedbackBalls);
-            return new FeedbackRewardResponse(FeedbackBalls);
+            _logger.LogInformation("用戶 {UserId} 提交回饋，獎勵 +{Balls} 球", userId, rewardBalls);
+            return new FeedbackRewardResponse(rewardBalls);
         }
 
         /// <summary>
@@ -462,8 +462,8 @@ namespace UploadServer.Services
         /// <summary>
         /// 審核制：提交上傳資料 → 建立 pending 列，不立即發球；
         /// 後台核准（ReviewDatasetUploadAsync）後才發 +3 球。
-        /// 去重：同 user + ClientFilePath 已有 pending / approved 列 → 跳過；
-        /// rejected 允許重新提交（新列）。
+        /// 去重：同 user + ClientFilePath 已有任何狀態的列（含 rejected）→ 跳過，
+        /// 不允許重新提交。
         /// </summary>
         public async Task<UploadRewardResponse?> ClaimUploadRewardAsync(
             string userId, List<SessionDataDto> sessions)
@@ -474,12 +474,11 @@ namespace UploadServer.Services
             if (sessions.Count == 0)
                 return new UploadRewardResponse(0, 0);
 
-            // ── 去重：同 user + 同 ClientFilePath 已有 pending / approved 列者跳過 ──
+            // ── 去重：同 user + 同 ClientFilePath 已有任何狀態的列（含 rejected）者跳過 ──
             var filePaths = sessions.Select(s => s.FilePath).ToList();
             var existingSet = (await _db.DatasetUploads
                 .Where(d => d.UserId == userId
-                            && filePaths.Contains(d.ClientFilePath)
-                            && d.Status != DatasetUploadStatus.Rejected)
+                            && filePaths.Contains(d.ClientFilePath))
                 .Select(d => d.ClientFilePath)
                 .ToListAsync()).ToHashSet();
 
@@ -589,6 +588,7 @@ namespace UploadServer.Services
             var total         = await query.CountAsync();
             var pendingCount  = await query.CountAsync(d => d.Status == DatasetUploadStatus.Pending);
             var approvedCount = await query.CountAsync(d => d.Status == DatasetUploadStatus.Approved);
+            var rejectedCount = await query.CountAsync(d => d.Status == DatasetUploadStatus.Rejected);
 
             var items = await query
                 .Skip((page - 1) * pageSize)
@@ -598,7 +598,7 @@ namespace UploadServer.Services
                 .ToListAsync();
 
             return new MyDatasetUploadsResponse(
-                total, pendingCount, approvedCount, page, pageSize, items);
+                total, pendingCount, approvedCount, rejectedCount, page, pageSize, items);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -685,8 +685,9 @@ namespace UploadServer.Services
             if (testMode && testTokens.Contains(purchaseToken))
             {
                 _logger.LogInformation("Google Play 測試模式：接受測試 token");
+                var months = subscriptionId?.Contains("yearly") == true ? 12 : 1;
                 return new SubscriptionValidationResult(true,
-                    ExpiryTime: DateTime.UtcNow.AddMonths(1),
+                    ExpiryTime: DateTime.UtcNow.AddMonths(months),
                     OriginalTransactionId: "test-order-id",
                     IsAutoRenewing: true);
             }
@@ -1006,11 +1007,11 @@ namespace UploadServer.Services
 
         private static readonly Dictionary<string, int> _ballPackMap = new()
         {
-            ["golf_balls_1"]   = 1,
-            ["golf_balls_5"]   = 5,
-            ["golf_balls_10"]  = 10,
-            ["golf_balls_50"]  = 50,
-            ["golf_balls_100"] = 100,
+            ["orvia_golf_balls_1"]   = 1,
+            ["orvia_golf_balls_5"]   = 5,
+            ["orvia_golf_balls_10"]  = 10,
+            ["orvia_golf_balls_50"]  = 50,
+            ["orvia_golf_balls_100"] = 100,
         };
 
         public record BallPackValidationResult(bool Success, string? TransactionId = null);

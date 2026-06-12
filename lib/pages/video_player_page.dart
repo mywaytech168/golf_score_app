@@ -17,6 +17,7 @@ import '../recording/trajectory_painter.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
+import '../services/recording_history_storage.dart';
 import '../services/skeleton_csv_locator.dart';
 import '../services/swing_stats_service.dart';
 import '../theme/app_theme.dart';
@@ -73,6 +74,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 揮桿 8 階段關鍵禎
   // key = phase key (e.g. 'address'), value = seconds in clip
   Map<String, double>? _phases;
+
+  // 長影片：已切出片段的擊球時間點（秒，相對原始影片），供時間軸標記與快速跳轉
+  List<({double sec, int index})> _clipMarks = const [];
 
   // 骨架疊圖（取代燒錄 skeleton.mp4）：CSV 為 clip 相對時間，offset=0 直接用 position 取樣
   PoseTrack? _skeletonTrack;
@@ -151,6 +155,34 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         (entry.videoType == VideoType.localClip || entry.isAnalyzed)) {
       _loadPhases();
       _loadCharts();
+    }
+
+    // 長影片：載入已切片段的擊球時間點（時間軸標記 + 快速跳轉）
+    if (_isLongVideo) _loadClipMarks();
+  }
+
+  /// 查出此長影片切出的所有片段，換算擊球時刻回原始影片座標。
+  /// clip 的 hitSecond 為 clip 內相對時間，startSecond 為 clip 在原片的起點。
+  Future<void> _loadClipMarks() async {
+    try {
+      final all = await RecordingHistoryStorage.instance.loadHistory();
+      final marks = <double>[];
+      for (final e in all) {
+        if (e.sourceVideoPath != widget.videoPath) continue;
+        final hit = e.hitSecond;
+        if (hit == null) continue;
+        marks.add((e.startSecond ?? 0.0) + hit);
+      }
+      marks.sort();
+      if (mounted && marks.isNotEmpty) {
+        setState(() {
+          _clipMarks = [
+            for (int i = 0; i < marks.length; i++) (sec: marks[i], index: i + 1),
+          ];
+        });
+      }
+    } catch (e) {
+      debugPrint('[VideoPlayer] 切片標記載入失敗: $e');
     }
   }
 
@@ -638,6 +670,49 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // ── 長影片：切片擊球時間點快速跳轉 ─────────────────────────
+          if (_isLongVideo && _clipMarks.isNotEmpty)
+            SizedBox(
+              height: 30,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _clipMarks.length,
+                itemBuilder: (_, i) {
+                  final m = _clipMarks[i];
+                  // 跳到擊球前 2 秒，方便看完整揮桿
+                  final target = Duration(
+                      milliseconds: ((m.sec - 2.0).clamp(0.0, durSec) * 1000).round());
+                  final active = (posSec - m.sec).abs() < 2.5;
+                  return GestureDetector(
+                    onTap: () => ctrl.seekTo(target),
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 6, bottom: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: active
+                            ? const Color(0xFFFF8F00).withValues(alpha: 0.22)
+                            : Colors.white10,
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
+                          color: active
+                              ? const Color(0xFFFF8F00)
+                              : Colors.white24,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '第${m.index}球 ${_fmt(Duration(milliseconds: (m.sec * 1000).round()))}',
+                        style: TextStyle(
+                          color: active ? const Color(0xFFFF8F00) : Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           // ── 多模態時間軸（音訊 RMS + 速度曲線 + 階段 tick + impact 鑽石）
           SizedBox(
             height: 56,
@@ -651,6 +726,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       wristSpeed:    _chartData?.wristSpeed    ?? const [],
                       phases:        _phases                   ?? const {},
                       hitSecond:     widget.entry?.hitSecond,
+                      clipMarks:     [for (final m in _clipMarks) m.sec],
                       currentSecond: posSec,
                       totalSeconds:  durSec,
                       goodShot:      widget.entry?.goodShot,
@@ -2168,6 +2244,8 @@ class _MultiModalTimelinePainter extends CustomPainter {
   final List<ChartPoint> wristSpeed;
   final Map<String, double> phases;
   final double? hitSecond;
+  /// 長影片：已切片段的擊球時刻（秒，原始影片座標）
+  final List<double> clipMarks;
   final double currentSecond;
   final double totalSeconds;
   final bool? goodShot;
@@ -2191,6 +2269,7 @@ class _MultiModalTimelinePainter extends CustomPainter {
     required this.wristSpeed,
     required this.phases,
     this.hitSecond,
+    this.clipMarks = const [],
     required this.currentSecond,
     required this.totalSeconds,
     this.goodShot,
@@ -2358,6 +2437,28 @@ class _MultiModalTimelinePainter extends CustomPainter {
       canvas.drawPath(diamond, Paint()..color = dc);
     }
 
+    // ── 層5b：切片擊球時刻標記（長影片，橙色 tick + 小鑽石）──────
+    for (final sec in clipMarks) {
+      if (sec < 0 || sec > totalSeconds) continue;
+      final x = _secToX(sec, trackW);
+      canvas.drawLine(
+        Offset(x, size.height * 0.16),
+        Offset(x, size.height * 0.84),
+        Paint()
+          ..color       = const Color(0xFFFF8F00).withValues(alpha: 0.75)
+          ..strokeWidth = 1.5,
+      );
+      const r = 3.5;
+      final cy = size.height * 0.16;
+      final diamond = Path()
+        ..moveTo(x,           cy - r)
+        ..lineTo(x + r * 0.7, cy)
+        ..lineTo(x,           cy + r)
+        ..lineTo(x - r * 0.7, cy)
+        ..close();
+      canvas.drawPath(diamond, Paint()..color = const Color(0xFFFF8F00));
+    }
+
     // ── 層6：播放游標（白色細線 + 頂部小三角）───────────────────
     final cx = _hPad + (currentSecond / totalSeconds).clamp(0.0, 1.0) * trackW;
     canvas.drawRect(
@@ -2401,5 +2502,6 @@ class _MultiModalTimelinePainter extends CustomPainter {
       old.audioRms      != audioRms      ||
       old.wristSpeed    != wristSpeed    ||
       old.phases        != phases        ||
+      old.clipMarks     != clipMarks     ||
       old.goodShot      != goodShot;
 }

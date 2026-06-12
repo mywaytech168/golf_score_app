@@ -102,6 +102,7 @@ class BallTrajectoryService {
   static Future<({int cx, int cy, int frame})?> findBallP0({
     required String inputPath,
     double? hitSec,
+    List<int>? golferBox, // coded 空間 [x1,y1,x2,y2]，提供時掃描範圍縮小到打者附近
   }) async {
     try {
       final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
@@ -109,6 +110,7 @@ class BallTrajectoryService {
         {
           'inputPath': inputPath,
           if (hitSec != null) 'hitSec': hitSec,
+          if (golferBox != null) 'golferBox': golferBox,
         },
       );
       if (raw == null) return null;

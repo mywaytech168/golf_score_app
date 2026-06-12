@@ -1092,7 +1092,15 @@ class _FeedbackCardState extends State<_FeedbackCard> {
         _selectedImageFile = null;
         _previewImageBytes = null;
       });
-      widget.onEarned(balls);
+      if (balls > 0) {
+        widget.onEarned(balls);
+      } else if (mounted) {
+        // 今日獎勵已領取：回饋照常送出，僅不發球
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('回饋已送出，感謝你的意見！'),
+          backgroundColor: kPrimaryGreen,
+        ));
+      }
     } catch (e) {
       widget.onError('提交失敗：$e');
     } finally {
@@ -1110,7 +1118,8 @@ class _FeedbackCardState extends State<_FeedbackCard> {
       description: RewardType.submitFeedback.description,
       balls: RewardType.submitFeedback.ballsPerAction,
       claimed: claimed,
-      bottomWidget: _expanded && !claimed
+      // 已領獎當日仍可送出回饋（僅不再發球）
+      bottomWidget: _expanded
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1301,7 +1310,9 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                         ),
                         child: _busy
                             ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : Text('送出回饋 +${RewardType.submitFeedback.ballsPerAction} 球'),
+                            : Text(claimed
+                                ? '送出回饋'
+                                : '送出回饋 +${RewardType.submitFeedback.ballsPerAction} 球'),
                       ),
                     ),
                   ],
@@ -1309,9 +1320,13 @@ class _FeedbackCardState extends State<_FeedbackCard> {
               ],
             )
           : null,
-      buttonLabel: claimed ? null : (_expanded ? null : '填寫回饋 +${RewardType.submitFeedback.ballsPerAction} 球'),
+      buttonLabel: _expanded
+          ? null
+          : (claimed
+              ? '填寫回饋'
+              : '填寫回饋 +${RewardType.submitFeedback.ballsPerAction} 球'),
       buttonBusy: _busy,
-      onTap: claimed ? null : () => setState(() => _expanded = true),
+      onTap: () => setState(() => _expanded = true),
     );
   }
 
@@ -1553,6 +1568,7 @@ class _UploadCardState extends State<_UploadCard> {
   int  _alreadyCount = 0;                          // 已上傳數
   int? _pendingCount;                              // 審核中筆數（server）
   int? _approvedCount;                             // 已通過筆數（server）
+  int? _rejectedCount;                             // 未通過筆數（server，不可重送）
 
   @override
   void initState() {
@@ -1569,6 +1585,7 @@ class _UploadCardState extends State<_UploadCard> {
         setState(() {
           _pendingCount  = (r['pendingCount'] as int?) ?? 0;
           _approvedCount = (r['approvedCount'] as int?) ?? 0;
+          _rejectedCount = (r['rejectedCount'] as int?) ?? 0;
         });
       }
     } catch (_) {}
@@ -1636,9 +1653,17 @@ class _UploadCardState extends State<_UploadCard> {
 
       final pending = await RewardService.claimUploadReward(sessions: payload);
 
-      // 標記為已上傳（防重複提交）。
-      // 若日後被審核拒絕，server 允許同 filePath 重新提交，
-      // 但 App 端的重送流程暫不實作（需先清除 isUploaded 標記）。
+      // pending=0 = 送審未建立（網路失敗或全為重複提交，含被拒絕者不可重送），
+      // 不標記 isUploaded，讓使用者可在排除問題後重試。
+      if (pending == 0) {
+        if (mounted) {
+          widget.onError('送審未成功：資料可能已提交過（含審核未通過者不可重送），'
+              '或網路異常請稍後再試');
+        }
+        return;
+      }
+
+      // 標記為已上傳（防重複提交；被拒絕者依政策不開放重送）
       for (final e in uploaded) {
         await RecordingHistoryStorage.instance.upsertEntry(
           e.copyWith(isUploaded: true),
@@ -1715,10 +1740,19 @@ class _UploadCardState extends State<_UploadCard> {
                       if (_pendingCount != null) ...[
                         const SizedBox(height: 2),
                         Text(
-                          '審核中 $_pendingCount 筆 / 已通過 $_approvedCount 筆',
+                          '審核中 $_pendingCount 筆 / 已通過 $_approvedCount 筆'
+                          '${(_rejectedCount ?? 0) > 0 ? ' / 未通過 $_rejectedCount 筆' : ''}',
                           style: TextStyle(
                               fontSize: 11, color: context.textSecondary),
                         ),
+                        if ((_rejectedCount ?? 0) > 0) ...[
+                          const SizedBox(height: 2),
+                          const Text(
+                            '未通過審核的資料不可重新提交',
+                            style: TextStyle(
+                                fontSize: 11, color: Color(0xFFE65100)),
+                          ),
+                        ],
                       ],
                     ],
                   ),
