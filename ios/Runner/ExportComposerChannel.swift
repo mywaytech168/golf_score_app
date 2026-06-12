@@ -56,12 +56,19 @@ func registerExportComposerChannel(messenger: FlutterBinaryMessenger) {
     let startSec      = (args["startSec"] as? NSNumber)?.doubleValue ?? 0.0
     let quality       = args["quality"] as? String ?? "STANDARD"
     let trackRaw      = (args["trackPts"] as? [[String: Any]]) ?? []
+    let hitGlow       = (args["hitGlow"]   as? NSNumber)?.boolValue ?? false
+    let sweetSpot     = (args["sweetSpot"] as? NSNumber)?.boolValue ?? false
+    let impactSec     = (args["impactSec"] as? NSNumber)?.doubleValue   // nullable
+    let goodShot      = (args["goodShot"]  as? NSNumber)?.boolValue     // nullable
+    let passCount     = (args["passCount"] as? NSNumber)?.intValue ?? 0
 
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let ok = try ecCompose(
           clipPath: clipPath, csvPath: csvPath, startSec: startSec,
           trackRaw: trackRaw, watermarkPath: watermarkPath,
+          hitGlow: hitGlow, sweetSpot: sweetSpot, impactSec: impactSec,
+          goodShot: goodShot, passCount: passCount,
           outputPath: outputPath, quality: quality
         )
         DispatchQueue.main.async { result(ok ? outputPath : nil) }
@@ -79,9 +86,20 @@ func registerExportComposerChannel(messenger: FlutterBinaryMessenger) {
 private func ecCompose(
   clipPath: String, csvPath: String?, startSec: Double,
   trackRaw: [[String: Any]], watermarkPath: String?,
+  hitGlow: Bool, sweetSpot: Bool, impactSec: Double?,
+  goodShot: Bool?, passCount: Int,
   outputPath: String, quality: String
 ) throws -> Bool {
   guard FileManager.default.fileExists(atPath: clipPath) else { return false }
+
+  // 擊球特效啟用判定：需 impactSec；甜蜜點另需 goodShot
+  let drawGlow  = hitGlow && impactSec != nil
+  let drawSweet = sweetSpot && impactSec != nil && goodShot != nil
+  let sweetColor: CGColor = {
+    if goodShot == true && passCount >= 4 { return ecColor(255, 215, 0, 1) }  // 金
+    if goodShot == true                   { return ecColor(144, 202, 249, 1) } // 藍
+    return ecColor(158, 158, 158, 1)                                          // 灰
+  }()
 
   // ── Layer 啟用判定 ─────────────────────────────────────────
   var frameData: [Int: [EcLandmark?]] = [:]
@@ -240,6 +258,22 @@ private func ecCompose(
           }
         }
 
+        // 2.5 擊球特效（光暈 / 甜蜜點）：以擊球時刻為起點的擴散光圈
+        if (drawGlow || drawSweet), let impactSec = impactSec {
+          let progress = (CMTimeGetSeconds(pts) - impactSec - 0.12) / 1.1
+          if progress >= 0, progress <= 1 {
+            let shortF = CGFloat(min(displayW, displayH))
+            if drawGlow {
+              ecDrawImpactRing(ctx: ctx, progress: progress, color: ecColor(245, 247, 250, 1),
+                               cxFrac: 0.5, cyFrac: 0.675, w: displayW, h: displayH, shortSide: shortF)
+            }
+            if drawSweet {
+              ecDrawImpactRing(ctx: ctx, progress: progress, color: sweetColor,
+                               cxFrac: 0.5194, cyFrac: 0.8469, w: displayW, h: displayH, shortSide: shortF)
+            }
+          }
+        }
+
         // 3. 浮水印
         if let wm = watermarkImg, let rect = wmRect {
           ctx.saveGState()
@@ -302,6 +336,31 @@ private func ecDrawTrajectory(ctx: CGContext, pts: [EcTrackPt], count: Int) {
   ctx.fillEllipse(in: CGRect(x: last.x - r, y: last.y - r, width: r * 2, height: r * 2))
   ctx.setStrokeColor(trajColor); ctx.setLineWidth(2)
   ctx.strokeEllipse(in: CGRect(x: last.x - r, y: last.y - r, width: r * 2, height: r * 2))
+}
+
+// MARK: - Impact ring drawing（光暈 / 甜蜜點共用）
+
+// 三層延遲擴散圈，節奏鏡像 ImpactGlowOverlay._ImpactRingPainter（解析度無關）。
+private func ecDrawImpactRing(
+  ctx: CGContext, progress: Double, color: CGColor,
+  cxFrac: CGFloat, cyFrac: CGFloat, w: Int, h: Int, shortSide: CGFloat
+) {
+  let cx = CGFloat(w) * cxFrac
+  let cy = CGFloat(h) * cyFrac
+  let maxR = shortSide * 0.32
+  let baseStroke = max(2.0, shortSide / 360.0)
+  let comps = color.components ?? [1, 1, 1, 1]
+  for i in 0..<3 {
+    let delay = Double(i) * 0.18
+    let t = min(1.0, max(0.0, (progress - delay) / 0.65))
+    if t <= 0 { continue }
+    let eased = CGFloat(1.0 - (1.0 - t) * (1.0 - t))  // easeOut 近似
+    let radius = maxR * 0.22 + eased * maxR
+    let opacity = max(0, min(1, 1 - eased)) * 0.85
+    ctx.setStrokeColor(ecColor(comps[0] * 255, comps[1] * 255, comps[2] * 255, opacity))
+    ctx.setLineWidth(baseStroke + (1 - eased) * baseStroke * 0.8)
+    ctx.strokeEllipse(in: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2))
+  }
 }
 
 // MARK: - Skeleton drawing

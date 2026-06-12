@@ -207,6 +207,10 @@ namespace UploadServer.Controllers
             var result = await _userService.ClaimAdRewardAsync(userId);
             if (result == null) return NotFound(new { message = "用戶不存在" });
 
+            // SSV 強制模式下尚未收到 Google 觀看驗證回呼 → client 稍後重試
+            if (result.Balls == -1)
+                return Conflict(new { message = "廣告觀看驗證處理中，請稍後再試" });
+
             if (result.Balls == 0)
                 return Ok(new { data = result, message = "今日廣告獎勵已達上限" });
 

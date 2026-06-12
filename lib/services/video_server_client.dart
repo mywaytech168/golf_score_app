@@ -430,6 +430,9 @@ class VideoServerClient {
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return (json['data'] as Map<String, dynamic>?) ?? json;
+      } else if (response.statusCode == 409) {
+        // SSV 觀看驗證回呼尚未到達，呼叫端稍後重試
+        return {'pending': true};
       } else {
         debugPrint('❌ 廣告獎勵失敗: ${response.statusCode}');
         return null;
@@ -649,6 +652,22 @@ class VideoServerClient {
     try {
       final response = await _send('POST', '/api/auth/google/link',
           body: {'idToken': idToken});
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      final err = jsonDecode(response.body) as Map<String, dynamic>;
+      return {'success': false, 'message': err['message'] ?? '綁定失敗 (${response.statusCode})'};
+    } catch (e) {
+      if (e is UnauthorizedException) rethrow;
+      return {'success': false, 'message': '網路錯誤: $e'};
+    }
+  }
+
+  /// 綁定 Apple 帳號（identityToken from sign_in_with_apple）
+  ///
+  /// 端點：POST /api/auth/apple/link  body: `{ "identityToken": "..." }`
+  Future<Map<String, dynamic>> linkAppleAccount(String identityToken, {bool isRetry = false}) async {
+    try {
+      final response = await _send('POST', '/api/auth/apple/link',
+          body: {'identityToken': identityToken});
       if (response.statusCode == 200) return jsonDecode(response.body);
       final err = jsonDecode(response.body) as Map<String, dynamic>;
       return {'success': false, 'message': err['message'] ?? '綁定失敗 (${response.statusCode})'};

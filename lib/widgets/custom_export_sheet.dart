@@ -11,11 +11,17 @@ import '../theme/app_theme.dart';
 class CustomExportSheet extends StatefulWidget {
   final bool hasSkeleton;
   final bool hasTrajectory;
+  /// 是否具備擊球時刻（光暈/甜蜜點特效的前提）。
+  final bool hasImpact;
+  /// 是否具備擊球品質資料（甜蜜點色彩的前提）。
+  final bool hasShotQuality;
   final bool isFree;
   const CustomExportSheet({
     super.key,
     required this.hasSkeleton,
     required this.hasTrajectory,
+    this.hasImpact = false,
+    this.hasShotQuality = false,
     required this.isFree,
   });
 
@@ -26,6 +32,8 @@ class CustomExportSheet extends StatefulWidget {
 class _CustomExportSheetState extends State<CustomExportSheet> {
   bool _skeleton = false;
   bool _trajectory = false;
+  bool _hitGlow = false;
+  bool _sweetSpot = false;
 
   @override
   void initState() {
@@ -33,6 +41,7 @@ class _CustomExportSheetState extends State<CustomExportSheet> {
     // 預設把可用的疊加元素都勾上
     _skeleton = widget.hasSkeleton;
     _trajectory = widget.hasTrajectory;
+    // 擊球特效預設不勾（避免畫面太花），由使用者主動開啟
   }
 
   @override
@@ -82,7 +91,23 @@ class _CustomExportSheetState extends State<CustomExportSheet> {
                 value: _trajectory,
                 onChanged: (v) => setState(() => _trajectory = v),
               ),
-            if (!widget.hasSkeleton && !widget.hasTrajectory)
+            if (widget.hasImpact)
+              _toggleTile(
+                icon: Icons.blur_on_rounded,
+                title: l10n.exportElementGlow,
+                subtitle: l10n.exportElementGlowDesc,
+                value: _hitGlow,
+                onChanged: (v) => setState(() => _hitGlow = v),
+              ),
+            if (widget.hasImpact && widget.hasShotQuality)
+              _toggleTile(
+                icon: Icons.adjust_rounded,
+                title: l10n.exportElementSweetSpot,
+                subtitle: l10n.exportElementSweetSpotDesc,
+                value: _sweetSpot,
+                onChanged: (v) => setState(() => _sweetSpot = v),
+              ),
+            if (!widget.hasSkeleton && !widget.hasTrajectory && !widget.hasImpact)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(l10n.exportNoOverlayMaterial,
@@ -130,6 +155,8 @@ class _CustomExportSheetState extends State<CustomExportSheet> {
                   ExportSpec(
                     skeleton: _skeleton,
                     trajectory: _trajectory,
+                    hitGlow: _hitGlow,
+                    sweetSpot: _sweetSpot,
                     watermark: widget.isFree, // 免費強制
                   ),
                 ),

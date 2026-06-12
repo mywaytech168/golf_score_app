@@ -559,6 +559,23 @@ class AppLocalizationsEn extends AppLocalizations {
       'Not linked. Tap to link Google account';
 
   @override
+  String get settingsAppleLogin => 'Apple Sign-In';
+
+  @override
+  String get settingsAppleLinked => 'Linked';
+
+  @override
+  String get settingsAppleNotLinked => 'Not linked. Tap to link Apple account';
+
+  @override
+  String get settingsAppleCredentialFailed =>
+      'Unable to retrieve Apple credentials, please try again';
+
+  @override
+  String get settingsAppleLinkFailed =>
+      'Apple account linking failed, please try again later';
+
+  @override
   String get settingsSectionAnalysis => 'Analysis Preferences';
 
   @override
@@ -2328,6 +2345,26 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get exportElementTrajectoryDesc => 'Ball flight path after impact';
+
+  @override
+  String get exportElementGlow => 'Impact glow';
+
+  @override
+  String get exportElementGlowDesc => 'Glowing ring at the moment of impact';
+
+  @override
+  String get exportElementSweetSpot => 'Sweet spot';
+
+  @override
+  String get exportElementSweetSpotDesc =>
+      'Quality ring at impact (gold / blue / gray)';
+
+  @override
+  String get swingBothHands => 'Two-hand detection';
+
+  @override
+  String get swingBothHandsDesc =>
+      'Count a swing only when both wrists move together; falls back to one hand if the other is occluded';
 
   @override
   String get exportNoOverlayMaterial =>

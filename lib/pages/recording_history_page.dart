@@ -26,6 +26,7 @@ import '../services/skeleton_csv_locator.dart';
 import '../services/hits_summary_storage.dart';
 import '../services/statistics_service.dart';
 import '../services/swing_auto_clip_service.dart';
+import '../services/swing_detect_prefs.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/golf_analysis_service.dart';
@@ -1282,14 +1283,17 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     // ── 偵測模式選擇對話框（含 V1/V2 切換）────────────────────────────
     SkeletonAnalysisMode detectionMode = SkeletonAnalysisMode.v1;
+    bool bothHands = await SwingDetectPrefs.getBothHands();
     if (mounted) {
       final result = await showDialog<_DetectionModeResult>(
         context: context,
         barrierDismissible: true,
-        builder: (_) => const _DetectionModeDialog(),
+        builder: (_) => _DetectionModeDialog(initialBothHands: bothHands),
       );
       if (result == null) return; // 使用者取消
       detectionMode = result.mode;
+      bothHands = result.bothHands;
+      await SwingDetectPrefs.setBothHands(bothHands); // 記住選擇，下次預設
       if (result.skipToday) await _SkipHelper.markSkipToday('detection');
     }
 
@@ -1609,7 +1613,8 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 3. 骨架速度偵測擊球
       debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
       progressNotifier.value = (0.5, l10n.historyProgressDetectingHit);
-      final hits = await SwingImpactDetector.detect(csvPath: detectCsvPath);
+      final hits = await SwingImpactDetector.detect(
+          csvPath: detectCsvPath, bothHands: bothHands);
       if (cancelToken.isCancelled) return;
       debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
 
@@ -4565,11 +4570,17 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
 class _DetectionModeResult {
   final SkeletonAnalysisMode mode;
   final bool skipToday;
-  const _DetectionModeResult({required this.mode, this.skipToday = false});
+  final bool bothHands;
+  const _DetectionModeResult({
+    required this.mode,
+    this.skipToday = false,
+    this.bothHands = false,
+  });
 }
 
 class _DetectionModeDialog extends StatefulWidget {
-  const _DetectionModeDialog();
+  final bool initialBothHands;
+  const _DetectionModeDialog({this.initialBothHands = false});
   @override
   State<_DetectionModeDialog> createState() => _DetectionModeDialogState();
 }
@@ -4577,6 +4588,7 @@ class _DetectionModeDialog extends StatefulWidget {
 class _DetectionModeDialogState extends State<_DetectionModeDialog> {
   SkeletonAnalysisMode _mode = SkeletonAnalysisMode.v1;
   bool _skipToday = false;
+  late bool _bothHands = widget.initialBothHands;
 
   static const _kGreen  = kBrandPrimary;
   static const _kOrange = Color(0xFFE65100);
@@ -4631,8 +4643,38 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
             badgeColor: _kBlue,
             timeHint: AppLocalizations.of(context).historyDetectV3Time,
           ),
-          // ── 今日不再提醒 ──
+          // ── 雙手判斷 ──
           Divider(height: 16, thickness: 0.8, color: context.borderColor),
+          GestureDetector(
+            onTap: () => setState(() => _bothHands = !_bothHands),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(children: [
+                Icon(Icons.back_hand_outlined, size: 18, color: context.textSecondary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(AppLocalizations.of(context).swingBothHands,
+                          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                      Text(AppLocalizations.of(context).swingBothHandsDesc,
+                          style: TextStyle(fontSize: 11, color: context.textSecondary)),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _bothHands,
+                  onChanged: (v) => setState(() => _bothHands = v),
+                  activeThumbColor: kBrandPrimary,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ]),
+            ),
+          ),
+          // ── 今日不再提醒 ──
+          Divider(height: 8, thickness: 0.8, color: context.borderColor),
           GestureDetector(
             onTap: () => setState(() => _skipToday = !_skipToday),
             behavior: HitTestBehavior.opaque,
@@ -4671,7 +4713,8 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           onPressed: () => Navigator.of(context).pop(
-            _DetectionModeResult(mode: _mode, skipToday: _skipToday),
+            _DetectionModeResult(
+                mode: _mode, skipToday: _skipToday, bothHands: _bothHands),
           ),
           child: Text(AppLocalizations.of(context).historyStartDetect),
         ),
@@ -5311,6 +5354,8 @@ Future<void> _runCustomExportFlow(
     builder: (_) => CustomExportSheet(
       hasSkeleton: hasSkeleton,
       hasTrajectory: hasTrajectory,
+      hasImpact: entry.hitSecond != null,
+      hasShotQuality: entry.goodShot != null,
       isFree: isFree,
     ),
   );
@@ -5319,7 +5364,13 @@ Future<void> _runCustomExportFlow(
   final toFolder = await _showSaveLocationPicker(context);
   if (toFolder == null || !context.mounted) return;
 
-  final burned = await OverlayBurnService.composeForExport(sessionDir, spec);
+  final burned = await OverlayBurnService.composeForExport(
+    sessionDir,
+    spec,
+    impactSec: entry.hitSecond,
+    goodShot: entry.goodShot,
+    passCount: entry.audioPassCount ?? 0,
+  );
   if (burned == null) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(

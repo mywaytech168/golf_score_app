@@ -42,6 +42,11 @@ class ExportComposerService {
   /// [startSec]    片段在原片起始秒（對齊 CSV）
   /// [trackPts]    軌跡點 [{x,y,pts}]；空 → 不畫軌跡
   /// [watermark]   true → 燒錄 ORVIA 浮水印
+  /// [hitGlow]     true → 擊球瞬間中性光暈（需 [impactSec]）
+  /// [sweetSpot]   true → 甜蜜點品質光圈（需 [impactSec]，色彩依 [goodShot]/[passCount]）
+  /// [impactSec]   擊球時刻（clip 相對秒）；null → 不畫擊球特效
+  /// [goodShot]    擊球品質（甜蜜點色彩）：true=好球、false=薄球、null=未知（不畫甜蜜點）
+  /// [passCount]   音訊通過數（≥4 → 金色甜蜜點）
   /// [outputPath]  輸出 mp4
   ///
   /// 成功回傳 [outputPath]，失敗回傳 null。
@@ -51,6 +56,11 @@ class ExportComposerService {
     double startSec = 0.0,
     List<Map<String, dynamic>> trackPts = const [],
     bool watermark = false,
+    bool hitGlow = false,
+    bool sweetSpot = false,
+    double? impactSec,
+    bool? goodShot,
+    int passCount = 0,
     required String outputPath,
     ExportQuality quality = ExportQuality.standard,
   }) async {
@@ -62,6 +72,11 @@ class ExportComposerService {
         'startSec':      startSec,
         'trackPts':      trackPts,
         'watermarkPath': watermarkPath,
+        'hitGlow':       hitGlow,
+        'sweetSpot':     sweetSpot,
+        'impactSec':     impactSec,
+        'goodShot':      goodShot,
+        'passCount':     passCount,
         'outputPath':    outputPath,
         'quality':       quality.channelKey,
       });

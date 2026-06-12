@@ -427,6 +427,50 @@ namespace UploadServer.Services
         }
 
         // ============================================================
+        // Apple 帳號綁定（設定頁主動綁定，與登入時的 email 自動合併互補）
+        // ============================================================
+        public async Task<(bool Success, string Error)> LinkAppleAsync(string userId, string appleId)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                    return (false, "用戶不存在");
+
+                var existing = await _context.UserAuths
+                    .FirstOrDefaultAsync(a => a.Provider == AuthProvider.Apple && a.ProviderUserId == appleId);
+                if (existing != null)
+                {
+                    // 同一用戶重複綁定視為成功（冪等）
+                    if (existing.UserId == userId) return (true, null);
+                    return (false, "此 Apple 帳號已綁定其他帳號");
+                }
+
+                var alreadyLinked = await _context.UserAuths
+                    .AnyAsync(a => a.UserId == userId && a.Provider == AuthProvider.Apple);
+                if (alreadyLinked)
+                    return (false, "此帳號已綁定其他 Apple 帳號");
+
+                _context.UserAuths.Add(new UserAuth
+                {
+                    UserId         = userId,
+                    Provider       = AuthProvider.Apple,
+                    ProviderUserId = appleId,
+                    CreatedAt      = DateTime.UtcNow,
+                    LastUsedAt     = DateTime.UtcNow,
+                });
+                user.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Apple 綁定失敗");
+                return (false, ex.Message);
+            }
+        }
+
+        // ============================================================
         // 設定密碼（純 OAuth 帳號首次建立本地密碼，不需舊密碼）
         // ============================================================
         public async Task<(bool Success, string Error)> SetPasswordAsync(

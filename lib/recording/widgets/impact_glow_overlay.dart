@@ -1,4 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+/// 光暈相對於「偵測開火」的延遲。
+///
+/// LiveSwingDetector 以**手腕弧線底部（垂直速度由下轉上）**為擊球判定點，物理上
+/// 等同桿頭觸球。依實機觀感，光暈於擊球後 300ms 才浮現（讓桿頭已掃過球、視覺
+/// 不搶在動作前），可調整（偏早調大、偏晚調小，0 = 擊球當下即播）。
+const Duration kImpactGlowDelay = Duration(milliseconds: 300);
 
 /// 即時擊球視覺回饋（RecordScreen / ShotRecordScreen 共用）。
 ///
@@ -18,11 +27,15 @@ class ImpactGlowOverlay extends StatefulWidget {
   /// 光圈中心（相對預覽尺寸 0~1）。預設偏下方中央，貼近球/桿頭位置。
   final Alignment center;
 
+  /// 偵測開火 → 光暈實際播放的補償延遲，對齊真正觸球瞬間（見 [kImpactGlowDelay]）。
+  final Duration triggerDelay;
+
   const ImpactGlowOverlay({
     super.key,
     required this.impactCount,
     this.labelBuilder,
     this.center = const Alignment(0.0, 0.35),
+    this.triggerDelay = kImpactGlowDelay,
   });
 
   @override
@@ -37,18 +50,26 @@ class _ImpactGlowOverlayState extends State<ImpactGlowOverlay>
   );
 
   String? _label; // 觸發當下捕捉，避免動畫進行中數字再變動
+  Timer? _delayTimer;
 
   @override
   void didUpdateWidget(ImpactGlowOverlay old) {
     super.didUpdateWidget(old);
     if (widget.impactCount > old.impactCount && widget.impactCount > 0) {
-      _label = widget.labelBuilder?.call(widget.impactCount);
-      _ctrl.forward(from: 0.0);
+      final count = widget.impactCount;
+      // 補償延遲後再播：腕速峰值早於觸球，延後對齊真正擊球瞬間。
+      _delayTimer?.cancel();
+      _delayTimer = Timer(widget.triggerDelay, () {
+        if (!mounted) return;
+        _label = widget.labelBuilder?.call(count);
+        _ctrl.forward(from: 0.0);
+      });
     }
   }
 
   @override
   void dispose() {
+    _delayTimer?.cancel();
     _ctrl.dispose();
     super.dispose();
   }

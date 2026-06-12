@@ -23,6 +23,7 @@ namespace UploadServer.Data
         public DbSet<AppVersion> AppVersions { get; set; }
         public DbSet<Announcement> Announcements { get; set; }
         public DbSet<DatasetUpload> DatasetUploads { get; set; }
+        public DbSet<AdRewardEvent> AdRewardEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -245,6 +246,46 @@ namespace UploadServer.Data
                 entity.HasIndex(e => e.UserId).HasDatabaseName("idx_ar_user_id");
                 entity.HasIndex(e => e.UsedAt).HasDatabaseName("idx_ar_used_at");
                 entity.HasIndex(e => new { e.UserId, e.UsedAt }).HasDatabaseName("idx_ar_user_used_at");
+
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // ============================================================
+            // AdRewardEvents（AdMob SSV 已驗證觀看事件）
+            // ============================================================
+            modelBuilder.Entity<AdRewardEvent>(entity =>
+            {
+                entity.ToTable("ad_reward_events");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .ValueGeneratedOnAdd();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.TransactionId)
+                    .HasColumnName("transaction_id")
+                    .HasMaxLength(128)
+                    .IsRequired();
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.ClaimedAt)
+                    .HasColumnName("claimed_at")
+                    .HasColumnType("datetime");
+
+                entity.HasIndex(e => e.TransactionId).IsUnique().HasDatabaseName("uk_are_transaction_id");
+                entity.HasIndex(e => new { e.UserId, e.ClaimedAt }).HasDatabaseName("idx_are_user_claimed");
 
                 entity.HasOne(e => e.User)
                     .WithMany()

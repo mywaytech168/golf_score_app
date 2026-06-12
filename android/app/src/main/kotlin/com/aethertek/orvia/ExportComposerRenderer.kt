@@ -53,6 +53,21 @@ class ExportComposerRenderer(private val context: android.content.Context) {
         private const val DOT_RADIUS   = 9f
         private const val SHADOW_ALPHA = 100
         private const val SHADOW_WIDTH = 10f
+
+        // ── 擊球特效（光暈 / 甜蜜點）──────────────────────────
+        // 中性亮白光暈（不帶品質語意，鏡像 ImpactGlowOverlay._color = #F5F7FA）
+        private val GLOW_COLOR = Color.rgb(245, 247, 250)
+        // 甜蜜點品質色（鏡像 video_player_page _SweetSpotRingPainter）
+        private val SWEET_GOLD = Color.rgb(255, 215, 0)    // goodShot && passCount>=4
+        private val SWEET_BLUE = Color.rgb(144, 202, 249)  // goodShot
+        private val SWEET_GRAY = Color.rgb(158, 158, 158)  // 薄球
+        // 擊球瞬間補償延遲，對齊真正觸球（同 kImpactGlowDelay = 120ms）
+        private const val IMPACT_GLOW_DELAY_SEC = 0.12
+        // 整段光暈動畫時長（同 ImpactGlowOverlay AnimationController）
+        private const val IMPACT_ANIM_SEC = 1.1
+        // 光暈中心（display 比例）：光暈偏中央、甜蜜點貼近球/桿頭
+        private const val GLOW_CX = 0.5f;     private const val GLOW_CY = 0.675f
+        private const val SWEET_CX = 0.5194f; private const val SWEET_CY = 0.8469f
     }
 
     private data class LandmarkPoint(
@@ -81,6 +96,7 @@ class ExportComposerRenderer(private val context: android.content.Context) {
         color = TRAJ_COLOR; strokeWidth = 2f; style = Paint.Style.STROKE; isAntiAlias = true
     }
     private val watermarkPaint = Paint().apply { isAntiAlias = true; isFilterBitmap = true; alpha = 165 }
+    private val ringPaint = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = true }
 
     private var yBuf = ByteArray(0)
     private var uBuf = ByteArray(0)
@@ -92,6 +108,11 @@ class ExportComposerRenderer(private val context: android.content.Context) {
      * @param startSec       片段在原片中的起始秒（對齊 CSV 時間 key）
      * @param trackPts       軌跡點 List<Map{x,y,pts}>，空 → 不畫軌跡
      * @param watermarkPath  浮水印 PNG 路徑，null 或不存在 → 不畫浮水印
+     * @param hitGlow        true → 擊球瞬間中性光暈（需 impactSec）
+     * @param sweetSpot      true → 甜蜜點品質光圈（需 impactSec + goodShot）
+     * @param impactSec      擊球時刻（clip 相對秒），null → 不畫擊球特效
+     * @param goodShot       擊球品質（甜蜜點色彩），null → 不畫甜蜜點
+     * @param passCount      音訊通過數（≥4 → 金色甜蜜點）
      * @param outputPath     輸出 mp4
      */
     fun render(
@@ -102,6 +123,11 @@ class ExportComposerRenderer(private val context: android.content.Context) {
         watermarkPath: String?,
         outputPath: String,
         quality: ExportQuality = ExportQuality.STANDARD,
+        hitGlow: Boolean = false,
+        sweetSpot: Boolean = false,
+        impactSec: Double? = null,
+        goodShot: Boolean? = null,
+        passCount: Int = 0,
         onProgress: ((op: String, progress: Double, label: String, current: Int, total: Int) -> Unit)? = null,
         shouldCancel: (() -> Boolean)? = null,
     ): Boolean {
@@ -132,7 +158,18 @@ class ExportComposerRenderer(private val context: android.content.Context) {
                 runCatching { BitmapFactory.decodeFile(watermarkPath) }.getOrNull()
             else null
 
-        Log.d(TAG, "layers: skeleton=$drawSkeleton trajectory=$trajectoryOn watermark=${watermarkBmp != null}")
+        // 擊球特效啟用判定：需 impactSec；甜蜜點另需 goodShot
+        val impactUs = impactSec?.let { (it * 1_000_000.0).toLong() }
+        val drawGlow  = hitGlow && impactUs != null
+        val drawSweet = sweetSpot && impactUs != null && goodShot != null
+        val sweetColor = when {
+            goodShot == true && passCount >= 4 -> SWEET_GOLD
+            goodShot == true                   -> SWEET_BLUE
+            else                               -> SWEET_GRAY
+        }
+
+        Log.d(TAG, "layers: skeleton=$drawSkeleton trajectory=$trajectoryOn watermark=${watermarkBmp != null} " +
+            "glow=$drawGlow sweet=$drawSweet")
 
         // ── MediaExtractor ─────────────────────────────────────────
         val extractor = MediaExtractor()
@@ -297,6 +334,17 @@ class ExportComposerRenderer(private val context: android.content.Context) {
                         }
                     }
 
+                    // 擊球特效（光暈 / 甜蜜點）：以擊球時刻為起點的擴散光圈
+                    if ((drawGlow || drawSweet) && impactSec != null) {
+                        val progress = ((pts / 1_000_000.0) - impactSec - IMPACT_GLOW_DELAY_SEC) / IMPACT_ANIM_SEC
+                        if (progress in 0.0..1.0) {
+                            if (drawGlow) drawImpactRing(
+                                overlayCanvas, progress, GLOW_COLOR, GLOW_CX, GLOW_CY, encW, encH, encShortSide)
+                            if (drawSweet) drawImpactRing(
+                                overlayCanvas, progress, sweetColor, SWEET_CX, SWEET_CY, encW, encH, encShortSide)
+                        }
+                    }
+
                     if (watermarkBmp != null && wmRect != null && wmSrc != null) {
                         overlayCanvas.drawBitmap(watermarkBmp, wmSrc, wmRect, watermarkPaint)
                     }
@@ -409,6 +457,31 @@ class ExportComposerRenderer(private val context: android.content.Context) {
 
     private fun drawTrajDot(canvas: Canvas, x: Int, y: Int) {
         canvas.drawCircle(x.toFloat(), y.toFloat(), DOT_RADIUS, trajDotFill)
+    }
+
+    // ── 繪製：擊球光圈（光暈 / 甜蜜點共用）──────────────────────
+    // 三層延遲擴散圈，節奏鏡像 ImpactGlowOverlay._ImpactRingPainter（解析度無關）。
+    private fun drawImpactRing(
+        canvas: Canvas, progress: Double, color: Int,
+        cxFrac: Float, cyFrac: Float, w: Int, h: Int, shortSide: Float,
+    ) {
+        val cx = w * cxFrac
+        val cy = h * cyFrac
+        val maxR = shortSide * 0.32f
+        val baseStroke = (shortSide / 360f).coerceAtLeast(2f)
+        for (i in 0 until 3) {
+            val delay = i * 0.18
+            val t = ((progress - delay) / 0.65).coerceIn(0.0, 1.0)
+            if (t <= 0.0) continue
+            // easeOut 近似（1-(1-t)^2），與 Flutter Curves.easeOut 視覺接近
+            val eased = (1.0 - (1.0 - t) * (1.0 - t)).toFloat()
+            val radius = maxR * 0.22f + eased * maxR
+            val opacity = ((1f - eased).coerceIn(0f, 1f) * 0.85f)
+            ringPaint.color = color
+            ringPaint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            ringPaint.strokeWidth = baseStroke + (1f - eased) * baseStroke * 0.8f
+            canvas.drawCircle(cx, cy, radius, ringPaint)
+        }
     }
 
     // ── CSV 解析 / 平滑 / 查詢（同 SkeletonOverlayRenderer）──────

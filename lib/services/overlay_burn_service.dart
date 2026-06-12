@@ -53,10 +53,16 @@ class OverlayBurnService {
   ///
   /// 來源固定為 clip.mp4（乾淨片段）。骨架/軌跡素材不足時自動跳過該 layer。
   /// 相同 [spec.cacheKey] 已存在則直接重用，不重燒。
+  ///
+  /// 擊球特效（光暈/甜蜜點）需傳入 [impactSec]（clip 相對秒）；
+  /// 甜蜜點色彩另需 [goodShot] / [passCount]。
   static Future<String?> composeForExport(
     String sessionDir,
-    ExportSpec spec,
-  ) async {
+    ExportSpec spec, {
+    double? impactSec,
+    bool? goodShot,
+    int passCount = 0,
+  }) async {
     final clip = p.join(sessionDir, 'clip.mp4');
     if (!File(clip).existsSync()) {
       debugPrint('[OverlayBurn] composeForExport: clip.mp4 不存在');
@@ -89,8 +95,15 @@ class OverlayBurnService {
       }
     }
 
+    // 擊球特效：無 impactSec 時自動關閉（避免畫在錯誤位置）
+    final hasImpact = impactSec != null;
+    final hitGlow   = spec.hitGlow && hasImpact;
+    // 甜蜜點另需品質資料
+    final sweetSpot = spec.sweetSpot && hasImpact && goodShot != null;
+
     debugPrint('[OverlayBurn] composeForExport ${spec.cacheKey} '
-        '(skeleton=${csv != null}, trajPts=${trackPts.length}, watermark=${spec.watermark})');
+        '(skeleton=${csv != null}, trajPts=${trackPts.length}, watermark=${spec.watermark}, '
+        'glow=$hitGlow, sweetSpot=$sweetSpot, impactSec=$impactSec)');
 
     return ExportComposerService.compose(
       clipPath:   clip,
@@ -98,6 +111,11 @@ class OverlayBurnService {
       startSec:   0.0,
       trackPts:   trackPts,
       watermark:  spec.watermark,
+      hitGlow:    hitGlow,
+      sweetSpot:  sweetSpot,
+      impactSec:  impactSec,
+      goodShot:   goodShot,
+      passCount:  passCount,
       outputPath: out,
       quality:    spec.quality,
     );

@@ -13,7 +13,9 @@ namespace UploadServer.DTOs
         /// <summary>是否已綁定 Google 登入</summary>
         bool GoogleLinked,
         /// <summary>是否已設定本地密碼（false = 純 OAuth 帳號）</summary>
-        bool HasPassword
+        bool HasPassword,
+        /// <summary>是否已綁定 Apple 登入</summary>
+        bool AppleLinked = false
     );
 
     /// <summary>PATCH /api/user/me 請求</summary>

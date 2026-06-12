@@ -14,6 +14,7 @@ import '../services/audio_extraction_service.dart';
 import '../models/recording_history_entry.dart';
 import '../services/realtime_audio_service.dart';
 import '../services/swing_auto_clip_service.dart';
+import '../services/swing_detect_prefs.dart';
 import 'device_capability.dart';
 import 'live_swing_detector.dart';
 import 'native_camera_service.dart';
@@ -64,6 +65,7 @@ class _RecordScreenState extends State<RecordScreen> {
   late final LiveSwingDetector _liveDetector =
       LiveSwingDetector(onImpact: _onLiveImpact);
   final List<double> _liveImpacts = [];
+  bool _bothHands = false; // 雙手判斷（設定可切換）
 
   /// 即時偵測到擊球：記錄時刻並立即 rebuild，讓光圈/徽章在擊球當下觸發
   /// （不依賴計時器 tick，避免最多 ~1s 的視覺延遲）。
@@ -98,6 +100,11 @@ class _RecordScreenState extends State<RecordScreen> {
     _checkDeviceCapability();
     _initCamera();
     unawaited(cleanupStalePrewarmDirs());
+    SwingDetectPrefs.getBothHands().then((v) {
+      if (!mounted) return;
+      setState(() => _bothHands = v);
+      _liveDetector.bothHands = v;
+    });
   }
 
   Future<void> _checkDeviceCapability() async {
@@ -670,6 +677,7 @@ class _RecordScreenState extends State<RecordScreen> {
     FrameRate            pendingFps     = _config.fps;
     RecordingAspectRatio pendingRatio   = _config.aspectRatio;
     bool                 pendingAudio   = _config.enableAudio;
+    bool                 pendingBoth    = _bothHands;
     final l10n = AppLocalizations.of(context);
 
     showModalBottomSheet<void>(
@@ -738,6 +746,27 @@ class _RecordScreenState extends State<RecordScreen> {
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ]),
+                  const SizedBox(height: 12),
+
+                  // 雙手判斷
+                  Row(children: [
+                    const Icon(Icons.back_hand_outlined, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(l10n.swingBothHands,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(l10n.swingBothHandsDesc,
+                            style: const TextStyle(color: Colors.white38, fontSize: 10.5)),
+                      ]),
+                    ),
+                    Switch(
+                      value: pendingBoth,
+                      onChanged: (v) => setSheet(() => pendingBoth = v),
+                      activeThumbColor: kBrandPrimary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ]),
                   const SizedBox(height: 16),
 
                   SizedBox(
@@ -751,6 +780,11 @@ class _RecordScreenState extends State<RecordScreen> {
                       ),
                       onPressed: () async {
                         Navigator.pop(ctx);
+                        if (pendingBoth != _bothHands) {
+                          setState(() => _bothHands = pendingBoth);
+                          _liveDetector.bothHands = pendingBoth;
+                          unawaited(SwingDetectPrefs.setBothHands(pendingBoth));
+                        }
                         if (pendingQuality != _config.quality ||
                             pendingFps     != _config.fps     ||
                             pendingRatio   != _config.aspectRatio ||

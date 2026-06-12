@@ -77,11 +77,16 @@ class SwingImpactDetector {
   }
 
   /// 主入口：在 isolate 中執行，不阻塞 UI
+  ///
+  /// [bothHands] 雙手判斷：速度訊號改為「兩手都在動」才計入，其中一手遮擋時退回
+  /// 另一手（見 [SwingDetectPrefs]）。
   static Future<List<SwingHit>> detect({
     required String csvPath,
+    bool bothHands = false,
   }) async {
     final args = _DetectArgs(
       csvPath: csvPath,
+      bothHands: bothHands,
     );
     try {
       return await Isolate.run(() => _detectIsolate(args));
@@ -98,7 +103,7 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
   debugPrint('[SwingDetect] 🔍 speed_y_low 模式開始偵測...');
 
   // 1. 解析 CSV → 速度 + 平滑 Y + FPS
-  final csvResult = _parseWristSpeed(args.csvPath);
+  final csvResult = _parseWristSpeed(args.csvPath, bothHands: args.bothHands);
   if (csvResult == null) {
     debugPrint('[SwingDetect] ❌ CSV 解析失敗');
     return [];
@@ -392,17 +397,48 @@ const double _smoothWristSec = 0.17;
 class _WristTrack {
   final List<double> x = [];
   final List<double> y = [];
+  final List<bool> okMask = []; // 該禎腕點是否有效（可見），雙手判斷用
   int valid = 0;
   void add(double vis, double xpx, double ypx) {
     if (vis >= _minVisibility && !xpx.isNaN && !ypx.isNaN) {
       x.add(xpx);
       y.add(ypx);
+      okMask.add(true);
       valid++;
     } else {
       x.add(double.nan);
       y.add(double.nan);
+      okMask.add(false);
     }
   }
+}
+
+/// 合成「雙手一起」速度訊號：
+///   ・雙手皆有效 → 兩手都在動才保留訊號；任一手明顯較慢（< 另一手 × factor）
+///                   時取較小值（壓低該禎，避免單手動作成峰）
+///   ・僅一手有效（遮擋）→ 退回該手速度
+///   ・雙手皆無效 → 0
+List<double> _combineBothHands(
+  List<double> rSpeed, List<double> lSpeed,
+  List<bool> rOk, List<bool> lOk,
+) {
+  final n = rSpeed.length;
+  final out = List<double>.filled(n, 0.0);
+  for (int i = 0; i < n; i++) {
+    final rv = i < rOk.length && rOk[i];
+    final lv = i < lOk.length && lOk[i];
+    if (rv && lv) {
+      // 兩手都在動才算：取較小值代表「一起」的程度
+      out[i] = math.min(rSpeed[i], lSpeed[i]);
+    } else if (rv) {
+      out[i] = rSpeed[i];
+    } else if (lv) {
+      out[i] = lSpeed[i];
+    } else {
+      out[i] = 0.0;
+    }
+  }
+  return out;
 }
 
 /// 插值 + 平滑 + 計算速度（px/frame）。
@@ -419,7 +455,7 @@ class _WristTrack {
   return (_movingAverage(speed, smoothWin), ys);
 }
 
-_CsvResult? _parseWristSpeed(String csvPath) {
+_CsvResult? _parseWristSpeed(String csvPath, {bool bothHands = false}) {
   try {
     debugPrint('[ParseCSV] 📂 讀取: $csvPath');
     final content = File(csvPath).readAsStringSync();
@@ -475,6 +511,16 @@ _CsvResult? _parseWristSpeed(String csvPath) {
     }
     final useLeft = left.valid > 0 && p95of(lSpeed) > p95of(rSpeed) * 1.15;
     if (useLeft) debugPrint('[ParseCSV] 🫲 改用左腕（速度 p95 較大，疑似左打者）');
+
+    // Y-LOW / TOP 仍用主導手的平滑 Y（雙手判斷僅改速度訊號）
+    final domY = useLeft ? lY : rY;
+
+    if (bothHands) {
+      final combined =
+          _combineBothHands(rSpeed, lSpeed, right.okMask, left.okMask);
+      debugPrint('[ParseCSV] 🤝 雙手判斷：合成兩手一起的速度訊號');
+      return _CsvResult(combined, domY, visList, fps);
+    }
 
     return useLeft
         ? _CsvResult(lSpeed, lY, visList, fps)
@@ -693,7 +739,9 @@ class _HitCandidate {
 
 class _DetectArgs {
   final String csvPath;
+  final bool bothHands;
   const _DetectArgs({
     required this.csvPath,
+    this.bothHands = false,
   });
 }

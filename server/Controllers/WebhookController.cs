@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Text.Json;
+using UploadServer.Data;
 using UploadServer.DTOs;
+using UploadServer.Models;
 using UploadServer.Services;
 
 namespace UploadServer.Controllers
@@ -23,14 +26,67 @@ namespace UploadServer.Controllers
             PropertyNameCaseInsensitive = true,
         };
 
+        private readonly AdMobSsvVerifier _ssvVerifier;
+        private readonly VideoDbContext _db;
+
         public WebhookController(
             SubscriptionService subscriptionService,
             ILogger<WebhookController> logger,
-            IConfiguration config)
+            IConfiguration config,
+            AdMobSsvVerifier ssvVerifier,
+            VideoDbContext db)
         {
             _subscriptionService = subscriptionService;
             _logger              = logger;
             _config              = config;
+            _ssvVerifier         = ssvVerifier;
+            _db                  = db;
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // AdMob 獎勵廣告 SSV 回呼
+        // GET /api/webhook/admob-ssv?...&user_id=...&transaction_id=...&signature=...&key_id=...
+        // 驗簽通過才記錄觀看事件；領獎 API（POST /api/user/rewards/ad）消耗事件發球
+        // ════════════════════════════════════════════════════════════════
+
+        [HttpGet("admob-ssv")]
+        public async Task<IActionResult> AdMobSsv()
+        {
+            var rawQuery = Request.QueryString.Value ?? "";
+            if (!await _ssvVerifier.VerifyAsync(rawQuery))
+            {
+                _logger.LogWarning("AdMob SSV 驗簽失敗: {Query}", rawQuery);
+                return BadRequest();
+            }
+
+            var userId        = Request.Query["user_id"].ToString();
+            var transactionId = Request.Query["transaction_id"].ToString();
+
+            // AdMob 後台「驗證 URL」測試 ping 不帶完整參數，驗簽過即回 200
+            if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(transactionId))
+                return Ok();
+
+            // transaction_id 唯一索引防重放；重複回呼直接視為成功
+            var exists = await _db.AdRewardEvents.AnyAsync(e => e.TransactionId == transactionId);
+            if (!exists)
+            {
+                _db.AdRewardEvents.Add(new AdRewardEvent
+                {
+                    UserId        = userId,
+                    TransactionId = transactionId,
+                });
+                try
+                {
+                    await _db.SaveChangesAsync();
+                    _logger.LogInformation("AdMob SSV 觀看事件入帳: user={UserId} tx={Tx}", userId, transactionId);
+                }
+                catch (DbUpdateException)
+                {
+                    // 並發重複回呼撞唯一索引：已有人寫入，等同成功
+                }
+            }
+
+            return Ok();
         }
 
         // ════════════════════════════════════════════════════════════════

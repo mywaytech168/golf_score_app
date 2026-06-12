@@ -19,6 +19,7 @@ import '../services/realtime_audio_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/swing_impact_detector.dart';
 import 'device_capability.dart';
+import '../services/swing_detect_prefs.dart';
 import 'live_swing_detector.dart';
 import 'native_camera_service.dart';
 import 'pose_csv_writer.dart';
@@ -52,6 +53,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   final _audioService = RealtimeAudioService();
   final _soundService = ShotSoundService();
   late final LiveSwingDetector _detector;
+  bool _bothHands = false; // 雙手判斷（設定可切換）
 
   // ── Recording paths ───────────────────────────────────────────────────────
   String _sessionId = '';
@@ -129,6 +131,11 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
     _detector = LiveSwingDetector(onImpact: _handleImpact);
+    SwingDetectPrefs.getBothHands().then((v) {
+      if (!mounted) return;
+      setState(() => _bothHands = v);
+      _detector.bothHands = v;
+    });
     _loadRoundIndex();
     unawaited(cleanupStalePrewarmDirs());
     DeviceCapability.supportsVideoAndAnalysis().then((ok) {
@@ -1075,6 +1082,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     VideoQuality pendingQ = _config.quality;
     FrameRate    pendingF = _config.fps;
     bool         pendingA = _config.enableAudio;
+    bool         pendingBoth = _bothHands;
 
     showModalBottomSheet<void>(
       context: context,
@@ -1132,6 +1140,24 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                     activeThumbColor: kBrandPrimary,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                 ]),
+                const SizedBox(height: 12),
+
+                // 雙手判斷
+                Row(children: [
+                  const Icon(Icons.back_hand_outlined, color: Colors.white54, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(l10n.swingBothHands,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(l10n.swingBothHandsDesc,
+                          style: const TextStyle(color: Colors.white38, fontSize: 10.5)),
+                    ]),
+                  ),
+                  Switch(value: pendingBoth, onChanged: (v) => setSheet(() => pendingBoth = v),
+                    activeThumbColor: kBrandPrimary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ]),
                 const SizedBox(height: 16),
 
                 SizedBox(width: double.infinity,
@@ -1143,6 +1169,11 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                     ),
                     onPressed: () async {
                       Navigator.pop(ctx);
+                      if (pendingBoth != _bothHands) {
+                        setState(() => _bothHands = pendingBoth);
+                        _detector.bothHands = pendingBoth;
+                        unawaited(SwingDetectPrefs.setBothHands(pendingBoth));
+                      }
                       if (pendingQ != _config.quality || pendingF != _config.fps ||
                           pendingA != _config.enableAudio) {
                         setState(() => _config = RecordingConfig(

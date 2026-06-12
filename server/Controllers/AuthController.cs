@@ -401,6 +401,47 @@ namespace UploadServer.Controllers
         }
 
         /// <summary>
+        /// 綁定 Apple 帳號至當前登入用戶
+        /// POST: /api/auth/apple/link  body: { "identityToken": "..." }
+        /// </summary>
+        [HttpPost("apple/link")]
+        [Authorize]
+        public async Task<IActionResult> LinkApple(
+            [FromBody] AppleLinkRequest request,
+            [FromServices] AppleTokenValidator appleValidator)
+        {
+            try
+            {
+                var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized(new { success = false, message = "無效的身份驗證" });
+
+                if (request == null || string.IsNullOrEmpty(request.IdentityToken))
+                    return BadRequest(new { success = false, message = "Apple identity token 為必需" });
+
+                var (valid, sub, _, validateError) =
+                    await appleValidator.ValidateAsync(request.IdentityToken);
+                if (!valid)
+                {
+                    _logger.LogWarning("❌ Apple token 驗證失敗 (link): {Error}", validateError);
+                    return Unauthorized(new { success = false, message = "無效的 Apple identity token" });
+                }
+
+                var (success, error) = await _authService.LinkAppleAsync(userId, sub!);
+                if (!success)
+                    return BadRequest(new { success = false, message = error });
+
+                _logger.LogInformation($"✅ Apple 帳號已綁定: UserId={userId}, AppleId={sub}");
+                return Ok(new { success = true, message = "Apple 帳號綁定成功" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Apple 綁定失敗");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// 刷新 Token
         /// POST: /api/auth/refresh-token
         /// </summary>

@@ -60,7 +60,8 @@ namespace UploadServer.Services
                 Email:        user.Email,
                 DisplayName:  user.DisplayName,
                 GoogleLinked: user.UserAuths.Any(a => a.Provider == AuthProvider.Google),
-                HasPassword:  user.UserAuths.Any(a => a.Provider == AuthProvider.Local)
+                HasPassword:  user.UserAuths.Any(a => a.Provider == AuthProvider.Local),
+                AppleLinked:  user.UserAuths.Any(a => a.Provider == AuthProvider.Apple)
             );
         }
 
@@ -246,10 +247,26 @@ namespace UploadServer.Services
         // 廣告獎勵
         // ════════════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// 認領廣告獎勵。AdMob:SsvEnforced=true 時必須先有一筆未領取的
+        /// SSV 已驗證觀看事件（GET /api/webhook/admob-ssv 寫入）才發球，
+        /// 沒有事件回 Balls=-1（controller 轉 409，client 等回呼到達後重試）。
+        /// </summary>
         public async Task<ClaimAdRewardResponse?> ClaimAdRewardAsync(string userId)
         {
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return null;
+
+            AdRewardEvent? ssvEvent = null;
+            if (_config.GetValue<bool>("AdMob:SsvEnforced"))
+            {
+                ssvEvent = await _db.AdRewardEvents
+                    .Where(e => e.UserId == userId && e.ClaimedAt == null)
+                    .OrderBy(e => e.CreatedAt)
+                    .FirstOrDefaultAsync();
+                if (ssvEvent == null)
+                    return new ClaimAdRewardResponse(-1, user.AdClaimedToday);
+            }
 
             var today = Today;
             if (user.AdClaimedDate != today)
@@ -263,6 +280,8 @@ namespace UploadServer.Services
                 _logger.LogWarning("用戶 {UserId} 廣告獎勵已達每日上限", userId);
                 return new ClaimAdRewardResponse(0, user.AdClaimedToday);
             }
+
+            if (ssvEvent != null) ssvEvent.ClaimedAt = DateTime.UtcNow;
 
             user.AdClaimedToday++;
             user.BonusBalls += AdBalls;

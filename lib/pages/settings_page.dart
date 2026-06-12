@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../models/export_quality.dart';
 import '../providers/app_state_provider.dart';
@@ -53,6 +54,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _displayName = '';
   String _email = '';
   bool _googleLinked = false;
+  bool _appleLinked = false;
   bool _hasPassword = true; // 預設 true，避免載入期間誤顯示「設定密碼」
   ExportQuality _quality = ExportQuality.standard;  bool _isLoadingProfile = true;
   bool _isCheckingUpdate = false;
@@ -91,6 +93,7 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() {
           _email       = me['email'] as String? ?? '';
           _googleLinked = me['googleLinked'] as bool? ?? false;
+          _appleLinked  = me['appleLinked'] as bool? ?? false;
           _hasPassword  = me['hasPassword'] as bool? ?? true;
           _displayName = me['displayName'] as String? ?? _displayName;
         });
@@ -354,6 +357,52 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     } catch (e) {
       if (mounted) _showSnack('Google: $e', isError: true);
+    }
+  }
+
+  // ── 第三方登入（Apple 綁定，僅 iOS）───────────────────────────
+  Future<void> _linkApple() async {
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+
+      final identityToken = credential.identityToken;
+      if (identityToken == null) {
+        if (mounted) _showSnack(AppLocalizations.of(context).settingsAppleCredentialFailed, isError: true);
+        return;
+      }
+
+      if (!mounted) return;
+      final res = await VideoServerClient.instance.linkAppleAccount(identityToken);
+      if (!mounted) return;
+
+      // 無論成功或失敗都重新 fetch 伺服器狀態，確保 UI 與後端同步
+      final me = await VideoServerClient.instance.getMe();
+      if (mounted && me != null) {
+        setState(() => _appleLinked = me['appleLinked'] as bool? ?? _appleLinked);
+      }
+
+      if (!mounted) return;
+      if (res['success'] == false) {
+        final msg = res['message']?.toString() ?? '';
+        if (_appleLinked) {
+          _showSnack(AppLocalizations.of(context).settingsAppleLinked);
+        } else {
+          _showSnack(msg.isNotEmpty ? msg : AppLocalizations.of(context).settingsAppleLinkFailed, isError: true);
+        }
+      } else {
+        _showSnack(AppLocalizations.of(context).settingsAppleLinked);
+      }
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code != AuthorizationErrorCode.canceled && mounted) {
+        _showSnack('Apple: ${e.message}', isError: true);
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Apple: $e', isError: true);
     }
   }
 
@@ -770,6 +819,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 : null,
             onTap: _googleLinked ? null : _linkGoogle,
           ),
+          if (Platform.isIOS)
+            _SettingsTile(
+              icon: Icons.apple_rounded,
+              iconColor: context.textPrimary,
+              title: l.settingsAppleLogin,
+              subtitle: _appleLinked ? l.settingsAppleLinked : l.settingsAppleNotLinked,
+              subtitleColor: _appleLinked ? kGoodColor : context.textHint,
+              trailing: _appleLinked
+                  ? const Icon(Icons.check_circle_rounded, color: kGoodColor, size: 18)
+                  : null,
+              onTap: _appleLinked ? null : _linkApple,
+            ),
           const SizedBox(height: 16),
           // ── 分析偏好 ────────────────────────────────────────
           _SectionHeader(l.settingsSectionAnalysis),

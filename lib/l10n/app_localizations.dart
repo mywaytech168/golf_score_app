@@ -1150,6 +1150,36 @@ abstract class AppLocalizations {
   /// **'Not linked. Tap to link Google account'**
   String get settingsGoogleNotLinked;
 
+  /// No description provided for @settingsAppleLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple Sign-In'**
+  String get settingsAppleLogin;
+
+  /// No description provided for @settingsAppleLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'Linked'**
+  String get settingsAppleLinked;
+
+  /// No description provided for @settingsAppleNotLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'Not linked. Tap to link Apple account'**
+  String get settingsAppleNotLinked;
+
+  /// No description provided for @settingsAppleCredentialFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to retrieve Apple credentials, please try again'**
+  String get settingsAppleCredentialFailed;
+
+  /// No description provided for @settingsAppleLinkFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple account linking failed, please try again later'**
+  String get settingsAppleLinkFailed;
+
   /// No description provided for @settingsSectionAnalysis.
   ///
   /// In en, this message translates to:
@@ -4293,6 +4323,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Ball flight path after impact'**
   String get exportElementTrajectoryDesc;
+
+  /// No description provided for @exportElementGlow.
+  ///
+  /// In en, this message translates to:
+  /// **'Impact glow'**
+  String get exportElementGlow;
+
+  /// No description provided for @exportElementGlowDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Glowing ring at the moment of impact'**
+  String get exportElementGlowDesc;
+
+  /// No description provided for @exportElementSweetSpot.
+  ///
+  /// In en, this message translates to:
+  /// **'Sweet spot'**
+  String get exportElementSweetSpot;
+
+  /// No description provided for @exportElementSweetSpotDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Quality ring at impact (gold / blue / gray)'**
+  String get exportElementSweetSpotDesc;
+
+  /// No description provided for @swingBothHands.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-hand detection'**
+  String get swingBothHands;
+
+  /// No description provided for @swingBothHandsDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Count a swing only when both wrists move together; falls back to one hand if the other is occluded'**
+  String get swingBothHandsDesc;
 
   /// No description provided for @exportNoOverlayMaterial.
   ///

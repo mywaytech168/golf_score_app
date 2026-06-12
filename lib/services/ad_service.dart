@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'auth_token_storage.dart';
+
 /// 廣告服務 - 管理所有廣告操作
 class AdService {
   /// 是否顯示廣告。僅 Free 方案為 true；Pro / Elite 免廣告。
@@ -141,7 +143,17 @@ class AdService {
       adUnitId: _resolveRewardedId(_rewardedAiCoachId),
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) {
+        onAdLoaded: (ad) async {
+          // SSV：把 userId 綁進 Google 回呼，server 驗簽後依此記錄觀看事件
+          try {
+            final userId = await AuthTokenStorage.instance.getUserId();
+            if (userId != null && userId.isNotEmpty) {
+              await ad.setServerSideOptions(
+                  ServerSideVerificationOptions(userId: userId));
+            }
+          } catch (e) {
+            debugPrint('[AdService] 設定 SSV userId 失敗: $e');
+          }
           _rewardedAiCoachAd = ad;
           ad.fullScreenContentCallback = FullScreenContentCallback(
             onAdDismissedFullScreenContent: (ad) { ad.dispose(); _rewardedAiCoachAd = null; loadRewardedAiCoach(); },

@@ -416,6 +416,11 @@ class MainActivity: FlutterActivity() {
                     @Suppress("UNCHECKED_CAST")
                     val trackPts   = (call.argument<List<Map<String, Any>>>("trackPts")) ?: emptyList()
                     val watermark  = call.argument<String>("watermarkPath")    // nullable
+                    val hitGlow    = call.argument<Boolean>("hitGlow") ?: false
+                    val sweetSpot  = call.argument<Boolean>("sweetSpot") ?: false
+                    val impactSec  = call.argument<Double>("impactSec")        // nullable
+                    val goodShot   = call.argument<Boolean>("goodShot")        // nullable
+                    val passCount  = call.argument<Int>("passCount") ?: 0
                     val outputPath = call.argument<String>("outputPath")
                     val quality    = ExportQuality.fromString(call.argument<String>("quality"))
 
@@ -432,6 +437,11 @@ class MainActivity: FlutterActivity() {
                                 startSec = startSec,
                                 trackPts = trackPts,
                                 watermarkPath = watermark,
+                                hitGlow = hitGlow,
+                                sweetSpot = sweetSpot,
+                                impactSec = impactSec,
+                                goodShot = goodShot,
+                                passCount = passCount,
                                 outputPath = outputPath,
                                 quality = quality,
                                 onProgress = ::sendProgress,

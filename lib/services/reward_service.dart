@@ -163,11 +163,20 @@ class RewardService {
 
   // ── 看廣告獎勵 ───────────────────────────────────────────────
 
-  /// 廣告看完後呼叫，回傳實際獎勵球數（0 = 失敗 / 已達上限）
+  /// 廣告看完後呼叫，回傳實際獎勵球數（0 = 失敗 / 已達上限）。
+  /// SSV 強制模式下 Google 觀看驗證回呼可能晚於播放結束，
+  /// server 回 pending 時以 2 秒間隔重試，最多等 ~10 秒。
   static Future<int> claimAdReward() async {
+    const maxAttempts = 5;
     try {
-      final result = await VideoServerClient.instance.claimAdReward();
-      if (result != null) {
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        final result = await VideoServerClient.instance.claimAdReward();
+        if (result == null) return 0;
+        if (result['pending'] == true) {
+          debugPrint('$_tag ⏳ 廣告驗證處理中（${attempt + 1}/$maxAttempts）');
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
+        }
         final balls = (result['balls'] as int?) ?? 0;
         debugPrint('$_tag ✅ 廣告獎勵: +$balls 球');
         return balls;

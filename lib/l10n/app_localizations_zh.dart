@@ -548,6 +548,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsGoogleNotLinked => '尚未綁定，點擊連結 Google 帳號';
 
   @override
+  String get settingsAppleLogin => 'Apple 登入';
+
+  @override
+  String get settingsAppleLinked => '已綁定';
+
+  @override
+  String get settingsAppleNotLinked => '尚未綁定，點擊連結 Apple 帳號';
+
+  @override
+  String get settingsAppleCredentialFailed => '無法取得 Apple 憑證，請重試';
+
+  @override
+  String get settingsAppleLinkFailed => 'Apple 綁定失敗，請稍後再試';
+
+  @override
   String get settingsSectionAnalysis => '分析偏好';
 
   @override
@@ -2270,6 +2285,24 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get exportElementTrajectoryDesc => '擊球後球體飛行軌跡';
+
+  @override
+  String get exportElementGlow => '擊球光暈';
+
+  @override
+  String get exportElementGlowDesc => '擊球瞬間的擴散光圈';
+
+  @override
+  String get exportElementSweetSpot => '甜蜜點';
+
+  @override
+  String get exportElementSweetSpotDesc => '擊球品質光圈（金／藍／灰）';
+
+  @override
+  String get swingBothHands => '雙手判斷';
+
+  @override
+  String get swingBothHandsDesc => '雙手腕一起移動才算一次揮桿；其中一手被遮擋時自動改用另一手';
 
   @override
   String get exportNoOverlayMaterial => '此影片沒有可疊加的分析素材，將輸出原片。';
@@ -4149,6 +4182,21 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get settingsGoogleNotLinked => '未绑定，点击链接 Google 账号';
 
   @override
+  String get settingsAppleLogin => 'Apple 登录';
+
+  @override
+  String get settingsAppleLinked => '已绑定';
+
+  @override
+  String get settingsAppleNotLinked => '未绑定，点击链接 Apple 账号';
+
+  @override
+  String get settingsAppleCredentialFailed => '无法获取 Apple 凭证，请重试';
+
+  @override
+  String get settingsAppleLinkFailed => 'Apple 绑定失败，请稍后再试';
+
+  @override
   String get settingsSectionAnalysis => '分析偏好';
 
   @override
@@ -5871,6 +5919,24 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get exportElementTrajectoryDesc => '击球后球体飞行轨迹';
+
+  @override
+  String get exportElementGlow => '击球光晕';
+
+  @override
+  String get exportElementGlowDesc => '击球瞬间的扩散光圈';
+
+  @override
+  String get exportElementSweetSpot => '甜蜜点';
+
+  @override
+  String get exportElementSweetSpotDesc => '击球质量光圈（金／蓝／灰）';
+
+  @override
+  String get swingBothHands => '双手判断';
+
+  @override
+  String get swingBothHandsDesc => '双手腕一起移动才算一次挥杆；其中一手被遮挡时自动改用另一手';
 
   @override
   String get exportNoOverlayMaterial => '此视频没有可叠加的分析素材，将输出原片。';
@@ -7750,6 +7816,21 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsGoogleNotLinked => '尚未綁定，點擊連結 Google 帳號';
 
   @override
+  String get settingsAppleLogin => 'Apple 登入';
+
+  @override
+  String get settingsAppleLinked => '已綁定';
+
+  @override
+  String get settingsAppleNotLinked => '尚未綁定，點擊連結 Apple 帳號';
+
+  @override
+  String get settingsAppleCredentialFailed => '無法取得 Apple 憑證，請重試';
+
+  @override
+  String get settingsAppleLinkFailed => 'Apple 綁定失敗，請稍後再試';
+
+  @override
   String get settingsSectionAnalysis => '分析偏好';
 
   @override
@@ -9472,6 +9553,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get exportElementTrajectoryDesc => '擊球後球體飛行軌跡';
+
+  @override
+  String get exportElementGlow => '擊球光暈';
+
+  @override
+  String get exportElementGlowDesc => '擊球瞬間的擴散光圈';
+
+  @override
+  String get exportElementSweetSpot => '甜蜜點';
+
+  @override
+  String get exportElementSweetSpotDesc => '擊球品質光圈（金／藍／灰）';
+
+  @override
+  String get swingBothHands => '雙手判斷';
+
+  @override
+  String get swingBothHandsDesc => '雙手腕一起移動才算一次揮桿；其中一手被遮擋時自動改用另一手';
 
   @override
   String get exportNoOverlayMaterial => '此影片沒有可疊加的分析素材，將輸出原片。';

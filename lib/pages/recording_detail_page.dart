@@ -271,6 +271,8 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
       builder: (ctx) => CustomExportSheet(
         hasSkeleton: hasSkeleton,
         hasTrajectory: hasTrajectory,
+        hasImpact: widget.entry.hitSecond != null,
+        hasShotQuality: widget.entry.goodShot != null,
         isFree: isFree,
       ),
     );
@@ -280,7 +282,13 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     try {
       final exportLabel = l10n.exportCustomTitle;
       _showSnack(l10n.recDetailBurning(exportLabel));
-      final burned = await OverlayBurnService.composeForExport(sessionDir, spec);
+      final burned = await OverlayBurnService.composeForExport(
+        sessionDir,
+        spec,
+        impactSec: widget.entry.hitSecond,
+        goodShot: widget.entry.goodShot,
+        passCount: widget.entry.audioPassCount ?? 0,
+      );
       if (burned == null) {
         if (mounted) _showSnack(l10n.recDetailBurnFailed, isError: true);
         return;

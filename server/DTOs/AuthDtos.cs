@@ -171,6 +171,13 @@ namespace UploadServer.DTOs
         public string IdToken { get; set; }
     }
 
+    /// <summary>POST /api/auth/apple/link 請求</summary>
+    public class AppleLinkRequest
+    {
+        /// <summary>Apple identity token (JWT, from sign_in_with_apple package)</summary>
+        public string IdentityToken { get; set; }
+    }
+
     // ============================================================
     // 忘記密碼 / 重設密碼
     // ============================================================
