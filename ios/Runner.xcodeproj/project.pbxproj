@@ -24,6 +24,7 @@
 		AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001141CF9AA0000000014 /* VideoExportChannel.swift */; };
 		AA0001171CF9AA0000000017 /* GolfAnalysisChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */; };
 		AA0001191CF9AA0000000019 /* MediaPipeCameraChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001181CF9AA0000000018 /* MediaPipeCameraChannel.swift */; };
+		AA00011B1CF9AA000000001B /* VideoOverlayChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00011A1CF9AA000000001A /* VideoOverlayChannel.swift */; };
 		EBD96FC061E6446ADA9EA04D /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D3EE3AF767EEE86B6ED334B6 /* Pods_Runner.framework */; };
 /* End PBXBuildFile section */
 
@@ -68,8 +69,9 @@
 		AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoTranscoderChannel.swift; sourceTree = "<group>"; };
 		AA0001141CF9AA0000000014 /* VideoExportChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoExportChannel.swift; sourceTree = "<group>"; };
 		AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GolfAnalysisChannel.swift; sourceTree = "<group>"; };
-		AA0001191CF9AA0000000019 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
+		AA00011C1CF9AA000000001C /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
 		AA0001181CF9AA0000000018 /* MediaPipeCameraChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MediaPipeCameraChannel.swift; sourceTree = "<group>"; };
+		AA00011A1CF9AA000000001A /* VideoOverlayChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoOverlayChannel.swift; sourceTree = "<group>"; };
 		BC5660C4942F611BB7C5199E /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		D3EE3AF767EEE86B6ED334B6 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3DD7156ECB2B5F94A35207C /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
@@ -146,8 +148,9 @@
 				AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */,
 				AA0001141CF9AA0000000014 /* VideoExportChannel.swift */,
 				AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */,
-				AA0001191CF9AA0000000019 /* Runner.entitlements */,
+				AA00011C1CF9AA000000001C /* Runner.entitlements */,
 				AA0001181CF9AA0000000018 /* MediaPipeCameraChannel.swift */,
+				AA00011A1CF9AA000000001A /* VideoOverlayChannel.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -345,6 +348,7 @@
 				AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */,
 				AA0001171CF9AA0000000017 /* GolfAnalysisChannel.swift in Sources */,
 				AA0001191CF9AA0000000019 /* MediaPipeCameraChannel.swift in Sources */,
+				AA00011B1CF9AA000000001B /* VideoOverlayChannel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

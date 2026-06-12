@@ -31,7 +31,7 @@ import UIKit
 
       // ── 新增 MethodChannel 實作 ──────────────────────────────
       setupShareChannel(messenger: m)
-      setupVideoOverlayChannel(messenger: m)
+      registerVideoOverlayChannel(messenger: m)
       registerTrimmerChannel(messenger: m)
       registerFrameExtractorChannel(messenger: m)
       registerPoseAnalyzerChannel(messenger: m)
@@ -271,44 +271,6 @@ private extension AppDelegate {
           }
           self?.window?.rootViewController?.present(vc, animated: true)
           result(true)
-        }
-      }
-  }
-}
-
-// MARK: - Video overlay (stub that copies file, mirrors Android behaviour)
-
-private extension AppDelegate {
-  func setupVideoOverlayChannel(messenger: FlutterBinaryMessenger) {
-    FlutterMethodChannel(name: "video_overlay_channel", binaryMessenger: messenger)
-      .setMethodCallHandler { call, result in
-        guard call.method == "processVideo",
-              let args       = call.arguments as? [String: Any],
-              let inputPath  = args["inputPath"]  as? String,
-              let outputPath = args["outputPath"] as? String
-        else {
-          result(FlutterMethodNotImplemented)
-          return
-        }
-
-        DispatchQueue.global(qos: .userInitiated).async {
-          do {
-            let dstURL = URL(fileURLWithPath: outputPath)
-            try FileManager.default.createDirectory(
-              at: dstURL.deletingLastPathComponent(),
-              withIntermediateDirectories: true
-            )
-            try? FileManager.default.removeItem(at: dstURL)
-            try FileManager.default.copyItem(
-              at: URL(fileURLWithPath: inputPath),
-              to: dstURL
-            )
-            DispatchQueue.main.async { result(outputPath) }
-          } catch {
-            DispatchQueue.main.async {
-              result(FlutterError(code: "overlay_failed", message: error.localizedDescription, details: nil))
-            }
-          }
         }
       }
   }

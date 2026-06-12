@@ -83,16 +83,20 @@ class HighlightService {
           if (titleData != null && titleData.isNotEmpty) {
             caption = titleData.entries.map((e) => '${e.key}: ${e.value}').join('  ');
           }
-          final String? out = await VideoOverlayProcessor.process(
+          final VideoOverlayResult out = await VideoOverlayProcessor.process(
             inputPath: videoPath,
             attachAvatar: false,
             avatarPath: null,
             attachCaption: caption.isNotEmpty,
             caption: caption,
           );
-          if (out != null && out.isNotEmpty) return out;
-          debugLog.writeln('mobile overlay fallback returned null');
-          await writeDebug();
+          if (out.path.isNotEmpty) {
+            if (!out.burned) {
+              debugLog.writeln('mobile overlay fallback: not burned, returning original');
+              await writeDebug();
+            }
+            return out.path;
+          }
         } catch (e) {
           try { debugLog.writeln('mobile overlay fallback error: $e'); await writeDebug(); } catch (_) {}
         }

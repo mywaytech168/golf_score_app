@@ -278,7 +278,7 @@ class MainActivity: FlutterActivity() {
                     overlayExecutor.execute {
                         try {
                             val processor = VideoOverlayProcessor(applicationContext)
-                            val finalPath = processor.process(
+                            val overlayResult = processor.process(
                                 inputPath = inputPath,
                                 outputPath = outputPath,
                                 attachAvatar = attachAvatar,
@@ -286,8 +286,8 @@ class MainActivity: FlutterActivity() {
                                 attachCaption = attachCaption,
                                 captionText = caption
                             )
-                            Log.i(logTag, "覆蓋流程成功，回傳路徑=$finalPath")
-                            runOnUiThread { result.success(finalPath) }
+                            Log.i(logTag, "覆蓋流程成功，回傳=$overlayResult")
+                            runOnUiThread { result.success(overlayResult) }
                         } catch (error: Exception) {
                             Log.e(logTag, "覆蓋流程失敗：${error.message}", error)
                             runOnUiThread {
