@@ -145,24 +145,50 @@ class SwingAutoClipService {
     return entry.copyWith(hitSecond: hit.hitSec, isAnalyzed: true);
   }
 
-  // ── 候選合併：±_dedupeWindowSec 內視為同一桿，優先音訊峰值 ──────────────
+  // ── 候選合併：骨架偵測為主，音訊峰值僅做時間精修 ─────────────────────────
+  //
+  // 設計（2026-06-12 定案）：桿數判定以 LiveSwingDetector（骨架腕速）為準；
+  // 音訊峰值只用來把時間修到真正擊球瞬間，**不能自己成為一桿**——
+  // 練習場環境音（隔壁打位擊球聲）會產生大量假峰值。
+  //
+  // 時間關係：腕速偵測要等峰值「確認下降」才開火，比真實擊球晚 0.3~3 秒；
+  // 音訊峰值≈真實擊球瞬間 → 在 live impact 前 4 秒 ~ 後 1 秒內找最近峰值精修。
+
+  /// live impact 往前找音訊峰值的窗口（偵測延遲最大觀測值 ~2.9s，留裕度）
+  static const double _audioRefineEarlySec = 4.0;
+
+  /// live impact 往後容許的音訊峰值窗口
+  static const double _audioRefineLateSec = 1.0;
 
   static List<({double sec, bool fromAudio})> mergeCandidates({
     required List<double> audioPeaks,
     required List<double> liveImpacts,
   }) {
-    final merged = <({double sec, bool fromAudio})>[
-      for (final s in audioPeaks) (sec: s, fromAudio: true),
-    ];
-    for (final s in liveImpacts) {
-      final nearAudio =
-          audioPeaks.any((a) => (a - s).abs() <= _dedupeWindowSec);
-      if (!nearAudio) merged.add((sec: s, fromAudio: false));
+    // 無骨架即時偵測（匯入影片、低端機暫停分析）→ 退回音訊峰值
+    if (liveImpacts.isEmpty) {
+      final sorted = [...audioPeaks]..sort();
+      return [for (final s in sorted) (sec: s, fromAudio: true)];
     }
-    merged.sort((a, b) => a.sec.compareTo(b.sec));
-    // 同來源相鄰過近也去重（保留前者）
+
+    // 骨架為主：每個 live impact 為一桿，窗口內有音訊峰值就取峰值時間
+    final refined = <({double sec, bool fromAudio})>[];
+    for (final s in liveImpacts) {
+      double? best;
+      for (final a in audioPeaks) {
+        if (a < s - _audioRefineEarlySec || a > s + _audioRefineLateSec) {
+          continue;
+        }
+        if (best == null || (a - s).abs() < (best - s).abs()) best = a;
+      }
+      refined.add(best != null
+          ? (sec: best, fromAudio: true)
+          : (sec: s, fromAudio: false));
+    }
+    refined.sort((a, b) => a.sec.compareTo(b.sec));
+
+    // 兩個 live impact 精修到同一峰值（或相鄰過近）時去重，保留前者
     final out = <({double sec, bool fromAudio})>[];
-    for (final c in merged) {
+    for (final c in refined) {
       if (out.isEmpty || c.sec - out.last.sec > _dedupeWindowSec) out.add(c);
     }
     return out;

@@ -1437,11 +1437,20 @@ class _HistoryTileState extends State<_HistoryTile> {
         if (cancelToken.isCancelled) return;
         debugPrint('[偵測擊球 V3] 音訊峰值: $rawPeakMs');
 
-        if (rawPeakMs.isEmpty) {
+        // 骨架偵測為主：live impacts 判定桿數、音訊峰值僅精修時間；
+        // 無 live 資料（匯入影片）時退回音訊峰值
+        final v3LiveImpacts =
+            await SwingAutoClipService.loadLiveImpacts(sessionDir);
+        final v3Candidates = SwingAutoClipService.mergeCandidates(
+          audioPeaks: rawPeakMs.map((ms) => ms / 1000.0).toList(),
+          liveImpacts: v3LiveImpacts,
+        );
+
+        if (v3Candidates.isEmpty) {
           navigator.pop();
           setState(() => _isDetecting = false);
           messenger.showSnackBar(const SnackBar(
-            content: Text('V3：影片無音訊或未偵測到擊球聲'),
+            content: Text('V3：未偵測到擊球（無揮桿動作與擊球聲）'),
             backgroundColor: Colors.orange,
           ));
           return;
@@ -1456,9 +1465,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           context,
           videoPath: widget.entry.filePath,
           durationSeconds: totalDur,
-          candidates: [
-            for (final ms in rawPeakMs) (sec: ms / 1000.0, fromAudio: true),
-          ],
+          candidates: v3Candidates,
         );
         if (selection == null || selection.isEmpty) {
           navigator.pop();
