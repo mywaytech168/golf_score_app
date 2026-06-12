@@ -321,10 +321,28 @@ class AnalysisService {
   AnalysisService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl:        _baseUrl,
-      connectTimeout: const Duration(seconds: 15),
+      connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 30),
     ));
+    _dio.interceptors.add(_ConnectRetryInterceptor(_dio));
     _dio.interceptors.add(_TokenRefreshInterceptor(_dio));
+  }
+
+  /// 把 Dio 連線類錯誤轉成使用者看得懂的訊息（其餘原樣回傳）。
+  static String friendlyError(Object e) {
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.connectionError:
+          return '無法連線到伺服器，請確認網路後再試';
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return '伺服器回應逾時，請稍後再試';
+        default:
+          break;
+      }
+    }
+    return e.toString();
   }
 
   Future<Map<String, String>> _authHeaders() async {
@@ -631,6 +649,37 @@ class AnalysisService {
       return list.first; // failed
     } catch (_) {
       return null;
+    }
+  }
+}
+
+// ── Dio 連線失敗自動重試攔截器 ────────────────────────────────
+//
+// connectionTimeout / connectionError 代表 TCP 連線根本沒建立、請求未送出，
+// 任何 method 重試都安全（不會重複建立任務）。行動網路切換瞬間常見此類失敗，
+// 退避 2 秒後重試一次。
+class _ConnectRetryInterceptor extends Interceptor {
+  final Dio _dio;
+  _ConnectRetryInterceptor(this._dio);
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    final isConnectFailure = err.type == DioExceptionType.connectionTimeout ||
+        err.type == DioExceptionType.connectionError;
+    final alreadyRetried = err.requestOptions.extra['connectRetried'] == true;
+    if (!isConnectFailure || alreadyRetried) {
+      handler.next(err);
+      return;
+    }
+    debugPrint('[AnalysisService] 連線失敗（${err.type.name}），2 秒後重試一次: '
+        '${err.requestOptions.path}');
+    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final opts = err.requestOptions..extra['connectRetried'] = true;
+      final resp = await _dio.fetch(opts);
+      handler.resolve(resp);
+    } on DioException catch (e) {
+      handler.next(e);
     }
   }
 }
