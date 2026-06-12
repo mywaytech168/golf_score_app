@@ -23,7 +23,7 @@ class RecordingHistoryStorage {
   static const String _folderName  = 'golf_recordings';
   static const String _legacyJson  = 'recording_history.json';
   static const String _dbName      = 'recording_history.db';
-  static const int    _dbVersion   = 7;
+  static const int    _dbVersion   = 9;
   static const String _table       = 'recordings';
 
   Database? _db;
@@ -51,6 +51,8 @@ class RecordingHistoryStorage {
             createdAt         TEXT,
             durationSeconds   INTEGER NOT NULL,
             customName        TEXT,
+            note              TEXT,
+            recordedPlatform  TEXT,
             thumbnailPath     TEXT,
             videoType         TEXT NOT NULL DEFAULT 'original',
             isClipped         INTEGER NOT NULL DEFAULT 0,
@@ -105,6 +107,12 @@ class RecordingHistoryStorage {
         if (oldVersion < 7) {
           await db.execute('ALTER TABLE $_table ADD COLUMN practiceSuggestions TEXT');
           await db.execute('ALTER TABLE $_table ADD COLUMN nextTrainingGoal TEXT');
+        }
+        if (oldVersion < 8) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN note TEXT');
+        }
+        if (oldVersion < 9) {
+          await db.execute('ALTER TABLE $_table ADD COLUMN recordedPlatform TEXT');
         }
       },
     );
@@ -269,6 +277,8 @@ class RecordingHistoryStorage {
     'createdAt':          e.createdAt?.toIso8601String(),
     'durationSeconds':    e.durationSeconds,
     'customName':         e.customName,
+    'note':               e.note,
+    'recordedPlatform':   e.recordedPlatform,
     'thumbnailPath':      e.thumbnailPath,
     'videoType':          e.videoType.name,
     'isClipped':          e.isClipped    ? 1 : 0,
@@ -364,6 +374,8 @@ class RecordingHistoryStorage {
       createdAt:          row['createdAt'] != null ? DateTime.tryParse(row['createdAt'] as String) : null,
       durationSeconds:    (row['durationSeconds']    as int?)    ?? 0,
       customName:         row['customName']          as String?,
+      note:               row['note']                as String?,
+      recordedPlatform:   row['recordedPlatform']    as String?,
       thumbnailPath:      rawThumb == null || rawThumb.isEmpty ? null : rawThumb,
       videoType:          videoType,
       isClipped:          (row['isClipped']          as int?)    == 1,

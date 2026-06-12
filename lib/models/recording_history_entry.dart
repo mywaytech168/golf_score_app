@@ -103,6 +103,14 @@ class RecordingHistoryEntry {
   /// 允許使用者自訂的影片名稱，空字串視為未命名
   final String? customName;
 
+  /// 使用者影片備註（練習心得、場地、桿型…），空字串視為無備註
+  final String? note;
+
+  /// 錄製來源平台（'android' | 'ios'）。跨平台分享後切片時，
+  /// 前鏡頭翻轉等邏輯必須依「錄製平台」而非「當前執行平台」判斷。
+  /// null = 舊資料（視為本機平台錄製）。
+  final String? recordedPlatform;
+
   /// 影片縮圖的完整路徑，供首頁與歷史頁顯示預覽畫面
   final String? thumbnailPath;
 
@@ -207,6 +215,8 @@ class RecordingHistoryEntry {
     this.createdAt,
     required this.durationSeconds,
     this.customName,
+    this.note,
+    this.recordedPlatform,
     this.thumbnailPath,
     this.videoType = VideoType.original,
     this.isClipped = false,
@@ -257,6 +267,8 @@ class RecordingHistoryEntry {
     DateTime? recordedAt,
     int? durationSeconds,
     String? customName,
+    String? note,
+    String? recordedPlatform,
     String? thumbnailPath,
     VideoType? videoType,
     bool? isClipped,
@@ -295,6 +307,8 @@ class RecordingHistoryEntry {
       createdAt: createdAt ?? this.createdAt,
       durationSeconds: durationSeconds ?? this.durationSeconds,
       customName: customName ?? this.customName,
+      note: note ?? this.note,
+      recordedPlatform: recordedPlatform ?? this.recordedPlatform,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       videoType: videoType ?? this.videoType,
       isClipped: isClipped ?? this.isClipped,
@@ -350,6 +364,8 @@ class RecordingHistoryEntry {
       'recordedAt': recordedAt.toIso8601String(),
       'durationSeconds': durationSeconds,
       'customName': customName,
+      'note': note,
+      'recordedPlatform': recordedPlatform,
       'thumbnailPath': thumbnailPath,
       'videoType': videoType.name,
       'isClipped': isClipped,
@@ -423,6 +439,8 @@ class RecordingHistoryEntry {
           DateTime.tryParse(json['recordedAt'] as String? ?? '') ?? DateTime.now(),
       durationSeconds: (json['durationSeconds'] as int?) ?? 0,
       customName: (json['customName'] as String?) ?? '',
+      note: json['note'] as String?,
+      recordedPlatform: json['recordedPlatform'] as String?,
       thumbnailPath:
           rawThumbnail == null || rawThumbnail.isEmpty ? null : rawThumbnail,
       videoType: videoType,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -29,6 +30,7 @@ import '../services/audio_export_models.dart';
 import '../services/audio_extraction_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/ad_service.dart';
+import '../services/reward_service.dart';
 import '../services/analysis_service.dart';
 import '../services/plan_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -39,12 +41,13 @@ import 'video_comparison_page.dart';
 import 'video_player_page.dart';
 import 'recording_detail_page.dart';
 import '../widgets/share_upload_dialog.dart';
+import '../widgets/clip_candidates_sheet.dart';
 import '../services/video_export_service.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, detectHits, analyze, compare, share, download, delete }
+enum _HistoryMenuAction { rename, note, detectHits, analyze, compare, share, download, uploadReward, delete }
 
-enum _ClipMenuAction { rename, share, download, delete }
+enum _ClipMenuAction { rename, note, share, download, uploadReward, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -229,17 +232,32 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     super.dispose();
   }
 
-  /// 移除指定紀錄並同步刪除實體檔案
+  /// 此原始影片底下的切片（切片存在獨立的 {session}_hit_n/ 兄弟目錄，
+  /// 不在原始 session 目錄內，刪除時必須逐筆處理）
+  List<RecordingHistoryEntry> _childClipsOf(RecordingHistoryEntry entry) =>
+      _entries.where((e) =>
+          e.videoType == VideoType.localClip &&
+          e.sourceVideoPath == entry.filePath).toList();
+
+  /// 移除指定紀錄並同步刪除實體檔案。
+  /// - 原始影片：連同所有切片（檔案 + DB 記錄）一併移除
+  /// - 切片：只刪該切片；若是最後一個切片，解除來源影片的 isClipped，
+  ///   讓使用者可以重新偵測擊球
   Future<void> _deleteEntry(RecordingHistoryEntry entry) async {
+    final isClip = entry.videoType == VideoType.localClip;
+    final childClips = isClip ? const <RecordingHistoryEntry>[] : _childClipsOf(entry);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('刪除影片'),
           content: Text(
-        entry.videoType == VideoType.localClip
+        isClip
             ? '確定要刪除切片「${entry.displayTitle}」嗎？'
-            : '確定要刪除「${entry.displayTitle}」嗎？影片、CSV 及所有切片將一併移除。',
+            : childClips.isEmpty
+                ? '確定要刪除「${entry.displayTitle}」嗎？影片與 CSV 將一併移除。'
+                : '確定要刪除「${entry.displayTitle}」嗎？'
+                    '影片、CSV 及 ${childClips.length} 個切片將一併移除。',
       ),
           actions: [
             TextButton(
@@ -265,14 +283,38 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       return; // 找不到對應項目時直接結束
     }
 
+    // 原始影片：先清掉所有子切片（檔案 + DB），再刪自己
+    for (final clip in childClips) {
+      await _removeEntryFiles(clip);
+      await RecordingHistoryStorage.instance.deleteEntry(clip.filePath);
+    }
+    if (childClips.isNotEmpty) {
+      final clipPaths = childClips.map((c) => c.filePath).toSet();
+      _entries.removeWhere((e) => clipPaths.contains(e.filePath));
+    }
+
     // 移除檔案
     await _removeEntryFiles(entry);
 
-    _entries.removeAt(index);
+    _entries.removeWhere((item) => item.filePath == entry.filePath);
+
+    // 切片刪光時解除來源影片的「已切片」標記，允許重新偵測
+    if (isClip && entry.sourceVideoPath != null) {
+      final srcIdx =
+          _entries.indexWhere((e) => e.filePath == entry.sourceVideoPath);
+      final siblingsLeft = _entries.any((e) =>
+          e.videoType == VideoType.localClip &&
+          e.sourceVideoPath == entry.sourceVideoPath);
+      if (srcIdx != -1 && !siblingsLeft && _entries[srcIdx].isClipped) {
+        _entries[srcIdx] = _entries[srcIdx].copyWith(isClipped: false);
+        await RecordingHistoryStorage.instance.upsertEntry(_entries[srcIdx]);
+      }
+    }
+
     if (mounted) {
       debugPrint('[歷史頁] 刪除後立即刷新列表，剩餘 ${_entries.length} 筆');
       setState(() {}); // 通知畫面重新渲染
-      
+
       // 通知父頁面即時更新（不需要等返回）
       widget.onDelete?.call();
     }
@@ -282,7 +324,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已刪除 ${entry.fileName}')),
+      SnackBar(content: Text(
+        childClips.isEmpty
+            ? '已刪除 ${entry.fileName}'
+            : '已刪除 ${entry.fileName}（含 ${childClips.length} 個切片）',
+      )),
     );
   }
 
@@ -850,6 +896,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       filteredEntries = filteredEntries.where((e) {
         if (e.displayTitle.toLowerCase().contains(q)) return true;
         if ((e.customName ?? '').toLowerCase().contains(q)) return true;
+        if ((e.note ?? '').toLowerCase().contains(q)) return true;
         if (_formatTimestamp(e.recordedAt).contains(q)) return true;
         return false;
       }).toList();
@@ -1304,7 +1351,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
         progressSvc.progress.addListener(listenV2);
 
-        final peakMs = await GolfAnalysisService.findAudioPeaks(
+        // 優先讀錄影結束時預計算的快取（audio_peaks.json），免重掃音軌
+        final peakMs = await SwingAutoClipService.getOrComputeAudioPeaks(
           videoPath: widget.entry.filePath,
           searchStartMs: 500,
           minGapMs: 2000,
@@ -1331,26 +1379,28 @@ class _HistoryTileState extends State<_HistoryTile> {
           return;
         }
 
+        // ── 切片前確認：逐段預覽、勾選保留、自由切片 ────────────────
+        final totalDur = widget.entry.durationSeconds.toDouble();
+        progressNotifier.value = (0.4, '等待確認片段...');
+        if (!mounted) return;
+        final selection = await showClipCandidatesSheet(
+          context,
+          videoPath: widget.entry.filePath,
+          durationSeconds: totalDur,
+          candidates: candidates,
+        );
+        if (selection == null || selection.isEmpty) {
+          navigator.pop();
+          if (mounted) setState(() => _isDetecting = false);
+          return;
+        }
+
         progressNotifier.value = (0.4, '裁切片段中...');
-        // 把候選轉為 SwingHit（±2.5 秒精確窗口）
+        // 把保留的候選轉為 SwingHit（±2.5 秒精確窗口）
         // 每個候選各自對應一個 clip；若兩候選相距 < 5 秒，clip 可重疊，這是預期行為。
         // trimWithSurface() 保證每個 clip 精確 5 秒，以候選為中心。
-        final totalDur = widget.entry.durationSeconds.toDouble();
-        final v2Hits = <SwingHit>[];
-        for (int i = 0; i < candidates.length; i++) {
-          final c = candidates[i];
-          final (s2, e2) = SwingImpactDetector.calculateClipBoundaries(
-            hitSec: c.sec, totalDurationSec: totalDur);
-          v2Hits.add(SwingHit(
-            hitIndex:   i + 1,
-            hitFrame:   (c.sec * 30).round(),
-            hitSec:     c.sec,
-            startSec:   s2,
-            endSec:     e2,
-            speedValue: 0.0,
-            audioValue: c.fromAudio ? 1.0 : 0.0,
-          ));
-        }
+        // 自由切片區段則直接以使用者選的起迄裁切。
+        final v2Hits = _hitsFromSelection(selection, totalDur);
 
         // 直接裁切，不跑骨架分析（進度從 0.6 起算）
         await _clipAndSaveHits(
@@ -1377,16 +1427,17 @@ class _HistoryTileState extends State<_HistoryTile> {
         }
         progressSvc.progress.addListener(listenAudio);
 
-        final peakMs = await GolfAnalysisService.findAudioPeaks(
+        // 優先讀錄影結束時預計算的快取（audio_peaks.json），免重掃音軌
+        final rawPeakMs = await SwingAutoClipService.getOrComputeAudioPeaks(
           videoPath: widget.entry.filePath,
           searchStartMs: 500,
           minGapMs: 2000,
         );
         progressSvc.progress.removeListener(listenAudio);
         if (cancelToken.isCancelled) return;
-        debugPrint('[偵測擊球 V3] 音訊峰值: $peakMs');
+        debugPrint('[偵測擊球 V3] 音訊峰值: $rawPeakMs');
 
-        if (peakMs.isEmpty) {
+        if (rawPeakMs.isEmpty) {
           navigator.pop();
           setState(() => _isDetecting = false);
           messenger.showSnackBar(const SnackBar(
@@ -1396,8 +1447,28 @@ class _HistoryTileState extends State<_HistoryTile> {
           return;
         }
 
-        // Step 2：對每個音訊峰值做局部骨架分析（±3 秒窗口 → 精確 impactMs）
+        // ── 切片前確認：逐段預覽、勾選保留、自由切片 ────────────────
+        // 在骨架精修前先讓使用者篩掉誤判峰值，省下被剔除候選的分析時間。
         final totalDur = widget.entry.durationSeconds.toDouble();
+        progressNotifier.value = (0.15, '等待確認片段...');
+        if (!mounted) return;
+        final selection = await showClipCandidatesSheet(
+          context,
+          videoPath: widget.entry.filePath,
+          durationSeconds: totalDur,
+          candidates: [
+            for (final ms in rawPeakMs) (sec: ms / 1000.0, fromAudio: true),
+          ],
+        );
+        if (selection == null || selection.isEmpty) {
+          navigator.pop();
+          if (mounted) setState(() => _isDetecting = false);
+          return;
+        }
+        final peakMs =
+            selection.candidates.map((c) => (c.sec * 1000).round()).toList();
+
+        // Step 2：對每個音訊峰值做局部骨架分析（±3 秒窗口 → 精確 impactMs）
         final v3Hits   = <SwingHit>[];
 
         for (int i = 0; i < peakMs.length; i++) {
@@ -1454,6 +1525,24 @@ class _HistoryTileState extends State<_HistoryTile> {
             speedValue:   0.0,
             audioValue:   1.0,
             skeletonJson: result.skeletonJson, // V3 局部骨架，直接寫入 clip CSV
+          ));
+        }
+
+        // 自由切片區段：不經骨架精修，直接以使用者選的起迄裁切
+        // （hitIndex 接在既有最大值之後 — 精修失敗的峰值會留下編號空洞）
+        var nextIndex = v3Hits.isEmpty
+            ? 1
+            : v3Hits.map((h) => h.hitIndex).reduce(math.max) + 1;
+        for (final r in selection.manualRanges) {
+          final mid = (r.startSec + r.endSec) / 2;
+          v3Hits.add(SwingHit(
+            hitIndex:   nextIndex++,
+            hitFrame:   (mid * 30).round(),
+            hitSec:     mid,
+            startSec:   r.startSec,
+            endSec:     r.endSec,
+            speedValue: 0.0,
+            audioValue: 0.0,
           ));
         }
 
@@ -1631,6 +1720,39 @@ class _HistoryTileState extends State<_HistoryTile> {
   /// 共用裁切 + 儲存邏輯（V1 後半 / V2 均呼叫）
   ///
   /// [baseProgress]：裁切開始時的進度基底（V1=0.5，V2=0.6）
+  /// 確認 sheet 的選擇結果 → SwingHit 列表。
+  /// 自動候選用 ±2.5 秒標準窗口；自由切片區段直接用使用者選的起迄。
+  List<SwingHit> _hitsFromSelection(ClipSelection selection, double totalDur) {
+    final hits = <SwingHit>[];
+    var idx = 1;
+    for (final c in selection.candidates) {
+      final (s, e) = SwingImpactDetector.calculateClipBoundaries(
+        hitSec: c.sec, totalDurationSec: totalDur);
+      hits.add(SwingHit(
+        hitIndex:   idx++,
+        hitFrame:   (c.sec * 30).round(),
+        hitSec:     c.sec,
+        startSec:   s,
+        endSec:     e,
+        speedValue: 0.0,
+        audioValue: c.fromAudio ? 1.0 : 0.0,
+      ));
+    }
+    for (final r in selection.manualRanges) {
+      final mid = (r.startSec + r.endSec) / 2;
+      hits.add(SwingHit(
+        hitIndex:   idx++,
+        hitFrame:   (mid * 30).round(),
+        hitSec:     mid,
+        startSec:   r.startSec,
+        endSec:     r.endSec,
+        speedValue: 0.0,
+        audioValue: 0.0,
+      ));
+    }
+    return hits;
+  }
+
   Future<void> _clipAndSaveHits({
     required List<SwingHit> hits,
     required NavigatorState navigator,
@@ -2118,7 +2240,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('AI 分析提交失敗: $e'),
+            content: Text('AI 分析提交失敗：${AnalysisService.friendlyError(e)}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -2133,53 +2255,31 @@ class _HistoryTileState extends State<_HistoryTile> {
   /// 下載影片到裝置（顯示版本選單 + 儲存位置選擇）
   Future<void> _downloadVideo() async {
     if (_isDownloading) return;
-    final sessionDir = p.dirname(widget.entry.filePath);
-
-    final chosen = await _showDownloadPicker(context, sessionDir);
-    if (chosen == null || !mounted) return;
-
-    // 選擇儲存位置：下載資料夾 or 自選資料夾
-    final toFolder = await _showSaveLocationPicker(context);
-    if (toFolder == null || !mounted) return;
-
     setState(() => _isDownloading = true);
     try {
-      final videoPath = p.join(sessionDir, chosen.file);
-      final baseName  = (widget.entry.customName?.isNotEmpty == true)
-          ? '${widget.entry.customName!}_${chosen.label}'
-          : '${p.basenameWithoutExtension(widget.entry.filePath)}_${chosen.label}';
-      final result = toFolder
-          ? await VideoExportService.downloadToFolder(videoPath, displayName: baseName)
-          : await VideoExportService.download(videoPath, displayName: baseName);
-      if (!mounted) return;
-      _showDownloadResultSnackBar(result, chosen.label);
+      await _runDownloadFlow(context, widget.entry);
     } finally {
       if (mounted) setState(() => _isDownloading = false);
     }
   }
 
-  void _showDownloadResultSnackBar(ExportResult result, String label) {
-    switch (result.status) {
-      case ExportStatus.savedToDownloads:
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('「$label」已儲存 ✅'),
-          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-        ));
-      case ExportStatus.savedToPhotos:
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('「$label」已儲存到相機膠卷 ✅'),
-          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-        ));
-      case ExportStatus.sharedViaSheet:
-        break;
-      case ExportStatus.failed:
-        if (result.detail != 'cancelled') {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('下載失敗：${result.detail}'),
-            backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
-          ));
-        }
+  /// 上傳分析資料領獎勵
+  Future<void> _claimUploadReward() async {
+    final updated = await _runUploadRewardFlow(context, widget.entry);
+    if (updated != null && mounted) {
+      widget.onEntryUpdated?.call(widget.entry, updated);
     }
+  }
+
+  /// 編輯影片備註
+  Future<void> _editNote() async {
+    final newNote = await _showNoteDialog(context, widget.entry.note);
+    if (newNote == null || !mounted) return;
+    if (newNote == (widget.entry.note ?? '')) return;
+    widget.onEntryUpdated?.call(
+      widget.entry,
+      widget.entry.copyWith(note: newNote),
+    );
   }
 
   /// 分享 session
@@ -2385,6 +2485,10 @@ class _HistoryTileState extends State<_HistoryTile> {
                               ),
                             ),
                           ]),
+                        ],
+                        if (widget.entry.note?.trim().isNotEmpty ?? false) ...[
+                          const SizedBox(height: 2),
+                          _NoteLine(note: widget.entry.note!.trim()),
                         ],
                         const SizedBox(height: 7),
                         // 標籤列（基本 badges）
@@ -2627,6 +2731,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                   case _HistoryMenuAction.rename:
                     widget.onRename();
                     break;
+                  case _HistoryMenuAction.note:
+                    _editNote();
+                    break;
                   case _HistoryMenuAction.detectHits:
                     _runDetection();
                     break;
@@ -2641,6 +2748,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                     break;
                   case _HistoryMenuAction.download:
                     _downloadVideo();
+                    break;
+                  case _HistoryMenuAction.uploadReward:
+                    _claimUploadReward();
                     break;
                   case _HistoryMenuAction.delete:
                     widget.onDelete();
@@ -2661,6 +2771,13 @@ class _HistoryTileState extends State<_HistoryTile> {
                 const PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.rename,
                   child: Text('重新命名'),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.note,
+                  child: Text(
+                      (widget.entry.note?.trim().isNotEmpty ?? false)
+                          ? '編輯備註'
+                          : '新增備註'),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.analyze,
@@ -2715,6 +2832,30 @@ class _HistoryTileState extends State<_HistoryTile> {
                             : const Color(0xFF1AA87C)),
                     const SizedBox(width: 8),
                     Text(_isDownloading ? '下載中...' : '下載影片'),
+                  ]),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.uploadReward,
+                  enabled: widget.entry.isAnalyzed &&
+                      !widget.entry.isEffectivelyUploaded,
+                  child: Row(children: [
+                    Icon(Icons.cloud_upload_rounded,
+                        size: 16,
+                        color: (widget.entry.isAnalyzed &&
+                                !widget.entry.isEffectivelyUploaded)
+                            ? const Color(0xFF00897B)
+                            : Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(
+                      widget.entry.isEffectivelyUploaded
+                          ? '已上傳資料'
+                          : '上傳獎勵 +${RewardType.uploadData.ballsPerAction} 球',
+                      style: TextStyle(
+                          color: (widget.entry.isAnalyzed &&
+                                  !widget.entry.isEffectivelyUploaded)
+                              ? null
+                              : Colors.grey),
+                    ),
                   ]),
                 ),
                 const PopupMenuItem<_HistoryMenuAction>(
@@ -2901,6 +3042,23 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     );
   }
 
+  /// 上傳分析資料領獎勵
+  Future<void> _claimUploadReward() async {
+    final updated = await _runUploadRewardFlow(context, widget.clip);
+    if (updated != null && mounted) {
+      widget.onEntryUpdated?.call(widget.clip, updated);
+    }
+  }
+
+  /// 編輯切片備註
+  Future<void> _editNote() async {
+    final clip = widget.clip;
+    final newNote = await _showNoteDialog(context, clip.note);
+    if (newNote == null || !mounted) return;
+    if (newNote == (clip.note ?? '')) return;
+    widget.onEntryUpdated?.call(clip, clip.copyWith(note: newNote));
+  }
+
   /// 分享切片
   void _share() {
     ShareUploadDialog.show(
@@ -2912,54 +3070,14 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
   bool _isDownloading = false;
 
-  /// 下載切片影片到裝置（顯示版本選單）
+  /// 下載切片影片到裝置（顯示版本選單 + 儲存位置選擇）
   Future<void> _downloadVideo() async {
     if (_isDownloading) return;
-    final sessionDir = p.dirname(widget.clip.filePath);
-
-    final chosen = await _showDownloadPicker(context, sessionDir);
-    if (chosen == null || !mounted) return;
-
-    final toFolder = await _showSaveLocationPicker(context);
-    if (toFolder == null || !mounted) return;
-
     setState(() => _isDownloading = true);
     try {
-      final videoPath = p.join(sessionDir, chosen.file);
-      final baseName  = (widget.clip.customName?.isNotEmpty == true)
-          ? '${widget.clip.customName!}_${chosen.label}'
-          : '${p.basenameWithoutExtension(widget.clip.filePath)}_${chosen.label}';
-      final result = toFolder
-          ? await VideoExportService.downloadToFolder(videoPath, displayName: baseName)
-          : await VideoExportService.download(videoPath, displayName: baseName);
-      if (!mounted) return;
-      _showClipDownloadResultSnackBar(result, chosen.label);
+      await _runDownloadFlow(context, widget.clip);
     } finally {
       if (mounted) setState(() => _isDownloading = false);
-    }
-  }
-
-  void _showClipDownloadResultSnackBar(ExportResult result, String label) {
-    switch (result.status) {
-      case ExportStatus.savedToDownloads:
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('「$label」已儲存 ✅'),
-          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-        ));
-      case ExportStatus.savedToPhotos:
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('「$label」已儲存到相機膠卷 ✅'),
-          backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
-        ));
-      case ExportStatus.sharedViaSheet:
-        break;
-      case ExportStatus.failed:
-        if (result.detail != 'cancelled') {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('下載失敗：${result.detail}'),
-            backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
-          ));
-        }
     }
   }
 
@@ -3328,7 +3446,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       debugPrint('[切片AI分析] 提交失敗: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('AI 分析提交失敗: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content:
+                  Text('AI 分析提交失敗：${AnalysisService.friendlyError(e)}'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -3439,6 +3560,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                       fontSize: 11,
                                       color: context.textHint),
                                 ),
+                              ],
+                              if (clip.note?.trim().isNotEmpty ?? false) ...[
+                                const SizedBox(height: 2),
+                                _NoteLine(note: clip.note!.trim()),
                               ],
                               const SizedBox(height: 5),
                               // 標籤（基本 badges）
@@ -3634,6 +3759,12 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     case _ClipMenuAction.download:
                       _downloadVideo();
                       break;
+                    case _ClipMenuAction.note:
+                      _editNote();
+                      break;
+                    case _ClipMenuAction.uploadReward:
+                      _claimUploadReward();
+                      break;
                     case _ClipMenuAction.delete:
                       widget.onDelete?.call();
                       break;
@@ -3644,6 +3775,13 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                 const PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.rename,
                   child: Text('重新命名'),
+                ),
+                PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.note,
+                  child: Text(
+                      (clip.note?.trim().isNotEmpty ?? false)
+                          ? '編輯備註'
+                          : '新增備註'),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.share,
@@ -3672,6 +3810,28 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                             : const Color(0xFF1AA87C)),
                     const SizedBox(width: 8),
                     Text(_isDownloading ? '下載中...' : '下載影片'),
+                  ]),
+                ),
+                PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.uploadReward,
+                  enabled: clip.isAnalyzed && !clip.isEffectivelyUploaded,
+                  child: Row(children: [
+                    Icon(Icons.cloud_upload_rounded,
+                        size: 16,
+                        color: (clip.isAnalyzed && !clip.isEffectivelyUploaded)
+                            ? const Color(0xFF00897B)
+                            : Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(
+                      clip.isEffectivelyUploaded
+                          ? '已上傳資料'
+                          : '上傳獎勵 +${RewardType.uploadData.ballsPerAction} 球',
+                      style: TextStyle(
+                          color: (clip.isAnalyzed &&
+                                  !clip.isEffectivelyUploaded)
+                              ? null
+                              : Colors.grey),
+                    ),
                   ]),
                 ),
                 const PopupMenuItem<_ClipMenuAction>(
@@ -4836,6 +4996,221 @@ const _kDlOptions = [
     icon: Icons.videocam_rounded, color: Color(0xFF546E7A),
   ),
 ];
+
+/// 共用上傳獎勵流程（原始影片與切片皆走此路）：
+/// 確認 → 上傳分析資料領獎勵 → 標記 isUploaded。
+/// 回傳更新後的 entry（取消或失敗回傳 null）。
+///
+/// 條件：entry 需已分析；AI 分析過的影片（影片+CSV 已在伺服器）
+/// 視為已上傳（isEffectivelyUploaded），不可重複領取。
+Future<RecordingHistoryEntry?> _runUploadRewardFlow(
+    BuildContext context, RecordingHistoryEntry entry) async {
+  final balls = RewardType.uploadData.ballsPerAction;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('上傳分析資料'),
+      content: Text(
+        '將上傳「${entry.displayTitle}」的分析資料，\n'
+        '用於改善揮桿偵測模型。\n\n'
+        '上傳後需經審核，審核通過將發放 +$balls 球獎勵。\n\n'
+        '確定上傳？',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('上傳送審'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return null;
+
+  // 真實上傳影片 + CSV（可能 5-50MB，顯示進度提示）
+  String? uploadId;
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(children: [
+          SizedBox(
+              width: 24, height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5)),
+          SizedBox(width: 16),
+          Expanded(child: Text('上傳影片與分析資料中…')),
+        ]),
+      ),
+    ),
+  );
+  try {
+    uploadId = await RewardService.uploadSessionFiles(entry);
+  } catch (e) {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('上傳失敗：$e'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    return null;
+  }
+  if (!context.mounted) return null;
+  Navigator.of(context, rootNavigator: true).pop();
+
+  try {
+    await RewardService.claimUploadReward(sessions: [
+      {
+        'filePath':        entry.filePath,
+        'recordedAt':      entry.recordedAt.toIso8601String(),
+        'durationSeconds': entry.durationSeconds,
+        'goodShot':        entry.goodShot,
+        'audioCrispness':  entry.audioCrispness,
+        'audioLabel':      entry.audioLabel,
+        'videoType':       entry.videoType.name,
+        'uploadId':        uploadId,
+      },
+    ]);
+    // isUploaded 標記：防止重複提交。若該筆日後被審核「拒絕」，
+    // server 端允許同 filePath 重新提交，但 App 端的重送流程暫不實作
+    //（需先清除 isUploaded 標記），先以後台溝通處理。
+    final updated = entry.copyWith(isUploaded: true);
+    await RecordingHistoryStorage.instance.upsertEntry(updated);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('已送出審核，通過後將發放 +$balls 球'),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    return updated;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('上傳失敗：$e'),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    return null;
+  }
+}
+
+/// 共用備註編輯對話框（原始影片與切片皆走此路）。
+/// 回傳 null = 取消；'' = 清除備註；其餘為新備註內容。
+Future<String?> _showNoteDialog(BuildContext context, String? initial) {
+  String tempNote = initial ?? '';
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('影片備註'),
+      content: TextField(
+        controller: TextEditingController(text: initial ?? ''),
+        maxLength: 200,
+        maxLines: 4,
+        minLines: 2,
+        autofocus: true,
+        decoration: const InputDecoration(
+          hintText: '記下練習心得、場地、使用桿型…',
+          helperText: '可留空以清除備註',
+          border: OutlineInputBorder(),
+        ),
+        onChanged: (v) => tempNote = v,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(tempNote.trim()),
+          child: const Text('儲存'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 列表卡片上的備註列（單行省略，原始影片與切片共用）
+class _NoteLine extends StatelessWidget {
+  final String note;
+  const _NoteLine({required this.note});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(children: [
+      const Icon(Icons.sticky_note_2_outlined,
+          size: 12, color: kPrimaryGreen),
+      const SizedBox(width: 4),
+      Expanded(
+        child: Text(
+          note,
+          style: TextStyle(
+            fontSize: 11,
+            color: context.textSecondary,
+            fontStyle: FontStyle.italic,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    ]);
+  }
+}
+
+/// 共用下載流程（原始影片與切片皆走此路）：
+/// 選版本（final/skeleton/原始）→ 選儲存位置 → 匯出 → 結果提示。
+Future<void> _runDownloadFlow(
+    BuildContext context, RecordingHistoryEntry entry) async {
+  final sessionDir = p.dirname(entry.filePath);
+
+  final chosen = await _showDownloadPicker(context, sessionDir);
+  if (chosen == null || !context.mounted) return;
+
+  final toFolder = await _showSaveLocationPicker(context);
+  if (toFolder == null || !context.mounted) return;
+
+  final videoPath = p.join(sessionDir, chosen.file);
+  final baseName  = (entry.customName?.isNotEmpty == true)
+      ? '${entry.customName!}_${chosen.label}'
+      : '${p.basenameWithoutExtension(entry.filePath)}_${chosen.label}';
+  final result = toFolder
+      ? await VideoExportService.downloadToFolder(videoPath, displayName: baseName)
+      : await VideoExportService.download(videoPath, displayName: baseName);
+  if (!context.mounted) return;
+  _showExportResultSnackBar(context, result, chosen.label);
+}
+
+void _showExportResultSnackBar(
+    BuildContext context, ExportResult result, String label) {
+  switch (result.status) {
+    case ExportStatus.savedToDownloads:
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('「$label」已儲存 ✅'),
+        backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+      ));
+    case ExportStatus.savedToPhotos:
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('「$label」已儲存到相機膠卷 ✅'),
+        backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
+      ));
+    case ExportStatus.sharedViaSheet:
+      break;
+    case ExportStatus.failed:
+      if (result.detail != 'cancelled') {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('下載失敗：${result.detail}'),
+          backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
+        ));
+      }
+  }
+}
 
 /// 顯示下載版本選擇底部選單，回傳使用者選擇的選項或 null（取消）
 /// 顯示儲存位置選擇：下載資料夾 or 自選資料夾。

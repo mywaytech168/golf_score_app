@@ -147,11 +147,15 @@ class ClipPipelineService {
     // 格式：'16x9_hd', '16x9_fhd', '4x3_hd', '4x3_fhd', '4x3_sd'
     // 舊格式相容：'hd', 'fhd'
     final (tw, th) = _targetSize(sourceEntry.recordedAspectRatio);
-    // 前鏡頭水平翻轉（僅 Android：iOS 在擷取階段已 isVideoMirrored，
+    // 前鏡頭水平翻轉（僅 Android 錄製的影片：iOS 在擷取階段已 isVideoMirrored，
     // 來源檔本身就是鏡像，再翻會雙重翻轉）。
     // ★ clip 影片與 clip CSV 必須同步翻轉（來源 swing.mp4 與其 CSV 都未翻轉）。
-    final flipClip = sourceEntry.isFrontCamera &&
-        defaultTargetPlatform == TargetPlatform.android;
+    // ★ 依「錄製來源平台」判斷，不是當前執行平台——跨平台分享後在對方
+    //   裝置切片時，翻轉需求跟著來源影片走。舊資料（recordedPlatform=null）
+    //   視為本機錄製，沿用當前平台。
+    final srcPlatform = sourceEntry.recordedPlatform ??
+        (defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios');
+    final flipClip = sourceEntry.isFrontCamera && srcPlatform == 'android';
     final trimResult = await VideoClipService.trimClip(
       srcPath:        srcVideoPath,
       dstPath:        clipPath,
@@ -283,6 +287,7 @@ class ClipPipelineService {
         thumbnailPath: thumbPath,
         videoType: VideoType.localClip,
         sourceVideoPath: sourceEntry.filePath,
+        recordedPlatform: sourceEntry.recordedPlatform,
         hitSecond: hit.hitSec - clipActualStartSec,
         startSecond: clipActualStartSec,
         endSecond: hit.endSec,

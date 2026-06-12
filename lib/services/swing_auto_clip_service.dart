@@ -66,9 +66,7 @@ class SwingAutoClipService {
     onProgress?.call('偵測擊球聲...');
     var audioPeaks = const <double>[];
     try {
-      final peakMs = await GolfAnalysisService.findAudioPeaks(
-        videoPath: videoPath,
-      );
+      final peakMs = await getOrComputeAudioPeaks(videoPath: videoPath);
       audioPeaks = peakMs.map((ms) => ms / 1000.0).toList();
     } catch (e) {
       debugPrint('[AutoClip] 音訊峰值偵測失敗（無音軌？）: $e');
@@ -179,6 +177,80 @@ class SwingAutoClipService {
       await f.writeAsString(jsonEncode({'impacts': impacts}));
     } catch (e) {
       debugPrint('[AutoClip] live_impacts.json 寫入失敗: $e');
+    }
+  }
+
+  // ── audio_peaks.json 快取 ────────────────────────────────────────────────
+  //
+  // 錄影結束的背景自動切片會先算一次音訊峰值並存檔；之後歷史頁的
+  // 偵測擊球 V2/V3 直接讀快取，免去重掃整段音軌。
+  // 快取以偵測參數為 key：參數不同（含預設值改版）即重算。
+
+  /// 讀快取（參數一致）→ 否則跑原生偵測並寫入快取。回傳毫秒峰值列表。
+  static Future<List<int>> getOrComputeAudioPeaks({
+    required String videoPath,
+    int searchStartMs = 500,
+    int minGapMs = 2000,
+    int topN = 20,
+  }) async {
+    final sessionDir = p.dirname(videoPath);
+    final cached = await _loadAudioPeaks(
+      sessionDir,
+      searchStartMs: searchStartMs, minGapMs: minGapMs, topN: topN,
+    );
+    if (cached != null) {
+      debugPrint('[AutoClip] 音訊峰值快取命中: ${cached.length} 峰');
+      return cached;
+    }
+    final peakMs = await GolfAnalysisService.findAudioPeaks(
+      videoPath: videoPath,
+      searchStartMs: searchStartMs, minGapMs: minGapMs, topN: topN,
+    );
+    await _saveAudioPeaks(
+      sessionDir, peakMs,
+      searchStartMs: searchStartMs, minGapMs: minGapMs, topN: topN,
+    );
+    return peakMs;
+  }
+
+  static Future<void> _saveAudioPeaks(
+    String sessionDir,
+    List<int> peakMs, {
+    required int searchStartMs,
+    required int minGapMs,
+    required int topN,
+  }) async {
+    try {
+      final f = File(p.join(sessionDir, 'audio_peaks.json'));
+      await f.writeAsString(jsonEncode({
+        'peaksMs': peakMs,
+        'searchStartMs': searchStartMs,
+        'minGapMs': minGapMs,
+        'topN': topN,
+      }));
+    } catch (e) {
+      debugPrint('[AutoClip] audio_peaks.json 寫入失敗: $e');
+    }
+  }
+
+  static Future<List<int>?> _loadAudioPeaks(
+    String sessionDir, {
+    required int searchStartMs,
+    required int minGapMs,
+    required int topN,
+  }) async {
+    try {
+      final f = File(p.join(sessionDir, 'audio_peaks.json'));
+      if (!await f.exists()) return null;
+      final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      if (m['searchStartMs'] != searchStartMs ||
+          m['minGapMs'] != minGapMs ||
+          m['topN'] != topN) {
+        return null;
+      }
+      return (m['peaksMs'] as List).map((e) => (e as num).toInt()).toList();
+    } catch (_) {
+      return null;
     }
   }
 

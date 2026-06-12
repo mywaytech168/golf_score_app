@@ -238,7 +238,7 @@ class ShareService {
     final metaFile = File('$sessionDir/session_meta.json');
     if (metaFile.existsSync()) {
       final json = jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>;
-      final original = RecordingHistoryEntry.fromJson(json);
+      var original = RecordingHistoryEntry.fromJson(json);
 
       // 路徑重映射：將原始 filePath 換成本機解壓縮後的路徑
       // thumbnailPath 若存在於 sessionDir 也一起重映射，否則清空
@@ -247,6 +247,15 @@ class ShareService {
         final thumbName = p.basename(original.thumbnailPath!);
         final localThumb = File('$sessionDir/$thumbName');
         remappedThumb = localThumb.existsSync() ? localThumb.path : null;
+      }
+
+      // sourceVideoPath 指向分享來源機器的絕對路徑，本機不存在時必須清空，
+      // 否則之後切片/分析會拿失效路徑 file-not-found（copyWith 無法設 null，
+      // 走 toJson 繞道）。
+      if (original.sourceVideoPath != null &&
+          !File(original.sourceVideoPath!).existsSync()) {
+        final m = original.toJson()..['sourceVideoPath'] = null;
+        original = RecordingHistoryEntry.fromJson(m);
       }
 
       final existing = await RecordingHistoryStorage.instance.loadHistory();
