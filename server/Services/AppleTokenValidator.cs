@@ -53,7 +53,12 @@ namespace UploadServer.Services
                     ValidateLifetime = true,
                 };
 
-                var handler   = new JwtSecurityTokenHandler();
+                var handler = new JwtSecurityTokenHandler();
+                // 預設 JwtSecurityTokenHandler 會把 "sub" 映射成 ClaimTypes.NameIdentifier、
+                // "email" 等也會被改名，導致 FindFirst("sub") 取不到值。關閉 inbound 映射，
+                // 保留 Apple token 原始 claim 名稱。
+                handler.MapInboundClaims = false;
+                handler.InboundClaimTypeMap.Clear();
                 var principal = handler.ValidateToken(identityToken, parameters, out _);
 
                 var sub   = principal.FindFirst("sub")?.Value;

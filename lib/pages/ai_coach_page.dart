@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
@@ -175,7 +176,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
       if (mounted) {
         setState(() => _isUpgrading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('升級失敗: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(AppLocalizations.of(context).aiCoachUpgradeFailed(e.toString())), backgroundColor: Colors.red),
         );
       }
     }
@@ -200,15 +201,14 @@ class _AiCoachPageState extends State<AiCoachPage> {
           builder: (_) => AlertDialog(
             icon: const Icon(Icons.sports_golf_rounded,
                 color: Color(0xFF7C3AED), size: 32),
-            title: const Text('今日球數已用完'),
+            title: Text(AppLocalizations.of(context).aiCoachQuotaExhaustedTitle),
             content: Text(
-              '今日已使用 ${planStatus.todayUsed} 次，已達上限 ${planStatus.totalLimit} 次。\n\n'
-              '明天可繼續使用，或升級方案取得更多次數。',
+              AppLocalizations.of(context).aiCoachQuotaExhaustedBody(planStatus.todayUsed, planStatus.totalLimit),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('知道了'),
+                child: Text(AppLocalizations.of(context).aiCoachGotIt),
               ),
             ],
           ),
@@ -273,8 +273,8 @@ class _AiCoachPageState extends State<AiCoachPage> {
     return Scaffold(
       backgroundColor: context.bgPage,
       appBar: AppBar(
-        title: const Text('AI 教練分析'),
-        backgroundColor: kPrimaryDark,
+        title: Text(AppLocalizations.of(context).aiCoachTitle),
+        backgroundColor: kBrandPrimaryDark,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: const [],
@@ -295,7 +295,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
 
     if (status.isFailed) {
       return _ErrorView(
-        error: '分析失敗，請重試',
+        error: AppLocalizations.of(context).aiCoachAnalysisFailed,
         onRetry: () => Navigator.of(context).pop(),
       );
     }
@@ -318,28 +318,28 @@ class _LoadingView extends StatelessWidget {
   final String? status;
   const _LoadingView({this.status});
 
-  String get _label => switch (status) {
-    'pending'    => '準備中...',
-    'queued'     => '等待分析佇列...',
-    'processing' => 'AI 教練正在分析影片...',
-    'idle'       => '等待 AI 教練分析...',
-    _            => '連接中...',
-  };
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final label = switch (status) {
+      'pending'    => l10n.aiCoachStatusPending,
+      'queued'     => l10n.aiCoachStatusQueued,
+      'processing' => l10n.aiCoachStatusProcessing,
+      'idle'       => l10n.aiCoachStatusIdle,
+      _            => l10n.aiCoachStatusConnecting,
+    };
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(
             width: 64, height: 64,
-            child: CircularProgressIndicator(color: kPrimaryGreen, strokeWidth: 3),
+            child: CircularProgressIndicator(color: kBrandPrimary, strokeWidth: 3),
           ),
           const SizedBox(height: kSpaceLG),
-          Text(_label, style: TextStyle(fontSize: 16, color: context.textSecondary)),
+          Text(label, style: TextStyle(fontSize: 16, color: context.textSecondary)),
           const SizedBox(height: kSpaceSM),
-          Text('通常需要 10~30 秒', style: TextStyle(fontSize: 13, color: context.textHint)),
+          Text(l10n.aiCoachLoadingHint, style: TextStyle(fontSize: 13, color: context.textHint)),
         ],
       ),
     );
@@ -365,7 +365,7 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: kSpaceMD),
             Text(error, textAlign: TextAlign.center, style: TextStyle(color: context.textSecondary)),
             const SizedBox(height: kSpaceLG),
-            FilledButton(onPressed: onRetry, child: const Text('重試')),
+            FilledButton(onPressed: onRetry, child: Text(AppLocalizations.of(context).commonRetry)),
           ],
         ),
       ),
@@ -396,21 +396,21 @@ class _IdleView extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: kPrimaryGreen.withAlpha(20),
+            color: kGoodColor.withAlpha(20),
             borderRadius: BorderRadius.circular(kRadiusMD),
-            border: Border.all(color: kPrimaryGreen.withAlpha(80)),
+            border: Border.all(color: kGoodColor.withAlpha(80)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.check_circle_outline, color: kPrimaryGreen, size: 20),
+              const Icon(Icons.check_circle_outline, color: kGoodColor, size: 20),
               const SizedBox(width: kSpaceSM),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  '已完成錯誤姿勢分析',
-                  style: TextStyle(
+                  AppLocalizations.of(context).aiCoachPostureAnalysisDone,
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: kPrimaryGreen,
+                    color: kGoodColor,
                   ),
                 ),
               ),
@@ -434,9 +434,9 @@ class _IdleView extends StatelessWidget {
                     ),
                   )
                 : const Icon(Icons.smart_toy_outlined),
-            label: Text(isUpgrading ? '送出中...' : '開始 AI 教練分析'),
+            label: Text(isUpgrading ? AppLocalizations.of(context).aiCoachSubmitting : AppLocalizations.of(context).aiCoachStartAnalysis),
             style: FilledButton.styleFrom(
-              backgroundColor: kPrimaryDark,
+              backgroundColor: kBrandPrimaryDark,
               padding: const EdgeInsets.symmetric(vertical: 14),
               textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
             ),
@@ -444,7 +444,7 @@ class _IdleView extends StatelessWidget {
         ),
         const SizedBox(height: kSpaceSM),
         Text(
-          '* AI 教練將依據姿勢分析結果，提供詳細教練評語與訓練建議',
+          AppLocalizations.of(context).aiCoachAnalysisHint,
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 11, color: context.textHint),
         ),
@@ -495,14 +495,14 @@ class _SummaryCard extends StatelessWidget {
     _        => kGoodColor,
   };
 
-  String _severityLabel(String severity) => switch (severity) {
-    'high'   => '嚴重',
-    'medium' => '中等',
-    _        => '輕微',
-  };
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    String severityLabel(String severity) => switch (severity) {
+      'high'   => l10n.aiCoachSeverityHigh,
+      'medium' => l10n.aiCoachSeverityMedium,
+      _        => l10n.aiCoachSeverityLow,
+    };
     final err      = result.primaryError;
     final sevColor = _severityColor(err.severity);
     // primary_error 為 null（完美）時，zhName 為空 → fallback 到「完美姿勢」
@@ -538,7 +538,7 @@ class _SummaryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(kRadiusSM),
                 ),
                 child: Text(
-                  _severityLabel(err.severity),
+                  severityLabel(err.severity),
                   style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -548,7 +548,7 @@ class _SummaryCard extends StatelessWidget {
           Text(result.summary, style: TextStyle(fontSize: 16, height: 1.5, color: context.textPrimary)),
           if (err.evidence.isNotEmpty) ...[
             const SizedBox(height: kSpaceMD),
-            Text('依據', style: TextStyle(fontSize: 12, color: context.textHint, fontWeight: FontWeight.bold)),
+            Text(l10n.aiCoachEvidence, style: TextStyle(fontSize: 12, color: context.textHint, fontWeight: FontWeight.bold)),
             const SizedBox(height: kSpaceXS),
             ...err.evidence.map((e) => Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -581,16 +581,16 @@ class _ImpactQualityCard extends StatelessWidget {
     _                    => kBadColor,
   };
 
-  String get _levelLabel => switch (iq.qualityLevel) {
-    'premium_sweet_spot' => '高品質甜蜜點',
-    'sweet_spot'         => '甜蜜點',
-    'near_sweet_spot'    => '接近甜蜜點',
-    'fair'               => '普通',
-    _                    => '擊球偏虛',
-  };
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final levelLabel = switch (iq.qualityLevel) {
+      'premium_sweet_spot' => l10n.aiCoachImpactPremiumSweetSpot,
+      'sweet_spot'         => l10n.aiCoachImpactSweetSpot,
+      'near_sweet_spot'    => l10n.aiCoachImpactNearSweetSpot,
+      'fair'               => l10n.aiCoachImpactFair,
+      _                    => l10n.aiCoachImpactPoor,
+    };
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -600,7 +600,7 @@ class _ImpactQualityCard extends StatelessWidget {
             children: [
               Icon(Icons.graphic_eq_rounded, color: _levelColor, size: 20),
               const SizedBox(width: 8),
-              Text('擊球品質（音訊）',
+              Text(l10n.aiCoachImpactQualityTitle,
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.textPrimary)),
               const Spacer(),
               Container(
@@ -611,7 +611,7 @@ class _ImpactQualityCard extends StatelessWidget {
                   border: Border.all(color: _levelColor.withValues(alpha: 0.55)),
                 ),
                 child: Text(
-                  _levelLabel,
+                  levelLabel,
                   style: TextStyle(color: _levelColor, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -649,7 +649,7 @@ class _ImpactQualityCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${iq.passCount} / ${iq.totalFeatures} 項特徵符合甜蜜點範圍',
+            l10n.aiCoachImpactFeatureCount(iq.passCount, iq.totalFeatures),
             style: TextStyle(color: context.textSecondary, fontSize: 11),
           ),
           // AI 音頻反饋
@@ -683,8 +683,9 @@ class _FeedbackCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (feedbacks.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context);
     return _Card(
-      title: '教練評語',
+      title: l10n.aiCoachFeedbackTitle,
       icon: Icons.chat_bubble_outline,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -693,7 +694,7 @@ class _FeedbackCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.arrow_right, size: 20, color: kPrimaryGreen),
+              const Icon(Icons.arrow_right, size: 20, color: kBrandPrimary),
               const SizedBox(width: kSpaceXS),
               Expanded(child: Text(f, style: TextStyle(fontSize: 14, height: 1.5, color: context.textPrimary))),
             ],
@@ -713,8 +714,9 @@ class _PracticeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (suggestions.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context);
     return _Card(
-      title: '訓練建議',
+      title: l10n.aiCoachPracticeTitle,
       icon: Icons.fitness_center,
       child: Column(
         children: suggestions.asMap().entries.map((entry) {
@@ -731,7 +733,7 @@ class _PracticeCard extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 2),
                     child: CircleAvatar(
                       radius: 12,
-                      backgroundColor: kPrimaryGreen,
+                      backgroundColor: kBrandPrimary,
                       child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 11)),
                     ),
                   ),
@@ -772,13 +774,13 @@ class _NextGoalCard extends StatelessWidget {
     return _Card(
       child: Row(
         children: [
-          const Icon(Icons.flag, color: kPrimaryGreen, size: 28),
+          const Icon(Icons.flag, color: kBrandPrimary, size: 28),
           const SizedBox(width: kSpaceMD),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('下次練習目標', style: TextStyle(fontSize: 12, color: context.textHint, fontWeight: FontWeight.bold)),
+                Text(AppLocalizations.of(context).aiCoachNextGoalTitle, style: TextStyle(fontSize: 12, color: context.textHint, fontWeight: FontWeight.bold)),
                 const SizedBox(height: kSpaceXS),
                 Text(goal, style: TextStyle(fontSize: 14, height: 1.5, color: context.textPrimary)),
               ],
@@ -816,7 +818,7 @@ class _Card extends StatelessWidget {
             Row(
               children: [
                 if (icon != null) ...[
-                  Icon(icon, size: 18, color: kPrimaryGreen),
+                  Icon(icon, size: 18, color: kBrandPrimary),
                   const SizedBox(width: kSpaceXS),
                 ],
                 Text(title!, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.textPrimary)),
@@ -879,7 +881,7 @@ class _ReanalyzeLoaderState extends State<_ReanalyzeLoader> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('重新分析失敗: $e'),
+            content: Text(AppLocalizations.of(context).aiCoachReanalyzeFailed(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -899,10 +901,10 @@ class _ReanalyzeLoaderState extends State<_ReanalyzeLoader> {
             const SizedBox(
               width: 48,
               height: 48,
-              child: CircularProgressIndicator(color: kPrimaryGreen, strokeWidth: 3),
+              child: CircularProgressIndicator(color: kBrandPrimary, strokeWidth: 3),
             ),
             const SizedBox(height: 16),
-            Text('提交重新分析中...', style: TextStyle(color: context.textSecondary, fontSize: 15)),
+            Text(AppLocalizations.of(context).aiCoachReanalyzeSubmitting, style: TextStyle(color: context.textSecondary, fontSize: 15)),
           ],
         ),
       ),

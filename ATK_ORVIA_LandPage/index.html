@@ -54,8 +54,8 @@
   --card:#1A1A1A;
   --border:#262626;
   --border-bright:#3a3a3a;
-  --green:#2BD9A0;
-  --green-dim:rgba(45,212,191,.12);
+  --green:#4A7FFF;--grad:linear-gradient(135deg,#00E5CC,#4A7FFF,#6B4FD8);--grad-start:#00E5CC;--grad-end:#6B4FD8;
+  --green-dim:rgba(74,127,255,.12);
   --text:#F5F5F5;
   --muted:#8a8a8a;
   --radius:16px;
@@ -95,7 +95,7 @@ nav{
   padding:4px 12px;border-radius:999px;cursor:pointer;
   transition:color .2s,background .2s;
 }
-.lang-switch button.active{background:var(--green);color:#042f2a}
+.lang-switch button.active{background:var(--grad);color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box}
 .lang-switch button:not(.active):hover{color:var(--text)}
 
 /* ---------- Buttons ---------- */
@@ -108,15 +108,15 @@ nav{
 }
 .btn:hover{border-color:var(--green)}
 .btn:active{transform:scale(.97)}
-.btn-primary{background:var(--green);border-color:var(--green);color:#042f2a}
+.btn-primary{background:var(--grad);border-color:transparent;color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box}
 .btn-primary:hover{background:#5eead4}
 .btn svg{width:20px;height:20px;flex-shrink:0}
 .btn small{display:block;font-size:.68rem;font-weight:500;opacity:.75;line-height:1.1}
 .btn .store-label{text-align:left;line-height:1.15}
 .badge-soon{
   font-size:.62rem;font-weight:700;letter-spacing:.05em;
-  background:var(--green-dim);color:var(--green);
-  border:1px solid rgba(45,212,191,.3);
+  background:var(--green-dim);background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+  border:1px solid rgba(74,127,255,.3);
   padding:2px 8px;border-radius:999px;margin-left:4px;
 }
 
@@ -128,22 +128,22 @@ nav{
 .hero::before{
   content:"";position:absolute;inset:0;pointer-events:none;
   background:
-    radial-gradient(600px 400px at 75% 35%,rgba(45,212,191,.07),transparent 70%),
-    radial-gradient(800px 500px at 20% 80%,rgba(45,212,191,.04),transparent 70%);
+    radial-gradient(600px 400px at 75% 35%,rgba(74,127,255,.07),transparent 70%),
+    radial-gradient(800px 500px at 20% 80%,rgba(74,127,255,.04),transparent 70%);
 }
 .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;position:relative}
 .hero-logo{height:64px;display:block;margin-bottom:28px}
 .eyebrow{
   display:inline-flex;align-items:center;gap:8px;
   font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--green);margin-bottom:20px;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;margin-bottom:20px;
 }
-.eyebrow::before{content:"";width:24px;height:1px;background:var(--green)}
+.eyebrow::before{content:"";width:24px;height:1px;background:var(--grad)}
 .hero h1{
   font-size:clamp(2.4rem,5vw,3.6rem);font-weight:800;line-height:1.12;
   letter-spacing:-.02em;margin-bottom:20px;
 }
-.hero h1 .accent{color:var(--green)}
+.hero h1 .accent{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
 .hero .lead{color:var(--muted);font-size:1.08rem;max-width:480px;margin-bottom:36px}
 .hero-ctas{display:flex;gap:14px;flex-wrap:wrap}
 
@@ -153,7 +153,7 @@ nav{
   width:270px;height:556px;border-radius:42px;
   background:#161616;
   border:1px solid #2e2e2e;
-  box-shadow:0 0 0 8px #0f0f0f,0 40px 80px -20px rgba(0,0,0,.8),0 0 120px -30px rgba(45,212,191,.25);
+  box-shadow:0 0 0 8px #0f0f0f,0 40px 80px -20px rgba(0,0,0,.8),0 0 120px -30px rgba(74,127,255,.25);
   padding:12px;position:relative;
   animation:float 3s ease-in-out infinite;
 }
@@ -183,7 +183,7 @@ nav{
   flex:1;background:#141a18;border:1px solid #1f2a27;border-radius:10px;
   padding:8px 10px;
 }
-.ps-stat b{display:block;font-size:.86rem;color:var(--green);font-weight:700}
+.ps-stat b{display:block;font-size:.86rem;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:700}
 .ps-stat span{font-size:.55rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
 
 /* ---------- Section headings ---------- */
@@ -200,7 +200,7 @@ nav{
 .card:hover{border-color:var(--border-bright)}
 .card .icon{
   width:44px;height:44px;border-radius:12px;margin-bottom:20px;
-  background:var(--green-dim);border:1px solid rgba(45,212,191,.25);
+  background:var(--green-dim);border:1px solid rgba(74,127,255,.25);
   display:flex;align-items:center;justify-content:center;
 }
 .card .icon svg{width:22px;height:22px;stroke:var(--green);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -212,7 +212,7 @@ nav{
 .step{text-align:center;padding:36px 22px;background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);position:relative}
 .step .num{
   width:40px;height:40px;border-radius:50%;margin:0 auto 18px;
-  border:1px solid var(--green);color:var(--green);
+  border:1px solid var(--green);background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
   display:flex;align-items:center;justify-content:center;
   font-weight:700;font-size:.95rem;background:var(--green-dim);
 }
@@ -220,7 +220,7 @@ nav{
 .step p{color:var(--muted);font-size:.9rem}
 .step::after{
   content:"→";position:absolute;right:-22px;top:50%;transform:translateY(-50%);
-  color:var(--green);font-size:1.2rem;z-index:1;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-size:1.2rem;z-index:1;
 }
 .step:last-child::after{display:none}
 
@@ -232,7 +232,7 @@ nav{
 .show-row:nth-child(even) .show-visual{order:2}
 .show-text .tag{
   display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--green);margin-bottom:14px;
+  text-transform:uppercase;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;margin-bottom:14px;
 }
 .show-text h3{font-size:1.5rem;font-weight:800;margin-bottom:14px;letter-spacing:-.01em}
 .show-text p{color:var(--muted);font-size:.98rem;max-width:440px}
@@ -256,11 +256,11 @@ nav{
   transition:border-color .25s;
 }
 .plan:hover{border-color:var(--border-bright)}
-.plan.pro{border-color:rgba(45,212,191,.45);position:relative}
+.plan.pro{border-color:rgba(74,127,255,.45);position:relative}
 .plan.pro:hover{border-color:var(--green)}
 .plan .plan-badge{
   position:absolute;top:-12px;left:32px;
-  background:var(--green);color:#042f2a;font-size:.68rem;font-weight:800;
+  background:var(--grad);color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box;font-size:.68rem;font-weight:800;
   letter-spacing:.06em;padding:3px 12px;border-radius:999px;text-transform:uppercase;
 }
 .plan h3{font-size:1.05rem;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;font-size:.82rem}
@@ -284,7 +284,7 @@ nav{
 }
 .referral-inner svg{width:22px;height:22px;stroke:var(--green);fill:none;stroke-width:1.8;flex-shrink:0}
 .referral-inner p{color:var(--text);font-size:.96rem}
-.referral-inner p b{color:var(--green)}
+.referral-inner p b{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
 
 /* ---------- Download CTA ---------- */
 .cta{
@@ -335,7 +335,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
   .hero-ctas{flex-direction:column;width:100%}
   .cta .hero-ctas{align-items:center}
 }
-</style>
+.brand-name{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:800}</style>
 </head>
 <body>
 
@@ -343,7 +343,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
 <nav>
   <div class="nav-inner">
     <a class="brand" href="#top">
-      <img class="brand-logo" src="images/brand-icon.png" alt="ORVIA">ORVIA
+      <img class="brand-logo" src="images/brand-icon.png" alt="ORVIA"><span class="brand-name">ORVIA</span>
     </a>
     <div class="lang-switch" role="group" aria-label="Language">
       <button data-lang="zh">繁</button>
@@ -384,12 +384,12 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
           <div class="ps-canvas">
             <svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">
               <!-- ball trajectory -->
-              <path d="M55 235 Q 115 60 195 95" fill="none" stroke="#2BD9A0" stroke-width="2" stroke-dasharray="5 6" opacity=".8"/>
+              <path d="M55 235 Q 115 60 195 95" fill="none" stroke="#4A7FFF" stroke-width="2" stroke-dasharray="5 6" opacity=".8"/>
               <circle cx="55" cy="235" r="4" fill="#fff"/>
-              <circle cx="118" cy="118" r="2.5" fill="#2BD9A0" opacity=".7"/>
-              <circle cx="160" cy="96" r="2.5" fill="#2BD9A0" opacity=".5"/>
+              <circle cx="118" cy="118" r="2.5" fill="#4A7FFF" opacity=".7"/>
+              <circle cx="160" cy="96" r="2.5" fill="#4A7FFF" opacity=".5"/>
               <!-- skeleton -->
-              <g stroke="#2BD9A0" stroke-width="2.4" stroke-linecap="round">
+              <g stroke="#4A7FFF" stroke-width="2.4" stroke-linecap="round">
                 <line x1="85" y1="120" x2="85" y2="170"/>
                 <line x1="85" y1="130" x2="62" y2="155"/>
                 <line x1="62" y1="155" x2="48" y2="125"/>
@@ -402,7 +402,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
               </g>
               <!-- club -->
               <line x1="48" y1="125" x2="40" y2="78" stroke="#9ca3af" stroke-width="1.8"/>
-              <g fill="#2BD9A0">
+              <g fill="#4A7FFF">
                 <circle cx="85" cy="108" r="7"/>
                 <circle cx="85" cy="130" r="3.4"/><circle cx="62" cy="155" r="3.4"/>
                 <circle cx="48" cy="125" r="3.4"/><circle cx="106" cy="150" r="3.4"/>
@@ -479,7 +479,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
         <div class="mini-phone"><div class="mini-screen">
           <svg viewBox="0 0 190 380">
             <rect x="16" y="30" width="158" height="84" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <polygon points="88,60 104,72 88,84" fill="#2BD9A0"/>
+            <polygon points="88,60 104,72 88,84" fill="#4A7FFF"/>
             <!-- audio waveform with impact peaks -->
             <rect x="16" y="126" width="158" height="40" rx="8" fill="#0f140f" stroke="#1f2a1f"/>
             <g stroke="#3a463a" stroke-width="2" stroke-linecap="round">
@@ -493,18 +493,18 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
               <line x1="132" y1="144" x2="132" y2="148"/><line x1="144" y1="142" x2="144" y2="150"/>
               <line x1="150" y1="143" x2="150" y2="149"/><line x1="162" y1="144" x2="162" y2="148"/>
             </g>
-            <g stroke="#2BD9A0" stroke-width="2.4" stroke-linecap="round">
+            <g stroke="#4A7FFF" stroke-width="2.4" stroke-linecap="round">
               <line x1="54" y1="132" x2="54" y2="160"/>
               <line x1="102" y1="130" x2="102" y2="162"/>
               <line x1="138" y1="133" x2="138" y2="159"/>
             </g>
-            <g fill="#2BD9A0">
+            <g fill="#4A7FFF">
               <circle cx="54" cy="128" r="2"/><circle cx="102" cy="126" r="2"/><circle cx="138" cy="129" r="2"/>
             </g>
             <g font-family="Inter,sans-serif" font-size="9" fill="#8a8a8a">
               <text x="16" y="185">Clip 1 · 00:42</text><text x="16" y="242">Clip 2 · 01:15</text><text x="16" y="299">Clip 3 · 02:03</text>
             </g>
-            <rect x="16" y="192" width="158" height="36" rx="8" fill="#141a14" stroke="#2BD9A0" stroke-opacity=".5"/>
+            <rect x="16" y="192" width="158" height="36" rx="8" fill="#141a14" stroke="#4A7FFF" stroke-opacity=".5"/>
             <rect x="16" y="249" width="158" height="36" rx="8" fill="#141a14" stroke="#1f2a1f"/>
             <rect x="16" y="306" width="158" height="36" rx="8" fill="#141a14" stroke="#1f2a1f"/>
           </svg>
@@ -524,7 +524,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
           <svg viewBox="0 0 190 380">
             <!-- top bar: A / B titles -->
             <rect x="10" y="30" width="170" height="24" rx="6" fill="#141414"/>
-            <rect x="38" y="36" width="56" height="12" rx="6" fill="#2BD9A0"/>
+            <rect x="38" y="36" width="56" height="12" rx="6" fill="#4A7FFF"/>
             <text x="50" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing A</text>
             <rect x="104" y="36" width="56" height="12" rx="6" fill="#1565C0"/>
             <text x="116" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing B</text>
@@ -533,11 +533,11 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <line x1="95" y1="60" x2="95" y2="260" stroke="#fff" stroke-width="1"/>
             <text x="16" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:12 / 00:34</text>
             <text x="101" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:08 / 00:21</text>
-            <g stroke="#2BD9A0" stroke-width="2" stroke-linecap="round">
+            <g stroke="#4A7FFF" stroke-width="2" stroke-linecap="round">
               <line x1="52" y1="120" x2="52" y2="165"/><line x1="52" y1="132" x2="34" y2="150"/><line x1="52" y1="132" x2="68" y2="148"/>
               <line x1="52" y1="165" x2="42" y2="200"/><line x1="52" y1="165" x2="62" y2="200"/>
             </g>
-            <circle cx="52" cy="110" r="6" fill="#2BD9A0"/>
+            <circle cx="52" cy="110" r="6" fill="#4A7FFF"/>
             <g stroke="#1565C0" stroke-width="2" stroke-linecap="round">
               <line x1="138" y1="120" x2="138" y2="165"/><line x1="138" y1="132" x2="118" y2="142"/><line x1="138" y1="132" x2="156" y2="146"/>
               <line x1="138" y1="165" x2="128" y2="200"/><line x1="138" y1="165" x2="148" y2="200"/>
@@ -546,12 +546,12 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <!-- controls: progress slider -->
             <rect x="10" y="260" width="170" height="80" rx="0" fill="#141414"/>
             <rect x="22" y="278" width="146" height="5" rx="2.5" fill="#3a3a3a"/>
-            <rect x="22" y="278" width="86" height="5" rx="2.5" fill="#2BD9A0"/>
+            <rect x="22" y="278" width="86" height="5" rx="2.5" fill="#4A7FFF"/>
             <circle cx="108" cy="280.5" r="6" fill="#fff"/>
             <!-- playback row: time / -1% play +1% / time -->
             <text x="22" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:12</text>
             <text x="62" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">-1%</text>
-            <circle cx="95" cy="313" r="13" fill="#2BD9A0"/>
+            <circle cx="95" cy="313" r="13" fill="#4A7FFF"/>
             <polygon points="91,306 103,313 91,320" fill="#fff"/>
             <text x="113" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">+1%</text>
             <text x="148" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:34</text>
@@ -575,7 +575,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <text x="18" y="44" font-family="Inter,sans-serif" font-size="11" fill="#8a8a8a">‹</text>
             <!-- summary card: posture label + severity badge -->
             <rect x="14" y="58" width="162" height="74" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <rect x="24" y="68" width="58" height="14" rx="7" fill="#2BD9A0"/>
+            <rect x="24" y="68" width="58" height="14" rx="7" fill="#4A7FFF"/>
             <text x="31" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">早期伸展</text>
             <rect x="88" y="68" width="30" height="14" rx="7" fill="#f97316"/>
             <text x="95" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">中等</text>
@@ -588,29 +588,29 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <rect x="118" y="149" width="44" height="13" rx="6.5" fill="#7C3AED"/>
             <text x="124" y="158.5" font-family="Inter,sans-serif" font-size="6.5" fill="#fff" font-weight="700">甜蜜點+</text>
             <g>
-              <rect x="24" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
-              <rect x="53" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
-              <rect x="82" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
-              <rect x="111" y="168" width="26" height="7" rx="3.5" fill="#2BD9A0"/>
+              <rect x="24" y="168" width="26" height="7" rx="3.5" fill="#4A7FFF"/>
+              <rect x="53" y="168" width="26" height="7" rx="3.5" fill="#4A7FFF"/>
+              <rect x="82" y="168" width="26" height="7" rx="3.5" fill="#4A7FFF"/>
+              <rect x="111" y="168" width="26" height="7" rx="3.5" fill="#4A7FFF"/>
               <rect x="140" y="168" width="26" height="7" rx="3.5" fill="#2a342a"/>
             </g>
-            <line x1="24" y1="184" x2="24" y2="196" stroke="#2BD9A0" stroke-width="2.4"/>
+            <line x1="24" y1="184" x2="24" y2="196" stroke="#4A7FFF" stroke-width="2.4"/>
             <rect x="30" y="186" width="118" height="6" rx="3" fill="#1f2a1f"/>
             <!-- coach feedback card: green arrow bullets -->
             <rect x="14" y="214" width="162" height="64" rx="10" fill="#141a14" stroke="#1f2a1f"/>
             <text x="24" y="231" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">教練回饋</text>
-            <text x="24" y="248" font-family="Inter,sans-serif" font-size="8" fill="#2BD9A0">›</text>
+            <text x="24" y="248" font-family="Inter,sans-serif" font-size="8" fill="#4A7FFF">›</text>
             <rect x="34" y="242" width="126" height="6" rx="3" fill="#2a342a"/>
-            <text x="24" y="264" font-family="Inter,sans-serif" font-size="8" fill="#2BD9A0">›</text>
+            <text x="24" y="264" font-family="Inter,sans-serif" font-size="8" fill="#4A7FFF">›</text>
             <rect x="34" y="258" width="108" height="6" rx="3" fill="#1f2a1f"/>
             <!-- practice suggestions card: numbered drills -->
             <rect x="14" y="288" width="162" height="60" rx="10" fill="#141a14" stroke="#1f2a1f"/>
             <text x="24" y="305" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">練習建議</text>
-            <circle cx="29" cy="320" r="6" fill="none" stroke="#2BD9A0" stroke-width="1.4"/>
-            <text x="26.6" y="323" font-family="Inter,sans-serif" font-size="7" fill="#2BD9A0">1</text>
+            <circle cx="29" cy="320" r="6" fill="none" stroke="#4A7FFF" stroke-width="1.4"/>
+            <text x="26.6" y="323" font-family="Inter,sans-serif" font-size="7" fill="#4A7FFF">1</text>
             <rect x="42" y="317" width="110" height="6" rx="3" fill="#2a342a"/>
-            <circle cx="29" cy="336" r="6" fill="none" stroke="#2BD9A0" stroke-width="1.4"/>
-            <text x="26.6" y="339" font-family="Inter,sans-serif" font-size="7" fill="#2BD9A0">2</text>
+            <circle cx="29" cy="336" r="6" fill="none" stroke="#4A7FFF" stroke-width="1.4"/>
+            <text x="26.6" y="339" font-family="Inter,sans-serif" font-size="7" fill="#4A7FFF">2</text>
             <rect x="42" y="333" width="92" height="6" rx="3" fill="#1f2a1f"/>
           </svg>
         </div></div>
@@ -631,8 +631,8 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <circle cx="32" cy="47" r="5" fill="none" stroke="#8a8a8a" stroke-width="1.6"/>
             <line x1="36" y1="51" x2="40" y2="55" stroke="#8a8a8a" stroke-width="1.6"/>
             <g font-family="Inter,sans-serif" font-size="8">
-              <rect x="16" y="70" width="52" height="18" rx="9" fill="#2BD9A0"/>
-              <text x="29" y="82" fill="#042f2a" font-weight="700">All</text>
+              <rect x="16" y="70" width="52" height="18" rx="9" fill="#4A7FFF"/>
+              <text x="29" y="82" fill="#001016" font-weight="700">All</text>
               <rect x="74" y="70" width="52" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
               <text x="82" y="82" fill="#8a8a8a">Analyzed</text>
               <rect x="132" y="70" width="42" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
@@ -643,11 +643,11 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
               <rect x="99" y="100" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
               <rect x="16" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
               <rect x="99" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
-              <polygon points="48,142 60,150 48,158" fill="#2BD9A0"/>
-              <polygon points="131,142 143,150 131,158" fill="#2BD9A0"/>
-              <polygon points="48,250 60,258 48,266" fill="#2BD9A0"/>
-              <polygon points="131,250 143,258 131,266" fill="#2BD9A0"/>
-              <rect x="22" y="180" width="40" height="12" rx="6" fill="#0f1a12" stroke="#2BD9A0" stroke-opacity=".5"/>
+              <polygon points="48,142 60,150 48,158" fill="#4A7FFF"/>
+              <polygon points="131,142 143,150 131,158" fill="#4A7FFF"/>
+              <polygon points="48,250 60,258 48,266" fill="#4A7FFF"/>
+              <polygon points="131,250 143,258 131,266" fill="#4A7FFF"/>
+              <rect x="22" y="180" width="40" height="12" rx="6" fill="#0f1a12" stroke="#4A7FFF" stroke-opacity=".5"/>
               <rect x="105" y="180" width="40" height="12" rx="6" fill="#1c1c1c"/>
             </g>
           </svg>

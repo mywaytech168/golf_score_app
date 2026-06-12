@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../services/purchase_service.dart';
 import '../theme/app_theme.dart';
 
@@ -29,7 +30,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
   Future<void> _refreshStatus() async {
     final isPremium = await widget.purchaseService.isPremiumUser();
     final paymentMethod = await widget.purchaseService.getPaymentMethod();
-    
+
     if (mounted) {
       setState(() {
         _isPremium = isPremium;
@@ -40,18 +41,19 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
 
   Future<void> _simulatePurchaseSuccess() async {
     setState(() => _isLoading = true);
-    
+
     try {
       // 模擬購買成功
       await widget.purchaseService.setPremiumUser(
         true,
         paymentMethod: 'test_app_store',
       );
-      
+
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ 模擬購買成功！用戶已設置為高級用戶'),
+          SnackBar(
+            content: Text(l10n.purchaseTestSimulateSuccessMsg),
             backgroundColor: Colors.green,
           ),
         );
@@ -59,9 +61,10 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
       }
     } catch (e) {
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ 錯誤: $e'),
+            content: Text(l10n.purchaseTestErrorMsg(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -75,15 +78,16 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
 
   Future<void> _clearPurchase() async {
     setState(() => _isLoading = true);
-    
+
     try {
       // 清除購買紀錄
       await widget.purchaseService.debugClearPremiumStatus();
-      
+
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🔄 已清除購買紀錄！用戶現在是普通用戶'),
+          SnackBar(
+            content: Text(l10n.purchaseTestClearSuccessMsg),
             backgroundColor: Colors.blue,
           ),
         );
@@ -91,9 +95,10 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
       }
     } catch (e) {
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ 錯誤: $e'),
+            content: Text(l10n.purchaseTestErrorMsg(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -107,6 +112,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       decoration: BoxDecoration(
         color: context.isDarkMode
@@ -126,7 +132,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
               Icon(Icons.bug_report, color: Colors.amber.shade700),
               const SizedBox(width: 8),
               Text(
-                '🧪 購買測試面板',
+                l10n.purchaseTestPanelTitle,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -138,7 +144,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
             ],
           ),
           const SizedBox(height: 12),
-          
+
           // 狀態顯示
           Container(
             decoration: BoxDecoration(
@@ -152,7 +158,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
               children: [
                 Row(
                   children: [
-                    const Text('高級用戶狀態: '),
+                    Text(l10n.purchaseTestPremiumStatusLabel),
                     if (_isPremium)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -160,9 +166,9 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                           color: Colors.green.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
-                          '✅ 已購買',
-                          style: TextStyle(
+                        child: Text(
+                          l10n.purchaseTestStatusPurchased,
+                          style: const TextStyle(
                             color: Colors.green,
                             fontWeight: FontWeight.bold,
                           ),
@@ -175,9 +181,9 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                           color: Colors.red.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
-                          '❌ 未購買',
-                          style: TextStyle(
+                        child: Text(
+                          l10n.purchaseTestStatusNotPurchased,
+                          style: const TextStyle(
                             color: Colors.red,
                             fontWeight: FontWeight.bold,
                           ),
@@ -187,14 +193,14 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '支付方式: ${_paymentMethod ?? "無"}',
+                  l10n.purchaseTestPaymentMethod(_paymentMethod ?? l10n.purchaseTestPaymentMethodNone),
                   style: TextStyle(fontSize: 12, color: context.textSecondary),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 12),
-          
+
           // 按鈕組
           Row(
             children: [
@@ -202,7 +208,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                 child: ElevatedButton.icon(
                   onPressed: _isLoading ? null : _simulatePurchaseSuccess,
                   icon: const Icon(Icons.check_circle),
-                  label: const Text('模擬購買成功'),
+                  label: Text(l10n.purchaseTestSimulateBtn),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
@@ -214,7 +220,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
                 child: ElevatedButton.icon(
                   onPressed: _isLoading ? null : _clearPurchase,
                   icon: const Icon(Icons.refresh),
-                  label: const Text('清除購買'),
+                  label: Text(l10n.purchaseTestClearBtn),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     foregroundColor: Colors.white,
@@ -223,7 +229,7 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
               ),
             ],
           ),
-          
+
           // 刷新按鈕
           const SizedBox(height: 8),
           SizedBox(
@@ -231,10 +237,10 @@ class _PurchaseTestPanelState extends State<PurchaseTestPanel> {
             child: OutlinedButton.icon(
               onPressed: _isLoading ? null : _refreshStatus,
               icon: const Icon(Icons.refresh),
-              label: const Text('刷新狀態'),
+              label: Text(l10n.purchaseTestRefreshBtn),
             ),
           ),
-          
+
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.only(top: 12),
@@ -251,10 +257,11 @@ Future<void> showPurchaseTestPanel(
   BuildContext context, {
   required PurchaseService purchaseService,
 }) async {
+  final l10n = AppLocalizations.of(context);
   return showDialog(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('🧪 購買功能測試'),
+      title: Text(l10n.purchaseTestDialogTitle),
       content: SizedBox(
         width: 300,
         child: PurchaseTestPanel(purchaseService: purchaseService),
@@ -262,7 +269,7 @@ Future<void> showPurchaseTestPanel(
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('關閉'),
+          child: Text(l10n.commonClose),
         ),
       ],
     ),

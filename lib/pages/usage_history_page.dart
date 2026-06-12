@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/video_server_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
@@ -90,35 +91,38 @@ class _UsageHistoryPageState extends State<UsageHistoryPage>
       body: Column(
         children: [
           GreenPageHeader(
-            title: '使用紀錄',
-            subtitle: 'AI 分析 & 球數流水帳',
+            title: AppLocalizations.of(context).usageTitle,
+            subtitle: AppLocalizations.of(context).usageSubtitle,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white, size: 20),
+                  color: kOnGradient, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: const [],
           ),
 
           // Tab Bar
-          Container(
-            color: kPrimaryDark,
-            child: TabBar(
-              controller: _tab,
-              indicatorColor: Colors.white,
-              indicatorWeight: 3,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white54,
-              labelStyle: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600),
-              tabs: const [
-                Tab(icon: Icon(Icons.sports_golf_rounded, size: 18),
-                    text: 'AI 分析紀錄'),
-                Tab(icon: Icon(Icons.receipt_long_rounded, size: 18),
-                    text: '球數流水帳'),
-              ],
-            ),
-          ),
+          Builder(builder: (context) {
+            final l10n = AppLocalizations.of(context);
+            return Container(
+              color: kBrandPrimaryDark,
+              child: TabBar(
+                controller: _tab,
+                indicatorColor: Colors.white,
+                indicatorWeight: 3,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white54,
+                labelStyle: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w600),
+                tabs: [
+                  Tab(icon: const Icon(Icons.sports_golf_rounded, size: 18),
+                      text: l10n.usageTabAnalysis),
+                  Tab(icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                      text: l10n.usageTabBalls),
+                ],
+              ),
+            );
+          }),
 
           Expanded(
             child: TabBarView(
@@ -197,7 +201,7 @@ class _AnalysisTabState extends State<_AnalysisTab>
       if (!mounted) return;
 
       if (data == null) {
-        setState(() { _error = '載入失敗，請下拉重試'; _loading = false; });
+        setState(() { _error = AppLocalizations.of(context).usageLoadFailed; _loading = false; });
         return;
       }
 
@@ -216,7 +220,7 @@ class _AnalysisTabState extends State<_AnalysisTab>
         _loading   = false;
       });
     } catch (e) {
-      if (mounted) setState(() { _error = '載入錯誤：$e'; _loading = false; });
+      if (mounted) setState(() { _error = AppLocalizations.of(context).usageLoadError(e.toString()); _loading = false; });
     }
   }
 
@@ -225,7 +229,7 @@ class _AnalysisTabState extends State<_AnalysisTab>
     super.build(context);
     return RefreshIndicator(
       onRefresh: () => _loadMore(reset: true),
-      color: kPrimaryGreen,
+      color: kBrandPrimary,
       child: CustomScrollView(
         controller: _scrollCtrl,
         slivers: [
@@ -243,13 +247,14 @@ class _AnalysisTabState extends State<_AnalysisTab>
               child: _ErrorState(message: _error!, onRetry: () => _loadMore(reset: true)),
             )
           else if (_items.isEmpty && !_loading)
-            const SliverFillRemaining(child: _EmptyState(text: '尚無分析紀錄'))
+            SliverFillRemaining(child: _EmptyState(text: AppLocalizations.of(context).usageEmptyAnalysis))
           else ...[
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (ctx, i) {
+                    final l10n = AppLocalizations.of(ctx);
                     if (i == _items.length) {
                       return _hasMore
                           ? const Padding(
@@ -259,7 +264,7 @@ class _AnalysisTabState extends State<_AnalysisTab>
                           : Padding(
                               padding: const EdgeInsets.symmetric(vertical: 24),
                               child: Center(
-                                child: Text('已載入全部紀錄',
+                                child: Text(l10n.usageAllLoaded,
                                     style: TextStyle(
                                         fontSize: 12, color: context.textHint)),
                               ),
@@ -307,23 +312,26 @@ class _AnalysisSummaryCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         boxShadow: context.cardShadow,
       ),
-      child: Row(
-        children: [
-          _SummaryCell(
-              label: '累計分析',
-              value: '$total',
-              unit: '次',
-              color: kPrimaryGreen),
-          Container(
-              width: 1, height: 32, color: context.borderColor,
-              margin: const EdgeInsets.symmetric(horizontal: 16)),
-          _SummaryCell(
-              label: '今日已用',
-              value: '$todayUsed',
-              unit: '次',
-              color: const Color(0xFF4285F4)),
-        ],
-      ),
+      child: Builder(builder: (context) {
+        final l10n = AppLocalizations.of(context);
+        return Row(
+          children: [
+            _SummaryCell(
+                label: l10n.usageSummaryTotalAnalysis,
+                value: '$total',
+                unit: l10n.usageUnitTimes,
+                color: kBrandPrimary),
+            Container(
+                width: 1, height: 32, color: context.borderColor,
+                margin: const EdgeInsets.symmetric(horizontal: 16)),
+            _SummaryCell(
+                label: l10n.usageSummaryTodayUsed,
+                value: '$todayUsed',
+                unit: l10n.usageUnitTimes,
+                color: const Color(0xFF4285F4)),
+          ],
+        );
+      }),
     );
   }
 }
@@ -335,11 +343,12 @@ class _AnalysisTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n     = AppLocalizations.of(context);
     final isQuota  = record.source == 'daily_quota';
-    final color    = isQuota ? kPrimaryGreen : const Color(0xFFFF6B35);
+    final color    = isQuota ? kBrandPrimary : const Color(0xFFFF6B35);
     final timeStr  = DateFormat('HH:mm').format(record.usedAt);
-    final label    = isQuota ? '每日配額' : '獎勵球';
-    final srcLabel = isQuota ? '使用每日配額' : '消耗 1 顆球';
+    final label    = isQuota ? l10n.usageSourceDailyQuota : l10n.usageSourceBonusBall;
+    final srcLabel = isQuota ? l10n.usageSourceDailyQuotaDesc : l10n.usageSourceBonusBallDesc;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -369,7 +378,7 @@ class _AnalysisTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'AI 揮桿分析',
+                    l10n.usageAnalysisItemTitle,
                     style: const TextStyle(
                         fontSize: 14, fontWeight: FontWeight.w600),
                   ),
@@ -477,7 +486,7 @@ class _BallsTabState extends State<_BallsTab>
       if (!mounted) return;
 
       if (data == null) {
-        setState(() { _error = '載入失敗，請下拉重試'; _loading = false; });
+        setState(() { _error = AppLocalizations.of(context).usageLoadFailed; _loading = false; });
         return;
       }
 
@@ -496,7 +505,7 @@ class _BallsTabState extends State<_BallsTab>
         _loading      = false;
       });
     } catch (e) {
-      if (mounted) setState(() { _error = '載入錯誤：$e'; _loading = false; });
+      if (mounted) setState(() { _error = AppLocalizations.of(context).usageLoadError(e.toString()); _loading = false; });
     }
   }
 
@@ -505,7 +514,7 @@ class _BallsTabState extends State<_BallsTab>
     super.build(context);
     return RefreshIndicator(
       onRefresh: () => _loadMore(reset: true),
-      color: kPrimaryGreen,
+      color: kBrandPrimary,
       child: CustomScrollView(
         controller: _scrollCtrl,
         slivers: [
@@ -523,13 +532,14 @@ class _BallsTabState extends State<_BallsTab>
                   message: _error!, onRetry: () => _loadMore(reset: true)),
             )
           else if (_items.isEmpty && !_loading)
-            const SliverFillRemaining(child: _EmptyState(text: '尚無球數紀錄'))
+            SliverFillRemaining(child: _EmptyState(text: AppLocalizations.of(context).usageEmptyBalls))
           else ...[
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (ctx, i) {
+                    final l10n = AppLocalizations.of(ctx);
                     if (i == _items.length) {
                       return _hasMore
                           ? const Padding(
@@ -540,7 +550,7 @@ class _BallsTabState extends State<_BallsTab>
                           : Padding(
                               padding: const EdgeInsets.symmetric(vertical: 24),
                               child: Center(
-                                child: Text('已載入全部紀錄',
+                                child: Text(l10n.usageAllLoaded,
                                     style: TextStyle(
                                         fontSize: 12,
                                         color: context.textHint)),
@@ -589,25 +599,28 @@ class _BallsSummaryCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         boxShadow: context.cardShadow,
       ),
-      child: Row(
-        children: [
-          _SummaryCell(
-              label: '累計筆數',
-              value: '$total',
-              unit: '筆',
-              color: kPrimaryGreen),
-          Container(
-              width: 1,
-              height: 32,
-              color: context.borderColor,
-              margin: const EdgeInsets.symmetric(horizontal: 16)),
-          _SummaryCell(
-              label: '目前球數',
-              value: '$currentBalls',
-              unit: '球',
-              color: const Color(0xFFFF6B35)),
-        ],
-      ),
+      child: Builder(builder: (context) {
+        final l10n = AppLocalizations.of(context);
+        return Row(
+          children: [
+            _SummaryCell(
+                label: l10n.usageSummaryTotalRecords,
+                value: '$total',
+                unit: l10n.usageUnitRecords,
+                color: kBrandPrimary),
+            Container(
+                width: 1,
+                height: 32,
+                color: context.borderColor,
+                margin: const EdgeInsets.symmetric(horizontal: 16)),
+            _SummaryCell(
+                label: l10n.usageSummaryCurrentBalls,
+                value: '$currentBalls',
+                unit: l10n.usageUnitBalls,
+                color: const Color(0xFFFF6B35)),
+          ],
+        );
+      }),
     );
   }
 }
@@ -617,18 +630,19 @@ class _BallTile extends StatelessWidget {
   const _BallTile({required this.record});
 
   static const _reasonMeta = <String, _ReasonMeta>{
-    'ad':       _ReasonMeta('📺', '看廣告獎勵',   Color(0xFF4285F4)),
-    'feedback': _ReasonMeta('💬', '問題回饋獎勵', Color(0xFF9C27B0)),
-    'invite':   _ReasonMeta('👥', '邀請好友獎勵', Color(0xFFFF6B35)),
-    'upload':   _ReasonMeta('☁️', '上傳資料獎勵', Color(0xFF00897B)),
-    'analysis': _ReasonMeta('🏌️', 'AI 分析消耗',  Color(0xFFF44336)),
-    'manual':   _ReasonMeta('✏️', '手動調整',     Color(0xFF9E9E9E)),
+    'ad':       _ReasonMeta('📺', 'ad',       Color(0xFF4285F4)),
+    'feedback': _ReasonMeta('💬', 'feedback', Color(0xFF9C27B0)),
+    'invite':   _ReasonMeta('👥', 'invite',   Color(0xFFFF6B35)),
+    'upload':   _ReasonMeta('☁️', 'upload',   Color(0xFF00897B)),
+    'analysis': _ReasonMeta('🏌️', 'analysis', Color(0xFFF44336)),
+    'manual':   _ReasonMeta('✏️', 'manual',   Color(0xFF9E9E9E)),
   };
 
   @override
   Widget build(BuildContext context) {
+    final l10n    = AppLocalizations.of(context);
     final meta    = _reasonMeta[record.reason]
-        ?? const _ReasonMeta('❓', '其他', Color(0xFF9E9E9E));
+        ?? const _ReasonMeta('❓', 'other', Color(0xFF9E9E9E));
     final isEarn  = record.delta > 0;
     final deltaStr = isEarn ? '+${record.delta}' : '${record.delta}';
     final timeStr = DateFormat('HH:mm').format(record.createdAt);
@@ -663,11 +677,11 @@ class _BallTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(meta.label,
+                  Text(meta.label(l10n),
                       style: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
-                  Text('餘額 ${record.balanceAfter} 球',
+                  Text(AppLocalizations.of(context).usageBallBalance(record.balanceAfter),
                       style: TextStyle(
                           fontSize: 12, color: context.textSecondary)),
                 ],
@@ -703,9 +717,21 @@ class _BallTile extends StatelessWidget {
 
 class _ReasonMeta {
   final String emoji;
-  final String label;
+  final String _labelKey; // internal stable key, not displayed directly
   final Color color;
-  const _ReasonMeta(this.emoji, this.label, this.color);
+  const _ReasonMeta(this.emoji, this._labelKey, this.color);
+
+  String label(AppLocalizations l10n) {
+    switch (_labelKey) {
+      case 'ad':       return l10n.usageReasonAd;
+      case 'feedback': return l10n.usageReasonFeedback;
+      case 'invite':   return l10n.usageReasonInvite;
+      case 'upload':   return l10n.usageReasonUpload;
+      case 'analysis': return l10n.usageReasonAnalysis;
+      case 'manual':   return l10n.usageReasonManual;
+      default:         return l10n.usageReasonOther;
+    }
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -762,11 +788,12 @@ class _DateHeader extends StatelessWidget {
     final today = DateTime(now.year, now.month, now.day);
     final d     = DateTime(date.year, date.month, date.day);
 
+    final l10n = AppLocalizations.of(context);
     String label;
     if (d == today) {
-      label = '今天';
+      label = l10n.usageDateToday;
     } else if (d == today.subtract(const Duration(days: 1))) {
-      label = '昨天';
+      label = l10n.usageDateYesterday;
     } else {
       label = DateFormat('MM/dd  EEEE', 'zh_TW').format(date);
     }
@@ -777,14 +804,14 @@ class _DateHeader extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           decoration: BoxDecoration(
-            color: kPrimaryGreen.withValues(alpha: 0.12),
+            color: kBrandPrimary.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(label,
               style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: kPrimaryGreen.withValues(alpha: 0.8))),
+                  color: kBrandPrimary.withValues(alpha: 0.8))),
         ),
         const SizedBox(width: 8),
         const Expanded(child: Divider(height: 1)),
@@ -841,7 +868,7 @@ class _ErrorState extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('重試'),
+              label: Text(AppLocalizations.of(context).commonRetry),
             ),
           ],
         ),

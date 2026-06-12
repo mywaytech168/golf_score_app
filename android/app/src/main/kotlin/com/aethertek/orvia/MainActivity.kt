@@ -45,6 +45,7 @@ class MainActivity: FlutterActivity() {
     private val PROGRESS_CHANNEL = "com.example.golf_score_app/analysis_progress"
     private val TRANSCODER_CHANNEL = "com.example.golf_score_app/video_transcoder"
     private val GOLF_ANALYSIS_CHANNEL = "com.example.golf_score_app/golf_analysis"
+    private val EXPORT_COMPOSER_CHANNEL = "com.example.golf_score_app/export_composer"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
@@ -86,6 +87,7 @@ class MainActivity: FlutterActivity() {
     }
     private val videoTrimmer by lazy { VideoTrimmer(this) }
     private val skeletonRenderer by lazy { SkeletonOverlayRenderer(this) }
+    private val exportComposerRenderer by lazy { ExportComposerRenderer(this) }
     private val ballBlobExtractor      by lazy { BallBlobExtractor() }
     private val trajectoryOverlayRenderer by lazy { TrajectoryOverlayRenderer() }
     private val ballYoloExtractor      by lazy {
@@ -404,6 +406,48 @@ class MainActivity: FlutterActivity() {
                     result.notImplemented()
                 }
             }
+        // ── 匯出合成器：軌跡/骨架/浮水印單 pass 合成 ───────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, EXPORT_COMPOSER_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "compose") {
+                    val clipPath   = call.argument<String>("clipPath")
+                    val csvPath    = call.argument<String>("csvPath")          // nullable
+                    val startSec   = call.argument<Double>("startSec") ?: 0.0
+                    @Suppress("UNCHECKED_CAST")
+                    val trackPts   = (call.argument<List<Map<String, Any>>>("trackPts")) ?: emptyList()
+                    val watermark  = call.argument<String>("watermarkPath")    // nullable
+                    val outputPath = call.argument<String>("outputPath")
+                    val quality    = ExportQuality.fromString(call.argument<String>("quality"))
+
+                    if (clipPath.isNullOrBlank() || outputPath.isNullOrBlank()) {
+                        result.error("invalid_args", "缺少 clipPath / outputPath", null)
+                        return@setMethodCallHandler
+                    }
+                    cancelFlag.set(false)
+                    skeletonExecutor.execute {
+                        try {
+                            val ok = exportComposerRenderer.render(
+                                clipPath = clipPath,
+                                csvPath = csvPath,
+                                startSec = startSec,
+                                trackPts = trackPts,
+                                watermarkPath = watermark,
+                                outputPath = outputPath,
+                                quality = quality,
+                                onProgress = ::sendProgress,
+                                shouldCancel = { cancelFlag.get() },
+                            )
+                            runOnUiThread { result.success(if (ok) outputPath else null) }
+                        } catch (e: Exception) {
+                            Log.e(logTag, "匯出合成失敗: ${e.message}", e)
+                            runOnUiThread { result.error("compose_failed", e.message, null) }
+                        }
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BALL_TRAJECTORY_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {

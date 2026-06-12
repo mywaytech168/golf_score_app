@@ -2,6 +2,19 @@ import Flutter
 import Photos
 import UIKit
 
+// MARK: - Helpers
+
+/// 取得目前前景 active scene 的 key window 的 rootViewController。
+/// 取代已於 iOS 15 deprecated 的 `UIApplication.shared.windows`，且在多場景下能正確選中前景視窗。
+private func vxRootViewController() -> UIViewController? {
+  let scenes = UIApplication.shared.connectedScenes
+    .compactMap { $0 as? UIWindowScene }
+  // 優先前景 active scene，退而求其次任一 scene
+  let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+  let keyWindow = scene?.windows.first { $0.isKeyWindow } ?? scene?.windows.first
+  return keyWindow?.rootViewController
+}
+
 // MARK: - Registration
 
 func registerVideoExportChannel(messenger: FlutterBinaryMessenger) {
@@ -80,7 +93,7 @@ private func vxPickFolderAndSave(srcPath: String, fileName: String, result: @esc
   }
 
   DispatchQueue.main.async {
-    guard let rootVC = UIApplication.shared.windows.first?.rootViewController else {
+    guard let rootVC = vxRootViewController() else {
       try? FileManager.default.removeItem(at: tempURL)
       result(FlutterError(code: "no_view_controller", message: "找不到 rootViewController", details: nil))
       return
@@ -148,7 +161,7 @@ private func vxSaveVideoToPhotos(srcPath: String, result: @escaping FlutterResul
 // MARK: - Fallback: Share Sheet
 
 private func vxShareVideoFallback(fileURL: URL, result: @escaping FlutterResult) {
-  guard let rootVC = UIApplication.shared.windows.first?.rootViewController else {
+  guard let rootVC = vxRootViewController() else {
     result(FlutterError(code: "no_view_controller", message: "找不到 rootViewController", details: nil))
     return
   }

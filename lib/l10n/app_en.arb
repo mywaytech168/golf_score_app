@@ -1,9 +1,7 @@
 {
   "@@locale": "en",
-
   "appName": "ORVIA",
   "appTagline": "Smart Swing Training Platform",
-
   "commonSave": "Save",
   "commonCancel": "Cancel",
   "commonConfirm": "Confirm",
@@ -15,7 +13,6 @@
   "commonOk": "OK",
   "commonLoading": "Loading...",
   "commonUnknownError": "An unknown error occurred, please try again later",
-
   "authWelcomeBack": "Welcome Back!",
   "authLoginSubtitle": "Login to ORVIA to sync swing data and explore the latest analysis reports.",
   "authRegisterTitle": "Create Account",
@@ -42,7 +39,6 @@
   "authAppleSigningIn": "Signing in with Apple...",
   "authNoAccount": "Don't have an account? Register now",
   "authHaveAccount": "Already have an account? Back to Login",
-
   "validationEnterUsernameOrEmail": "Please enter your username or email",
   "validationEnterPassword": "Please enter your password",
   "validationEnterEmail": "Please enter your email",
@@ -52,13 +48,14 @@
   "validationPasswordTooShort": "Password must be 8+ characters with uppercase, lowercase and a digit",
   "validationPasswordMismatch": "Passwords do not match",
   "validationEnterPasswordAgain": "Please re-enter your password",
-
   "msgLoginSuccess": "Login successful, welcome back!",
   "msgLoginFailed": "Login failed, please check your credentials",
   "msgLoginFailedWithError": "Login failed: {error}",
   "@msgLoginFailedWithError": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "msgRegisterSuccess": "Registration successful, please login",
@@ -66,7 +63,9 @@
   "msgRegisterFailedWithError": "Registration failed: {error}",
   "@msgRegisterFailedWithError": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "msgGoogleLoginCancelled": "Google login cancelled",
@@ -74,7 +73,9 @@
   "msgGoogleLoginFailed": "Google login failed: {error}",
   "@msgGoogleLoginFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "msgGoogleLoginNoToken": "Google login failed: server did not return an auth token",
@@ -87,7 +88,6 @@
     }
   },
   "msgAppleLoginNoToken": "Apple sign-in failed: server did not return an auth token",
-
   "permTitle": "Please Allow Bluetooth & Location",
   "permSubtitle": "Bluetooth permission is required on first login.",
   "permGranted": "Granted",
@@ -104,13 +104,11 @@
   "permAndroidInstructions": "Please allow the following permissions in system settings:\n1. Go to \"Apps & Notifications\"\n2. Select ORVIA → Permissions\n3. Enable \"Nearby Devices, Bluetooth\" and \"Location\"",
   "permStatusGranted": "Granted",
   "permStatusDenied": "Denied",
-
   "navHome": "Home",
   "navData": "Data",
   "navRecord": "Record",
   "navHistory": "History",
   "navPremium": "Premium",
-
   "homeLogout": "Logout",
   "homeConfirmLogout": "Confirm Logout",
   "homeConfirmLogoutMsg": "Are you sure you want to logout?",
@@ -119,16 +117,26 @@
   "homeTodayUsage": "Today: {used} / {total} balls",
   "@homeTodayUsage": {
     "placeholders": {
-      "used": {"type": "int"},
-      "total": {"type": "int"}
+      "used": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
     }
   },
   "homeTodayUsageBonus": "Today: {used} / {total} balls (incl. +{bonus} bonus)",
   "@homeTodayUsageBonus": {
     "placeholders": {
-      "used": {"type": "int"},
-      "total": {"type": "int"},
-      "bonus": {"type": "int"}
+      "used": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "bonus": {
+        "type": "int"
+      }
     }
   },
   "homeTodayLimit": "⚠️ Limit reached",
@@ -140,7 +148,6 @@
   "homeAvgScore": "Avg Score",
   "homeNoDataYet": "No data yet today",
   "homeStartRecording": "Start Recording",
-
   "recTitle": "New Session",
   "recStartRecording": "Start Recording",
   "recSelectLocalVideo": "Select Local Video",
@@ -150,12 +157,10 @@
   "recSuccess": "Import Successful",
   "recFailed": "Import Failed",
   "recCancelled": "Cancelled",
-
   "historyTitle": "History",
   "historyEmpty": "No recordings yet",
   "historyDeleteConfirm": "Delete this recording?",
   "historyDeleteConfirmMsg": "This action cannot be undone.",
-
   "upgradeTitle": "Upgrade Plan",
   "upgradeFreeForever": "Free Forever",
   "upgradePerMonth": "/month",
@@ -182,31 +187,26 @@
   "upgradeHistoryCompare": "History Compare",
   "upgradeNoAds": "Ad-free",
   "upgradeAdvanced": "Advanced",
-
   "todayTitle": "Today",
   "todaySwingCount": "Swing Count",
   "todayGoodRate": "Good Rate",
   "todayAvgSpeed": "Avg Speed",
-
   "aiCoachTitle": "AI Coach Analysis",
   "aiCoachAnalyzing": "Analyzing... usually 10–30 seconds",
   "aiCoachNoData": "No analysis data",
   "aiCoachBasis": "Basis",
   "aiCoachSuggestion": "Suggestion",
-
   "profileTitle": "Edit Profile",
   "profileAvatar": "Set an avatar so coaches can identify you more easily",
   "profileRemoveAvatar": "Remove Avatar",
   "profilePersonalInfo": "Personal Info",
   "profileDisplayName": "Display Name",
   "profileSaveChanges": "Save Changes",
-
   "langTitle": "Language",
   "langZhTW": "繁體中文",
   "langZhCN": "简体中文",
   "langEn": "English",
   "langSelectTitle": "Select Language",
-
   "settingsTitle": "Settings",
   "settingsSectionAccount": "Account",
   "settingsChangeName": "Change Name",
@@ -230,7 +230,11 @@
   "settingsApply": "Apply",
   "settingsQualityUpdated": "Output quality updated to \"{quality}\"",
   "@settingsQualityUpdated": {
-    "placeholders": { "quality": {"type": "String"} }
+    "placeholders": {
+      "quality": {
+        "type": "String"
+      }
+    }
   },
   "settingsSectionSubscription": "Subscription",
   "settingsViewSubscription": "View Subscription Plans",
@@ -250,7 +254,11 @@
   "settingsVersionCopied": "Version copied",
   "settingsAlreadyLatest": "Already on latest version v{version}",
   "@settingsAlreadyLatest": {
-    "placeholders": { "version": {"type": "String"} }
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
   },
   "settingsUpdateCheckFailed": "Update check failed, please try again later",
   "settingsConfirmLogout": "Confirm Logout?",
@@ -264,22 +272,33 @@
   "settingsNameUpdated": "Name updated",
   "settingsPickFromGallery": "Choose from Gallery",
   "settingsRemoveAvatar": "Remove Avatar",
-
   "homeTodayOverview": "Today's Overview",
   "homeHi": "Hi, {name} 👋",
   "@homeHi": {
-    "placeholders": { "name": {"type": "String"} }
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "homeRounds": "Rounds",
   "homePractices": "Practice",
   "homeTodayGoodRate": "Today's Good Rate",
   "homeGoodTimes": "Good {count}",
   "@homeGoodTimes": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "homeBadTimes": "Bad {count}",
   "@homeBadTimes": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "homeTodayPosture": "Today's Posture",
   "homeTopSpeed": "Peak Speed",
@@ -291,13 +310,24 @@
   "homeTodayQuota": "Today's Usage",
   "homeQuotaBalls": "{used} / {total} balls",
   "@homeQuotaBalls": {
-    "placeholders": { "used": {"type": "int"}, "total": {"type": "int"} }
+    "placeholders": {
+      "used": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
   },
   "homeHitAnalysis": "Shot Analysis",
   "homeHitRecordsLabel": "shots recorded",
   "homeImprovedVsAvg": "Keep it up! Today is {pct}% above your average.",
   "@homeImprovedVsAvg": {
-    "placeholders": { "pct": {"type": "String"} }
+    "placeholders": {
+      "pct": {
+        "type": "String"
+      }
+    }
   },
   "homeTrainingFocus": "Training Focus",
   "homeViewNow": "View",
@@ -310,7 +340,6 @@
   "weekdayFri": "Fri",
   "weekdaySat": "Sat",
   "weekdaySun": "Sun",
-
   "todayTitleToday": "Today's Summary",
   "todayTitleHistory": "History Summary",
   "todayLoadFailed": "Failed to load, pull down to refresh",
@@ -322,11 +351,14 @@
   "todayGoRecord": "Go record a swing!",
   "todayPostureToday": "Today's Posture Analysis",
   "todayPosture": "Posture Analysis",
-
   "annBoardTitle": "Announcements",
   "annUnreadCount": "{count} unread",
   "@annUnreadCount": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annAllAnnouncements": "All Announcements",
   "annMarkAllRead": "Mark All Read",
@@ -334,24 +366,39 @@
   "annLoadFailed": "Failed to load, pull down to retry",
   "annMinutesAgo": "{count}m ago",
   "@annMinutesAgo": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annHoursAgo": "{count}h ago",
   "@annHoursAgo": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annDaysAgo": "{count}d ago",
   "@annDaysAgo": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annDetailTitle": "Announcement Detail",
   "annExpiresAt": "Valid until {date}",
   "@annExpiresAt": {
-    "placeholders": { "date": {"type": "String"} }
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
   },
   "annEmpty": "No announcements",
   "annEmptySubtitle": "New announcements will appear here",
-
   "updateNotes": "What's New",
   "updateForcedWarning": "This version is no longer supported. Please update to continue.",
   "updateNow": "Update Now",
@@ -364,14 +411,17 @@
   "updateFoundSubtitle": "Update recommended for the best experience",
   "updateCurrentVersion": "Current Version",
   "updateLatestVersion": "Latest Version",
-
   "upgradePageTitle": "Upgrade Your Plan",
   "upgradePageSubtitle": "Unlock more swing analysis features and sharpen your game",
   "upgradeFullComparison": "Full Feature Comparison",
   "upgradeFeatureColumn": "Feature",
   "upgradeSubscribePlan": "Upgrade to {plan}",
   "@upgradeSubscribePlan": {
-    "placeholders": { "plan": {"type": "String"} }
+    "placeholders": {
+      "plan": {
+        "type": "String"
+      }
+    }
   },
   "upgradeSelectPayment": "Select Payment Method",
   "upgradeApplePayFailed": "Apple Pay configuration failed to load",
@@ -379,12 +429,10 @@
   "upgradePaymentFailed": "Payment verification failed, please try again",
   "upgradeSuccessMsg": "Upgrade successful",
   "upgradeAlreadyFree": "You are already on the free plan",
-
   "learningTitle": "Swing Learning",
   "learningMoreComing": "More courses coming soon",
   "learningVideoComingSoon": "Demo video coming soon. Key points and markers available for reference.",
   "learningKeyMarkers": "Key Markers",
-
   "myFeedbackTitle": "My Feedback",
   "myFeedbackSubtitle": "Submitted feedback & official replies",
   "myFeedbackEntry": "View My Feedback",
@@ -397,7 +445,6 @@
   "myFeedbackAdminReply": "Official Reply",
   "myFeedbackNoReply": "Awaiting reply",
   "myFeedbackAttachedVideo": "Video attached",
-
   "onboardingSkip": "Skip",
   "onboardingNext": "Next",
   "onboardingStart": "Get Started",
@@ -413,16 +460,27 @@
   "recFrameCount": "{count} frames",
   "@recFrameCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "recDetectedShots": "{count} detected",
   "@recDetectedShots": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
+  "recImpactShot": "Shot {number}",
+  "@recImpactShot": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
   "privacySettingsTitle": "Privacy & Analytics",
   "privacySectionDataCollection": "DATA COLLECTION",
   "privacyDataCollectionDesc": "Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.",
@@ -431,5 +489,1664 @@
   "privacyUploadDesc": "You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.",
   "privacyUploadStatusEntry": "View My Upload Review Status",
   "privacySectionAccount": "ACCOUNT",
-  "privacyDeleteAccountSubtitle": "Soft delete: you can no longer sign in and your data is anonymized"
+  "privacyDeleteAccountSubtitle": "Soft delete: you can no longer sign in and your data is anonymized",
+  "rewardSubtitle": "Complete tasks to earn balls and redeem analyses",
+  "historyFilterReset": "Reset",
+  "aiCoachUpgradeFailed": "Upgrade failed: {error}",
+  "@aiCoachUpgradeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "aiCoachQuotaExhaustedTitle": "Daily ball quota used up",
+  "aiCoachQuotaExhaustedBody": "You have used {todayUsed} analyses today, reaching the limit of {totalLimit}.\n\nYou can continue tomorrow, or upgrade your plan for more analyses.",
+  "@aiCoachQuotaExhaustedBody": {
+    "placeholders": {
+      "todayUsed": {
+        "type": "int"
+      },
+      "totalLimit": {
+        "type": "int"
+      }
+    }
+  },
+  "aiCoachGotIt": "Got it",
+  "aiCoachAnalysisFailed": "Analysis failed, please retry",
+  "aiCoachStatusPending": "Preparing...",
+  "aiCoachStatusQueued": "Waiting in analysis queue...",
+  "aiCoachStatusProcessing": "AI Coach is analyzing the video...",
+  "aiCoachStatusIdle": "Waiting for AI Coach analysis...",
+  "aiCoachStatusConnecting": "Connecting...",
+  "aiCoachLoadingHint": "Usually takes 10–30 seconds",
+  "aiCoachPostureAnalysisDone": "Posture error analysis complete",
+  "aiCoachSubmitting": "Submitting...",
+  "aiCoachStartAnalysis": "Start AI Coach Analysis",
+  "aiCoachAnalysisHint": "* AI Coach will provide detailed feedback and training suggestions based on posture analysis results",
+  "aiCoachEvidence": "Evidence",
+  "aiCoachSeverityHigh": "Severe",
+  "aiCoachSeverityMedium": "Moderate",
+  "aiCoachSeverityLow": "Minor",
+  "aiCoachImpactPremiumSweetSpot": "Premium Sweet Spot",
+  "aiCoachImpactSweetSpot": "Sweet Spot",
+  "aiCoachImpactNearSweetSpot": "Near Sweet Spot",
+  "aiCoachImpactFair": "Fair",
+  "aiCoachImpactPoor": "Off-center Hit",
+  "aiCoachImpactQualityTitle": "Impact Quality (Audio)",
+  "aiCoachImpactFeatureCount": "{passCount} / {totalFeatures} features match the sweet spot range",
+  "@aiCoachImpactFeatureCount": {
+    "placeholders": {
+      "passCount": {
+        "type": "int"
+      },
+      "totalFeatures": {
+        "type": "int"
+      }
+    }
+  },
+  "aiCoachFeedbackTitle": "Coach Feedback",
+  "aiCoachPracticeTitle": "Training Suggestions",
+  "aiCoachNextGoalTitle": "Next Practice Goal",
+  "aiCoachReanalyzeSubmitting": "Submitting re-analysis...",
+  "aiCoachReanalyzeFailed": "Re-analysis failed: {error}",
+  "@aiCoachReanalyzeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ballTuneTitle": "Ball Trajectory Tuning",
+  "ballTuneHudInit": "Initializing…",
+  "ballTuneHudDetecting": "Detecting…",
+  "ballTuneHudBlobFailed": "Blob extraction failed",
+  "ballTuneRoiBadge": "ROI r={r}px  margin={margin}",
+  "@ballTuneRoiBadge": {
+    "placeholders": {
+      "r": {
+        "type": "String"
+      },
+      "margin": {
+        "type": "String"
+      }
+    }
+  },
+  "ballTuneRoiToggleTooltip": "Toggle ROI overlay",
+  "ballTuneSectionRealtime": "Realtime (applies immediately)",
+  "ballTuneSliderResidual": "Quality gate — residual limit",
+  "ballTuneSliderP1MaxDist": "P1 max distance",
+  "ballTuneRoiMaskSection": "ROI / Mask (drag on preview to adjust)",
+  "ballTuneSliderRoiRadius": "ROI radius",
+  "ballTuneSliderGolferMargin": "Golfer mask margin",
+  "ballTuneSliderRoiMissScale": "ROI miss large expand ×",
+  "ballTuneSliderRoiRadiusMax": "ROI radius max",
+  "ballTuneSliderStepMaxPost": "Post-impact step max",
+  "ballTuneSliderPredMaxPost": "Post-impact pred max",
+  "ballTuneSliderMissPatiencePost": "Post-impact miss tolerance",
+  "ballTuneSectionReextract": "Re-extract (press button below to apply)",
+  "ballTuneSliderDiffThresh": "diffThresh frame-diff threshold",
+  "ballTuneRedetectButton": "Re-detect (apply diffThresh)",
+  "clipCandTitle": "Confirm shots ({count} candidates)",
+  "@clipCandTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "clipCandTapToPreview": "Tap to preview",
+  "clipCandRangeTooShort": "Clip range must be at least 0.5 s (end must be after start)",
+  "clipCandConfirmClip": "Clip {count} segment(s)",
+  "@clipCandConfirmClip": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "clipCandManualHint": "Start {start} → drag to end then tap \"Add range\"",
+  "@clipCandManualHint": {
+    "placeholders": {
+      "start": {
+        "type": "String"
+      }
+    }
+  },
+  "clipCandManualPrompt": "Free clip: drag timeline to start point",
+  "clipCandSetStart": "Set start",
+  "clipCandReset": "Reset",
+  "clipCandAddRange": "Add range",
+  "clipCandCandidateLabel": "Candidate {index} · {time}",
+  "@clipCandCandidateLabel": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "clipCandFromAudio": "Detected by impact sound",
+  "clipCandFromMotion": "Detected by motion during recording",
+  "clipCandManualRangeLabel": "Custom range · {start} - {end}",
+  "@clipCandManualRangeLabel": {
+    "placeholders": {
+      "start": {
+        "type": "String"
+      },
+      "end": {
+        "type": "String"
+      }
+    }
+  },
+  "clipCandRangeDuration": "Duration {seconds} s",
+  "@clipCandRangeDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "compareLoadingVideos": "Loading videos…",
+  "highlightTitle": "Highlight Preview",
+  "highlightShareSystem": "Share",
+  "highlightExportDebug": "Export debug",
+  "highlightShareDebug": "Share debug",
+  "highlightShareText": "My swing highlight",
+  "highlightDebugFileError": "Failed to create debug file",
+  "highlightStoragePermissionRequired": "Storage permission is required to export to the Downloads folder",
+  "highlightDownloadsDirNotFound": "Downloads folder not found",
+  "highlightSavedTo": "Saved to: {path}",
+  "@highlightSavedTo": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "highlightExportFailed": "Export failed: {error}",
+  "@highlightExportFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "historySubtitle": "{total} total · {good} good · {bad} bad",
+  "historySearchHint": "Search recordings…",
+  "historySearchResult": "Search results {count} / {total}",
+  "@historySearchResult": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historySearchNoResult": "No results found",
+  "historySearchNoResultHint": "No results for \"{query}\"",
+  "@historySearchNoResultHint": {
+    "placeholders": {
+      "query": {
+        "type": "Object"
+      }
+    }
+  },
+  "historySearchClear": "Clear search",
+  "historyEmptyTitle": "No recordings yet",
+  "historyEmptySubtitle": "Start recording your swings to see them here",
+  "historyFilterLabelSort": "Sort",
+  "historyFilterLabelDate": "Date",
+  "historyFilterLabelVideo": "Video",
+  "historyFilterLabelGoodBad": "Shot",
+  "historyFilterLabelAnalysis": "Analysis",
+  "historyFilterLabelClip": "Clip",
+  "historyFilterLabelAI": "AI",
+  "historyFilterLabelPosture": "Posture",
+  "historyFilterAll": "All",
+  "historyFilterToday": "Today",
+  "historyFilterWeek": "This week",
+  "historyFilterMonth": "This month",
+  "historyFilterCustomDate": "Custom range",
+  "historyFilterSort": "Sort by",
+  "historyFilterGood": "Good",
+  "historyFilterBad": "Poor",
+  "historyFilterAnalyzed": "Analyzed",
+  "historyFilterNotAnalyzed": "Not analyzed",
+  "historyFilterAiAnalyzed": "AI analyzed",
+  "historyFilterAiNotAnalyzed": "AI not analyzed",
+  "historyFilterClipped": "Clipped",
+  "historyFilterNotClipped": "Not clipped",
+  "historyFilterLongVideo": "Long video",
+  "historyFilterShortVideo": "Short video",
+  "historySortDate": "Date",
+  "historySortPeakSpeed": "Peak speed",
+  "historySortClipTime": "Clip time",
+  "historyDateRangeHelp": "Select date range",
+  "historyDeleteTitle": "Delete recording",
+  "historyDeleteClipConfirm": "Delete clip \"{title}\"?",
+  "@historyDeleteClipConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeleteVideoConfirm": "Delete recording \"{title}\"?",
+  "@historyDeleteVideoConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeleteVideoWithClipsConfirm": "Delete \"{title}\" and its {count} clips?",
+  "@historyDeleteVideoWithClipsConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      },
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeletedSnack": "Deleted {name}",
+  "@historyDeletedSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeletedWithClipsSnack": "Deleted {name} and {count} clips",
+  "@historyDeletedWithClipsSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      },
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyRenameTitle": "Rename recording",
+  "historyRenameClipTitle": "Rename clip",
+  "historyRenameLabel": "New name",
+  "historyRenameHelper": "Leave empty to reset to default name",
+  "historyRenameValidation": "Name cannot be blank",
+  "historyRenamedSnack": "Renamed to {name}",
+  "@historyRenamedSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyRenameResetSnack": "Reset to default name \"{name}\"",
+  "@historyRenameResetSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyFileNotFound": "File not found: {name}",
+  "@historyFileNotFound": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipFileNotExist": "Clip file does not exist, please re-detect",
+  "historyAlreadyClipped": "This video already has clips. Re-detect to replace them.",
+  "historyProgressPreparingSkeleton": "Preparing skeleton analysis…",
+  "historyProgressPreparing": "Preparing…",
+  "historyDetectingShots": "Detecting shots",
+  "historyCancelledDetection": "Detection cancelled",
+  "historyCancelledAnalysis": "Analysis cancelled",
+  "historyV2NoAudio": "No audio track found, cannot use audio-based detection",
+  "historyV3NoShot": "No shot detected in skeleton analysis",
+  "historyV3NoValidHit": "No valid impact found after filtering",
+  "historyNoShotDetected": "No shots detected",
+  "historyClipFailed": "Clip generation failed",
+  "historyClipsGenerated": "{count} clips generated",
+  "@historyClipsGenerated": {
+    "placeholders": {
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipsGeneratedBg": "{count} clips saved to history",
+  "@historyClipsGeneratedBg": {
+    "placeholders": {
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDetectFailed": "Detection failed: {error}",
+  "@historyDetectFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyLongVideoTitle": "Long video warning",
+  "historyLongVideoContent": "This video is {seconds}s long. Full analysis may take a while.",
+  "@historyLongVideoContent": {
+    "placeholders": {
+      "seconds": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyContinueAnalysis": "Continue",
+  "historyFullAnalysisTitle": "Analyzing",
+  "historyInvalidDuration": "Invalid video duration: {seconds}s",
+  "@historyInvalidDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyAnalysisComplete": "Analysis complete{audio}",
+  "@historyAnalysisComplete": {
+    "placeholders": {
+      "audio": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyAnalysisFailed": "Analysis failed: {error}",
+  "@historyAnalysisFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyQuotaExhaustedTitle": "Daily quota reached",
+  "historyQuotaExhaustedContent": "Used {used}/{total} today. Upgrade to continue.",
+  "@historyQuotaExhaustedContent": {
+    "placeholders": {
+      "used": {
+        "type": "Object"
+      },
+      "total": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyGotIt": "Got it",
+  "historyAiAnalysisConfirmTitle": "AI Analysis",
+  "historyAiAnalysisConfirmDesc": "Submit this swing for AI analysis. This will use 1 ball.",
+  "historyAiAnalysisConfirmBtn": "Analyze",
+  "historyAiSubmitFailed": "Submission failed: {error}",
+  "@historyAiSubmitFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyNoOtherVideoToCompare": "No other videos available to compare",
+  "historyCompareTitle": "Compare swings",
+  "historyCompareSubtitle": "Select a video to compare with \"{title}\"",
+  "@historyCompareSubtitle": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyPhasesJsonMissing": "phases.json not found, please re-analyze",
+  "historyPhasesJsonInvalid": "phases.json is invalid, please re-analyze",
+  "historySelectAiModeTitle": "Select AI mode",
+  "historyAiModeV1Title": "Basic (V1)",
+  "historyAiModeV1Desc": "Audio peak detection",
+  "historyAiModeV2Title": "Standard (V2)",
+  "historyAiModeV2Desc": "Audio + skeleton hybrid",
+  "historyAiModeV3Title": "Advanced (V3)",
+  "historyAiModeV3Desc": "Skeleton-first with audio refinement",
+  "historySelectDetectModeTitle": "Select detection mode",
+  "historyDetectV1Title": "Skeleton (V1)",
+  "historyDetectV1Desc": "MediaPipe pose estimation",
+  "historyDetectBadgePrecise": "Precise",
+  "historyDetectV1Time": "~10s",
+  "historyDetectV2Title": "Audio (V2)",
+  "historyDetectV2Desc": "Fast audio peak detection",
+  "historyDetectBadgeFast": "Fast",
+  "historyDetectV2Time": "~30s",
+  "historyDetectV3Title": "Hybrid (V3)",
+  "historyDetectV3Desc": "Skeleton-first + audio refinement",
+  "historyDetectBadgeBalanced": "Balanced",
+  "historyDetectV3Time": "~45s",
+  "historySkipToday": "Don't show today",
+  "historyStartDetect": "Start detection",
+  "historySelectQualityTitle": "Select export quality",
+  "historyStartAnalysis": "Start analysis",
+  "historyActionDetect": "Detect shots",
+  "historyActionAiAnalysis": "AI analysis",
+  "historyActionFullAnalysis": "Full analysis",
+  "historyActionChart": "Stats",
+  "historyActionPlay": "Play",
+  "historyActionExpand": "Expand clips",
+  "historyActionCollapse": "Collapse clips",
+  "historyMenuRename": "Rename",
+  "historyMenuAddNote": "Add note",
+  "historyMenuEditNote": "Edit note",
+  "historyMenuShare": "Share",
+  "historyMenuDownload": "Download",
+  "historyMenuDownloading": "Downloading…",
+  "historyMenuCompare": "Compare",
+  "historyMenuUploadReward": "Upload for +{balls} balls",
+  "historyMenuUploaded": "Uploaded",
+  "historyMenuAnalyzing": "Analyzing…",
+  "historyMenuDeleteVideo": "Delete",
+  "historyMoreActions": "More actions",
+  "historyBadgeNoAudio": "No audio",
+  "historyBadgeAnalyzed": "Analyzed",
+  "historySweetSpot": "Sweet spot",
+  "historySweetSpotHit": "Hit",
+  "historySweetSpotMiss": "Miss",
+  "historyHitSummary": "Shot summary",
+  "historyClipDefaultName": "Shot {index}",
+  "@historyClipDefaultName": {
+    "placeholders": {
+      "index": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipHitAt": "Impact @ {time}",
+  "@historyClipHitAt": {
+    "placeholders": {
+      "time": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipRange": "Clip {start}–{end}s",
+  "@historyClipRange": {
+    "placeholders": {
+      "start": {
+        "type": "Object"
+      },
+      "end": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyRoundLabel": "Round {index}",
+  "@historyRoundLabel": {
+    "placeholders": {
+      "index": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDurationLine": "{time} · {seconds}s",
+  "@historyDurationLine": {
+    "placeholders": {
+      "time": {
+        "type": "Object"
+      },
+      "seconds": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyImportedFrom": "From {name}",
+  "@historyImportedFrom": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyNoteDialogTitle": "Video note",
+  "historyNoteHint": "Practice notes, location, club used…",
+  "historyNoteHelper": "Leave empty to clear note",
+  "historySaveLocationTitle": "Save location",
+  "historySaveLocationDownloads": "Downloads folder",
+  "historySaveLocationDownloadsSub": "Save to system Downloads",
+  "historySaveLocationPick": "Choose folder",
+  "historySaveLocationPickSub": "Custom save location",
+  "historyDownloadVersionTitle": "Select version",
+  "historyExportSaved": "\"{label}\" saved ✅",
+  "@historyExportSaved": {
+    "placeholders": {
+      "label": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyExportSavedPhotos": "\"{label}\" saved to Camera Roll ✅",
+  "@historyExportSavedPhotos": {
+    "placeholders": {
+      "label": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyExportFailed": "Download failed: {detail}",
+  "@historyExportFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyUploadRewardTitle": "Upload for reward",
+  "historyUploadRewardContent": "Upload analysis data for \"{title}\" to improve swing detection. After review, you'll receive +{balls} balls.",
+  "@historyUploadRewardContent": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      },
+      "balls": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyUploadSubmit": "Submit for review",
+  "historyUploadingProgress": "Uploading video and analysis data…",
+  "historyUploadFailed": "Upload failed: {error}",
+  "@historyUploadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyUploadSubmitFailed": "Submission failed: this video may have already been submitted (including rejected ones), or please retry later",
+  "historyUploadReviewPending": "Submitted for review. +{balls} balls will be awarded upon approval.",
+  "@historyUploadReviewPending": {
+    "placeholders": {
+      "balls": {
+        "type": "Object"
+      }
+    }
+  },
+  "hitsSummaryEmpty": "No shots detected yet",
+  "hitsSummaryHitIndex": "Shot #{index}",
+  "@hitsSummaryHitIndex": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "hitsSummaryPeak": "Peak",
+  "hitsSummaryDuration": "Duration",
+  "hitsSummaryStart": "Start",
+  "hitsSummaryEnd": "End",
+  "hitsSummaryDetectFrom": "Source: {source}",
+  "@hitsSummaryDetectFrom": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "hitsSummaryTitle": "Shot Summary",
+  "hitsSummaryCount": "{count} shots total",
+  "@hitsSummaryCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeCurrentSuggestions": "Current Practice Plan",
+  "homeNextGoal": "Next goal: {goal}",
+  "@homeNextGoal": {
+    "placeholders": {
+      "goal": {
+        "type": "String"
+      }
+    }
+  },
+  "authInviteCodeOptional": "Optional",
+  "authInviteCodeLabel": "Invite Code",
+  "authInviteCodeHint": "Enter a friend's invite code if you have one",
+  "authInviteCodeHelper": "Enter an invite code — both of you get +5 ball rewards",
+  "devTestAccounts": "Test Accounts",
+  "devTestPassword": "Password: Test1234!",
+  "forgotTitle": "Forgot Password",
+  "forgotEnterCodeTitle": "Enter Verification Code",
+  "forgotEmailSubtitle": "Enter your Email — we'll send you a 6-digit verification code",
+  "forgotCodeSentSubtitle": "Verification code sent to {email}",
+  "@forgotCodeSentSubtitle": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "forgotSixDigitCodeLabel": "6-digit Code",
+  "forgotNewPasswordLabel": "New Password",
+  "forgotNewPasswordHint": "At least 8 characters with uppercase, lowercase, and digits",
+  "forgotConfirmPasswordLabel": "Confirm New Password",
+  "forgotSendCodeButton": "Send Verification Code",
+  "forgotConfirmResetButton": "Confirm Password Reset",
+  "forgotReEnterEmail": "Re-enter Email",
+  "forgotEnterValidEmail": "Please enter a valid Email",
+  "forgotSendFailed": "Failed to send",
+  "forgotNetworkError": "Network error, please try again later",
+  "forgotEnterSixDigitCode": "Please enter the 6-digit verification code",
+  "forgotPasswordComplexity": "Password must be at least 8 characters with uppercase, lowercase, and digits",
+  "forgotPasswordMismatch": "Passwords do not match",
+  "forgotResetSuccess": "Password reset — please sign in with your new password",
+  "forgotResetFailed": "Reset failed",
+  "playerTitle": "Video Review",
+  "playerNoteAdd": "Add Note",
+  "playerNoteEdit": "Edit Note",
+  "playerNoteCleared": "Note cleared",
+  "playerNoteSaved": "Note saved",
+  "playerVideoNotFound": "Video file not found",
+  "playerVideoLoadFailed": "Failed to load video",
+  "playerSkeletonNotFound": "Skeleton data not available",
+  "playerOverlaySkeleton": "Skeleton",
+  "playerOverlayTrajectory": "Trajectory",
+  "playerOverlayEffect": "Effects",
+  "playerTrajectoryTuning": "Trajectory Tuning",
+  "playerShotLabel": "Shot {index} {time}",
+  "@playerShotLabel": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "playerStatsEmpty": "No statistics yet (requires trajectory or phase analysis)",
+  "playerStatLaunchAngle": "Launch Angle",
+  "playerStatTempo": "Tempo (Back:Down)",
+  "playerStatBackDownswing": "Back / Downswing",
+  "playerStatFlightTime": "In-Frame Flight",
+  "playerChartEmpty": "No chart data. Please complete analysis first.",
+  "playerChartNoData": "No data",
+  "playerChartAudioEmpty": "Audio peak — no data",
+  "playerChartWristYEmpty": "Wrist Y — no data",
+  "playerChartSpeedEmpty": "Speed — no data",
+  "playerChartTabAudio": "Audio Peak",
+  "playerChartTabWristY": "Wrist Y",
+  "playerChartTabSpeed": "Speed",
+  "playerChartTabPosture": "Posture",
+  "playerChartTabAudioFeature": "Audio Features",
+  "playerLoadDetailScore": "Load Detailed Scores",
+  "playerPostureEmpty": "No posture analysis yet. Please complete analysis first.",
+  "playerAudioPassCount": "{count} / 5 features passed",
+  "@playerAudioPassCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "playerAudioEmpty": "No audio analysis yet",
+  "playerAiAnalysisFailed": "AI analysis failed: {error}",
+  "@playerAiAnalysisFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "playerAiNotStarted": "AI coach analysis not yet started",
+  "playerAiStartAnalysis": "Start Analysis",
+  "playerAiViewProgress": "View Progress",
+  "playerAiCoachTitle": "AI Coach Analysis",
+  "playerAiPrimaryIssue": "Primary Issue",
+  "playerAiCoachFeedback": "Coach Feedback",
+  "playerAiPracticeSuggestions": "Practice Suggestions",
+  "playerAiNextGoal": "Next Goal",
+  "playerAiReanalyze": "Re-analyze",
+  "playerAiViewDetail": "View Details",
+  "playerAiStatusPending": "Preparing...",
+  "playerAiStatusQueued": "Waiting in analysis queue...",
+  "playerAiStatusProcessing": "AI coach analyzing...",
+  "playerAiStatusAnalyzing": "Analyzing...",
+  "playerSeverityHigh": "Severe",
+  "playerSeverityMedium": "Moderate",
+  "playerSeverityLow": "Minor",
+  "playerHighlightPreview": "Highlight Preview",
+  "playerSweetSpotHit": "Sweet Spot Hit",
+  "playerSweetSpot": "Sweet Spot",
+  "playerThinShot": "Thin Shot",
+  "playerAudioPassCountBadge": "{count}/5 features matched",
+  "@playerAudioPassCountBadge": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "playerNoteDialogTitle": "Video Note",
+  "playerNoteHint": "Jot down practice thoughts, course, club used…",
+  "playerNoteHelper": "Leave empty to clear the note",
+  "playerPhaseAddress": "Address",
+  "playerPhaseTakeaway": "Takeaway",
+  "playerPhaseBackswing": "Backswing",
+  "playerPhaseTop": "Top",
+  "playerPhaseDownswing": "Downswing",
+  "playerPhaseImpact": "Impact",
+  "clipLegendStart": "Start",
+  "clipLegendEnd": "End",
+  "playerPhaseFollowthrough": "Follow-through",
+  "playerPhaseFinish": "Finish",
+  "postureTitle": "Posture Analysis",
+  "postureNoData": "No AI analysis data yet",
+  "profileSubtitle": "Update your profile for more accurate swing analysis. Remember to save when done.",
+  "profileAvatarHint": "Set a profile photo so your coach can identify you more easily",
+  "profileAvatarSaveFailed": "Failed to save photo. Please try again later.",
+  "profileDisplayNameLabel": "Nickname",
+  "profileDisplayNameHint": "Name shown on the home screen",
+  "profileDisplayNameRequired": "Please enter a nickname",
+  "profileEmailLabel": "Email",
+  "profilePhoneLabel": "Phone number",
+  "profilePhoneHint": "e.g. 0912-345-678",
+  "profileHandicapLabel": "Handicap",
+  "profileHandicapHint": "Enter your current handicap or target",
+  "purchaseTestPanelTitle": "🧪 Purchase Test Panel",
+  "purchaseTestSimulateSuccessMsg": "✅ Simulated purchase successful! User set to premium.",
+  "purchaseTestErrorMsg": "❌ Error: {error}",
+  "@purchaseTestErrorMsg": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "purchaseTestClearSuccessMsg": "🔄 Purchase record cleared! User is now a regular user.",
+  "purchaseTestPremiumStatusLabel": "Premium status: ",
+  "purchaseTestStatusPurchased": "✅ Subscribed",
+  "purchaseTestStatusNotPurchased": "❌ Not subscribed",
+  "purchaseTestPaymentMethod": "Payment method: {method}",
+  "@purchaseTestPaymentMethod": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      }
+    }
+  },
+  "purchaseTestPaymentMethodNone": "None",
+  "purchaseTestSimulateBtn": "Simulate Purchase",
+  "purchaseTestClearBtn": "Clear Purchase",
+  "purchaseTestRefreshBtn": "Refresh Status",
+  "purchaseTestDialogTitle": "🧪 Purchase Function Test",
+  "recDetailDownloadVideo": "Download video",
+  "exportCustomTitle": "Custom export",
+  "exportCustomSubtitle": "Choose elements to burn into the video",
+  "exportElementSkeleton": "Skeleton",
+  "exportElementSkeletonDesc": "Body pose skeleton",
+  "exportElementTrajectory": "Ball trajectory",
+  "exportElementTrajectoryDesc": "Ball flight path after impact",
+  "exportNoOverlayMaterial": "This video has no overlay data; the original will be exported.",
+  "exportWatermarkFree": "Free exports include an ORVIA watermark — upgrade to remove",
+  "exportWatermarkPaid": "Subscribed: no watermark",
+  "exportComposeAndDownload": "Compose & download",
+  "recDetailNoVideoFound": "No downloadable video found",
+  "recDetailBurning": "Rendering \"{label}\"…",
+  "@recDetailBurning": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailBurnFailed": "Rendering failed, please try again later",
+  "recDetailSavedToDownloads": "\"{label}\" saved to Downloads ✅",
+  "@recDetailSavedToDownloads": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailSavedToPhotos": "\"{label}\" saved to Camera Roll ✅",
+  "@recDetailSavedToPhotos": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailSharedViaSheet": "Share sheet opened ✅",
+  "recDetailDownloadFailed": "Download failed: {detail}",
+  "@recDetailDownloadFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailSkeletonPreview": "Skeleton Preview",
+  "recDetailSkeletonLoadFailed": "Failed to load skeleton preview",
+  "recDetailAudioPeak": "Audio Peak",
+  "recDetailAudioPeakSubtitle": "RMS dBFS",
+  "recDetailAudioPeakMissing": "Audio analysis required",
+  "recDetailWristY": "Wrist Y",
+  "recDetailWristYSubtitle": "Right wrist Y position (px)",
+  "recDetailPoseMissing": "Pose analysis required",
+  "recDetailSpeedSubtitle": "Wrist movement speed (px/frame)",
+  "recDetailSpeedMissing": "Speed",
+  "recDetailSweetSpot": "Sweet Spot",
+  "recDetailOffCenter": "Off-Center",
+  "recDetailAudioFeaturesTitle": "Audio Feature Analysis",
+  "recDetailFeaturePassCount": "{count} / 5 features within sweet spot range",
+  "@recDetailFeaturePassCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recDetailAutoAnalyzing": "Uploading pose analysis, please wait…",
+  "recDetailOnnxTitle": "ONNX Posture Analysis",
+  "recDetailOnnxLoadFailed": "Load failed: {error}",
+  "@recDetailOnnxLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailOnnxNoResult": "No ONNX result yet",
+  "recDetailOnnxNoScores": "No score data",
+  "recDetailSwingPhases": "Swing Phases",
+  "recDetailRegenerate": "Regenerate",
+  "recDetailGeneratePhases": "Generate phases",
+  "recDetailNoChartData": "No chart data yet",
+  "recDetailNoChartHint": "Complete audio analysis and pose analysis first",
+  "recDetailLoadFailed": "Load failed",
+  "recDetailSelectDownloadVersion": "Select download version",
+  "recDetailOptLabelFull": "Full Analysis",
+  "recDetailOptDescFull": "Skeleton + ball trajectory",
+  "recDetailOptLabelSkeleton": "Skeleton only",
+  "recDetailOptDescSkeleton": "Skeleton overlay only",
+  "recDetailOptLabelClip": "Raw clip",
+  "recDetailOptDescNoOverlay": "No overlays",
+  "recDetailOptLabelRaw": "Original video",
+  "recDetailOptLabelRawMov": "Original video (MOV)",
+  "recDetailOptDescRawMov": "Raw MOV file",
+  "recDetailPhaseAddress": "①Address",
+  "recDetailPhaseTakeaway": "②Takeaway",
+  "recDetailPhaseBackswing": "③Backswing",
+  "recDetailPhaseTop": "④Top",
+  "recDetailPhaseDownswing": "⑤Downswing",
+  "recDetailPhaseImpact": "⑥Impact",
+  "recDetailPhaseFollowthrough": "⑦Release",
+  "recDetailPhaseFinish": "⑧Finish",
+  "recHistSheetEmptyHint": "No recordings yet. Recordings will appear here automatically after you finish recording.",
+  "recHistSheetPickFromFolder": "Pick a video from files",
+  "recHistSheetDurationSeconds": "{count} sec",
+  "@recHistSheetDurationSeconds": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recSelPreparingProgress": "Preparing...",
+  "recSelAnalyzingDialogTitle": "Analyzing Video",
+  "recSelNoFileSelected": "❌ No file selected",
+  "recSelVideoTooLong": "❌ Video exceeds 10-minute limit ({durationSec} seconds)\nPlease select a video under 600 seconds",
+  "@recSelVideoTooLong": {
+    "placeholders": {
+      "durationSec": {
+        "type": "int"
+      }
+    }
+  },
+  "recSelVideoDurationOk": "✅ Video duration {durationSec} seconds, within the 10-minute limit",
+  "@recSelVideoDurationOk": {
+    "placeholders": {
+      "durationSec": {
+        "type": "int"
+      }
+    }
+  },
+  "recSelImportFailed": "❌ Import failed\nFile may not exist or format is unsupported",
+  "recSelImportSuccess": "✅ Import successful!\n{name}\nDuration: {duration}",
+  "@recSelImportSuccess": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "recSelImportError": "❌ Import error\n{error}",
+  "@recSelImportError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recSelImportingVideo": "Importing video...",
+  "recSelDoNotClose": "Do not close the app",
+  "recSelShotModeTitle": "Live Swing Mode",
+  "recSelShotModeSubtitle": "Auto-detects and clips each swing — no long recordings needed",
+  "recSelNewFeatureBadge": "New",
+  "recSelRecordTitle": "Start Recording",
+  "recSelRecordSubtitle": "Record live and analyze your swing",
+  "recSelLocalVideoTitle": "Select Local Video",
+  "recSelLocalVideoSubtitle": "Choose an existing video from your device (max 10 minutes)",
+  "recSelShareLinkTitle": "Get from Share Link",
+  "recSelShareLinkSubtitle": "Enter a 16-digit share code to download the video",
+  "recSelHeaderTitle": "Select Recording Mode",
+  "recSelHeaderSubtitle": "Record live, import a local video, or get one via share code",
+  "recSelIOSSourceSheetTitle": "Select Video Source",
+  "recSelPhotoLibrary": "Photo Library",
+  "recSelFilesApp": "Files App (Folder)",
+  "recTabsTitle": "Recording History ({count})",
+  "@recTabsTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recTabsEmpty": "No recordings",
+  "recTabsEmptyHint": "Recordings will appear here after you complete a new session",
+  "recTabsMode": "Mode: {label}",
+  "@recTabsMode": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recTabsDuration": "Duration: {seconds}s",
+  "@recTabsDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "recordTitle": "Golf Swing Recording",
+  "recordOverlayToggle": "Toggle outline overlay",
+  "recordSettings": "Recording settings",
+  "recordPermissionTitle": "Camera & Microphone Permission Required",
+  "recordPermissionMicOnly": "Microphone permission is required to record impact sounds. Please grant access and try again.",
+  "recordPermissionCameraAndMic": "Camera and microphone permissions are required for swing recording. Please grant access and try again.",
+  "recordGoToSettings": "Go to Settings",
+  "recordGotIt": "Got it",
+  "recordLowEndDeviceWarning": "This device does not support real-time skeleton detection during recording. Detection will resume after recording stops.",
+  "recordFailed": "Recording failed (no valid frames captured). Please try again.",
+  "recordVideoQuality": "Video Quality",
+  "recordFrameRate": "Frame Rate",
+  "recordAudio": "Record Audio",
+  "recordApply": "Apply",
+  "rewardTitle": "Reward Balls",
+  "rewardUsageHistoryTooltip": "Usage History",
+  "rewardEarnedSnackbar": "Earned +{balls} balls via \"{source}\"!",
+  "@rewardEarnedSnackbar": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      },
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadSubmittedPending": "Submitted {pending} item(s) for review. Balls will be awarded after approval.",
+  "@rewardUploadSubmittedPending": {
+    "placeholders": {
+      "pending": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadSubmittedDuplicate": "Data submitted (duplicate data will not be re-reviewed).",
+  "rewardStatBonusBalls": "Total Rewards",
+  "rewardUnitBall": "balls",
+  "rewardStatAdToday": "Ads Today",
+  "rewardAdDailyUnit": "/ 5 times",
+  "rewardStatInvites": "Friends Invited",
+  "rewardUnitPerson": "friends",
+  "rewardBallsBadge": "+{balls} balls",
+  "@rewardBallsBadge": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardAdProgress": "{used} / {cap} times",
+  "@rewardAdProgress": {
+    "placeholders": {
+      "used": {
+        "type": "int"
+      },
+      "cap": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardDoneToday": "Completed Today",
+  "rewardAdNotCompleted": "Ad not fully watched or temporarily unavailable. Please try again later.",
+  "rewardAdFailed": "Ad reward failed: {error}",
+  "@rewardAdFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardWatchAdTitle": "Watch Ad",
+  "rewardWatchAdButton": "Watch Ad +{balls} balls",
+  "@rewardWatchAdButton": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardInviteFriendTitle": "Invite Friends",
+  "rewardInviteFriendDesc": "When a friend registers with your invite code, you both get +{balls} balls.",
+  "@rewardInviteFriendDesc": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardGetInviteCode": "Get Invite Code",
+  "rewardYourInviteCode": "Your Invite Code",
+  "rewardInviteCodeCopied": "Invite code copied",
+  "rewardInvitedFriends": "Invited Friends",
+  "rewardNoInviteHistory": "No invitations yet",
+  "rewardShareInviteHint": "Share your invite code and practice together!",
+  "rewardEnterCodeTitle": "Enter Invite Code",
+  "rewardEnterCodeDesc": "Enter a friend's invite code — you both get +{balls} balls.",
+  "@rewardEnterCodeDesc": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardEnterCodeEmpty": "Please enter an invite code",
+  "rewardInviteCodeInvalid": "Invalid invite code",
+  "rewardApplyFailed": "Apply failed: {error}",
+  "@rewardApplyFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardApplying": "Applying...",
+  "rewardApplyButton": "Apply +{balls} balls",
+  "@rewardApplyButton": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardEnterFriendCode": "Enter Friend's Invite Code",
+  "rewardFeedbackTitle": "Submit Feedback",
+  "rewardFeedbackTypeBug": "🐛 Bug Report",
+  "rewardFeedbackTypeFeature": "💡 Feature Request",
+  "rewardFeedbackTypeOther": "💬 Other",
+  "rewardFeedbackHint": "Please describe your feedback in detail...",
+  "rewardSelectVideo": "Select Video",
+  "rewardChangeVideo": "Change Video",
+  "rewardUploadImage": "Upload Image",
+  "rewardChangeImage": "Change Image",
+  "rewardFeedbackEmpty": "Please enter your feedback",
+  "rewardFeedbackSubmitted": "Feedback submitted. Thank you for your input!",
+  "rewardSubmitFailed": "Submission failed: {error}",
+  "@rewardSubmitFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardSubmitFeedback": "Submit Feedback",
+  "rewardSubmitFeedbackWithBalls": "Submit Feedback +{balls} balls",
+  "@rewardSubmitFeedbackWithBalls": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardWriteFeedback": "Write Feedback",
+  "rewardWriteFeedbackWithBalls": "Write Feedback +{balls} balls",
+  "@rewardWriteFeedbackWithBalls": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardNoVideoHistory": "No recorded videos yet",
+  "rewardLongVideo": "Long video",
+  "rewardShortVideo": "Short video",
+  "rewardUploadDataTitle": "Upload Analysis Data",
+  "rewardNoUploadable": "No analysis data available to upload",
+  "rewardUploadPartialFail": "{count} item(s) failed to upload and were skipped",
+  "@rewardUploadPartialFail": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadFailed": "Upload failed. Please try again later.",
+  "rewardUploadResubmitBlocked": "Review submission failed: data may have been submitted already (rejected items cannot be resubmitted), or there was a network error — please try again.",
+  "rewardUploadError": "Upload failed: {error}",
+  "@rewardUploadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardUploadAvailableCount": "{available} item(s) available to upload, {uploaded} already uploaded",
+  "@rewardUploadAvailableCount": {
+    "placeholders": {
+      "available": {
+        "type": "int"
+      },
+      "uploaded": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadAllDone": "All analysis data uploaded ({count} total)",
+  "@rewardUploadAllDone": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadReviewStatus": "Under review: {pending} / Approved: {approved}",
+  "@rewardUploadReviewStatus": {
+    "placeholders": {
+      "pending": {
+        "type": "int"
+      },
+      "approved": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadRejectedSuffix": " / Rejected: {count}",
+  "@rewardUploadRejectedSuffix": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadRejectedNote": "Rejected items cannot be resubmitted",
+  "rewardSelectUploadVideo": "Select Recording to Upload",
+  "rewardSelectUploadSubtitle": "Select one and tap \"Confirm Upload\" to earn rewards",
+  "rewardNoneSelected": "None selected",
+  "rewardOneSelected": "1 selected",
+  "rewardConfirmUpload": "Confirm Upload +{balls} balls",
+  "@rewardConfirmUpload": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardAnalyzed": "Analyzed",
+  "rewardDurationSec": "{seconds}s",
+  "@rewardDurationSec": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsNameSyncFailed": "Name updated, but server sync failed",
+  "settingsGoogleCredentialFailed": "Unable to retrieve Google credentials, please try again",
+  "settingsGoogleLinkFailed": "Google account linking failed, please try again later",
+  "shareImportTitle": "Import from Share Link",
+  "shareImportEnterCodeTitle": "Enter 16-digit Share Code",
+  "shareImportEnterCodeDesc": "Once someone shares a video, enter the code to download it to your device",
+  "shareImportCodeValidator": "Please enter the complete 16-digit share code",
+  "shareImportLooking": "Looking up…",
+  "shareImportLookup": "Look up",
+  "shareImportFrom": "From",
+  "shareImportSize": "Size",
+  "shareImportExpiry": "Expires",
+  "shareImportReenter": "Re-enter Code",
+  "shareImportDownload": "Download to Device",
+  "shareImportPreparing": "Preparing download…",
+  "shareImportDownloading": "Downloading…",
+  "shareImportExtracting": "Extracting…",
+  "shareImportDoneTitle": "Download Complete!",
+  "shareImportDoneDesc": "Video has been added to history",
+  "shareImportBack": "Back",
+  "shareUploadTitle": "Share Link",
+  "shareUploadChecking": "Checking share status…",
+  "shareUploadCompressing": "Compressing…",
+  "shareUploadUnknownError": "Unknown error",
+  "shareUploadUploading": "Uploading…  {percent}%",
+  "@shareUploadUploading": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "shareUploadCodeReused": "Existing share code (not yet expired)",
+  "shareUploadCodeNew": "Share code (valid for 1 day)",
+  "shareUploadCopy": "Copy",
+  "shareUploadCopied": "Share code copied",
+  "shareUploadShareText": "Golf swing share code: {code}\n(Valid for 1 day — enter this code in the app to get the video)",
+  "@shareUploadShareText": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "shareUploadSystemShare": "Share",
+  "shotRecTitle": "Live Swing Mode",
+  "shotRecSettings": "Recording Settings",
+  "shotRecShotsCompleted": "Completed {count} shots",
+  "@shotRecShotsCompleted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shotRecReady": "Ready",
+  "shotRecCalibrating": "Calibrating… Stay still",
+  "shotRecAddressPrompt": "Take address position ({current}/{total})",
+  "@shotRecAddressPrompt": {
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "shotRecAddressSubText": "Recording starts automatically when stance is confirmed",
+  "shotRecDetecting": "⚡ Detecting… Swing now",
+  "shotRecStop": "Stop",
+  "shotRecSwingDetected": "Swing detected ✓\nCountdown {seconds}s",
+  "@shotRecSwingDetected": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "shotRecAnalyzing": "Analyzing…",
+  "shotRecExtractingAudio": "Extracting audio…",
+  "shotRecDetectingImpact": "Detecting impact…",
+  "shotRecClipping": "Clipping…",
+  "shotRecScoringAudio": "Scoring audio…",
+  "shotRecDone": "Done!",
+  "shotRecWatch": "Watch",
+  "shotRecNextShot": "Next shot ({countdown})",
+  "@shotRecNextShot": {
+    "placeholders": {
+      "countdown": {
+        "type": "int"
+      }
+    }
+  },
+  "shotRecVideoQuality": "Video Quality",
+  "shotRecFrameRate": "Frame Rate",
+  "shotRecEnableAudio": "Record Audio",
+  "shotRecApply": "Apply",
+  "shotRecAddressTimeout": "Address posture not detected, cancelled",
+  "shotRecNoAnalysisWarning": "This device does not support skeleton detection during recording. Swing detection will still work automatically.",
+  "shotRecRecordFailed": "Recording failed (no valid video captured), please try again",
+  "shotRecNoSwingDetected": "No swing detected, please try again",
+  "shotRecClipFailed": "Clipping failed, please try again",
+  "shotRecLiveShotName": "Live Shot {number}",
+  "@shotRecLiveShotName": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "termsPageSubtitle": "Terms of Service & Privacy Policy",
+  "termsReadPrompt": "Please read the terms below, then check the box to agree and get started",
+  "termsScrolledToBottom": "You've reached the end of the terms. Please scroll back to the top to check the agreement box.",
+  "termsDeclineTitle": "Confirm Exit",
+  "termsDeclineContent": "You cannot use ORVIA without agreeing to the Terms of Service. Are you sure you want to exit?",
+  "termsDeclineBack": "Go Back",
+  "termsDeclineExit": "Exit",
+  "termsPrivacyOpenFailed": "Unable to open the Privacy Policy page. Please try again later.",
+  "termsAgreePrefix": "I have read and agree to the Terms of Service and the ",
+  "termsPrivacyLink": "Privacy Policy",
+  "termsAgreeSuffix": "》",
+  "termsAnalyticsTitle": "Allow usage analytics (optional)",
+  "termsAnalyticsDesc": "Helps us improve the app experience. No personally identifiable information is included.",
+  "termsScrollFirst": "Please scroll through the full terms before checking the agreement box",
+  "termsDisagree": "Disagree",
+  "termsAgreeAndContinue": "Agree & Continue",
+  "termsOpenPrivacyFull": "Open Full Privacy Policy",
+  "termsSec1Title": "1. Service Description",
+  "termsSec1Body": "ORVIA (hereinafter \"the Service\") is provided by the ORVIA team to help users record and analyze golf swing motions via mobile devices, and to provide related data statistics and recommendations.\n\nBefore using the Service, please read the following terms carefully. By starting to use the Service, you acknowledge that you have read, understood, and agreed to all content of these terms.",
+  "termsSec2Title": "2. Account & Security",
+  "termsSec2Body": "1. You must register via email or a Google account to access full features.\n2. You are responsible for keeping your account credentials secure and for all activities conducted under your account.\n3. If you discover unauthorized use of your account, please notify us immediately.\n4. You may not transfer your account to another person.",
+  "termsSec3Title": "3. User Conduct",
+  "termsSec3Body": "By using the Service, you agree to:\n\n1. Only upload video content that you personally filmed or hold legitimate authorization for.\n2. Not upload any illegal, infringing, or inappropriate content.\n3. Not interfere with or disrupt the normal operation of the Service.\n4. Not attempt unauthorized access to the Service's systems or data.",
+  "termsSec4Title": "4. Video & Data Processing",
+  "termsSec4Body": "1. Videos and analysis data you upload will be stored in the Service's cloud system to provide swing analysis.\n2. Share links generated by the sharing feature are valid for 1 day; related files will be automatically deleted after expiry.\n3. You may delete your personal data and recording history from within the app at any time.\n4. We will not provide your personal videos to unauthorized third parties.",
+  "termsSec5Title": "5. Privacy Policy",
+  "termsSec5Body": "We value your privacy and collect and use your information according to the following principles:\n\nInformation collected:\n• Account information (email, display name)\n• Swing videos and analysis results\n• Device information and usage records\n\nUsage analytics (with your consent):\n• We may collect anonymous usage data (feature clicks, page views, etc.)\n• Used to improve the app experience and feature design\n• Does not include personally identifiable information; can be turned off in Settings at any time\n\nData protection:\n• All data transmissions use TLS encryption\n• Server-side data is encrypted at rest\n• Regular security audits are conducted\n\nFull privacy policy: https://orvia.atk.tw/privacy.html",
+  "termsSec6Title": "6. Intellectual Property",
+  "termsSec6Body": "1. The software, interface design, trademarks, and all related content of the Service are owned by ORVIA and protected by copyright law.\n2. The copyright of videos you upload belongs to you; however, you grant the Service a limited license to use that content to provide analysis services.\n3. Without authorization, you may not reproduce, modify, or distribute any part of the Service.",
+  "termsSec7Title": "7. Disclaimer",
+  "termsSec7Body": "1. Swing analysis results provided by the Service are for reference only and do not constitute professional sports coaching advice.\n2. The Service is provided \"as is\" and does not guarantee uninterrupted or error-free operation.\n3. The Service is not liable for any direct or indirect losses arising from the use of the Service.\n4. Swing practice involves physical activity; please practice in a safe environment and assess your own physical condition.",
+  "termsSec8Title": "8. Service Changes & Termination",
+  "termsSec8Body": "1. We reserve the right to modify, suspend, or terminate the Service at any time.\n2. If there are significant changes to these terms, we will notify you via the app.\n3. Continued use of the Service constitutes acceptance of the updated terms.",
+  "termsSec9Title": "9. Contact Us",
+  "termsSec9Body": "If you have any questions about these terms, please contact us via:\n\nEmail: support@atk.tw\nWebsite: https://orvia.atk.tw\nPrivacy Policy: https://orvia.atk.tw/privacy.html\n\nThese terms were last updated: May 25, 2026",
+  "testVideoTitle": "Select Test Video",
+  "testVideoLoadError": "Failed to load videos\n{error}",
+  "@testVideoLoadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "testVideoEmpty": "No imported videos yet",
+  "testVideoSelect": "Select",
+  "testVideoHint": "💡 Tip: Select a video as the test recording for demo and analysis testing",
+  "upgradeSubscribed": "Subscribed",
+  "upgradeCurrentPlanActive": "Current Plan",
+  "upgradeMonthly": "Monthly",
+  "upgradeYearly": "Yearly (save ~2 months)",
+  "upgradeSubscribeFailed": "Subscription failed: {error}",
+  "@upgradeSubscribeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "upgradeProductLoadFailed": "Failed to load product, please try again later",
+  "upgradeAppStoreSubscribe": "Subscribe on App Store",
+  "upgradeGooglePlaySubscribe": "Subscribe on Google Play",
+  "upgradeManageSubscriptionIos": "You can manage or cancel your subscription anytime in App Store",
+  "upgradeManageSubscriptionAndroid": "You can manage or cancel your subscription anytime in Google Play",
+  "upgradeBuyBalls": "Buy Balls",
+  "upgradeNoExpiry": "No expiry",
+  "upgradeBallCount": "{count} balls",
+  "@upgradeBallCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "upgradeBallPackValidity": "Never expires, use anytime",
+  "upgradeBuyButton": "Buy",
+  "upgradePurchaseFailed": "Purchase failed: {error}",
+  "@upgradePurchaseFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "upgradeBuyBallCount": "Buy {count} balls",
+  "@upgradeBuyBallCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "upgradeBallPackDescription": "Balls never expire and have no time limit. Used automatically when your daily quota runs out.",
+  "upgradeAppStorePurchase": "Buy on App Store",
+  "upgradeGooglePlayPurchase": "Buy on Google Play",
+  "usageTitle": "Usage History",
+  "usageSubtitle": "AI Analysis & Ball Ledger",
+  "usageTabAnalysis": "AI Analysis",
+  "usageTabBalls": "Ball Ledger",
+  "usageLoadFailed": "Failed to load. Pull down to retry.",
+  "usageLoadError": "Load error: {error}",
+  "@usageLoadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "usageEmptyAnalysis": "No analysis records yet",
+  "usageAllLoaded": "All records loaded",
+  "usageSummaryTotalAnalysis": "Total Analyses",
+  "usageUnitTimes": "times",
+  "usageSummaryTodayUsed": "Used Today",
+  "usageAnalysisItemTitle": "AI Swing Analysis",
+  "usageSourceDailyQuota": "Daily Quota",
+  "usageSourceBonusBall": "Bonus Ball",
+  "usageSourceDailyQuotaDesc": "Used daily quota",
+  "usageSourceBonusBallDesc": "Consumed 1 ball",
+  "usageEmptyBalls": "No ball records yet",
+  "usageSummaryTotalRecords": "Total Records",
+  "usageUnitRecords": "records",
+  "usageSummaryCurrentBalls": "Current Balls",
+  "usageUnitBalls": "balls",
+  "usageBallBalance": "Balance: {balance} balls",
+  "@usageBallBalance": {
+    "placeholders": {
+      "balance": {
+        "type": "int"
+      }
+    }
+  },
+  "usageDateToday": "Today",
+  "usageDateYesterday": "Yesterday",
+  "waveformCrispScore": "Crispness {score}",
+  "@waveformCrispScore": {
+    "placeholders": {
+      "score": {
+        "type": "int"
+      }
+    }
+  },
+  "waveformPeakLabel": "Peak {level}",
+  "@waveformPeakLabel": {
+    "placeholders": {
+      "level": {
+        "type": "String"
+      }
+    }
+  },
+  "@historySubtitle": {
+    "placeholders": {
+      "total": {
+        "type": "int"
+      },
+      "good": {
+        "type": "int"
+      },
+      "bad": {
+        "type": "int"
+      }
+    }
+  },
+  "@historyMenuUploadReward": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "extImportProgressCopying": "Copying video...",
+  "extImportProgressTranscoding": "Preparing transcode...",
+  "extImportProgressDurationInvalid": "Video duration invalid (must be 1–600 seconds)",
+  "extImportProgressThumbnail": "Generating thumbnail...",
+  "extImportProgressDone": "Import complete ✅",
+  "learnHubGoodSwingTitle": "Good Swing Demo",
+  "learnHubGoodSwingDesc": "Smooth tempo, stable weight shift, complete follow-through after impact.",
+  "learnHubEarlyReleaseTitle": "Common Error: Early Release",
+  "learnHubEarlyReleaseDesc": "Wrists release too early, resulting in insufficient clubhead acceleration and a weak or right-curving shot.",
+  "learnHubMarkerBackswingTop": "Top of Backswing",
+  "learnHubMarkerBackswingTopNote": "Weight still centered over feet, shaft and arms form a straight line.",
+  "learnHubMarkerImpact": "Impact",
+  "learnHubMarkerImpactNote": "Hands ahead of the ball, body rotation drives the impact.",
+  "learnHubMarkerFinish": "Follow-Through",
+  "learnHubMarkerFinishNote": "Weight transferred to lead foot, body maintains balance.",
+  "learnHubMarkerEarlyReleaseTopNote": "Wrist angle releases too early, clubhead lags behind.",
+  "learnHubMarkerPreImpact": "Pre-Impact",
+  "learnHubMarkerPreImpactNote": "Insufficient hand lead, weight biased to trail side.",
+  "learnHubMarkerEarlyReleaseFinishNote": "Weight not transferred to lead foot, poor balance.",
+  "playerTimelineAbbrAddress": "Adr",
+  "playerTimelineAbbrTakeaway": "Tkw",
+  "playerTimelineAbbrBackswing": "Bk",
+  "playerTimelineAbbrTop": "Top",
+  "playerTimelineAbbrDownswing": "Dwn",
+  "playerTimelineAbbrImpact": "Imp",
+  "playerTimelineAbbrFollowthrough": "Fol",
+  "playerTimelineAbbrFinish": "Fin",
+  "recHistSheetTitle": "Recording History",
+  "recTabsToday": "Today",
+  "recTabsYesterday": "Yesterday",
+  "recTabsDateMonthDay": "{month}/{day}",
+  "@recTabsDateMonthDay": {
+    "placeholders": {
+      "month": {
+        "type": "int"
+      },
+      "day": {
+        "type": "int"
+      }
+    }
+  },
+  "recWidgetsZoomWide": "Wide",
+  "recWidgetsSavingVideo": "Saving video…",
+  "rewardFriendFallbackName": "Friend",
+  "upgradeHighlightFullFeatured": "Full recording & analysis features",
+  "upgradeHighlightAiDaily10": "AI coach analysis 10 times per day",
+  "upgradeHighlightBuyMore": "Top up balls when quota runs out",
+  "upgradeHighlightAiDaily90": "AI coach analysis 90 times per day",
+  "upgradeHighlightAiUnlimited": "Unlimited AI coach analysis",
+  "upgradeFeatureAutoClip": "Auto clip long videos",
+  "upgradeFeatureVoiceHint": "Real-time voice prompts",
+  "upgradeFeatureAudioScore": "Audio analysis (impact scoring)",
+  "upgradeFeatureDualVideo": "Dual video comparison",
+  "upgradeFeatureAiCoachAnalysis": "AI coach analysis",
+  "upgradeQuotaDaily10": "10/day",
+  "upgradeQuotaDaily90": "90/day",
+  "upgradeQuotaUnlimited": "Unlimited",
+  "upgradeBadgePopular": "Popular",
+  "upgradeBadgeValue": "Good Value",
+  "upgradeBadgeBestDeal": "Best Deal",
+  "upgradePerYear": "/year",
+  "usageReasonAd": "Watch Ad Reward",
+  "usageReasonFeedback": "Feedback Reward",
+  "usageReasonInvite": "Invite Friend Reward",
+  "usageReasonUpload": "Upload Data Reward",
+  "usageReasonAnalysis": "AI Analysis Cost",
+  "usageReasonManual": "Manual Adjustment",
+  "usageReasonOther": "Other",
+  "waveformPeakHigh": "High",
+  "waveformPeakMid": "Mid",
+  "waveformPeakLow": "Low",
+  "waveformFreqCrispy": "Crispy",
+  "waveformFreqMid": "Mid tone",
+  "waveformFreqMuffled": "Muffled",
+  "historyProgressV2AudioScan": "V2 audio scanning...",
+  "historyProgressV3AudioScan": "V3 audio scanning...",
+  "historyProgressWaitingConfirm": "Waiting for clip confirmation...",
+  "historyProgressClipping": "Trimming clips...",
+  "historyProgressClippingPct": "Trimming clips... {pct}% ({cur}/{total})",
+  "@historyProgressClippingPct": {
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      },
+      "cur": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProgressV3SkeletonAnalysis": "V3 skeleton analysis {cur}/{total}",
+  "@historyProgressV3SkeletonAnalysis": {
+    "placeholders": {
+      "cur": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProgressV3SkeletonItem": "Item {cur}/{total}",
+  "@historyProgressV3SkeletonItem": {
+    "placeholders": {
+      "cur": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProgressDetectingHit": "Detecting impact...",
+  "historyProgressVideoAnalysis": "Analyzing video...",
+  "historyProgressDetectingPhase": "Detecting swing phases...",
+  "historyProgressAudioAnalysis": "Analyzing audio...",
+  "historyDlLabelFull": "Full Analysis",
+  "historyDlDescFull": "Skeleton + ball trajectory overlay",
+  "historyDlLabelSkeleton": "Skeleton Version",
+  "historyDlDescSkeleton": "Skeleton overlay only",
+  "historyDlLabelClip": "Original Clip",
+  "historyDlDescClip": "Original clip without overlay",
+  "historyDlLabelRaw": "Original Video",
+  "historyDlDescRaw": "No overlay",
+  "historyDlLabelRawMov": "Original Video (MOV)",
+  "historyDlDescRawMov": "Original MOV file",
+  "historyCandidateDuration": "{seconds} sec",
+  "@historyCandidateDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "recDetailPointCount": "{count} pts",
+  "@recDetailPointCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

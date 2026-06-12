@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../theme/app_theme.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 個人資訊編輯結果模型，用於回傳最新填寫內容
 class ProfileEditResult {
@@ -133,8 +134,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       if (!mounted) {
         return;
       }
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('儲存頭像失敗，請稍後再試。')),
+        SnackBar(content: Text(l10n.profileAvatarSaveFailed)),
       );
     }
   }
@@ -200,6 +202,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
 
   /// 建立頭像預覽區塊，包含目前圖片、覆蓋提示與操作按鈕
   Widget _buildAvatarSection(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final hasAvatar = _avatarPath != null && File(_avatarPath!).existsSync();
 
     return Column(
@@ -213,7 +216,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               decoration: BoxDecoration(
                 color: context.mintTint,
                 borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: const Color(0xFF1AA87C), width: 2),
+                border: Border.all(color: kBrandPrimary, width: 2),
               ),
               clipBehavior: Clip.antiAlias,
               child: hasAvatar
@@ -221,7 +224,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       File(_avatarPath!),
                       fit: BoxFit.cover,
                     )
-                  : const Icon(Icons.person, size: 56, color: Color(0xFF1AA87C)),
+                  : const Icon(Icons.person, size: 56, color: kBrandPrimary),
             ),
             Positioned(
               bottom: 6,
@@ -229,19 +232,19 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               child: FloatingActionButton.small(
                 heroTag: 'avatarPicker',
                 onPressed: () => _handlePickAvatar(),
-                backgroundColor: const Color(0xFF1AA87C),
+                backgroundColor: kBrandPrimary,
                 child: const Icon(Icons.edit, color: Colors.white),
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        Text('設定個人頭像讓教練更容易識別', style: TextStyle(color: context.textSecondary)),
+        Text(l10n.profileAvatarHint, style: TextStyle(color: context.textSecondary)),
         if (hasAvatar)
           TextButton.icon(
             onPressed: () => _handleRemoveAvatar(),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('移除頭像'),
+            label: Text(l10n.profileRemoveAvatar),
           ),
       ],
     );
@@ -250,9 +253,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   @override
   Widget build(BuildContext context) {
     // ---------- 生命週期渲染區 ----------
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('個人資訊'),
+        title: Text(l10n.profileTitle),
       ),
       body: SafeArea(
         child: Form(
@@ -263,19 +267,20 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               _buildAvatarSection(context),
               const SizedBox(height: 24),
               Text(
-                '調整個人資訊以獲得更精準的揮桿分析，完成後記得儲存。',
+                l10n.profileSubtitle,
                 style: TextStyle(color: context.textSecondary),
               ),
               const SizedBox(height: 24),
               TextFormField(
                 controller: _displayNameController,
-                decoration: const InputDecoration(
-                  labelText: '暱稱',
-                  hintText: '輸入想在首頁顯示的名稱',
+                decoration: InputDecoration(
+                  labelText: l10n.profileDisplayNameLabel,
+                  hintText: l10n.profileDisplayNameHint,
+                  hintMaxLines: 1,
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return '請輸入暱稱';
+                    return l10n.profileDisplayNameRequired;
                   }
                   return null;
                 },
@@ -284,32 +289,33 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               TextFormField(
                 controller: _emailController,
                 readOnly: true, // 電子郵件作為帳號識別，僅顯示不可修改
-                decoration: const InputDecoration(
-                  labelText: '電子郵件',
+                decoration: InputDecoration(
+                  labelText: l10n.profileEmailLabel,
                 ),
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: '聯絡電話',
-                  hintText: '例：0912-345-678',
+                decoration: InputDecoration(
+                  labelText: l10n.profilePhoneLabel,
+                  hintText: l10n.profilePhoneHint,
                 ),
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _handicapController,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: '差點',
-                  hintText: '可填寫目前差點或目標數值',
+                decoration: InputDecoration(
+                  labelText: l10n.profileHandicapLabel,
+                  hintText: l10n.profileHandicapHint,
+                  hintMaxLines: 1,
                 ),
               ),
               const SizedBox(height: 32),
               FilledButton(
                 onPressed: _handleSubmit,
-                child: const Text('儲存變更'),
+                child: Text(l10n.profileSaveChanges),
               ),
             ],
           ),

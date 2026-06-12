@@ -10,6 +10,8 @@ import '../models/recording_history_entry.dart';
 import '../providers/user_provider.dart';
 import '../services/share_service.dart';
 import '../services/recording_history_storage.dart';
+import '../theme/app_theme.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 分享上傳 Dialog：
 /// - 若 entry 已有有效分享碼 → 直接顯示，不重新上傳
@@ -133,30 +135,31 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return PopScope(
       canPop: _phase == _Phase.done || _phase == _Phase.error,
       child: AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('分享連結', style: TextStyle(color: Colors.white)),
-        content: _buildContent(),
-        actions: _buildActions(),
+        title: Text(l10n.shareUploadTitle, style: const TextStyle(color: Colors.white)),
+        content: _buildContent(l10n),
+        actions: _buildActions(l10n),
       ),
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(AppLocalizations l10n) {
     switch (_phase) {
       case _Phase.checking:
-        return _buildSpinner('檢查分享狀態…');
+        return _buildSpinner(l10n.shareUploadChecking);
       case _Phase.compressing:
-        return _buildSpinner('壓縮中…');
+        return _buildSpinner(l10n.shareUploadCompressing);
       case _Phase.uploading:
-        return _buildUploadProgress();
+        return _buildUploadProgress(l10n);
       case _Phase.done:
-        return _buildResult();
+        return _buildResult(l10n);
       case _Phase.error:
-        return Text(_error ?? '未知錯誤', style: const TextStyle(color: Colors.redAccent));
+        return Text(_error ?? l10n.shareUploadUnknownError, style: const TextStyle(color: Colors.redAccent));
     }
   }
 
@@ -164,32 +167,32 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        LinearProgressIndicator(value: null, backgroundColor: Colors.white12, color: const Color(0xFF1AA87C)),
+        LinearProgressIndicator(value: null, backgroundColor: Colors.white12, color: kBrandPrimary),
         const SizedBox(height: 12),
         Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
       ],
     );
   }
 
-  Widget _buildUploadProgress() {
+  Widget _buildUploadProgress(AppLocalizations l10n) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         LinearProgressIndicator(
           value: _uploadProgress,
           backgroundColor: Colors.white12,
-          color: const Color(0xFF1AA87C),
+          color: kBrandPrimary,
         ),
         const SizedBox(height: 12),
         Text(
-          '上傳中…  ${(_uploadProgress * 100).toStringAsFixed(0)}%',
+          l10n.shareUploadUploading((_uploadProgress * 100).toStringAsFixed(0)),
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],
     );
   }
 
-  Widget _buildResult() {
+  Widget _buildResult(AppLocalizations l10n) {
     final code = _shareCode!;
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -198,12 +201,12 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
         Row(
           children: [
             Text(
-              _isReused ? '現有分享碼（尚未過期）' : '分享碼（有效 1 天）',
+              _isReused ? l10n.shareUploadCodeReused : l10n.shareUploadCodeNew,
               style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
             if (_isReused) ...[
               const SizedBox(width: 6),
-              const Icon(Icons.recycling, color: Color(0xFF1AA87C), size: 14),
+              const Icon(Icons.recycling, color: kBrandPrimary, size: 14),
             ],
           ],
         ),
@@ -230,11 +233,11 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
               ),
               IconButton(
                 icon: const Icon(Icons.copy, color: Colors.white54, size: 20),
-                tooltip: '複製',
+                tooltip: l10n.shareUploadCopy,
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: code));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已複製分享碼'), duration: Duration(seconds: 2)),
+                    SnackBar(content: Text(l10n.shareUploadCopied), duration: const Duration(seconds: 2)),
                   );
                 },
               ),
@@ -245,18 +248,18 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
     );
   }
 
-  List<Widget>? _buildActions() {
+  List<Widget>? _buildActions(AppLocalizations l10n) {
     if (_phase == _Phase.done) {
       return [
         TextButton(
           onPressed: () {
-            Share.share('高爾夫揮桿分享碼：$_shareCode\n（有效 1 天，請在 App 中輸入此碼取得影片）');
+            Share.share(l10n.shareUploadShareText(_shareCode!));
           },
-          child: const Text('系統分享', style: TextStyle(color: Color(0xFF1AA87C))),
+          child: Text(l10n.shareUploadSystemShare, style: const TextStyle(color: kBrandPrimary)),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('關閉', style: TextStyle(color: Colors.white54)),
+          child: Text(l10n.commonClose, style: const TextStyle(color: Colors.white54)),
         ),
       ];
     }
@@ -264,7 +267,7 @@ class _ShareUploadDialogState extends State<ShareUploadDialog> {
       return [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('關閉', style: TextStyle(color: Colors.white54)),
+          child: Text(l10n.commonClose, style: const TextStyle(color: Colors.white54)),
         ),
       ];
     }

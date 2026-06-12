@@ -11,6 +11,9 @@ import '../services/ball_trajectory_service.dart';
 import '../services/detection_config.dart';
 import '../services/golfer_mask.dart';
 import '../theme/app_theme.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
+
+enum _HudState { init, detecting, blobFailed, track }
 
 /// 球軌跡調參頁（排查用）。
 ///
@@ -40,7 +43,9 @@ class _BallTuningPageState extends State<BallTuningPage> {
   int _diffThresh = 18;
 
   bool _busy = true;
-  String _hud = '初始化中…';
+  _HudState _hudState = _HudState.init;
+  // Track result data for the track HUD line (technical debug values, not localized)
+  String _hudTrackRaw = '';
 
   // ── ROI 視覺化 + 手勢 ──────────────────────────────────────
   bool _showRoiOverlay = true;
@@ -65,6 +70,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
   @override
   void initState() {
     super.initState();
+    // _hud is set to a localized string in build; placeholder until first frame
     _init();
   }
 
@@ -89,7 +95,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
   /// 重抽：原生偵測(diffThresh/area) + p0-SAHI 種子 + 球員框，然後 track。
   Future<void> _reextract() async {
     if (!mounted) return;
-    setState(() { _busy = true; _hud = '偵測中…'; });
+    setState(() { _busy = true; _hudState = _HudState.detecting; });
     _ext = await BallTrajectoryService.extractBlobsWithConfig(
       inputPath: widget.clipPath,
       config: DetectionConfig(diffThresh: _diffThresh, areaLo: 6, areaHi: 150, circMin: 0.45),
@@ -119,7 +125,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
   void _rerun() {
     if (!mounted) return;
     final ext = _ext;
-    if (ext == null) { setState(() => _hud = 'blob 抽取失敗'); return; }
+    if (ext == null) { setState(() => _hudState = _HudState.blobFailed); return; }
     final pts = BallTracker().track(
       frames:   ext.frames,
       fps:      ext.fps,
@@ -139,7 +145,9 @@ class _BallTuningPageState extends State<BallTuningPage> {
     );
     setState(() {
       _track = track;
-      _hud = '軌跡點 ${pts.length}　seed=${_seed == null ? "無(幀差)" : "(${_seed!.cx},${_seed!.cy})"}'
+      _hudState = _HudState.track;
+      // Technical debug values intentionally kept as-is (not localized)
+      _hudTrackRaw = '軌跡點 ${pts.length}　seed=${_seed == null ? "無(幀差)" : "(${_seed!.cx},${_seed!.cy})"}'
           '　golfer=${_golferBox == null ? "無" : "有"}';
     });
   }
@@ -153,12 +161,19 @@ class _BallTuningPageState extends State<BallTuningPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final ctrl = _ctrl;
     final posSec = (ctrl != null && ctrl.value.isInitialized)
         ? ctrl.value.position.inMilliseconds / 1000.0 : 0.0;
+    final hudText = switch (_hudState) {
+      _HudState.init      => l10n.ballTuneHudInit,
+      _HudState.detecting => l10n.ballTuneHudDetecting,
+      _HudState.blobFailed => l10n.ballTuneHudBlobFailed,
+      _HudState.track     => _hudTrackRaw,
+    };
     return Scaffold(
       backgroundColor: const Color(0xFF101418),
-      appBar: AppBar(title: const Text('球軌跡調參'), backgroundColor: const Color(0xFF101418)),
+      appBar: AppBar(title: Text(l10n.ballTuneTitle), backgroundColor: const Color(0xFF101418)),
       body: Column(children: [
         // ── 影片 + 軌跡疊圖 + ROI 指示 ──
         AspectRatio(
@@ -200,7 +215,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
                       borderRadius: BorderRadius.circular(kRadiusSM),
                     ),
                     child: Text(
-                      'ROI r=${_roiHalf.toStringAsFixed(0)}px  margin=${_margin.toStringAsFixed(2)}',
+                      l10n.ballTuneRoiBadge(_roiHalf.toStringAsFixed(0), _margin.toStringAsFixed(2)),
                       style: const TextStyle(color: kOrviaMint, fontSize: 12),
                     ),
                   ),
@@ -212,7 +227,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
                       _showRoiOverlay ? Icons.visibility : Icons.visibility_off,
                       color: Colors.white70, size: 20,
                     ),
-                    tooltip: 'ROI 疊圖開關',
+                    tooltip: l10n.ballTuneRoiToggleTooltip,
                     onPressed: () => setState(() => _showRoiOverlay = !_showRoiOverlay),
                   ),
                 ),
@@ -225,16 +240,16 @@ class _BallTuningPageState extends State<BallTuningPage> {
           width: double.infinity,
           color: const Color(0xFF1A2026),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Text(_busy ? '⏳ $_hud' : _hud,
+          child: Text(_busy ? '⏳ $hudText' : hudText,
               style: const TextStyle(color: Color(0xFF8FE3A0), fontSize: 13)),
         ),
         // ── 滑桿 ──
         Expanded(
           child: ListView(padding: const EdgeInsets.all(12), children: [
-            _section('即時（拉了立刻重畫）'),
-            _slider('品質閘門 殘差上限', _cfg.trackMaxResidualPx, 0, 200,
+            _section(l10n.ballTuneSectionRealtime),
+            _slider(l10n.ballTuneSliderResidual, _cfg.trackMaxResidualPx, 0, 200,
                 (v) => _setCfg(trackMaxResidualPx: v)),
-            _slider('P1 最遠距離', _cfg.p1MaxDistPx, 100, 600,
+            _slider(l10n.ballTuneSliderP1MaxDist, _cfg.p1MaxDistPx, 100, 600,
                 (v) => _setCfg(p1MaxDistPx: v)),
             // ROI 半徑 / 遮罩 margin：主要操作改在預覽畫面上拖拉，
             // 滑桿收進進階區（雙向同步：手勢放手後滑桿跟著更新）。
@@ -245,36 +260,36 @@ class _BallTuningPageState extends State<BallTuningPage> {
                 childrenPadding: EdgeInsets.zero,
                 iconColor: Colors.white70,
                 collapsedIconColor: Colors.white70,
-                title: const Text('ROI / 遮罩（可直接在預覽上拖拉）',
-                    style: TextStyle(color: Colors.white, fontSize: 12)),
+                title: Text(l10n.ballTuneRoiMaskSection,
+                    style: const TextStyle(color: Colors.white, fontSize: 12)),
                 children: [
-                  _slider('ROI 半徑', _roiHalf, _roiMin, _roiMax,
+                  _slider(l10n.ballTuneSliderRoiRadius, _roiHalf, _roiMin, _roiMax,
                       (v) => _setCfg(roiHalfBasePx: v)),
-                  _slider('球員遮罩 margin', _margin, 0, 0.5,
+                  _slider(l10n.ballTuneSliderGolferMargin, _margin, 0, 0.5,
                       (v) => setState(() => _margin = v),
                       onEnd: (v) async { _margin = v; await _recomputeGolfer(); _rerun(); }),
                 ],
               ),
             ),
-            _slider('ROI miss 大擴張×', _cfg.roiMissScaleLarge, 1, 5,
+            _slider(l10n.ballTuneSliderRoiMissScale, _cfg.roiMissScaleLarge, 1, 5,
                 (v) => _setCfg(roiMissScaleLarge: v)),
-            _slider('ROI 半徑上限', _cfg.roiHalfMaxAbs, 150, 500,
+            _slider(l10n.ballTuneSliderRoiRadiusMax, _cfg.roiHalfMaxAbs, 150, 500,
                 (v) => _setCfg(roiHalfMaxAbs: v)),
-            _slider('擊球後 step 上限', _cfg.stepAbsHardMaxPostImpact, 150, 600,
+            _slider(l10n.ballTuneSliderStepMaxPost, _cfg.stepAbsHardMaxPostImpact, 150, 600,
                 (v) => _setCfg(stepAbsHardMaxPostImpact: v)),
-            _slider('擊球後 pred 上限', _cfg.predDistHardMaxPostImpact, 200, 700,
+            _slider(l10n.ballTuneSliderPredMaxPost, _cfg.predDistHardMaxPostImpact, 200, 700,
                 (v) => _setCfg(predDistHardMaxPostImpact: v)),
-            _slider('擊球後 miss 容忍', _cfg.noCandPatiencePostImpact.toDouble(), 3, 40,
+            _slider(l10n.ballTuneSliderMissPatiencePost, _cfg.noCandPatiencePostImpact.toDouble(), 3, 40,
                 (v) => _setCfg(noCandPatiencePostImpact: v.round())),
             const Divider(color: Colors.white24, height: 28),
-            _section('重抽（改完按下方按鈕）'),
-            _slider('diffThresh 幀差門檻', _diffThresh.toDouble(), 5, 40, null,
+            _section(l10n.ballTuneSectionReextract),
+            _slider(l10n.ballTuneSliderDiffThresh, _diffThresh.toDouble(), 5, 40, null,
                 onEnd: (v) => setState(() => _diffThresh = v.round())),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: _busy ? null : _reextract,
               icon: const Icon(Icons.refresh),
-              label: const Text('重新偵測（套用 diffThresh）'),
+              label: Text(l10n.ballTuneRedetectButton),
             ),
             const SizedBox(height: 24),
           ]),

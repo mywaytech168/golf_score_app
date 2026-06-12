@@ -11,6 +11,7 @@ import '../recording/shot_record_screen.dart';
 import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import 'share_import_page.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 通知類型枚舉
 enum NotificationType {
@@ -107,6 +108,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   /// 選項 2: 選擇本地影片
   void _selectLocalVideo() async {
     debugPrint('[RecordingSelection] 使用者選擇本地影片');
+    final l10n = AppLocalizations.of(context);
 
     // iOS 額外詢問來源：相簿 or 檔案 App
     FilePickerResult? result;
@@ -129,7 +131,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     if (result == null || result.files.isEmpty || result.files.single.path == null) {
       debugPrint('[RecordingSelection] 使用者取消選擇');
       _showNotification(
-        message: '❌ 未選擇任何檔案',
+        message: l10n.recSelNoFileSelected,
         type: NotificationType.cancelled,
       );
       return;
@@ -149,7 +151,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
       if (!mounted) return;
       setState(() => _isImporting = false);
       _showNotification(
-        message: '❌ 影片超過 10 分鐘限制（$durationSec 秒）\n請選擇 600 秒以內的影片',
+        message: AppLocalizations.of(context).recSelVideoTooLong(durationSec),
         type: NotificationType.failed,
         duration: const Duration(seconds: 4),
       );
@@ -159,7 +161,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     // 通過時長限制，通知使用者
     if (!mounted) return;
     _showNotification(
-      message: '✅ 影片時長 $durationSec 秒，符合 10 分鐘限制',
+      message: AppLocalizations.of(context).recSelVideoDurationOk(durationSec),
       type: NotificationType.selected,
     );
 
@@ -191,7 +193,8 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   }) async {
     if (!mounted) return;
 
-    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+    final l10n = AppLocalizations.of(context);
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, l10n.recSelPreparingProgress));
 
     showDialog(
       context: context,
@@ -200,7 +203,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
         canPop: false,
         child: AlertDialog(
           backgroundColor: Colors.grey[900],
-          title: const Text('影片分析中', style: TextStyle(color: Colors.white)),
+          title: Text(l10n.recSelAnalyzingDialogTitle, style: const TextStyle(color: Colors.white)),
           content: ValueListenableBuilder<(double, String)>(
             valueListenable: progressNotifier,
             builder: (_, val, __) => Column(
@@ -232,6 +235,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
         originalName: fileName,
         nextRoundIndex: nextRoundIndex,
         onProgress: (prog, label) => progressNotifier.value = (prog, label),
+        l10n: l10n,
       );
 
       if (!mounted) return;
@@ -239,7 +243,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
       if (entry == null) {
         _showNotification(
-          message: '❌ 導入失敗\n檔案可能不存在或格式不支援',
+          message: l10n.recSelImportFailed,
           type: NotificationType.failed,
           duration: const Duration(seconds: 3),
         );
@@ -252,7 +256,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
       final durationStr = _formatDuration(entry.durationSeconds);
       _showNotification(
-        message: '✅ 導入成功！\n${entry.customName ?? fileName}\n時長: $durationStr',
+        message: l10n.recSelImportSuccess(entry.customName ?? fileName ?? '', durationStr),
         type: NotificationType.success,
         duration: const Duration(seconds: 3),
       );
@@ -264,7 +268,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
       if (mounted) {
         Navigator.pop(context); // 關閉進度 Dialog
         _showNotification(
-          message: '❌ 導入出錯\n$e',
+          message: AppLocalizations.of(context).recSelImportError(e.toString()),
           type: NotificationType.failed,
           duration: const Duration(seconds: 3),
         );
@@ -277,24 +281,25 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
   /// iOS 來源選擇 sheet：相簿 or 檔案 App
   Future<_VideoSource?> _showIOSSourceSheet() {
+    final l10n = AppLocalizations.of(context);
     return showCupertinoModalPopup<_VideoSource>(
       context: context,
       builder: (_) => CupertinoActionSheet(
-        title: const Text('選擇影片來源'),
+        title: Text(l10n.recSelIOSSourceSheetTitle),
         actions: [
           CupertinoActionSheetAction(
             onPressed: () => Navigator.pop(context, _VideoSource.photoLibrary),
-            child: const Text('相簿'),
+            child: Text(l10n.recSelPhotoLibrary),
           ),
           CupertinoActionSheetAction(
             onPressed: () => Navigator.pop(context, _VideoSource.files),
-            child: const Text('檔案 App（資料夾）'),
+            child: Text(l10n.recSelFilesApp),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
           isDestructiveAction: false,
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(l10n.commonCancel),
         ),
       ),
     );
@@ -355,6 +360,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   }
 
   Widget _buildLoadingOverlay() {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -365,17 +371,18 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
           ),
           const SizedBox(height: 24),
           Text(
-            '正在導入影片...',
+            l10n.recSelImportingVideo,
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: context.textSecondary),
           ),
           const SizedBox(height: 8),
-          Text('請勿關閉應用', style: TextStyle(fontSize: 14, color: context.textHint)),
+          Text(l10n.recSelDoNotClose, style: TextStyle(fontSize: 14, color: context.textHint)),
         ],
       ),
     );
   }
 
   Widget _buildSelectionUI() {
+    final l10n = AppLocalizations.of(context);
     return Column(
       children: [
         // ── Header ────────────────────────────────────────────
@@ -389,33 +396,33 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
               children: [
                 _buildCard(
                   icon: Icons.flash_on_rounded,
-                  title: '即時揮桿模式',
-                  subtitle: '揮桿自動偵測並切片，無需錄長影片',
-                  color: const Color(0xFF1AA87C),
+                  title: l10n.recSelShotModeTitle,
+                  subtitle: l10n.recSelShotModeSubtitle,
+                  color: kBrandPrimary,
                   onTap: _startShotMode,
-                  badge: '新功能',
+                  badge: l10n.recSelNewFeatureBadge,
                 ),
                 const SizedBox(height: 16),
                 _buildCard(
                   icon: Icons.videocam_rounded,
-                  title: '開始錄製',
-                  subtitle: '即時拍攝並進行揮桿分析',
+                  title: l10n.recSelRecordTitle,
+                  subtitle: l10n.recSelRecordSubtitle,
                   color: const Color(0xFF2196F3),
                   onTap: _startRecording,
                 ),
                 const SizedBox(height: 16),
                 _buildCard(
                   icon: Icons.folder_open_rounded,
-                  title: '選擇本地影片',
-                  subtitle: '從裝置中選擇已有影片（上限 10 分鐘）',
+                  title: l10n.recSelLocalVideoTitle,
+                  subtitle: l10n.recSelLocalVideoSubtitle,
                   color: const Color(0xFF7C3AED),
                   onTap: _selectLocalVideo,
                 ),
                 const SizedBox(height: 16),
                 _buildCard(
                   icon: Icons.link_rounded,
-                  title: '從分享連結取得',
-                  subtitle: '輸入 16 碼分享碼下載影片',
+                  title: l10n.recSelShareLinkTitle,
+                  subtitle: l10n.recSelShareLinkSubtitle,
                   color: const Color(0xFF1565C0),
                   onTap: _importFromShare,
                 ),
@@ -428,15 +435,10 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
   }
 
   Widget _buildHeader() {
+    final l10n = AppLocalizations.of(context);
     return Container(
       width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1976D2), Color(0xFF0D47A1)],
-        ),
-      ),
+      decoration: const BoxDecoration(gradient: kPrimaryGradient),
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -444,14 +446,14 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '選擇錄製方式',
-                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+              Text(
+                l10n.recSelHeaderTitle,
+                style: const TextStyle(color: kOnGradient, fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Text(
-                '即時拍攝、匯入本地影片或透過分享碼取得',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13),
+                l10n.recSelHeaderSubtitle,
+                style: TextStyle(color: kOnGradient.withValues(alpha: 0.72), fontSize: 13),
               ),
             ],
           ),

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
+
+import '../theme/app_theme.dart';
 
 /// 錄製畫面共用子 widget（RecordScreen / ShotRecordScreen 共用）。
 
@@ -39,10 +42,10 @@ class SettingChip extends StatelessWidget {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF1AA87C) : const Color(0xFF2A2A2A),
+            color: selected ? kBrandPrimary : const Color(0xFF2A2A2A),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: selected ? const Color(0xFF1AA87C) : Colors.white12),
+                color: selected ? kBrandPrimary : Colors.white12),
           ),
           alignment: Alignment.center,
           child: Text(
@@ -103,7 +106,10 @@ class ZoomSlider extends StatelessWidget {
   final ValueChanged<double> onChanged;
   const ZoomSlider({super.key, required this.zoom, required this.onChanged});
 
-  String get _label => zoom == 0.0 ? '最廣' : '${(zoom * 100).round()}%';
+  String _label(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return zoom == 0.0 ? l10n.recWidgetsZoomWide : '${(zoom * 100).round()}%';
+  }
 
   @override
   Widget build(BuildContext context) => Positioned(
@@ -111,7 +117,7 @@ class ZoomSlider extends StatelessWidget {
         top: 0,
         bottom: 110,
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text(_label,
+          Text(_label(context),
               style: const TextStyle(color: Colors.white70, fontSize: 11)),
           const SizedBox(height: 4),
           Expanded(
@@ -141,22 +147,26 @@ class ZoomSlider extends StatelessWidget {
 /// 儲存影片期間的全螢幕鎖定層：吸收所有觸控並顯示進度提示，
 /// 兩種錄影模式（一般錄製 / SHOT）共用，行為一致。
 class SavingScreenLock extends StatelessWidget {
-  final String label;
-  const SavingScreenLock({super.key, this.label = '儲存影片中…'});
+  final String? label;
+  const SavingScreenLock({super.key, this.label});
 
   @override
-  Widget build(BuildContext context) => Positioned.fill(
-        child: AbsorbPointer(
-          child: Container(
-            color: Colors.black54,
-            alignment: Alignment.center,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const CircularProgressIndicator(color: Colors.white70),
-              const SizedBox(height: 16),
-              Text(label,
-                  style: const TextStyle(color: Colors.white70, fontSize: 16)),
-            ]),
-          ),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final resolvedLabel = label ?? l10n.recWidgetsSavingVideo;
+    return Positioned.fill(
+      child: AbsorbPointer(
+        child: Container(
+          color: Colors.black54,
+          alignment: Alignment.center,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const CircularProgressIndicator(color: Colors.white70),
+            const SizedBox(height: 16),
+            Text(resolvedLabel,
+                style: const TextStyle(color: Colors.white70, fontSize: 16)),
+          ]),
         ),
-      );
+      ),
+    );
+  }
 }

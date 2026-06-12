@@ -46,6 +46,9 @@ import UIKit
       // ── 影片匯出（下載 / 存到相機膠卷）──────────────────
       registerVideoExportChannel(messenger: m)
 
+      // ── 匯出合成器（軌跡/骨架/浮水印單 pass）────────────
+      registerExportComposerChannel(messenger: m)
+
       // ── 擊球分析（V2 音訊峰值 / V3 局部骨架）────────────
       registerGolfAnalysisChannel(messenger: m)
 

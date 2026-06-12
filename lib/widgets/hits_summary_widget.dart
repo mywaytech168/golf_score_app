@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/hits_summary.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 显示摆球摘要列表的 Widget
 /// 提供了卡片视图，展示每个摆球的关键信息
@@ -22,12 +23,13 @@ class HitsSummaryWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     if (hitsSummary.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(16.0),
         child: Center(
           child: Text(
-            '还没有检测到摆球',
+            l10n.hitsSummaryEmpty,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.grey,
                 ),
@@ -69,6 +71,7 @@ class _HitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: InkWell(
@@ -83,7 +86,7 @@ class _HitCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '摆球 #$index',
+                    l10n.hitsSummaryHitIndex(index),
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -101,7 +104,7 @@ class _HitCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _DetailRow(
-                        label: '峰值',
+                        label: l10n.hitsSummaryPeak,
                         value: '${hit.peakSmooth.toStringAsFixed(2)} G',
                         icon: Icons.trending_up,
                         color: Colors.orange,
@@ -110,7 +113,7 @@ class _HitCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: _DetailRow(
-                        label: '时长',
+                        label: l10n.hitsSummaryDuration,
                         value: '${hit.duration.toStringAsFixed(2)} s',
                         icon: Icons.timer,
                         color: Colors.green,
@@ -123,7 +126,7 @@ class _HitCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _DetailRow(
-                        label: '开始',
+                        label: l10n.hitsSummaryStart,
                         value: _formatTime(hit.startT),
                         icon: Icons.skip_previous,
                         color: Colors.blue,
@@ -132,7 +135,7 @@ class _HitCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: _DetailRow(
-                        label: '结束',
+                        label: l10n.hitsSummaryEnd,
                         value: _formatTime(hit.endT),
                         icon: Icons.skip_next,
                         color: Colors.purple,
@@ -143,7 +146,7 @@ class _HitCard extends StatelessWidget {
                 if (hit.detectFrom != null && hit.detectFrom!.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    '检测源: ${hit.detectFrom}',
+                    l10n.hitsSummaryDetectFrom(hit.detectFrom!),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey.shade600,
                         ),
@@ -218,7 +221,7 @@ class HitsSummaryExpansionTile extends StatelessWidget {
   final List<HitsSummary> hitsSummary;
 
   /// 标题
-  final String title;
+  final String? title;
 
   /// 点击摆球时的回调
   final Function(HitsSummary)? onHitTap;
@@ -229,22 +232,23 @@ class HitsSummaryExpansionTile extends StatelessWidget {
   const HitsSummaryExpansionTile({
     super.key,
     required this.hitsSummary,
-    this.title = '摆球摘要',
+    this.title,
     this.onHitTap,
     this.initiallyExpanded = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return ExpansionTile(
       title: Text(
-        title,
+        title ?? l10n.hitsSummaryTitle,
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
             ),
       ),
       subtitle: Text(
-        '共 ${hitsSummary.length} 个摆球',
+        l10n.hitsSummaryCount(hitsSummary.length),
         style: Theme.of(context).textTheme.bodySmall,
       ),
       initiallyExpanded: initiallyExpanded,

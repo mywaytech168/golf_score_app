@@ -380,14 +380,17 @@ import UIKit
             recordingTmpPath = nil; recordingFinalPath = nil
             return nil
         }
-        let w = Int(captureSize.width)
-        let h = Int(captureSize.height)
+        // ★ 擷取連線已鎖 .portrait（見 setupSession），送進來的 pixel buffer 為直式
+        //   （短邊=寬、長邊=高）。writer 維度必須與 buffer 一致，否則編碼器會把直式內容
+        //   縮放塞進橫式畫面 → 存檔變橫且壓扁。captureSize 存的是橫式（1920×1080），故在此交換。
+        let w = Int(min(captureSize.width, captureSize.height))   // portrait 寬（1080）
+        let h = Int(max(captureSize.width, captureSize.height))   // portrait 高（1920）
         let settings: [String: Any] = [
             AVVideoCodecKey:  AVVideoCodecType.h264,
             AVVideoWidthKey:  w,
             AVVideoHeightKey: h,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey:  (w >= 1920) ? 16_000_000 : 8_000_000,
+                AVVideoAverageBitRateKey:  (h >= 1920) ? 16_000_000 : 8_000_000,
                 AVVideoProfileLevelKey:    AVVideoProfileLevelH264HighAutoLevel,
                 AVVideoMaxKeyFrameIntervalKey: Int(targetFps),
             ],

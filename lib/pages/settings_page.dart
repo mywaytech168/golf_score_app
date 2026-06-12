@@ -162,7 +162,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1AA87C),
+              backgroundColor: kBrandPrimary,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
@@ -187,7 +187,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (ok) {
       _showSnack(AppLocalizations.of(context).settingsNameUpdated);
     } else {
-      _showSnack('名稱已更新，但伺服器同步失敗', isError: true);
+      _showSnack(AppLocalizations.of(context).settingsNameSyncFailed, isError: true);
     }
   }
 
@@ -222,7 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
           contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
           actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
           title: Row(children: [
-            const Icon(Icons.lock_outline_rounded, color: Color(0xFF1AA87C), size: 20),
+            const Icon(Icons.lock_outline_rounded, color: kBrandPrimary, size: 20),
             const SizedBox(width: 8),
             Text(isSetMode ? l.settingsSetPassword : l.settingsChangePassword,
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
@@ -253,7 +253,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1AA87C),
+                backgroundColor: kBrandPrimary,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: isLoading ? null : () async {
@@ -326,7 +326,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final auth    = await account.authentication;
       final idToken = auth.idToken;
       if (idToken == null) {
-        if (mounted) _showSnack('無法取得 Google 憑證，請重試', isError: true);
+        if (mounted) _showSnack(AppLocalizations.of(context).settingsGoogleCredentialFailed, isError: true);
         return;
       }
 
@@ -347,7 +347,7 @@ class _SettingsPageState extends State<SettingsPage> {
         if (_googleLinked) {
           _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
         } else {
-          _showSnack(msg.isNotEmpty ? msg : 'Google 綁定失敗，請稍後再試', isError: true);
+          _showSnack(msg.isNotEmpty ? msg : AppLocalizations.of(context).settingsGoogleLinkFailed, isError: true);
         }
       } else {
         _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
@@ -395,31 +395,31 @@ class _SettingsPageState extends State<SettingsPage> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF1AA87C).withValues(alpha: 0.07) : ctx.bgInset,
+                    color: isSelected ? kBrandPrimary.withValues(alpha: 0.07) : ctx.bgInset,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: isSelected ? const Color(0xFF1AA87C) : ctx.borderColor,
+                      color: isSelected ? kBrandPrimary : ctx.borderColor,
                       width: isSelected ? 1.5 : 1.0,
                     ),
                   ),
                   child: Row(children: [
                     Icon(
                       isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                      color: isSelected ? const Color(0xFF1AA87C) : ctx.textHint,
+                      color: isSelected ? kBrandPrimary : ctx.textHint,
                       size: 20,
                     ),
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(q.label, style: TextStyle(
                         fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: isSelected ? const Color(0xFF1AA87C) : ctx.textPrimary,
+                        color: isSelected ? kBrandPrimary : ctx.textPrimary,
                       )),
                       const SizedBox(height: 2),
                       Text(q.sizeHint, style: TextStyle(fontSize: 12, color: ctx.textSecondary)),
                     ])),
                     Text(q.bitrateHint, style: TextStyle(
                       fontSize: 11, fontWeight: FontWeight.w500,
-                      color: isSelected ? const Color(0xFF1AA87C) : ctx.textHint,
+                      color: isSelected ? kBrandPrimary : ctx.textHint,
                     )),
                   ]),
                 ),
@@ -430,7 +430,7 @@ class _SettingsPageState extends State<SettingsPage> {
               width: double.infinity,
               child: FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF1AA87C),
+                  backgroundColor: kBrandPrimary,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
@@ -503,25 +503,25 @@ class _SettingsPageState extends State<SettingsPage> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF1AA87C).withValues(alpha: 0.07) : ctx.bgInset,
+                    color: isSelected ? kBrandPrimary.withValues(alpha: 0.07) : ctx.bgInset,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: isSelected ? const Color(0xFF1AA87C) : ctx.borderColor,
+                      color: isSelected ? kBrandPrimary : ctx.borderColor,
                       width: isSelected ? 1.5 : 1.0,
                     ),
                   ),
                   child: Row(children: [
                     Icon(_themeModeIcon(mode),
-                        color: isSelected ? const Color(0xFF1AA87C) : ctx.textHint, size: 20),
+                        color: isSelected ? kBrandPrimary : ctx.textHint, size: 20),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(_themeModeLabel(l, mode), style: TextStyle(
                         fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: isSelected ? const Color(0xFF1AA87C) : ctx.textPrimary,
+                        color: isSelected ? kBrandPrimary : ctx.textPrimary,
                       )),
                     ),
                     if (isSelected)
-                      const Icon(Icons.check_circle_rounded, color: Color(0xFF1AA87C), size: 18),
+                      const Icon(Icons.check_circle_rounded, color: kBrandPrimary, size: 18),
                   ]),
                 ),
               );
@@ -709,7 +709,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? Colors.red : const Color(0xFF1AA87C),
+      backgroundColor: isError ? Colors.red : kBrandPrimary,
       duration: const Duration(seconds: 2),
     ));
   }
@@ -724,7 +724,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return Scaffold(
       backgroundColor: context.bgPage,
       appBar: AppBar(
-        backgroundColor: context.isDarkMode ? context.bgPage : const Color(0xFF1AA87C),
+        backgroundColor: context.isDarkMode ? context.bgPage : kBrandPrimary,
         foregroundColor: context.isDarkMode ? context.textPrimary : Colors.white,
         elevation: 0,
         title: Text(l.settingsTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
@@ -761,12 +761,12 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           _SettingsTile(
             icon: Icons.g_mobiledata_rounded,
-            iconColor: const Color(0xFF1AA87C),
+            iconColor: kBrandPrimary,
             title: l.settingsGoogleLogin,
             subtitle: _googleLinked ? l.settingsGoogleLinked : l.settingsGoogleNotLinked,
-            subtitleColor: _googleLinked ? const Color(0xFF1AA87C) : context.textHint,
+            subtitleColor: _googleLinked ? kGoodColor : context.textHint,
             trailing: _googleLinked
-                ? const Icon(Icons.check_circle_rounded, color: Color(0xFF1AA87C), size: 18)
+                ? const Icon(Icons.check_circle_rounded, color: kGoodColor, size: 18)
                 : null,
             onTap: _googleLinked ? null : _linkGoogle,
           ),
@@ -825,12 +825,12 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           _SettingsTile(
             icon: Icons.system_update_rounded,
-            iconColor: const Color(0xFF1AA87C),
+            iconColor: kBrandPrimary,
             title: l.settingsCheckUpdate,
             trailing: _isCheckingUpdate
                 ? const SizedBox(
                     width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1AA87C)),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: kBrandPrimary),
                   )
                 : null,
             onTap: _isCheckingUpdate ? null : _checkUpdate,
@@ -951,7 +951,7 @@ class _ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: const Color(0xFF1AA87C),
+      color: kBrandPrimary,
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
       child: Column(children: [
         // ── 大頭貼 ──
@@ -976,7 +976,7 @@ class _ProfileCard extends StatelessWidget {
               decoration: const BoxDecoration(
                 color: Colors.white, shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.camera_alt_rounded, size: 14, color: Color(0xFF1AA87C)),
+              child: const Icon(Icons.camera_alt_rounded, size: 14, color: kBrandPrimary),
             ),
           ]),
         ),
@@ -1011,7 +1011,7 @@ class _ProfileCard extends StatelessWidget {
           Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 14),
               decoration: BoxDecoration(color: context.borderColor, borderRadius: BorderRadius.circular(2))),
           ListTile(
-            leading: const Icon(Icons.photo_library_rounded, color: Color(0xFF1AA87C)),
+            leading: const Icon(Icons.photo_library_rounded, color: kBrandPrimary),
             title: Text(AppLocalizations.of(context).settingsPickFromGallery),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             onTap: () { Navigator.pop(context); onTapAvatar(); },

@@ -69,6 +69,11 @@ class _AnnouncementPageState extends State<AnnouncementPage> {
       body: Column(
         children: [
           GreenPageHeader(
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                  color: kOnGradient, size: 20),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
             title: l.annBoardTitle,
             subtitle: _unreadCount > 0 ? l.annUnreadCount(_unreadCount) : l.annAllAnnouncements,
             actions: [
@@ -89,14 +94,14 @@ class _AnnouncementPageState extends State<AnnouncementPage> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: kPrimaryGreen))
+                ? const Center(child: CircularProgressIndicator(color: kBrandPrimary))
                 : _error != null
                     ? _ErrorView(message: _error!, onRetry: _load)
                     : _items.isEmpty
                         ? const _EmptyView()
                         : RefreshIndicator(
                             onRefresh: _load,
-                            color: kPrimaryGreen,
+                            color: kBrandPrimary,
                             child: ListView.builder(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: kSpaceMD, vertical: kSpaceSM),
@@ -274,7 +279,7 @@ class _AnnouncementDetailPage extends StatelessWidget {
           GreenPageHeader(
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white, size: 20),
+                  color: kOnGradient, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: l.annDetailTitle,
@@ -451,7 +456,7 @@ class _ErrorView extends StatelessWidget {
             onPressed: onRetry,
             icon: const Icon(Icons.refresh_rounded, size: 18),
             label: Text(AppLocalizations.of(context).commonRetry),
-            style: ElevatedButton.styleFrom(backgroundColor: kPrimaryGreen),
+            style: ElevatedButton.styleFrom(backgroundColor: kBrandPrimary),
           ),
         ],
       ),

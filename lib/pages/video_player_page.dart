@@ -21,7 +21,9 @@ import '../services/recording_history_storage.dart';
 import '../services/skeleton_csv_locator.dart';
 import '../services/swing_stats_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/clip_candidates_sheet.dart';
 import 'ai_coach_page.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
@@ -31,12 +33,18 @@ class VideoPlayerPage extends StatefulWidget {
     this.avatarPath,
     this.startPosition,
     this.entry,
+    this.onEntryUpdated,
   });
 
   final String videoPath;
   final String? avatarPath;
   final Duration? startPosition;
   final RecordingHistoryEntry? entry;
+
+  /// 備註更新後通知上層列表刷新（與 recording_history_page 一致）。
+  /// 為 null 時仍會直接寫入 DB，故獨立進入查看頁也可儲存。
+  final void Function(RecordingHistoryEntry old, RecordingHistoryEntry updated)?
+      onEntryUpdated;
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -46,6 +54,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     with TickerProviderStateMixin {
   VideoPlayerController? _controller;
   bool _initialized = false;
+
+  /// 目前備註（可即時編輯，與 widget.entry.note 脫鉤以便就地更新標題列圖示）
+  String? _note;
 
   // 60Hz 播放頭（骨架/軌跡疊圖專用，見 _onTick）
   final ValueNotifier<double> _playheadSec = ValueNotifier(0.0);
@@ -78,6 +89,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 長影片：已切出片段的擊球時間點（秒，相對原始影片），供時間軸標記與快速跳轉
   List<({double sec, int index})> _clipMarks = const [];
 
+  // 長影片：已切出片段的剪輯起迄區間（秒，相對原始影片），供時間軸綠/紅邊界標記
+  List<({double start, double end})> _clipRanges = const [];
+
   // 骨架疊圖（取代燒錄 skeleton.mp4）：CSV 為 clip 相對時間，offset=0 直接用 position 取樣
   PoseTrack? _skeletonTrack;
   bool _skeletonLoading = false;
@@ -94,26 +108,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 甜蜜點特效動畫（僅分析 Tab）
   late final AnimationController _impactAnim;
   bool _impactTriggered = false;
-  static const _phaseOrder = [
-    ('address',       '準備'),
-    ('takeaway',      '起桿'),
-    ('backswing',     '上桿'),
-    ('top',           '頂點'),
-    ('downswing',     '下桿'),
-    ('impact',        '擊球'),
-    ('followthrough', '送桿'),
-    ('finish',        '收桿'),
+  static const _phaseKeys = [
+    'address',
+    'takeaway',
+    'backswing',
+    'top',
+    'downswing',
+    'impact',
+    'followthrough',
+    'finish',
   ];
 
   /// 骨架 CSV 是否存在（逐幀版或 live 版皆可；initState 檢查一次）
   late final bool _hasSkeletonCsv;
 
-  static const _chartTabs = [
-    (label: '聲音峰值', color: Color(0xFFE53935)),
-    (label: '手腕 Y',   color: Color(0xFF1565C0)),
-    (label: '速度',      color: Color(0xFF1AA87C)),
-    (label: '姿勢',     color: Color(0xFF7C3AED)),
-    (label: '音頻特徵', color: Color(0xFF7B1FA2)),
+  static const _chartTabColors = [
+    Color(0xFFE53935),
+    Color(0xFF1565C0),
+    Color(0xFF1AA87C),
+    Color(0xFF7C3AED),
+    Color(0xFF7B1FA2),
   ];
 
   String get _sessionDir => '${p.dirname(widget.videoPath)}${p.separator}';
@@ -122,6 +136,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   void initState() {
     super.initState();
 
+    _note = widget.entry?.note;
     _hasSkeletonCsv = resolveSkeletonCsv(p.dirname(widget.videoPath)) != null;
     _hasTrajectory  = File('${_sessionDir}trajectory.json').existsSync();
 
@@ -167,18 +182,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     try {
       final all = await RecordingHistoryStorage.instance.loadHistory();
       final marks = <double>[];
+      final ranges = <({double start, double end})>[];
       for (final e in all) {
         if (e.sourceVideoPath != widget.videoPath) continue;
         final hit = e.hitSecond;
         if (hit == null) continue;
         marks.add((e.startSecond ?? 0.0) + hit);
+        final st = e.startSecond;
+        final en = e.endSecond;
+        if (st != null && en != null && en > st) {
+          ranges.add((start: st, end: en));
+        }
       }
       marks.sort();
+      ranges.sort((a, b) => a.start.compareTo(b.start));
       if (mounted && marks.isNotEmpty) {
         setState(() {
           _clipMarks = [
             for (int i = 0; i < marks.length; i++) (sec: marks[i], index: i + 1),
           ];
+          _clipRanges = ranges;
         });
       }
     } catch (e) {
@@ -206,7 +229,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   Future<void> _initController(String path, {bool isOriginal = false}) async {
     final file = File(path);
     if (!file.existsSync()) {
-      _showSnack('找不到影片檔案');
+      _showSnackKey((l) => l.playerVideoNotFound);
       return;
     }
 
@@ -239,7 +262,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       if (mounted) setState(() => _initialized = true);
     } catch (e) {
       debugPrint('[VideoPlayer] 初始化失敗: $e');
-      if (mounted) _showSnack('影片載入失敗');
+      if (mounted) _showSnackKey((l) => l.playerVideoLoadFailed);
     } finally {
       await old?.dispose();
     }
@@ -353,7 +376,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('AI 分析失敗: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(AppLocalizations.of(context).playerAiAnalysisFailed(e.toString())), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -383,11 +406,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     super.dispose();
   }
 
-  void _showSnack(String text) {
-    if (!mounted) return;
+  /// Like _showSnackKey but resolves the l10n string lazily inside the post-frame
+  /// callback, safe to call from [initState] or async methods before first build.
+  void _showSnackKey(String Function(AppLocalizations) resolve) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(resolve(AppLocalizations.of(context)))));
     });
   }
 
@@ -405,7 +430,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     // 載入一次即定：本頁生命週期內不偷換來源，避免使用者不知情下骨架變樣。
     final csvPath = resolveSkeletonCsv(p.dirname(widget.videoPath));
     if (csvPath == null) {
-      _showSnack('骨架資料不存在');
+      _showSnackKey((l) => l.playerSkeletonNotFound);
       return;
     }
     setState(() => _skeletonLoading = true);
@@ -449,6 +474,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   }
 
   Widget _buildTopBar(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       color: Colors.black87,
       child: Row(
@@ -460,13 +486,28 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           ),
           Expanded(
             child: Text(
-              widget.entry?.displayTitle ?? '影片查看',
+              widget.entry?.displayTitle ?? l10n.playerTitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
+          if (widget.entry != null)
+            IconButton(
+              icon: Icon(
+                (_note ?? '').trim().isEmpty
+                    ? Icons.sticky_note_2_outlined
+                    : Icons.sticky_note_2,
+                color: (_note ?? '').trim().isEmpty
+                    ? Colors.white70
+                    : kBrandPrimary,
+                size: 20,
+              ),
+              tooltip: (_note ?? '').trim().isEmpty ? l10n.playerNoteAdd : l10n.playerNoteEdit,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              onPressed: _editVideoNote,
+            ),
           if (widget.avatarPath != null) ...[
             CircleAvatar(
               radius: 14,
@@ -479,8 +520,28 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     );
   }
 
+  /// 就地編輯影片備註：寫入 DB + 通知上層列表刷新。
+  Future<void> _editVideoNote() async {
+    final entry = widget.entry;
+    if (entry == null) return;
+    final newNote = await _showVideoNoteDialog(context, _note);
+    if (newNote == null || !mounted) return;           // 取消
+    if (newNote == (_note ?? '')) return;               // 未變更
+    final updated = entry.copyWith(note: newNote);
+    setState(() => _note = newNote);
+    await RecordingHistoryStorage.instance.upsertEntry(updated);
+    widget.onEntryUpdated?.call(entry, updated);
+    if (mounted) {
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(newNote.isEmpty ? l10n.playerNoteCleared : l10n.playerNoteSaved)),
+      );
+    }
+  }
+
   /// 疊層開關列：骨架 / 軌跡 checkbox + 軌跡調參入口（從頂列移下來）
   Widget _buildOverlayToggles() {
+    final l10n = AppLocalizations.of(context);
     Widget toggle({
       required String label,
       required IconData icon,
@@ -498,7 +559,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               child: Checkbox(
                 value: value,
                 onChanged: (v) => onChanged(v ?? false),
-                activeColor: const Color(0xFF1AA87C),
+                activeColor: kBrandPrimary,
                 side: const BorderSide(color: Colors.white54),
               ),
             ),
@@ -519,7 +580,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         children: [
           if (_hasSkeletonCsv)
             toggle(
-              label: '骨架',
+              label: l10n.playerOverlaySkeleton,
               icon: Icons.person,
               value: _showSkeleton,
               onChanged: (v) {
@@ -530,7 +591,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           if (_hasTrajectory) ...[
             const SizedBox(width: 8),
             toggle(
-              label: '軌跡',
+              label: l10n.playerOverlayTrajectory,
               icon: Icons.sports_golf,
               value: _showTrajectory,
               onChanged: (v) {
@@ -542,7 +603,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           if (_hasImpactFx) ...[
             const SizedBox(width: 8),
             toggle(
-              label: '特效',
+              label: l10n.playerOverlayEffect,
               icon: Icons.auto_awesome,
               value: _showImpactFx,
               onChanged: (v) => setState(() => _showImpactFx = v),
@@ -563,8 +624,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               ));
             },
             icon: const Icon(Icons.tune, color: Colors.white54, size: 16),
-            label: const Text('軌跡調參',
-                style: TextStyle(color: Colors.white54, fontSize: 12)),
+            label: Text(l10n.playerTrajectoryTuning,
+                style: const TextStyle(color: Colors.white54, fontSize: 12)),
           ),
         ],
       ),
@@ -664,6 +725,18 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     final posSec   = position.inMilliseconds / 1000.0;
     final progress = durSec > 0 ? (posSec / durSec).clamp(0.0, 1.0) : 0.0;
 
+    final l10n = AppLocalizations.of(context);
+    final timelinePhaseLabels = <String, String>{
+      'address':       l10n.playerTimelineAbbrAddress,
+      'takeaway':      l10n.playerTimelineAbbrTakeaway,
+      'backswing':     l10n.playerTimelineAbbrBackswing,
+      'top':           l10n.playerTimelineAbbrTop,
+      'downswing':     l10n.playerTimelineAbbrDownswing,
+      'impact':        l10n.playerTimelineAbbrImpact,
+      'followthrough': l10n.playerTimelineAbbrFollowthrough,
+      'finish':        l10n.playerTimelineAbbrFinish,
+    };
+
     return Container(
       color: Colors.black87,
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
@@ -701,7 +774,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       ),
                       alignment: Alignment.center,
                       child: Text(
-                        '第${m.index}球 ${_fmt(Duration(milliseconds: (m.sec * 1000).round()))}',
+                        AppLocalizations.of(context).playerShotLabel(m.index, _fmt(Duration(milliseconds: (m.sec * 1000).round()))),
                         style: TextStyle(
                           color: active ? const Color(0xFFFF8F00) : Colors.white70,
                           fontSize: 11,
@@ -727,9 +800,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       phases:        _phases                   ?? const {},
                       hitSecond:     widget.entry?.hitSecond,
                       clipMarks:     [for (final m in _clipMarks) m.sec],
+                      clipRanges:    _clipRanges,
                       currentSecond: posSec,
                       totalSeconds:  durSec,
                       goodShot:      widget.entry?.goodShot,
+                      phaseLabels:   timelinePhaseLabels,
                     ),
                   ),
                 ),
@@ -754,6 +829,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               ],
             ),
           ),
+          // ── 剪輯邊界配色圖例（僅長影片有切片區間時顯示）──────────
+          if (_isLongVideo && _clipRanges.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            const ClipBoundaryLegend(),
+          ],
           const SizedBox(height: 2),
           // ── 播放控制 Row ─────────────────────────────────────────
           Row(
@@ -770,7 +850,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   width: 44,
                   height: 44,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1AA87C),
+                    color: kBrandPrimary,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -806,7 +886,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   child: Icon(
                     Icons.bar_chart_rounded,
                     color: _chartsExpanded
-                        ? const Color(0xFF1AA87C)
+                        ? kBrandPrimary
                         : Colors.white54,
                     size: 24,
                   ),
@@ -835,6 +915,17 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // ── 揮桿 8 階段關鍵禎橫列 ─────────────────────────────────────
 
   Widget _buildPhaseStrip() {
+    final l10n = AppLocalizations.of(context);
+    final phaseLabels = {
+      'address':       l10n.playerPhaseAddress,
+      'takeaway':      l10n.playerPhaseTakeaway,
+      'backswing':     l10n.playerPhaseBackswing,
+      'top':           l10n.playerPhaseTop,
+      'downswing':     l10n.playerPhaseDownswing,
+      'impact':        l10n.playerPhaseImpact,
+      'followthrough': l10n.playerPhaseFollowthrough,
+      'finish':        l10n.playerPhaseFinish,
+    };
     final phases = _phases!;
     final ctrl   = _controller;
     final posSec = ctrl != null && ctrl.value.isInitialized
@@ -843,8 +934,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
     // 計算當前播放位置對應的階段（高亮）
     String? currentPhase;
-    for (int i = _phaseOrder.length - 1; i >= 0; i--) {
-      final key = _phaseOrder[i].$1;
+    for (int i = _phaseKeys.length - 1; i >= 0; i--) {
+      final key = _phaseKeys[i];
       final t   = phases[key];
       if (t != null && posSec >= t - 0.05) {
         currentPhase = key;
@@ -858,9 +949,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        itemCount: _phaseOrder.length,
+        itemCount: _phaseKeys.length,
         itemBuilder: (context, index) {
-          final (key, label) = _phaseOrder[index];
+          final key   = _phaseKeys[index];
+          final label = phaseLabels[key] ?? key;
           final sec      = phases[key];
           final isActive = currentPhase == key;
 
@@ -876,12 +968,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
           final chipBg = impactColor != null
               ? impactColor.withValues(alpha: 0.14)
-              : isActive ? kPrimaryGreen.withValues(alpha: 0.18) : const Color(0xFF1A1A1A);
+              : isActive ? kBrandPrimary.withValues(alpha: 0.18) : const Color(0xFF1A1A1A);
           final chipBorderColor = impactColor != null
               ? impactColor.withValues(alpha: 0.75)
-              : isActive ? kPrimaryGreen : Colors.white12;
+              : isActive ? kBrandPrimary : Colors.white12;
           final chipBorderWidth = (impactColor != null || isActive) ? 1.5 : 1.0;
-          final secColor = impactColor ?? (isActive ? kPrimaryGreen : Colors.white60);
+          final secColor = impactColor ?? (isActive ? kBrandPrimary : Colors.white60);
           final labelColor = impactColor ?? (isActive ? Colors.white : Colors.white38);
 
           return GestureDetector(
@@ -944,11 +1036,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   }
 
   Widget _buildStatsContent() {
+    final l10n = AppLocalizations.of(context);
     final stats = SwingStats.compute(track: _trajTrack, phases: _phases);
     if (stats.isEmpty) {
-      return const Center(
-        child: Text('尚無統計資料（需軌跡或階段分析）',
-            style: TextStyle(color: Colors.white38, fontSize: 12)),
+      return Center(
+        child: Text(l10n.playerStatsEmpty,
+            style: const TextStyle(color: Colors.white38, fontSize: 12)),
       );
     }
 
@@ -976,34 +1069,34 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     if (stats.tempoRatio != null) {
       final t = stats.tempoRatio!;
       tempoColor = (t >= 2.5 && t <= 3.5)
-          ? const Color(0xFF1AA87C)
+          ? kGoodColor
           : const Color(0xFFFFB74D);
     }
 
     return Row(
       children: [
         stat(
-          '發射角',
+          l10n.playerStatLaunchAngle,
           stats.launchAngleDeg != null
               ? '${stats.launchAngleDeg!.toStringAsFixed(1)}°'
               : '--',
           color: const Color(0xFFFFD21E),
         ),
         stat(
-          '節奏 (上桿:下桿)',
+          l10n.playerStatTempo,
           stats.tempoRatio != null
               ? '${stats.tempoRatio!.toStringAsFixed(1)} : 1'
               : '--',
           color: tempoColor,
         ),
         stat(
-          '上桿 / 下桿',
+          l10n.playerStatBackDownswing,
           (stats.backswingSec != null && stats.downswingSec != null)
               ? '${stats.backswingSec!.toStringAsFixed(2)}s / ${stats.downswingSec!.toStringAsFixed(2)}s'
               : '--',
         ),
         stat(
-          '入鏡飛行',
+          l10n.playerStatFlightTime,
           stats.flightTimeSec != null
               ? '${stats.flightTimeSec!.toStringAsFixed(2)}s'
               : '--',
@@ -1031,39 +1124,48 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   Widget _buildChartContent() {
     if (_chartsLoading) {
       return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF1AA87C), strokeWidth: 2),
+        child: CircularProgressIndicator(color: kBrandPrimary, strokeWidth: 2),
       );
     }
     final data = _chartData;
     if (data == null || data.isEmpty) {
-      return const Center(
-        child: Text('尚無圖表資料，請先完成分析',
-            style: TextStyle(color: Colors.white38, fontSize: 12)),
+      return Center(
+        child: Text(AppLocalizations.of(context).playerChartEmpty,
+            style: const TextStyle(color: Colors.white38, fontSize: 12)),
       );
     }
 
+    final l10n = AppLocalizations.of(context);
+
     // ── 前 3 個 tab：時序折線圖資料 ────────────────────────
     List<ChartPoint>? activePoints;
-    Color activeColor = _chartTabs[_chartTabIndex].color;
+    final chartTabLabels = [
+      l10n.playerChartTabAudio,
+      l10n.playerChartTabWristY,
+      l10n.playerChartTabSpeed,
+      l10n.playerChartTabPosture,
+      l10n.playerChartTabAudioFeature,
+    ];
+    Color activeColor = _chartTabColors[_chartTabIndex];
     bool invertY = false;
     String Function(double)? yLabel;
-    String emptyLabel = '無資料';
+    String emptyLabel = l10n.playerChartNoData;
 
     if (_chartTabIndex == 0) {
       activePoints = data.audioRms;
       invertY      = false;
       yLabel       = (v) => '${v.toStringAsFixed(0)}dB';
-      emptyLabel   = '聲音峰值 無資料';
+      emptyLabel   = l10n.playerChartAudioEmpty;
     } else if (_chartTabIndex == 1) {
       activePoints = data.wristY;
       invertY      = true;
       yLabel       = (v) => '${v.toStringAsFixed(0)}px';
-      emptyLabel   = '手腕 Y 無資料';
+      emptyLabel   = l10n.playerChartWristYEmpty;
     } else if (_chartTabIndex == 2) {
       activePoints = data.wristSpeed;
       invertY      = false;
       yLabel       = (v) => v.toStringAsFixed(0);
-      emptyLabel   = '速度 無資料';
+      emptyLabel   = l10n.playerChartSpeedEmpty;
     }
 
     return Column(
@@ -1075,8 +1177,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: List.generate(_chartTabs.length, (i) {
-                final t = _chartTabs[i];
+              children: List.generate(_chartTabColors.length, (i) {
+                final tabColor = _chartTabColors[i];
+                final tabLabel = chartTabLabels[i];
                 final selected = i == _chartTabIndex;
                 return GestureDetector(
                   onTap: () {
@@ -1092,15 +1195,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                     decoration: BoxDecoration(
                       border: Border(
                         bottom: BorderSide(
-                          color: selected ? t.color : Colors.transparent,
+                          color: selected ? tabColor : Colors.transparent,
                           width: 2,
                         ),
                       ),
                     ),
                     child: Text(
-                      t.label,
+                      tabLabel,
                       style: TextStyle(
-                        color: selected ? t.color : Colors.white38,
+                        color: selected ? tabColor : Colors.white38,
                         fontSize: 12,
                         fontWeight:
                             selected ? FontWeight.w700 : FontWeight.normal,
@@ -1250,7 +1353,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             TextButton.icon(
               onPressed: _loadAiStatus,
               icon: const Icon(Icons.refresh_rounded, size: 13),
-              label: const Text('載入詳細分數', style: TextStyle(fontSize: 12)),
+              label: Text(AppLocalizations.of(context).playerLoadDetailScore, style: const TextStyle(fontSize: 12)),
               style: TextButton.styleFrom(
                   foregroundColor: const Color(0xFF7C3AED),
                   padding: const EdgeInsets.symmetric(
@@ -1261,9 +1364,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       );
     }
 
-    return const Center(
-      child: Text('尚無姿勢分析，請先完成分析',
-          style: TextStyle(color: Colors.white38, fontSize: 12)),
+    return Center(
+      child: Text(AppLocalizations.of(context).playerPostureEmpty,
+          style: const TextStyle(color: Colors.white38, fontSize: 12)),
     );
   }
 
@@ -1301,7 +1404,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           Row(
             children: [
               Text(
-                hasData ? '$passCount / 5 項通過' : '尚無音頻分析',
+                hasData ? AppLocalizations.of(context).playerAudioPassCount(passCount) : AppLocalizations.of(context).playerAudioEmpty,
                 style: TextStyle(
                     color: hasData ? scoreColor : Colors.white38,
                     fontSize: 12,
@@ -1508,6 +1611,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     }
     final status = _aiStatus;
 
+    final l10n = AppLocalizations.of(context);
+
     // 尚無分析
     if (status == null) {
       return Padding(
@@ -1517,9 +1622,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             const Icon(Icons.psychology_rounded,
                 color: Color(0xFF7C3AED), size: 22),
             const SizedBox(width: 10),
-            const Expanded(
-              child: Text('尚未進行 AI 教練分析',
-                  style: TextStyle(color: Colors.white70, fontSize: 13)),
+            Expanded(
+              child: Text(l10n.playerAiNotStarted,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
             ),
             _aiSubmitting
                 ? const SizedBox(
@@ -1533,8 +1638,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                     ),
-                    child: const Text('開始分析',
-                        style: TextStyle(fontSize: 13)),
+                    child: Text(l10n.playerAiStartAnalysis,
+                        style: const TextStyle(fontSize: 13)),
                   ),
           ],
         ),
@@ -1554,7 +1659,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(_aiStatusLabel(status.status),
+              child: Text(_aiStatusLabel(status.status, l10n),
                   style: const TextStyle(
                       color: Colors.white70, fontSize: 13)),
             ),
@@ -1565,8 +1670,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 6),
               ),
-              child: const Text('查看進度',
-                  style: TextStyle(fontSize: 13)),
+              child: Text(l10n.playerAiViewProgress,
+                  style: const TextStyle(fontSize: 13)),
             ),
           ],
         ),
@@ -1588,9 +1693,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               const Icon(Icons.psychology_rounded,
                   color: Color(0xFF7C3AED), size: 18),
               const SizedBox(width: 8),
-              const Expanded(
-                child: Text('AI 教練分析',
-                    style: TextStyle(
+              Expanded(
+                child: Text(l10n.playerAiCoachTitle,
+                    style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
                         fontWeight: FontWeight.w600)),
@@ -1603,7 +1708,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: sevColor.withValues(alpha: 0.6)),
                   ),
-                  child: Text(_severityLabel(status.severity!),
+                  child: Text(_severityLabel(status.severity!, l10n),
                       style: TextStyle(fontSize: 11, color: sevColor, fontWeight: FontWeight.w600)),
                 ),
             ],
@@ -1619,7 +1724,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             // 主要錯誤
             if (result.primaryError.zhName.isNotEmpty) ...[
               const SizedBox(height: 10),
-              _aiSectionTitle('主要問題'),
+              _aiSectionTitle(l10n.playerAiPrimaryIssue),
               const SizedBox(height: 4),
               _aiTag(result.primaryError.zhName, sevColor),
               if (result.primaryError.evidence.isNotEmpty)
@@ -1628,14 +1733,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             // 教練評語
             if (result.coachFeedback.isNotEmpty) ...[
               const SizedBox(height: 10),
-              _aiSectionTitle('教練評語'),
+              _aiSectionTitle(l10n.playerAiCoachFeedback),
               const SizedBox(height: 4),
               ...result.coachFeedback.map((f) => _aiBullet(f)),
             ],
             // 訓練建議
             if (result.practiceSuggestions.isNotEmpty) ...[
               const SizedBox(height: 10),
-              _aiSectionTitle('訓練建議'),
+              _aiSectionTitle(l10n.playerAiPracticeSuggestions),
               const SizedBox(height: 4),
               ...result.practiceSuggestions.asMap().entries.map((entry) {
                 final i = entry.key;
@@ -1689,7 +1794,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             // 下次目標
             if (result.nextTrainingGoal.isNotEmpty) ...[
               const SizedBox(height: 10),
-              _aiSectionTitle('下次目標'),
+              _aiSectionTitle(l10n.playerAiNextGoal),
               const SizedBox(height: 4),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1716,7 +1821,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   textStyle: const TextStyle(fontSize: 12),
                 ),
-                child: const Text('重新分析'),
+                child: Text(l10n.playerAiReanalyze),
               ),
               const SizedBox(width: 4),
               ElevatedButton(
@@ -1729,7 +1834,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                child: const Text('查看詳細'),
+                child: Text(l10n.playerAiViewDetail),
               ),
             ],
           ),
@@ -1779,11 +1884,11 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     ),
   );
 
-  String _aiStatusLabel(String s) => switch (s) {
-    'pending'    => '準備中...',
-    'queued'     => '等待分析佇列...',
-    'processing' => 'AI 教練分析中...',
-    _            => '分析中...',
+  String _aiStatusLabel(String s, AppLocalizations l10n) => switch (s) {
+    'pending'    => l10n.playerAiStatusPending,
+    'queued'     => l10n.playerAiStatusQueued,
+    'processing' => l10n.playerAiStatusProcessing,
+    _            => l10n.playerAiStatusAnalyzing,
   };
 
   Color _severityColor(String s) => switch (s) {
@@ -1792,10 +1897,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     _        => kGoodColor,
   };
 
-  String _severityLabel(String s) => switch (s) {
-    'high'   => '嚴重',
-    'medium' => '中等',
-    _        => '輕微',
+  String _severityLabel(String s, AppLocalizations l10n) => switch (s) {
+    'high'   => l10n.playerSeverityHigh,
+    'medium' => l10n.playerSeverityMedium,
+    _        => l10n.playerSeverityLow,
   };
 }
 
@@ -2020,8 +2125,8 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 8),
-                  const Text('精彩片段預覽',
-                      style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  Text(AppLocalizations.of(context).playerHighlightPreview,
+                      style: const TextStyle(color: Colors.white70, fontSize: 14)),
                 ],
               ),
             ),
@@ -2061,7 +2166,7 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
               trackHeight: 3,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
               overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: const Color(0xFF1AA87C),
+              activeTrackColor: kBrandPrimary,
               thumbColor: Colors.white,
               inactiveTrackColor: Colors.white24,
               overlayColor: Colors.white24,
@@ -2082,7 +2187,7 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
                   width: 44,
                   height: 44,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1AA87C),
+                    color: kBrandPrimary,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -2175,6 +2280,8 @@ class _SweetSpotBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     if (goodShot == null || progress <= 0) return const SizedBox.shrink();
 
+    final l10n = AppLocalizations.of(context);
+
     final opacity = progress < 0.12
         ? progress / 0.12
         : progress > 0.65
@@ -2187,15 +2294,15 @@ class _SweetSpotBadge extends StatelessWidget {
     final IconData icon;
     if (goodShot! && passCount >= 4) {
       color = const Color(0xFFFFD700);
-      title = '甜蜜點命中';
+      title = l10n.playerSweetSpotHit;
       icon  = Icons.star_rounded;
     } else if (goodShot!) {
       color = const Color(0xFF90CAF9);
-      title = '甜蜜點';
+      title = l10n.playerSweetSpot;
       icon  = Icons.check_circle_rounded;
     } else {
       color = const Color(0xFF9E9E9E);
-      title = '偏虛球';
+      title = l10n.playerThinShot;
       icon  = Icons.radio_button_unchecked_rounded;
     }
 
@@ -2222,7 +2329,7 @@ class _SweetSpotBadge extends StatelessWidget {
                 children: [
                   Text(title,
                       style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
-                  Text('$passCount/5 特徵符合',
+                  Text(l10n.playerAudioPassCountBadge(passCount),
                       style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 9)),
                 ],
               ),
@@ -2246,23 +2353,16 @@ class _MultiModalTimelinePainter extends CustomPainter {
   final double? hitSecond;
   /// 長影片：已切片段的擊球時刻（秒，原始影片座標）
   final List<double> clipMarks;
+  /// 長影片：已切片段的剪輯起迄區間（秒，原始影片座標）—— 綠=開始、紅=結束
+  final List<({double start, double end})> clipRanges;
   final double currentSecond;
   final double totalSeconds;
   final bool? goodShot;
+  /// 階段單字縮寫標籤（由 build() 傳入，已本地化）。
+  final Map<String, String> phaseLabels;
 
   // Flutter Slider 內部 track 兩側的 horizontal padding（固定 20px）
   static const double _hPad = 20.0;
-
-  static const _phaseLabels = <String, String>{
-    'address':       '準',
-    'takeaway':      '起',
-    'backswing':     '上',
-    'top':           '頂',
-    'downswing':     '下',
-    'impact':        '擊',
-    'followthrough': '送',
-    'finish':        '收',
-  };
 
   const _MultiModalTimelinePainter({
     required this.audioRms,
@@ -2270,9 +2370,11 @@ class _MultiModalTimelinePainter extends CustomPainter {
     required this.phases,
     this.hitSecond,
     this.clipMarks = const [],
+    this.clipRanges = const [],
     required this.currentSecond,
     required this.totalSeconds,
     this.goodShot,
+    this.phaseLabels = const {},
   });
 
   double _secToX(double sec, double trackW) =>
@@ -2314,7 +2416,7 @@ class _MultiModalTimelinePainter extends CustomPainter {
           ? ((hitSecond! / totalSeconds) * numBars).floor().clamp(0, numBars - 1)
           : -1;
 
-      final paintPlayed = Paint()..color = const Color(0xFF1AA87C).withValues(alpha: 0.80);
+      final paintPlayed = Paint()..color = kBrandPrimary.withValues(alpha: 0.80);
       final paintFuture = Paint()..color = Colors.white.withValues(alpha: 0.18);
       final paintHit    = Paint()..color = const Color(0xFFFF8F00);
       final paintGlow   = Paint()
@@ -2395,7 +2497,7 @@ class _MultiModalTimelinePainter extends CustomPainter {
         );
 
         // 底部單字 label
-        final label = _phaseLabels[e.key] ?? '';
+        final label = phaseLabels[e.key] ?? '';
         if (label.isNotEmpty) {
           _drawText(
             canvas, label,
@@ -2459,6 +2561,12 @@ class _MultiModalTimelinePainter extends CustomPainter {
       canvas.drawPath(diamond, Paint()..color = const Color(0xFFFF8F00));
     }
 
+    // ── 層5c：切片剪輯起迄邊界（綠=開始、紅=結束）────────────────
+    for (final r in clipRanges) {
+      _drawBoundary(canvas, size, trackW, r.start, kClipStartColor, true);
+      _drawBoundary(canvas, size, trackW, r.end,   kClipEndColor, false);
+    }
+
     // ── 層6：播放游標（白色細線 + 頂部小三角）───────────────────
     final cx = _hPad + (currentSecond / totalSeconds).clamp(0.0, 1.0) * trackW;
     canvas.drawRect(
@@ -2471,6 +2579,28 @@ class _MultiModalTimelinePainter extends CustomPainter {
       ..lineTo(cx, 5.0)
       ..close();
     canvas.drawPath(arrowPath, Paint()..color = Colors.white);
+  }
+
+  /// 剪輯邊界標記：細色線 + 頂部朝內小三角（start 朝右、end 朝左）。
+  void _drawBoundary(
+    Canvas canvas, Size size, double trackW, double sec, Color color, bool isStart) {
+    if (sec < 0 || sec > totalSeconds) return;
+    final x = _secToX(sec, trackW);
+    canvas.drawLine(
+      Offset(x, size.height * 0.10),
+      Offset(x, size.height * 0.90),
+      Paint()
+        ..color       = color.withValues(alpha: 0.65)
+        ..strokeWidth = 1.2,
+    );
+    final ty  = size.height * 0.10;
+    final dir = isStart ? 1.0 : -1.0;
+    final tri = Path()
+      ..moveTo(x, ty)
+      ..lineTo(x + dir * 4, ty)
+      ..lineTo(x, ty + 4)
+      ..close();
+    canvas.drawPath(tri, Paint()..color = color);
   }
 
   void _drawText(
@@ -2503,5 +2633,43 @@ class _MultiModalTimelinePainter extends CustomPainter {
       old.wristSpeed    != wristSpeed    ||
       old.phases        != phases        ||
       old.clipMarks     != clipMarks     ||
-      old.goodShot      != goodShot;
+      old.clipRanges    != clipRanges    ||
+      old.goodShot      != goodShot      ||
+      old.phaseLabels   != phaseLabels;
+}
+
+/// 影片查看頁的備註編輯對話框（與 recording_history_page 同款式）。
+/// 回傳 null = 取消；'' = 清除備註；其餘為新備註內容。
+Future<String?> _showVideoNoteDialog(BuildContext context, String? initial) {
+  final l10n = AppLocalizations.of(context);
+  String tempNote = initial ?? '';
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(l10n.playerNoteDialogTitle),
+      content: TextField(
+        controller: TextEditingController(text: initial ?? ''),
+        maxLength: 200,
+        maxLines: 4,
+        minLines: 2,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: l10n.playerNoteHint,
+          helperText: l10n.playerNoteHelper,
+          border: const OutlineInputBorder(),
+        ),
+        onChanged: (v) => tempNote = v,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: Text(l10n.commonCancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(tempNote.trim()),
+          child: Text(l10n.commonSave),
+        ),
+      ],
+    ),
+  );
 }

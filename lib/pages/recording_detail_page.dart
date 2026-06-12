@@ -5,9 +5,13 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../models/export_spec.dart';
 import '../models/recording_history_entry.dart';
+import '../providers/plan_provider.dart';
+import '../services/plan_service.dart';
 import '../recording/pose_csv_loader.dart';
 import '../recording/skeleton_painter.dart';
 import '../models/swing_posture.dart';
@@ -21,6 +25,8 @@ import '../services/skeleton_csv_locator.dart';
 import '../services/swing_impact_detector.dart';
 import '../services/video_export_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/custom_export_sheet.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 錄影詳情頁：顯示聲音峰值、手腕 Y、Speed 三張圖表
 class RecordingDetailPage extends StatefulWidget {
@@ -141,35 +147,35 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
   // ── 下載影片 ────────────────────────────────────────────────────
 
   /// 可下載的影片項目定義
-  static const _kDownloadOptions = [
+  static List<_VideoOption> _buildDownloadOptions(AppLocalizations l10n) => [
     _VideoOption(
       file:  'final.mp4',
-      label: '分析完整版',
-      desc:  '骨架 + 球軌跡',
+      label: l10n.recDetailOptLabelFull,
+      desc:  l10n.recDetailOptDescFull,
       icon:  Icons.sports_golf_rounded,
     ),
     _VideoOption(
       file:  'skeleton.mp4',
-      label: '骨架版',
-      desc:  '只含骨架 overlay',
+      label: l10n.recDetailOptLabelSkeleton,
+      desc:  l10n.recDetailOptDescSkeleton,
       icon:  Icons.accessibility_new_rounded,
     ),
     _VideoOption(
       file:  'clip.mp4',
-      label: '原始片段',
-      desc:  '無任何 overlay',
+      label: l10n.recDetailOptLabelClip,
+      desc:  l10n.recDetailOptDescNoOverlay,
       icon:  Icons.videocam_rounded,
     ),
     _VideoOption(
       file:  'swing.mp4',
-      label: '原始影片',
-      desc:  '無任何 overlay',
+      label: l10n.recDetailOptLabelRaw,
+      desc:  l10n.recDetailOptDescNoOverlay,
       icon:  Icons.videocam_rounded,
     ),
     _VideoOption(
       file:  'swing.mov',
-      label: '原始影片 (MOV)',
-      desc:  '原始 MOV 檔',
+      label: l10n.recDetailOptLabelRawMov,
+      desc:  l10n.recDetailOptDescRawMov,
       icon:  Icons.videocam_rounded,
     ),
   ];
@@ -178,6 +184,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
   /// 燒錄版（final/skeleton）改為下載時隨選燒錄：分析階段已不產生燒錄影片，
   /// 只要素材齊全（clip + CSV / trajectory.json）選項就會出現，選了現場燒。
   Future<void> _downloadVideo() async {
+    final l10n = AppLocalizations.of(context);
     final sessionDir = p.dirname(widget.entry.filePath);
 
     bool isAvailable(_VideoOption o) {
@@ -189,10 +196,10 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
       };
     }
 
-    final available = _kDownloadOptions.where(isAvailable).toList();
+    final available = _buildDownloadOptions(l10n).where(isAvailable).toList();
 
     if (available.isEmpty) {
-      _showSnack('找不到可下載的影片', isError: true);
+      _showSnack(AppLocalizations.of(context).recDetailNoVideoFound, isError: true);
       return;
     }
 
@@ -211,14 +218,14 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     try {
       var videoPath = p.join(sessionDir, chosen.file);
       if (!File(videoPath).existsSync()) {
-        _showSnack('燒錄「${chosen.label}」中…');
+        _showSnack(l10n.recDetailBurning(chosen.label));
         final burned = switch (chosen.file) {
           'final.mp4'    => await OverlayBurnService.ensureFinalVideo(sessionDir),
           'skeleton.mp4' => await OverlayBurnService.ensureSkeletonVideo(sessionDir),
           _              => null,
         };
         if (burned == null) {
-          _showSnack('燒錄失敗，請稍後重試', isError: true);
+          _showSnack(l10n.recDetailBurnFailed, isError: true);
           return;
         }
         videoPath = burned;
@@ -229,13 +236,68 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
       if (!mounted) return;
       switch (result.status) {
         case ExportStatus.savedToDownloads:
-          _showSnack('「${chosen.label}」已儲存到下載資料夾 ✅');
+          _showSnack(l10n.recDetailSavedToDownloads(chosen.label));
         case ExportStatus.savedToPhotos:
-          _showSnack('「${chosen.label}」已儲存到相機膠卷 ✅');
+          _showSnack(l10n.recDetailSavedToPhotos(chosen.label));
         case ExportStatus.sharedViaSheet:
-          _showSnack('已開啟分享 ✅');
+          _showSnack(l10n.recDetailSharedViaSheet);
         case ExportStatus.failed:
-          _showSnack('下載失敗：${result.detail}', isError: true);
+          _showSnack(l10n.recDetailDownloadFailed(result.detail ?? ''), isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  /// 自訂匯出：勾選疊加元素 → 單 pass 合成 → 下載。
+  /// 浮水印由方案決定（免費強制，UI 不可關）。
+  Future<void> _customExportFlow() async {
+    final l10n = AppLocalizations.of(context);
+    final sessionDir = p.dirname(widget.entry.filePath);
+    if (!OverlayBurnService.canCompose(sessionDir)) {
+      _showSnack(l10n.recDetailNoVideoFound, isError: true);
+      return;
+    }
+    final hasSkeleton   = resolveSkeletonCsv(sessionDir) != null;
+    final hasTrajectory = File(p.join(sessionDir, 'trajectory.json')).existsSync();
+    final isFree        = context.read<PlanProvider>().plan == UserPlan.free;
+
+    final spec = await showModalBottomSheet<ExportSpec>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => CustomExportSheet(
+        hasSkeleton: hasSkeleton,
+        hasTrajectory: hasTrajectory,
+        isFree: isFree,
+      ),
+    );
+    if (spec == null || !mounted) return;
+
+    setState(() => _isDownloading = true);
+    try {
+      final exportLabel = l10n.exportCustomTitle;
+      _showSnack(l10n.recDetailBurning(exportLabel));
+      final burned = await OverlayBurnService.composeForExport(sessionDir, spec);
+      if (burned == null) {
+        if (mounted) _showSnack(l10n.recDetailBurnFailed, isError: true);
+        return;
+      }
+      final displayName =
+          '${_title.replaceAll(RegExp(r'[^\w一-龥]'), '_')}_export';
+      final result = await VideoExportService.download(burned, displayName: displayName);
+      if (!mounted) return;
+      switch (result.status) {
+        case ExportStatus.savedToDownloads:
+          _showSnack(l10n.recDetailSavedToDownloads(exportLabel));
+        case ExportStatus.savedToPhotos:
+          _showSnack(l10n.recDetailSavedToPhotos(exportLabel));
+        case ExportStatus.sharedViaSheet:
+          _showSnack(l10n.recDetailSharedViaSheet);
+        case ExportStatus.failed:
+          _showSnack(l10n.recDetailDownloadFailed(result.detail ?? ''), isError: true);
       }
     } finally {
       if (mounted) setState(() => _isDownloading = false);
@@ -258,7 +320,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     return Scaffold(
       backgroundColor: context.bgPage,
       appBar: AppBar(
-        backgroundColor: kPrimaryGreen,
+        backgroundColor: kBrandPrimary,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(_title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
@@ -272,12 +334,18 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               ),
             )
-          else
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.tune_rounded),
+              tooltip: AppLocalizations.of(context).exportCustomTitle,
+              onPressed: _customExportFlow,
+            ),
             IconButton(
               icon: const Icon(Icons.download_rounded),
-              tooltip: '下載影片',
+              tooltip: AppLocalizations.of(context).recDetailDownloadVideo,
               onPressed: _downloadVideo,
             ),
+          ],
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
@@ -292,7 +360,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
           _MetaHeader(entry: widget.entry),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: kPrimaryGreen))
+                ? const Center(child: CircularProgressIndicator(color: kBrandPrimary))
                 : _error != null
                     ? _ErrorView(message: _error!)
                     : _data == null || _data!.isEmpty
@@ -324,7 +392,7 @@ class _MetaHeader extends StatelessWidget {
         : '${dur}s';
 
     return Container(
-      color: kPrimaryGreen,
+      color: kBrandPrimary,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Row(
         children: [
@@ -392,8 +460,8 @@ class _ChartsBody extends StatelessWidget {
         if (postureAnalysisId != null || isAutoAnalyzing) const SizedBox(height: 16),
         if (data.audioRms.isNotEmpty)
           _ChartCard(
-            title: '聲音峰值',
-            subtitle: 'RMS dBFS',
+            title: AppLocalizations.of(context).recDetailAudioPeak,
+            subtitle: AppLocalizations.of(context).recDetailAudioPeakSubtitle,
             icon: Icons.graphic_eq_rounded,
             color: const Color(0xFFE53935),
             points: data.audioRms,
@@ -402,12 +470,15 @@ class _ChartsBody extends StatelessWidget {
             invertY: false,
           )
         else
-          const _MissingDataCard(label: '聲音峰值', hint: '需完成音頻分析'),
+          _MissingDataCard(
+            label: AppLocalizations.of(context).recDetailAudioPeak,
+            hint: AppLocalizations.of(context).recDetailAudioPeakMissing,
+          ),
         const SizedBox(height: 16),
         if (data.wristY.isNotEmpty)
           _ChartCard(
-            title: '手腕 Y',
-            subtitle: '右手腕 Y 位置（像素）',
+            title: AppLocalizations.of(context).recDetailWristY,
+            subtitle: AppLocalizations.of(context).recDetailWristYSubtitle,
             icon: Icons.sports_golf_rounded,
             color: const Color(0xFF1565C0),
             points: data.wristY,
@@ -416,21 +487,27 @@ class _ChartsBody extends StatelessWidget {
             invertY: true,  // 螢幕 Y 向下，圖表反轉較直覺
           )
         else
-          const _MissingDataCard(label: '手腕 Y', hint: '需完成姿勢分析'),
+          _MissingDataCard(
+            label: AppLocalizations.of(context).recDetailWristY,
+            hint: AppLocalizations.of(context).recDetailPoseMissing,
+          ),
         const SizedBox(height: 16),
         if (data.wristSpeed.isNotEmpty)
           _ChartCard(
             title: 'Speed',
-            subtitle: '手腕移動速度（px/frame）',
+            subtitle: AppLocalizations.of(context).recDetailSpeedSubtitle,
             icon: Icons.speed_rounded,
-            color: kPrimaryGreen,
+            color: kBrandPrimary,
             points: data.wristSpeed,
             hitSecond: hitSecond,
             yLabel: (v) => v.toStringAsFixed(0),
             invertY: false,
           )
         else
-          const _MissingDataCard(label: '速度', hint: '需完成姿勢分析'),
+          _MissingDataCard(
+            label: AppLocalizations.of(context).recDetailSpeedMissing,
+            hint: AppLocalizations.of(context).recDetailPoseMissing,
+          ),
         // 音頻特徵分析卡片
         if (entry.audioFeatureValues != null && entry.audioFeatureValues!.isNotEmpty) ...[
           const SizedBox(height: 16),
@@ -523,24 +600,24 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.person_rounded, color: Color(0xFF1AA87C), size: 18),
-              SizedBox(width: 8),
-              Text('骨架預覽',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            children: [
+              const Icon(Icons.person_rounded, color: kBrandPrimary, size: 18),
+              const SizedBox(width: 8),
+              Text(AppLocalizations.of(context).recDetailSkeletonPreview,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
             ],
           ),
           const SizedBox(height: 12),
           if (_loading)
             const SizedBox(
               height: 160,
-              child: Center(child: CircularProgressIndicator(color: kPrimaryGreen)),
+              child: Center(child: CircularProgressIndicator(color: kBrandPrimary)),
             )
           else if (_error != null || _ctrl == null)
             SizedBox(
               height: 80,
               child: Center(
-                child: Text('骨架預覽載入失敗',
+                child: Text(AppLocalizations.of(context).recDetailSkeletonLoadFailed,
                     style: TextStyle(color: context.textHint, fontSize: 13)),
               ),
             )
@@ -606,7 +683,7 @@ class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
                   value: posSec.clamp(
                       0, ctrl.value.duration.inMilliseconds / 1000.0),
                   max: ctrl.value.duration.inMilliseconds / 1000.0,
-                  activeColor: kPrimaryGreen,
+                  activeColor: kBrandPrimary,
                   onChanged: (v) =>
                       ctrl.seekTo(Duration(milliseconds: (v * 1000).round())),
                 ),
@@ -696,7 +773,7 @@ class _ChartCardState extends State<_ChartCard> {
               )),
               const Spacer(),
               Text(
-                '${widget.points.length} 點',
+                AppLocalizations.of(context).recDetailPointCount(widget.points.length),
                 style: TextStyle(color: context.textHint, fontSize: 11),
               ),
             ]),
@@ -934,9 +1011,9 @@ class _NoDataView extends StatelessWidget {
         children: [
           Icon(Icons.bar_chart_outlined, size: 64, color: context.textHint),
           const SizedBox(height: 16),
-          Text('尚無圖表資料', style: TextStyle(fontSize: 16, color: context.textSecondary, fontWeight: FontWeight.w600)),
+          Text(AppLocalizations.of(context).recDetailNoChartData, style: TextStyle(fontSize: 16, color: context.textSecondary, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Text('請先完成音頻分析與姿勢分析', style: TextStyle(fontSize: 13, color: context.textHint)),
+          Text(AppLocalizations.of(context).recDetailNoChartHint, style: TextStyle(fontSize: 13, color: context.textHint)),
         ],
       ),
     );
@@ -957,7 +1034,7 @@ class _ErrorView extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, size: 48, color: Colors.red),
             const SizedBox(height: 12),
-            const Text('載入失敗', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            Text(AppLocalizations.of(context).recDetailLoadFailed, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             Text(message, style: TextStyle(fontSize: 12, color: context.textSecondary), textAlign: TextAlign.center),
           ],
@@ -1006,12 +1083,13 @@ class _AudioFeaturesCard extends StatelessWidget {
     // 品質等級對應色彩
     final Color qualityColor;
     final String qualityText;
+    final l10n = AppLocalizations.of(context);
     if (goodShot == true) {
-      qualityColor = kPrimaryGreen;
-      qualityText  = label?.isNotEmpty == true ? label! : '甜蜜點';
+      qualityColor = kBrandPrimary;
+      qualityText  = label?.isNotEmpty == true ? label! : l10n.recDetailSweetSpot;
     } else {
       qualityColor = const Color(0xFFE05252);
-      qualityText  = label?.isNotEmpty == true ? label! : '擊球偏虛';
+      qualityText  = label?.isNotEmpty == true ? label! : l10n.recDetailOffCenter;
     }
 
     return Card(
@@ -1027,8 +1105,8 @@ class _AudioFeaturesCard extends StatelessWidget {
               children: [
                 const Icon(Icons.equalizer_rounded, color: Color(0xFF7B1FA2), size: 18),
                 const SizedBox(width: 8),
-                const Text('音頻特徵分析',
-                    style: TextStyle(color: Color(0xFF7B1FA2), fontSize: 15, fontWeight: FontWeight.w700)),
+                Text(l10n.recDetailAudioFeaturesTitle,
+                    style: const TextStyle(color: Color(0xFF7B1FA2), fontSize: 15, fontWeight: FontWeight.w700)),
                 const Spacer(),
                 if (goodShot != null)
                   Container(
@@ -1058,7 +1136,7 @@ class _AudioFeaturesCard extends StatelessWidget {
                             height: 6,
                             decoration: BoxDecoration(
                               color: i < passCount
-                                  ? (isGood ? kPrimaryGreen : const Color(0xFFE05252))
+                                  ? (isGood ? kBrandPrimary : const Color(0xFFE05252))
                                   : context.bgInset,
                               borderRadius: BorderRadius.circular(3),
                             ),
@@ -1075,14 +1153,14 @@ class _AudioFeaturesCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: isGood ? kPrimaryGreen : const Color(0xFFE05252),
+                    color: isGood ? kBrandPrimary : const Color(0xFFE05252),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              '$passCount / 5 項特徵符合甜蜜點範圍',
+              l10n.recDetailFeaturePassCount(passCount),
               style: TextStyle(color: context.textSecondary, fontSize: 11),
             ),
             const SizedBox(height: 14),
@@ -1236,13 +1314,13 @@ class _AutoAnalyzingPostureCard extends StatelessWidget {
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: const Padding(
-        padding: EdgeInsets.all(20),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
         child: Row(
           children: [
-            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF7C3AED))),
-            SizedBox(width: 12),
-            Text('姿勢分析上傳中，請稍候…', style: TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF7C3AED))),
+            const SizedBox(width: 12),
+            Text(AppLocalizations.of(context).recDetailAutoAnalyzing, style: const TextStyle(fontSize: 13, color: Colors.grey)),
           ],
         ),
       ),
@@ -1305,8 +1383,8 @@ class _OnnxPostureCardState extends State<_OnnxPostureCard> {
             Row(children: [
               const Icon(Icons.sports_golf_rounded, color: Color(0xFF7C3AED), size: 20),
               const SizedBox(width: 8),
-              const Text('ONNX 姿勢分析',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              Text(AppLocalizations.of(context).recDetailOnnxTitle,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ]),
             const SizedBox(height: 12),
             if (_loading)
@@ -1315,22 +1393,22 @@ class _OnnxPostureCardState extends State<_OnnxPostureCard> {
                 child: CircularProgressIndicator(),
               ))
             else if (_error != null)
-              Center(child: Text('載入失敗: $_error',
+              Center(child: Text(AppLocalizations.of(context).recDetailOnnxLoadFailed(_error!),
                   style: const TextStyle(color: Colors.red, fontSize: 12)))
             else if (_result == null)
-              const Center(child: Text('尚無 ONNX 結果',
-                  style: TextStyle(color: Colors.grey)))
+              Center(child: Text(AppLocalizations.of(context).recDetailOnnxNoResult,
+                  style: const TextStyle(color: Colors.grey)))
             else
-              ..._buildBars(_result!),
+              ..._buildBars(_result!, context),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _buildBars(OnnxResult result) {
+  List<Widget> _buildBars(OnnxResult result, BuildContext context) {
     final scores = result.scores;
-    if (scores.isEmpty) return [const Text('無分數資料')];
+    if (scores.isEmpty) return [Text(AppLocalizations.of(context).recDetailOnnxNoScores)];
 
     final sorted = scores.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
@@ -1398,15 +1476,15 @@ class _SwingPhasesCard extends StatefulWidget {
 }
 
 class _SwingPhasesCardState extends State<_SwingPhasesCard> {
-  static const _phaseOrder = [
-    ('address',       '①準備'),
-    ('takeaway',      '②起桿'),
-    ('backswing',     '③上桿'),
-    ('top',           '④頂點'),
-    ('downswing',     '⑤下桿'),
-    ('impact',        '⑥擊球'),
-    ('followthrough', '⑦送桿'),
-    ('finish',        '⑧收桿'),
+  static List<(String, String)> _buildPhaseOrder(AppLocalizations l10n) => [
+    ('address',       l10n.recDetailPhaseAddress),
+    ('takeaway',      l10n.recDetailPhaseTakeaway),
+    ('backswing',     l10n.recDetailPhaseBackswing),
+    ('top',           l10n.recDetailPhaseTop),
+    ('downswing',     l10n.recDetailPhaseDownswing),
+    ('impact',        l10n.recDetailPhaseImpact),
+    ('followthrough', l10n.recDetailPhaseFollowthrough),
+    ('finish',        l10n.recDetailPhaseFinish),
   ];
 
   Map<String, double>? _phases;
@@ -1475,15 +1553,15 @@ class _SwingPhasesCardState extends State<_SwingPhasesCard> {
         children: [
           Row(
             children: [
-              Icon(Icons.sports_golf_rounded, color: kPrimaryGreen, size: 18),
+              Icon(Icons.sports_golf_rounded, color: kBrandPrimary, size: 18),
               const SizedBox(width: 6),
-              const Text('揮桿階段', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              Text(AppLocalizations.of(context).recDetailSwingPhases, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
               const Spacer(),
               if (_canGenerate)
                 _generating
                     ? const SizedBox(
                         width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: kPrimaryGreen),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: kBrandPrimary),
                       )
                     : GestureDetector(
                         onTap: _generate,
@@ -1493,12 +1571,12 @@ class _SwingPhasesCardState extends State<_SwingPhasesCard> {
                             Icon(
                               _phases != null ? Icons.refresh_rounded : Icons.auto_awesome_rounded,
                               size: 15,
-                              color: kPrimaryGreen,
+                              color: kBrandPrimary,
                             ),
                             const SizedBox(width: 3),
                             Text(
-                              _phases != null ? '重新生成' : '生成階段',
-                              style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600),
+                              _phases != null ? AppLocalizations.of(context).recDetailRegenerate : AppLocalizations.of(context).recDetailGeneratePhases,
+                              style: const TextStyle(fontSize: 11, color: kBrandPrimary, fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),
@@ -1506,18 +1584,19 @@ class _SwingPhasesCardState extends State<_SwingPhasesCard> {
             ],
           ),
           const SizedBox(height: 10),
-          _phases != null ? _buildTimeline() : _buildPlaceholder(),
+          _phases != null ? _buildTimeline(context) : _buildPlaceholder(context),
         ],
       ),
     );
   }
 
-  Widget _buildTimeline() {
+  Widget _buildTimeline(BuildContext context) {
     final phases = _phases!;
+    final phaseOrder = _buildPhaseOrder(AppLocalizations.of(context));
     // 分兩列 4+4
     Widget row(int start) => Row(
       children: List.generate(4, (i) {
-        final (key, label) = _phaseOrder[start + i];
+        final (key, label) = phaseOrder[start + i];
         final sec = phases[key];
         return Expanded(
           child: _PhaseChip(label: label, sec: sec),
@@ -1534,9 +1613,10 @@ class _SwingPhasesCardState extends State<_SwingPhasesCard> {
     );
   }
 
-  Widget _buildPlaceholder() {
+  Widget _buildPlaceholder(BuildContext context) {
+    final phaseOrder = _buildPhaseOrder(AppLocalizations.of(context));
     return Row(
-      children: _phaseOrder.take(4).map((e) => Expanded(
+      children: phaseOrder.take(4).map((e) => Expanded(
         child: _PhaseChip(label: e.$2, sec: null),
       )).toList(),
     );
@@ -1559,12 +1639,12 @@ class _PhaseChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: sec != null
                   ? (context.isDarkMode
-                      ? kPrimaryGreen.withValues(alpha: 0.12)
+                      ? kBrandPrimary.withValues(alpha: 0.12)
                       : const Color(0xFFF0FAF4))
                   : context.bgInset,
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: sec != null ? kPrimaryGreen.withValues(alpha: 0.35) : context.borderColor,
+                color: sec != null ? kBrandPrimary.withValues(alpha: 0.35) : context.borderColor,
               ),
             ),
             child: Center(
@@ -1574,7 +1654,7 @@ class _PhaseChip extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: kPrimaryGreen,
+                        color: kBrandPrimary,
                       ),
                     )
                   : Icon(Icons.hourglass_empty_rounded, color: context.textHint, size: 16),
@@ -1629,12 +1709,12 @@ class _DownloadPicker extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
             child: Row(
               children: [
-                const Icon(Icons.download_rounded, color: kPrimaryGreen, size: 22),
+                const Icon(Icons.download_rounded, color: kBrandPrimary, size: 22),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    '選擇下載版本',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    AppLocalizations.of(context).recDetailSelectDownloadVersion,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                 ),
                 IconButton(
@@ -1677,10 +1757,10 @@ class _OptionTile extends StatelessWidget {
             Container(
               width: 42, height: 42,
               decoration: BoxDecoration(
-                color: kPrimaryGreen.withValues(alpha: 0.1),
+                color: kBrandPrimary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(option.icon, color: kPrimaryGreen, size: 22),
+              child: Icon(option.icon, color: kBrandPrimary, size: 22),
             ),
             const SizedBox(width: 14),
             // 文字

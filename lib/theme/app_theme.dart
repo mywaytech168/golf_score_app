@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 // ── ORVIA 品牌色 ─────────────────────────────────────────────────
-const kOrviaMint   = Color(0xFF2BD9A0); // logo 漸層起點
-const kOrviaBlue   = Color(0xFF38B6E8); // logo 漸層中段
-const kOrviaViolet = Color(0xFF5B5BE8); // logo 漸層終點
+const kOrviaMint   = Color(0xFF00E5CC); // 品牌漸層起點(Cyan)，深色主題主色
+const kOrviaBlue   = Color(0xFF4A7FFF); // 品牌漸層中段(Blue)
+const kOrviaViolet = Color(0xFF6B4FD8); // 品牌漸層終點(Purple)
 const kOrviaInk    = Color(0xFF0A0A0F); // 深色背景
 
 // ── 主色 ─────────────────────────────────────────────────────────
-// 淺色主題用加深的 mint(#1AA87C)確保對比度;深色主題用 logo 原色
-const kPrimaryGreen  = Color(0xFF1AA87C);
-const kPrimaryDark   = Color(0xFF0F5C46);
-const kPrimaryLight  = kOrviaMint;
+// 品牌主色＝漸層紫端本色 #6B4FD8(淺色主題白字對比 5.62 過 AA);深色主題用亮青 kOrviaMint
+const kBrandPrimary     = Color(0xFF6B4FD8); // 淺色主題主色(品牌紫)
+const kBrandPrimaryDark = Color(0xFF4A33A8); // 品牌主色深端(漸層/按下態)
+const kPrimaryLight     = kOrviaMint;        // 亮端(Cyan)供淺色漸層收尾
 
 // ── 語意色 ───────────────────────────────────────────────────────
 const kGoodColor   = Color(0xFF1AA87C);
@@ -96,18 +96,23 @@ BoxDecoration kCardDecoration({
     );
 
 // ── 漸層 ─────────────────────────────────────────────────────────
+// 淺色/深色主色漸層統一為品牌三色 Cyan → Blue → Purple，水平由左到右。
+// 注意:cyan 端極亮，疊在上面的文字/icon 需用深色(kOnGradient)才有對比。
 const kPrimaryGradient = LinearGradient(
-  colors: [kPrimaryGreen, kPrimaryDark],
-  begin: Alignment.topLeft,
-  end: Alignment.bottomRight,
+  colors: [kOrviaMint, kOrviaBlue, kOrviaViolet],
+  begin: Alignment.centerLeft,
+  end: Alignment.centerRight,
 );
 
-// ORVIA 品牌漸層(logo 軌跡環:mint → blue → violet)
+// ORVIA 品牌漸層:Cyan → Blue → Purple，水平由左到右(與 kPrimaryGradient 同向)
 const kOrviaGradient = LinearGradient(
   colors: [kOrviaMint, kOrviaBlue, kOrviaViolet],
-  begin: Alignment.topLeft,
-  end: Alignment.bottomRight,
+  begin: Alignment.centerLeft,
+  end: Alignment.centerRight,
 );
+
+// 疊在品牌漸層上的前景色:深色,確保在最亮的 cyan 端仍可讀
+const kOnGradient = Color(0xFF001016);
 
 LinearGradient kColorGradient(Color color) => LinearGradient(
       colors: [color, Color.lerp(color, Colors.black, 0.2)!],
@@ -118,8 +123,8 @@ LinearGradient kColorGradient(Color color) => LinearGradient(
 // ── ThemeData ─────────────────────────────────────────────────────
 ThemeData buildAppTheme() {
   final cs = ColorScheme.fromSeed(
-    seedColor: kPrimaryGreen,
-    primary: kPrimaryGreen,
+    seedColor: kBrandPrimary,
+    primary: kBrandPrimary,
     onPrimary: Colors.white,
     secondary: kOrviaViolet,
     onSecondary: Colors.white,
@@ -147,7 +152,7 @@ ThemeData buildAppTheme() {
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: kPrimaryGreen,
+        backgroundColor: kBrandPrimary,
         foregroundColor: Colors.white,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusMD)),
@@ -157,7 +162,7 @@ ThemeData buildAppTheme() {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: kPrimaryGreen,
+        backgroundColor: kBrandPrimary,
         foregroundColor: Colors.white,
         elevation: 0,
         shape:
@@ -170,10 +175,10 @@ ThemeData buildAppTheme() {
           OutlineInputBorder(borderRadius: BorderRadius.circular(kRadiusMD)),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(kRadiusMD),
-        borderSide: const BorderSide(color: kPrimaryGreen, width: 2),
+        borderSide: const BorderSide(color: kBrandPrimary, width: 2),
       ),
       labelStyle: const TextStyle(color: kTextSecondary),
-      floatingLabelStyle: const TextStyle(color: kPrimaryGreen),
+      floatingLabelStyle: const TextStyle(color: kBrandPrimary),
     ),
     chipTheme: ChipThemeData(
       labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
@@ -186,10 +191,10 @@ ThemeData buildAppTheme() {
           borderRadius: BorderRadius.circular(kRadiusSM)),
     ),
     progressIndicatorTheme:
-        const ProgressIndicatorThemeData(color: kPrimaryGreen),
+        const ProgressIndicatorThemeData(color: kBrandPrimary),
     checkboxTheme: CheckboxThemeData(
       fillColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? kPrimaryGreen : null,
+        (s) => s.contains(WidgetState.selected) ? kBrandPrimary : null,
       ),
     ),
   );

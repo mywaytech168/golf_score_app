@@ -5,6 +5,10 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 /// 廣告服務 - 管理所有廣告操作
 class AdService {
+  /// 是否顯示廣告。僅 Free 方案為 true；Pro / Elite 免廣告。
+  /// 由 [PlanProvider.refresh] 依當前方案更新。
+  static bool adsEnabled = true;
+
   // ── 橫幅廣告 ──────────────────────────────────────────────────
   static String get bannerAdUnitId {
     if (kDebugMode) {
@@ -156,6 +160,7 @@ class AdService {
 
   /// 顯示 AI Coach 插頁廣告（分析完成後呼叫）
   static Future<void> showAiCoachInterstitial() async {
+    if (!adsEnabled) return; // Pro / Elite 免廣告
     if (_aiCoachAd != null) {
       await _aiCoachAd!.show();
     } else {
@@ -166,6 +171,7 @@ class AdService {
 
   /// 顯示偵測擊球插頁廣告
   static Future<void> showBallDetectionInterstitial() async {
+    if (!adsEnabled) return; // Pro / Elite 免廣告
     if (_ballDetectionAd != null) {
       await _ballDetectionAd!.show();
     } else {
@@ -176,6 +182,7 @@ class AdService {
 
   /// 顯示完整分析插頁廣告
   static Future<void> showFullAnalysisInterstitial() async {
+    if (!adsEnabled) return; // Pro / Elite 免廣告
     if (_fullAnalysisAd != null) {
       await _fullAnalysisAd!.show();
     } else {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/recording_history_entry.dart';
 import '../theme/app_theme.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 自訂底部彈窗，統一顯示錄影歷史列表與播放行為
 Future<void> showRecordingHistorySheet({
@@ -9,7 +10,7 @@ Future<void> showRecordingHistorySheet({
   required List<RecordingHistoryEntry> entries,
   required ValueChanged<RecordingHistoryEntry> onPlayEntry,
   VoidCallback? onPickExternal,
-  String title = '曾經錄影紀錄',
+  String? title,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -19,6 +20,8 @@ Future<void> showRecordingHistorySheet({
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (sheetContext) {
+      final l10n = AppLocalizations.of(sheetContext);
+      final resolvedTitle = title ?? l10n.recHistSheetTitle;
       final displayEntries = List<RecordingHistoryEntry>.from(entries);
 
       return FractionallySizedBox(
@@ -41,7 +44,7 @@ Future<void> showRecordingHistorySheet({
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  title,
+                  resolvedTitle,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -57,7 +60,7 @@ Future<void> showRecordingHistorySheet({
                         Icon(Icons.video_collection_outlined, size: 56, color: sheetContext.textHint),
                         const SizedBox(height: 12),
                         Text(
-                          '目前沒有錄影紀錄，完成錄影後會自動顯示在此處。',
+                          AppLocalizations.of(sheetContext).recHistSheetEmptyHint,
                           style: TextStyle(fontSize: 13, color: sheetContext.textSecondary),
                           textAlign: TextAlign.center,
                         ),
@@ -111,13 +114,13 @@ Future<void> showRecordingHistorySheet({
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        _buildSubtitle(entry),
+                                        _buildSubtitle(entry, AppLocalizations.of(context)),
                                         style: TextStyle(fontSize: 12, color: context.textSecondary),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.play_arrow_rounded, color: Color(0xFF1AA87C), size: 28),
+                                const Icon(Icons.play_arrow_rounded, color: kBrandPrimary, size: 28),
                               ],
                             ),
                           ),
@@ -138,7 +141,7 @@ Future<void> showRecordingHistorySheet({
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                     icon: const Icon(Icons.folder_open),
-                    label: const Text('從檔案資料夾選取影片'),
+                    label: Text(AppLocalizations.of(sheetContext).recHistSheetPickFromFolder),
                   ),
                 ],
               ],
@@ -151,11 +154,11 @@ Future<void> showRecordingHistorySheet({
 }
 
 /// 將錄影紀錄的時間與模式組合成描述文字
-String _buildSubtitle(RecordingHistoryEntry entry) {
+String _buildSubtitle(RecordingHistoryEntry entry, AppLocalizations l10n) {
   final buffer = StringBuffer()
     ..write(_formatTimestamp(entry.recordedAt))
     ..write(' · ')
-    ..write('${entry.durationSeconds}\u0020秒')
+    ..write(l10n.recHistSheetDurationSeconds(entry.durationSeconds))
     ..write('\n')
     ..write(entry.fileName);
   return buffer.toString();

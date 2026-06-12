@@ -130,7 +130,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
                   onPrimary: Color(0xFF00261A),
                 )
               : const ColorScheme.light(
-                  primary: kPrimaryGreen,
+                  primary: kBrandPrimary,
                   onPrimary: Colors.white,
                 ),
         ),
@@ -198,7 +198,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadStats,
-              color: kPrimaryGreen,
+              color: kBrandPrimary,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(kSpaceMD),
@@ -319,7 +319,7 @@ class _DatePickerRow extends StatelessWidget {
           IconButton(
             onPressed: onPrev,
             icon: const Icon(Icons.chevron_left_rounded),
-            color: kPrimaryGreen,
+            color: kBrandPrimary,
             iconSize: 28,
             splashRadius: 20,
           ),
@@ -335,7 +335,7 @@ class _DatePickerRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.calendar_today_rounded,
-                      size: 15, color: kPrimaryGreen),
+                      size: 15, color: kBrandPrimary),
                   const SizedBox(width: kSpaceXS),
                   Text(
                     label,
@@ -352,7 +352,7 @@ class _DatePickerRow extends StatelessWidget {
           IconButton(
             onPressed: canGoNext ? onNext : null,
             icon: const Icon(Icons.chevron_right_rounded),
-            color: canGoNext ? kPrimaryGreen : context.textHint,
+            color: canGoNext ? kBrandPrimary : context.textHint,
             iconSize: 28,
             splashRadius: 20,
           ),
@@ -398,7 +398,7 @@ class _SummaryBanner extends StatelessWidget {
                       label: l.homeRounds,
                       value: rounds.toString(),
                       icon: Icons.videocam_rounded,
-                      color: kPrimaryGreen,
+                      color: kBrandPrimary,
                     ),
                   ),
                   _VertDivider(),
@@ -407,7 +407,7 @@ class _SummaryBanner extends StatelessWidget {
                       label: l.homePractices,
                       value: practices.toString(),
                       icon: Icons.sports_golf_rounded,
-                      color: kPrimaryGreen,
+                      color: kBrandPrimary,
                     ),
                   ),
                   _VertDivider(),

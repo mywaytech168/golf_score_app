@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../models/recording_history_entry.dart';
 import '../services/analysis_progress_service.dart';
@@ -36,6 +37,7 @@ class ExternalVideoImporter {
     required int nextRoundIndex,
     String? originalName,
     void Function(double progress, String label)? onProgress,
+    AppLocalizations? l10n,
   }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
@@ -55,11 +57,11 @@ class ExternalVideoImporter {
       final String videoPath;
       if (Platform.isIOS) {
         videoPath = p.join(sessionDir, 'swing.mov');
-        onProgress?.call(0.0, '複製影片中...');
+        onProgress?.call(0.0, l10n?.extImportProgressCopying ?? '複製影片中...');
         await File(sourcePath).copy(videoPath);
       } else if (Platform.isAndroid) {
         videoPath = p.join(sessionDir, 'swing.mp4');
-        onProgress?.call(0.0, '轉檔準備中...');
+        onProgress?.call(0.0, l10n?.extImportProgressTranscoding ?? '轉檔準備中...');
 
         // 監聽 Kotlin sendProgress("transcode") → EventChannel → 更新進度 Dialog
         final progressSvc = AnalysisProgressService.instance;
@@ -83,7 +85,7 @@ class ExternalVideoImporter {
         }
       } else {
         videoPath = p.join(sessionDir, 'swing.mp4');
-        onProgress?.call(0.0, '複製影片中...');
+        onProgress?.call(0.0, l10n?.extImportProgressCopying ?? '複製影片中...');
         await File(sourcePath).copy(videoPath);
       }
 
@@ -93,16 +95,16 @@ class ExternalVideoImporter {
         debugPrint('[Importer] ❌ 影片時長不符：$durationSeconds 秒 (需 1-600 秒)');
         await File(videoPath).delete();
         await Directory(sessionDir).delete();
-        onProgress?.call(1.0, '影片時長不符 (需 1-600 秒)');
+        onProgress?.call(1.0, l10n?.extImportProgressDurationInvalid ?? '影片時長不符 (需 1-600 秒)');
         return null;
       }
 
       // 生成縮圖
-      onProgress?.call(0.5, '生成縮圖中...');
+      onProgress?.call(0.5, l10n?.extImportProgressThumbnail ?? '生成縮圖中...');
       final thumbnailPath = await _generateThumbnail(videoPath);
       final sanitizedName = _normalizeImportName(originalName);
 
-      onProgress?.call(1.0, '匯入完成 ✅');
+      onProgress?.call(1.0, l10n?.extImportProgressDone ?? '匯入完成 ✅');
       debugPrint('[Importer] ✅ 導入完成: sessionId=$sessionId, '
           'duration=$durationSeconds秒, thumbnail=$thumbnailPath');
 

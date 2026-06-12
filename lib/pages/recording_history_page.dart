@@ -6,10 +6,16 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:path/path.dart' as p;
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/export_quality.dart';
+import '../models/export_spec.dart';
+import '../providers/plan_provider.dart';
+import '../services/overlay_burn_service.dart';
+import '../widgets/custom_export_sheet.dart';
 import '../theme/app_theme.dart';
 import '../models/recording_history_entry.dart';
 import '../models/hits_summary.dart';
@@ -44,9 +50,9 @@ import '../widgets/clip_candidates_sheet.dart';
 import '../services/video_export_service.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, note, detectHits, analyze, compare, share, download, uploadReward, delete }
+enum _HistoryMenuAction { rename, note, detectHits, analyze, compare, share, download, customExport, uploadReward, delete }
 
-enum _ClipMenuAction { rename, note, share, download, uploadReward, delete }
+enum _ClipMenuAction { rename, note, share, download, customExport, uploadReward, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -57,15 +63,15 @@ enum _SortBy {
   /// 按片段時間排序（切片在原始影片中的開始秒數，由小到大）
   clipTime;
 
-  /// 中文標籤
+  /// 標籤（僅供 dead-code 保留；UI 使用 historySortDate/PeakSpeed/ClipTime）
   String get label {
     switch (this) {
       case _SortBy.date:
-        return '時間';
+        return 'date';
       case _SortBy.peakValue:
-        return '最佳速度';
+        return 'peakValue';
       case _SortBy.clipTime:
-        return '片段時間';
+        return 'clipTime';
     }
   }
 }
@@ -188,23 +194,22 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('刪除影片'),
+          title: Text(AppLocalizations.of(context).historyDeleteTitle),
           content: Text(
         isClip
-            ? '確定要刪除切片「${entry.displayTitle}」嗎？'
+            ? AppLocalizations.of(context).historyDeleteClipConfirm(entry.displayTitle)
             : childClips.isEmpty
-                ? '確定要刪除「${entry.displayTitle}」嗎？影片與 CSV 將一併移除。'
-                : '確定要刪除「${entry.displayTitle}」嗎？'
-                    '影片、CSV 及 ${childClips.length} 個切片將一併移除。',
+                ? AppLocalizations.of(context).historyDeleteVideoConfirm(entry.displayTitle)
+                : AppLocalizations.of(context).historyDeleteVideoWithClipsConfirm(entry.displayTitle, childClips.length),
       ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
+              child: Text(AppLocalizations.of(context).commonCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('刪除'),
+              child: Text(AppLocalizations.of(context).commonDelete),
             ),
           ],
         );
@@ -264,8 +269,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(
         childClips.isEmpty
-            ? '已刪除 ${entry.fileName}'
-            : '已刪除 ${entry.fileName}（含 ${childClips.length} 個切片）',
+            ? AppLocalizations.of(context).historyDeletedSnack(entry.fileName)
+            : AppLocalizations.of(context).historyDeletedWithClipsSnack(entry.fileName, childClips.length),
       )),
     );
   }
@@ -284,22 +289,22 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('重新命名影片'),
+          title: Text(AppLocalizations.of(context).historyRenameTitle),
           content: Form(
             key: formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: TextFormField(
               initialValue: initialText,
               maxLength: 40,
-              decoration: const InputDecoration(
-                labelText: '影片名稱',
-                helperText: '可留空以恢復預設名稱',
+              decoration: InputDecoration(
+                labelText: AppLocalizations.of(context).historyRenameLabel,
+                helperText: AppLocalizations.of(context).historyRenameHelper,
               ),
               onChanged: (value) => tempName = value,
               validator: (value) {
                 final trimmed = value?.trim() ?? '';
                 if (trimmed.length > 40) {
-                  return '名稱需在 40 字以內';
+                  return AppLocalizations.of(context).historyRenameValidation;
                 }
                 return null;
               },
@@ -308,7 +313,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
+              child: Text(AppLocalizations.of(context).commonCancel),
             ),
             FilledButton(
               onPressed: () {
@@ -318,7 +323,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                 }
                 Navigator.of(dialogContext).pop(tempName.trim());
               },
-              child: const Text('儲存'),
+              child: Text(AppLocalizations.of(context).commonSave),
             ),
           ],
         );
@@ -360,8 +365,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
     if (!mounted) return;
     final snackMessage = storedName.isEmpty
-        ? '已恢復影片名稱為 $defaultTitle'
-        : '已將影片命名為 $storedName';
+        ? AppLocalizations.of(context).historyRenameResetSnack(defaultTitle)
+        : AppLocalizations.of(context).historyRenamedSnack(storedName);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(snackMessage)),
     );
@@ -527,6 +532,23 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     }
   }
 
+  /// 重置所有篩選與排序回預設值
+  void _resetFilters() {
+    setState(() {
+      _selectedGoodShot = null;
+      _videoTypeIsLong  = null;
+      _aiAnalyzedFilter = null;
+      _aiCoachFilter    = null;
+      _clippedFilter    = null;
+      _postureFilter    = null;
+      _datePreset       = null;
+      _customDateFrom   = null;
+      _customDateTo     = null;
+      _sortBy           = _SortBy.date;
+    });
+    _saveFilters();
+  }
+
   static bool? _prefBool(SharedPreferences p, String key) {
     final v = p.getString(key);
     if (v == 'true')  return true;
@@ -619,36 +641,42 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 折疊時顯示目前啟用的篩選摘要小 chip
   Widget _activeFilterSummary() {
+    final l10n = AppLocalizations.of(context);
     final items = <(String, Color)>[];
-    if (_selectedGoodShot == true)  items.add(('好球',   const Color(0xFF4CAF50)));
-    if (_selectedGoodShot == false) items.add(('壞球',   const Color(0xFFF44336)));
-    if (_videoTypeIsLong  == true)  items.add(('長影片', const Color(0xFF1565C0)));
-    if (_videoTypeIsLong  == false) items.add(('短影片', const Color(0xFF757575)));
-    if (_aiAnalyzedFilter == true)  items.add(('已分析', const Color(0xFF1AA87C)));
-    if (_aiAnalyzedFilter == false) items.add(('未分析', const Color(0xFF9AA6B2)));
-    if (_aiCoachFilter    == true)  items.add(('AI已分析', const Color(0xFF7C3AED)));
-    if (_aiCoachFilter    == false) items.add(('AI未分析', const Color(0xFF9AA6B2)));
-    if (_clippedFilter    == true)  items.add(('已切片', const Color(0xFFFF9800)));
-    if (_clippedFilter    == false) items.add(('未切片', const Color(0xFF9AA6B2)));
+    if (_selectedGoodShot == true)  items.add((l10n.historyFilterGood,         const Color(0xFF4CAF50)));
+    if (_selectedGoodShot == false) items.add((l10n.historyFilterBad,          const Color(0xFFF44336)));
+    if (_videoTypeIsLong  == true)  items.add((l10n.historyFilterLongVideo,    const Color(0xFF1565C0)));
+    if (_videoTypeIsLong  == false) items.add((l10n.historyFilterShortVideo,   const Color(0xFF757575)));
+    if (_aiAnalyzedFilter == true)  items.add((l10n.historyFilterAnalyzed,     kGoodColor));
+    if (_aiAnalyzedFilter == false) items.add((l10n.historyFilterNotAnalyzed,  const Color(0xFF9AA6B2)));
+    if (_aiCoachFilter    == true)  items.add((l10n.historyFilterAiAnalyzed,   const Color(0xFF7C3AED)));
+    if (_aiCoachFilter    == false) items.add((l10n.historyFilterAiNotAnalyzed,const Color(0xFF9AA6B2)));
+    if (_clippedFilter    == true)  items.add((l10n.historyFilterClipped,      const Color(0xFFFF9800)));
+    if (_clippedFilter    == false) items.add((l10n.historyFilterNotClipped,   const Color(0xFF9AA6B2)));
     if (_postureFilter != null) {
       final color = SwingPosture.isPerfect(_postureFilter)
           ? const Color(0xFF4CAF50)
           : const Color(0xFFE57373);
       items.add((SwingPosture.zhName(_postureFilter!), color));
     }
-    if (_datePreset == 'today')  items.add(('今天',     const Color(0xFF2196F3)));
-    if (_datePreset == 'week')   items.add(('本週',     const Color(0xFF2196F3)));
-    if (_datePreset == 'month')  items.add(('本月',     const Color(0xFF2196F3)));
+    if (_datePreset == 'today')  items.add((l10n.historyFilterToday, const Color(0xFF2196F3)));
+    if (_datePreset == 'week')   items.add((l10n.historyFilterWeek,  const Color(0xFF2196F3)));
+    if (_datePreset == 'month')  items.add((l10n.historyFilterMonth, const Color(0xFF2196F3)));
     if (_datePreset == 'custom' && _customDateFrom != null) {
       final df = _customDateFrom!;
       final dt = _customDateTo ?? _customDateFrom!;
       String fmt(DateTime d) => '${d.month}/${d.day}';
       items.add(('${fmt(df)}–${fmt(dt)}', const Color(0xFF2196F3)));
     }
-    if (_sortBy != _SortBy.date)    items.add((_sortBy.label, const Color(0xFF1565C0)));
+    if (_sortBy != _SortBy.date) {
+      final sortLabel = _sortBy == _SortBy.peakValue
+          ? l10n.historySortPeakSpeed
+          : l10n.historySortClipTime;
+      items.add((sortLabel, const Color(0xFF1565C0)));
+    }
 
     if (items.isEmpty) {
-      return Text('全部',
+      return Text(l10n.historyFilterAll,
           style: TextStyle(fontSize: 11, color: context.textHint));
     }
     return SingleChildScrollView(
@@ -686,7 +714,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (!await file.exists()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('找不到影片檔案 ${entry.fileName}，請確認檔案是否仍存在於裝置內。')),
+        SnackBar(content: Text(AppLocalizations.of(context).historyFileNotFound(entry.fileName))),
       );
       return;
     }
@@ -697,6 +725,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           videoPath: entry.filePath,
           avatarPath: widget.userAvatarPath,
           entry: entry,
+          onEntryUpdated: _onEntryUpdated,
         ),
       ),
     );
@@ -844,11 +873,12 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     final goodCount = _entries.where((e) => e.goodShot == true).length;
     final badCount  = _entries.where((e) => e.goodShot == false).length;
     final totalShown = filteredEntries.length;
+    final l10n = AppLocalizations.of(context);
     final subtitle  = _isLoading
-        ? '載入中…'
+        ? l10n.commonLoading
         : _searchQuery.isNotEmpty
-            ? '搜尋結果 $totalShown / ${_entries.length} 筆'
-            : '共 ${_entries.length} 筆 · 好球 $goodCount · 壞球 $badCount';
+            ? l10n.historySearchResult(totalShown, _entries.length)
+            : l10n.historySubtitle(_entries.length, goodCount, badCount);
 
     return Scaffold(
         backgroundColor: context.bgPage,
@@ -856,7 +886,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
           children: [
             // ── 綠色頂部面板 ─────────────────────────────────────
             GreenPageHeader(
-              title: '歷史錄影',
+              title: l10n.historyTitle,
               subtitle: subtitle,
               actions: [
                 if (_isLoading)
@@ -880,7 +910,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                   textInputAction: TextInputAction.search,
                   style: TextStyle(fontSize: 14, color: context.textPrimary),
                   decoration: InputDecoration(
-                    hintText: '搜尋影片名稱、日期…',
+                    hintText: l10n.historySearchHint,
+                    hintMaxLines: 1,
                     hintStyle: TextStyle(fontSize: 13.5, color: context.textHint),
                     prefixIcon: Icon(Icons.search_rounded, size: 18, color: context.textHint),
                     prefixIconConstraints: const BoxConstraints(minWidth: 38, minHeight: 38),
@@ -903,7 +934,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFF1AA87C), width: 1.2),
+                      borderSide: const BorderSide(color: kBrandPrimary, width: 1.2),
                     ),
                   ),
                 ),
@@ -925,9 +956,9 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                       child: Row(
                         children: [
                           const Icon(Icons.tune_rounded,
-                              size: 15, color: Color(0xFF1AA87C)),
+                              size: 15, color: kBrandPrimary),
                           const SizedBox(width: 6),
-                          Text('篩選與排序',
+                          Text(l10n.historyFilterSort,
                               style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -938,7 +969,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 1),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1AA87C),
+                                color: kBrandPrimary,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text('$_activeFilterCount',
@@ -978,33 +1009,33 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                _filterRow('好/壞', [
-                                  _chip('全部',   _selectedGoodShot == null,  const Color(0xFF1AA87C), () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
-                                  _chip('好球',   _selectedGoodShot == true,  const Color(0xFF4CAF50), () { setState(() => _selectedGoodShot = true);  _saveFilters(); }),
-                                  _chip('壞球',   _selectedGoodShot == false, const Color(0xFFF44336), () { setState(() => _selectedGoodShot = false); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelGoodBad, [
+                                  _chip(l10n.historyFilterAll,   _selectedGoodShot == null,  kBrandPrimary, () { setState(() => _selectedGoodShot = null);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterGood,  _selectedGoodShot == true,  const Color(0xFF4CAF50), () { setState(() => _selectedGoodShot = true);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterBad,   _selectedGoodShot == false, const Color(0xFFF44336), () { setState(() => _selectedGoodShot = false); _saveFilters(); }),
                                 ]),
-                                _filterRow('影片', [
-                                  _chip('全部',   _videoTypeIsLong == null,  const Color(0xFF1AA87C), () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
-                                  _chip('長影片', _videoTypeIsLong == true,  const Color(0xFF1565C0), () { setState(() => _videoTypeIsLong = true);  _saveFilters(); }),
-                                  _chip('短影片', _videoTypeIsLong == false, const Color(0xFF757575), () { setState(() => _videoTypeIsLong = false); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelVideo, [
+                                  _chip(l10n.historyFilterAll,        _videoTypeIsLong == null,  kBrandPrimary, () { setState(() => _videoTypeIsLong = null);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterLongVideo,  _videoTypeIsLong == true,  const Color(0xFF1565C0), () { setState(() => _videoTypeIsLong = true);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterShortVideo, _videoTypeIsLong == false, const Color(0xFF757575), () { setState(() => _videoTypeIsLong = false); _saveFilters(); }),
                                 ]),
-                                _filterRow('分析', [
-                                  _chip('全部',   _aiAnalyzedFilter == null,  const Color(0xFF1AA87C), () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
-                                  _chip('已分析', _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
-                                  _chip('未分析', _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelAnalysis, [
+                                  _chip(l10n.historyFilterAll,          _aiAnalyzedFilter == null,  kBrandPrimary, () { setState(() => _aiAnalyzedFilter = null);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterAnalyzed,     _aiAnalyzedFilter == true,  const Color(0xFF4CAF50), () { setState(() => _aiAnalyzedFilter = true);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterNotAnalyzed,  _aiAnalyzedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiAnalyzedFilter = false); _saveFilters(); }),
                                 ]),
-                                _filterRow('AI', [
-                                  _chip('全部',   _aiCoachFilter == null,  const Color(0xFF1AA87C), () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
-                                  _chip('已分析', _aiCoachFilter == true,  const Color(0xFF7C3AED), () { setState(() => _aiCoachFilter = true);  _saveFilters(); }),
-                                  _chip('未分析', _aiCoachFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiCoachFilter = false); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelAI, [
+                                  _chip(l10n.historyFilterAll,             _aiCoachFilter == null,  kBrandPrimary, () { setState(() => _aiCoachFilter = null);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterAiAnalyzed,      _aiCoachFilter == true,  const Color(0xFF7C3AED), () { setState(() => _aiCoachFilter = true);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterAiNotAnalyzed,   _aiCoachFilter == false, const Color(0xFF9AA6B2), () { setState(() => _aiCoachFilter = false); _saveFilters(); }),
                                 ]),
-                                _filterRow('切片', [
-                                  _chip('全部',   _clippedFilter == null,  const Color(0xFF1AA87C), () { setState(() => _clippedFilter = null);  _saveFilters(); }),
-                                  _chip('已切片', _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
-                                  _chip('未切片', _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelClip, [
+                                  _chip(l10n.historyFilterAll,        _clippedFilter == null,  kBrandPrimary, () { setState(() => _clippedFilter = null);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterClipped,    _clippedFilter == true,  const Color(0xFFFF9800), () { setState(() => _clippedFilter = true);  _saveFilters(); }),
+                                  _chip(l10n.historyFilterNotClipped, _clippedFilter == false, const Color(0xFF9AA6B2), () { setState(() => _clippedFilter = false); _saveFilters(); }),
                                 ]),
-                                _filterRow('姿勢', [
-                                  _chip('全部', _postureFilter == null, const Color(0xFF1AA87C), () { setState(() => _postureFilter = null); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelPosture, [
+                                  _chip(l10n.historyFilterAll, _postureFilter == null, kBrandPrimary, () { setState(() => _postureFilter = null); _saveFilters(); }),
                                   _chip(
                                     SwingPosture.zhName(SwingPosture.good),
                                     _postureFilter == SwingPosture.good,
@@ -1019,11 +1050,11 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                       () { setState(() => _postureFilter = label); _saveFilters(); },
                                     ),
                                 ]),
-                                _filterRow('日期', [
-                                  _chip('全部', _datePreset == null,    const Color(0xFF1AA87C), () { setState(() { _datePreset = null; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
-                                  _chip('今天', _datePreset == 'today', const Color(0xFF2196F3), () { setState(() { _datePreset = 'today'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
-                                  _chip('本週', _datePreset == 'week',  const Color(0xFF2196F3), () { setState(() { _datePreset = 'week';  _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
-                                  _chip('本月', _datePreset == 'month', const Color(0xFF2196F3), () { setState(() { _datePreset = 'month'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelDate, [
+                                  _chip(l10n.historyFilterAll,   _datePreset == null,    kBrandPrimary, () { setState(() { _datePreset = null; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip(l10n.historyFilterToday, _datePreset == 'today', const Color(0xFF2196F3), () { setState(() { _datePreset = 'today'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip(l10n.historyFilterWeek,  _datePreset == 'week',  const Color(0xFF2196F3), () { setState(() { _datePreset = 'week';  _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
+                                  _chip(l10n.historyFilterMonth, _datePreset == 'month', const Color(0xFF2196F3), () { setState(() { _datePreset = 'month'; _customDateFrom = null; _customDateTo = null; }); _saveFilters(); }),
                                   _DateRangeChip(
                                     selected: _datePreset == 'custom',
                                     dateFrom: _customDateFrom,
@@ -1034,11 +1065,27 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                     },
                                   ),
                                 ]),
-                                _filterRow('排序', [
-                                  _chip('時間',     _sortBy == _SortBy.date,      const Color(0xFF1AA87C), () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
-                                  _chip('最佳速度', _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
-                                  _chip('片段時間', _sortBy == _SortBy.clipTime,  const Color(0xFFFF9800), () { setState(() => _sortBy = _SortBy.clipTime);  _saveFilters(); }),
+                                _filterRow(l10n.historyFilterLabelSort, [
+                                  _chip(l10n.historySortDate,      _sortBy == _SortBy.date,      kBrandPrimary, () { setState(() => _sortBy = _SortBy.date);      _saveFilters(); }),
+                                  _chip(l10n.historySortPeakSpeed, _sortBy == _SortBy.peakValue, const Color(0xFF1565C0), () { setState(() => _sortBy = _SortBy.peakValue); _saveFilters(); }),
+                                  _chip(l10n.historySortClipTime,  _sortBy == _SortBy.clipTime,  const Color(0xFFFF9800), () { setState(() => _sortBy = _SortBy.clipTime);  _saveFilters(); }),
                                 ]),
+                                const SizedBox(height: 4),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton.icon(
+                                    onPressed: _activeFilterCount > 0 ? _resetFilters : null,
+                                    icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                                    label: Text(AppLocalizations.of(context).historyFilterReset,
+                                        style: const TextStyle(fontSize: 13)),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: kBrandPrimary,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           )
@@ -1098,12 +1145,12 @@ class _EmptyHistoryView extends StatelessWidget {
           Icon(Icons.video_collection_outlined, size: 72, color: context.textHint),
           const SizedBox(height: 16),
           Text(
-            '目前沒有錄影紀錄',
+            AppLocalizations.of(context).historyEmptyTitle,
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: context.textPrimary),
           ),
           const SizedBox(height: 8),
           Text(
-            '完成一次錄影後即可在此查看歷史影片。',
+            AppLocalizations.of(context).historyEmptySubtitle,
             style: TextStyle(fontSize: 13, color: context.textSecondary),
           ),
         ],
@@ -1127,20 +1174,20 @@ class _SearchEmptyView extends StatelessWidget {
           Icon(Icons.search_off_rounded, size: 64, color: context.textHint),
           const SizedBox(height: 16),
           Text(
-            '找不到符合的影片',
+            AppLocalizations.of(context).historySearchNoResult,
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: context.textPrimary),
           ),
           const SizedBox(height: 6),
           Text(
-            '沒有包含「$query」的紀錄',
+            AppLocalizations.of(context).historySearchNoResultHint(query),
             style: TextStyle(fontSize: 13, color: context.textSecondary),
           ),
           const SizedBox(height: 20),
           TextButton.icon(
             onPressed: onClear,
             icon: const Icon(Icons.close_rounded, size: 16),
-            label: const Text('清除搜尋'),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFF1AA87C)),
+            label: Text(AppLocalizations.of(context).historySearchClear),
+            style: TextButton.styleFrom(foregroundColor: kBrandPrimary),
           ),
         ],
       ),
@@ -1224,8 +1271,8 @@ class _HistoryTileState extends State<_HistoryTile> {
     // 檢查是否已經切片過
     if (widget.entry.isClipped) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('此影片已經切片過，無法重複切片'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).historyAlreadyClipped),
           backgroundColor: Colors.orange,
         ),
       );
@@ -1253,14 +1300,15 @@ class _HistoryTileState extends State<_HistoryTile> {
     // 在第一個 await 之前捕捉 navigator/messenger，確保 Dialog 一定能關閉
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備骨架分析...'));
+    final l10n = AppLocalizations.of(context);
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, l10n.historyProgressPreparingSkeleton));
     final cancelToken = _CancelToken();
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => _ProgressWithAdDialog(
-        title: '擊球偵測中',
+        title: AppLocalizations.of(context).historyDetectingShots,
         progressNotifier: progressNotifier,
         progressColor: Colors.blue,
         onCancel: () {
@@ -1268,7 +1316,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           unawaited(_cancelNativeAnalysis());   // 通知 Kotlin 停止分析迴圈
           navigator.pop();
           if (mounted) setState(() => _isDetecting = false);
-          messenger.showSnackBar(const SnackBar(content: Text('已取消擊球偵測')));
+          messenger.showSnackBar(SnackBar(content: Text(AppLocalizations.of(context).historyCancelledDetection)));
         },
       ),
     );
@@ -1281,7 +1329,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (detectionMode == SkeletonAnalysisMode.v2) {
         // 監聽 native EventChannel 進度，即時更新對話框進度條
         final progressSvc = AnalysisProgressService.instance;
-        progressSvc.reset('V2 音訊掃描中...');
+        progressSvc.reset(l10n.historyProgressV2AudioScan);
         void listenV2() {
           final (pct, label) = progressSvc.progress.value;
           // V2 audio peaks 佔整體進度的 0~0.6，裁切佔 0.6~1.0
@@ -1310,8 +1358,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         if (candidates.isEmpty) {
           navigator.pop();
           setState(() => _isDetecting = false);
-          messenger.showSnackBar(const SnackBar(
-            content: Text('V2：影片無音訊或未偵測到擊球聲'),
+          messenger.showSnackBar(SnackBar(
+            content: Text(l10n.historyV2NoAudio),
             backgroundColor: Colors.orange,
           ));
           return;
@@ -1319,7 +1367,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
         // ── 切片前確認：逐段預覽、勾選保留、自由切片 ────────────────
         final totalDur = widget.entry.durationSeconds.toDouble();
-        progressNotifier.value = (0.4, '等待確認片段...');
+        progressNotifier.value = (0.4, l10n.historyProgressWaitingConfirm);
         if (!mounted) return;
         final selection = await showClipCandidatesSheet(
           context,
@@ -1333,7 +1381,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           return;
         }
 
-        progressNotifier.value = (0.4, '裁切片段中...');
+        progressNotifier.value = (0.4, l10n.historyProgressClipping);
         // 把保留的候選轉為 SwingHit（±2.5 秒精確窗口）
         // 每個候選各自對應一個 clip；若兩候選相距 < 5 秒，clip 可重疊，這是預期行為。
         // trimWithSurface() 保證每個 clip 精確 5 秒，以候選為中心。
@@ -1356,7 +1404,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (detectionMode == SkeletonAnalysisMode.v3) {
         // Step 1：音訊掃描（監聽 native 進度，0.0~0.15）
         final progressSvc = AnalysisProgressService.instance;
-        progressSvc.reset('V3 音訊掃描中...');
+        progressSvc.reset(l10n.historyProgressV3AudioScan);
         void listenAudio() {
           if (progressSvc.currentOp == 'findAudioPeaks') {
             final (pct, label) = progressSvc.progress.value;
@@ -1387,8 +1435,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         if (v3Candidates.isEmpty) {
           navigator.pop();
           setState(() => _isDetecting = false);
-          messenger.showSnackBar(const SnackBar(
-            content: Text('V3：未偵測到擊球（無揮桿動作與擊球聲）'),
+          messenger.showSnackBar(SnackBar(
+            content: Text(l10n.historyV3NoShot),
             backgroundColor: Colors.orange,
           ));
           return;
@@ -1397,7 +1445,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         // ── 切片前確認：逐段預覽、勾選保留、自由切片 ────────────────
         // 在骨架精修前先讓使用者篩掉誤判峰值，省下被剔除候選的分析時間。
         final totalDur = widget.entry.durationSeconds.toDouble();
-        progressNotifier.value = (0.15, '等待確認片段...');
+        progressNotifier.value = (0.15, l10n.historyProgressWaitingConfirm);
         if (!mounted) return;
         final selection = await showClipCandidatesSheet(
           context,
@@ -1422,12 +1470,12 @@ class _HistoryTileState extends State<_HistoryTile> {
           final peak     = peakMs[i];
           final baseFrom = 0.15 + (i / peakMs.length) * 0.55;   // 0.15 ~ 0.70
           final baseTo   = 0.15 + ((i + 1) / peakMs.length) * 0.55;
-          final label    = 'V3 骨架分析 ${i+1}/${peakMs.length}';
+          final label    = l10n.historyProgressV3SkeletonAnalysis(i+1, peakMs.length);
           progressNotifier.value = (baseFrom, label);
 
           // 監聽 Kotlin 進度，顯示「第幾個影片 / 總數：Kotlin 幀狀態」
-          final peakLabel = '第${i+1}/${peakMs.length}個';
-          progressSvc.reset('V3 骨架分析 $peakLabel...');
+          final peakLabel = l10n.historyProgressV3SkeletonItem(i+1, peakMs.length);
+          progressSvc.reset(l10n.historyProgressV3SkeletonAnalysis(i+1, peakMs.length));
           void listenSkel() {
             final (pct, frameLbl) = progressSvc.progress.value;
             final mapped  = baseFrom + pct * (baseTo - baseFrom);
@@ -1494,8 +1542,8 @@ class _HistoryTileState extends State<_HistoryTile> {
         if (v3Hits.isEmpty) {
           navigator.pop();
           setState(() => _isDetecting = false);
-          messenger.showSnackBar(const SnackBar(
-            content: Text('V3：無法找到有效擊球時間點'),
+          messenger.showSnackBar(SnackBar(
+            content: Text(l10n.historyV3NoValidHit),
             backgroundColor: Colors.orange,
           ));
           return;
@@ -1560,7 +1608,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       // 3. 骨架速度偵測擊球
       debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
-      progressNotifier.value = (0.5, '偵測擊球中...');
+      progressNotifier.value = (0.5, l10n.historyProgressDetectingHit);
       final hits = await SwingImpactDetector.detect(csvPath: detectCsvPath);
       if (cancelToken.isCancelled) return;
       debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
@@ -1596,12 +1644,12 @@ class _HistoryTileState extends State<_HistoryTile> {
         Navigator.pop(context);
         setState(() => _isDetecting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              '未偵測到擊球\n影片中可能無明顯揮桿動作，或骨架分析未能成功辨識',
-              style: TextStyle(height: 1.5),
+              l10n.historyNoShotDetected,
+              style: const TextStyle(height: 1.5),
             ),
-            duration: Duration(seconds: 5),
+            duration: const Duration(seconds: 5),
           ),
         );
         return;
@@ -1609,7 +1657,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       // ── 切片前確認：逐段預覽、勾選保留、自由切片（與 V2/V3 一致）────
       final totalDur = widget.entry.durationSeconds.toDouble();
-      progressNotifier.value = (0.5, '等待確認片段...');
+      progressNotifier.value = (0.5, l10n.historyProgressWaitingConfirm);
       if (!mounted) return;
       final selection = await showClipCandidatesSheet(
         context,
@@ -1657,7 +1705,7 @@ class _HistoryTileState extends State<_HistoryTile> {
             : 0;
           progressNotifier.value = (
             0.5 + (percentage / 100) * 0.5,
-            '裁切片段中... ${percentage.round()}% (${prog.current}/${prog.total})'
+            l10n.historyProgressClippingPct(percentage.round(), prog.current, prog.total),
           );
         },
       );
@@ -1668,7 +1716,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       if (results.isEmpty) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('偵測成功，但片段裁切失敗，請重試')),
+          SnackBar(content: Text(l10n.historyClipFailed)),
         );
         return;
       }
@@ -1682,7 +1730,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       await AdService.showBallDetectionInterstitial();
       messenger.showSnackBar(
         SnackBar(
-          content: Text('已生成 ${results.length} 個擊球片段 ✅\n可對每個切片執行「影片分析」加入骨架與球軌跡'),
+          content: Text(l10n.historyClipsGenerated(results.length)),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -1692,7 +1740,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (mounted) setState(() => _isDetecting = false);
       messenger.showSnackBar(
         SnackBar(
-          content: Text('偵測失敗: $e'),
+          content: Text(l10n.historyDetectFailed(e.toString())),
           backgroundColor: Colors.red,
         ),
       );
@@ -1745,6 +1793,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     double baseProgress = 0.5,
     _CancelToken? cancelToken,
   }) async {
+    final l10n = AppLocalizations.of(context);
     final remaining = 1.0 - baseProgress;
     final results = await ClipPipelineService.run(
       hits: hits,
@@ -1754,7 +1803,7 @@ class _HistoryTileState extends State<_HistoryTile> {
         final pct = prog.total > 0 ? prog.current / prog.total : 0.0;
         progressNotifier.value = (
           baseProgress + pct * remaining,
-          '裁切片段中... ${(pct * 100).round()}% (${prog.current}/${prog.total})',
+          l10n.historyProgressClippingPct((pct * 100).round(), prog.current, prog.total),
         );
       },
     );
@@ -1766,7 +1815,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     if (results.isEmpty) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('偵測成功，但片段裁切失敗，請重試')),
+        SnackBar(content: Text(l10n.historyClipFailed)),
       );
       return;
     }
@@ -1777,7 +1826,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     );
     messenger.showSnackBar(
       SnackBar(
-        content: Text('已生成 ${results.length} 個擊球片段 ✅\n骨架與 8 階段正在背景分析中'),
+        content: Text(l10n.historyClipsGeneratedBg(results.length)),
         duration: const Duration(seconds: 4),
       ),
     );
@@ -1807,21 +1856,18 @@ class _HistoryTileState extends State<_HistoryTile> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('影片較長'),
+          title: Text(AppLocalizations.of(context).historyLongVideoTitle),
           content: Text(
-            '此影片長度為 ${widget.entry.durationSeconds} 秒。\n\n'
-            '建議先裁切至 30 秒內再匯入分析，\n'
-            '以避免記憶體不足導致 App 閃退。\n\n'
-            '確定繼續分析整支影片？',
+            AppLocalizations.of(context).historyLongVideoContent(widget.entry.durationSeconds),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
+              child: Text(AppLocalizations.of(context).commonCancel),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('繼續分析'),
+              child: Text(AppLocalizations.of(context).historyContinueAnalysis),
             ),
           ],
         ),
@@ -1859,14 +1905,15 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+    final l10n = AppLocalizations.of(context);
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, l10n.historyProgressPreparing));
     final cancelToken = _CancelToken();
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => _ProgressWithAdDialog(
-        title: '🎬 完整分析中',
+        title: l10n.historyFullAnalysisTitle,
         progressNotifier: progressNotifier,
         progressColor: Colors.cyan,
         onCancel: () {
@@ -1874,7 +1921,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           unawaited(_cancelNativeAnalysis());
           navigator.pop();
           if (mounted) setState(() => _isAnalyzing = false);
-          messenger.showSnackBar(const SnackBar(content: Text('已取消完整分析')));
+          messenger.showSnackBar(SnackBar(content: Text(l10n.historyCancelledAnalysis)));
         },
       ),
     );
@@ -1887,12 +1934,12 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       // 檢查時長有效性
       if (durationSeconds < 1 || durationSeconds > 600) {
-        throw '影片時長 ($durationSeconds 秒) 不符合要求 (1-600 秒)';
+        throw l10n.historyInvalidDuration(durationSeconds);
       }
 
       // Stage 1: 視頻分析（0-70%）
       debugPrint('[完整分析] 開始視頻分析...');
-      progressNotifier.value = (0.0, '視頻分析中...');
+      progressNotifier.value = (0.0, l10n.historyProgressVideoAnalysis);
 
       late RecordingHistoryEntry updatedEntry;
 
@@ -1955,7 +2002,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 長影片（isLongVideo）的切片由「偵測擊球」時的 _trimHit 負責寫入。
       if (!_isLongVideo && hasCsv) {
         try {
-          progressNotifier.value = (0.68, '偵測揮桿階段...');
+          progressNotifier.value = (0.68, l10n.historyProgressDetectingPhase);
           final phaseHits = await SwingImpactDetector.detect(csvPath: csvPath);
           if (phaseHits.isNotEmpty) {
             await ClipPipelineService.savePhasesJson(
@@ -1979,7 +2026,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (cancelToken.isCancelled) return;
 
       // Stage 2: 音頻分析（70-100%）
-      progressNotifier.value = (0.7, '音頻分析中...');
+      progressNotifier.value = (0.7, l10n.historyProgressAudioAnalysis);
       final audioResult = await _analyzeWavFile(
         sessionDir:    sessionDir,
         clipPath:      clipPath,
@@ -2039,7 +2086,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           : '';
       await AdService.showFullAnalysisInterstitial();
       messenger.showSnackBar(SnackBar(
-        content: Text('完整分析完成 ✅$audioMsg'),
+        content: Text(l10n.historyAnalysisComplete(audioMsg)),
         duration: const Duration(seconds: 4),
       ));
     } catch (e) {
@@ -2048,7 +2095,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (mounted) setState(() => _isAnalyzing = false);
       messenger.showSnackBar(
         SnackBar(
-          content: Text('完整分析失敗: $e'),
+          content: Text(l10n.historyAnalysisFailed(e.toString())),
           backgroundColor: Colors.red,
         ),
       );
@@ -2116,15 +2163,14 @@ class _HistoryTileState extends State<_HistoryTile> {
           builder: (_) => AlertDialog(
             icon: const Icon(Icons.sports_golf_rounded,
                 color: Color(0xFF7C3AED), size: 32),
-            title: const Text('今日球數已用完'),
+            title: Text(AppLocalizations.of(context).historyQuotaExhaustedTitle),
             content: Text(
-              '今日已使用 ${planStatus.todayUsed} 次，已達上限 ${planStatus.totalLimit} 次。\n\n'
-              '明天可繼續使用，或升級方案取得更多次數。',
+              AppLocalizations.of(context).historyQuotaExhaustedContent(planStatus.todayUsed, planStatus.totalLimit),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('知道了'),
+                child: Text(AppLocalizations.of(context).historyGotIt),
               ),
             ],
           ),
@@ -2141,12 +2187,12 @@ class _HistoryTileState extends State<_HistoryTile> {
         final result = await showDialog<_ConfirmResult>(
           context: context,
           barrierDismissible: true,
-          builder: (_) => const _ConfirmActionDialog(
+          builder: (_) => _ConfirmActionDialog(
             icon: Icons.psychology_rounded,
-            iconColor: Color(0xFF7C3AED),
-            title: '確定送出 AI 分析？',
-            description: '影片將上傳至 AI 教練系統進行分析，請確認網路連線正常。',
-            confirmLabel: '送出分析',
+            iconColor: const Color(0xFF7C3AED),
+            title: AppLocalizations.of(context).historyAiAnalysisConfirmTitle,
+            description: AppLocalizations.of(context).historyAiAnalysisConfirmDesc,
+            confirmLabel: AppLocalizations.of(context).historyAiAnalysisConfirmBtn,
           ),
         );
         if (result == null) return; // 使用者取消
@@ -2224,7 +2270,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('AI 分析提交失敗：${AnalysisService.friendlyError(e)}'),
+            content: Text(AppLocalizations.of(context).historyAiSubmitFailed(AnalysisService.friendlyError(e))),
             backgroundColor: Colors.red,
           ),
         );
@@ -2242,6 +2288,17 @@ class _HistoryTileState extends State<_HistoryTile> {
     setState(() => _isDownloading = true);
     try {
       await _runDownloadFlow(context, widget.entry);
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
+  /// 自訂匯出（勾選疊加元素 + 浮水印分級）
+  Future<void> _customExport() async {
+    if (_isDownloading) return;
+    setState(() => _isDownloading = true);
+    try {
+      await _runCustomExportFlow(context, widget.entry);
     } finally {
       if (mounted) setState(() => _isDownloading = false);
     }
@@ -2285,7 +2342,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('沒有其他短影片可供比較')),
+        SnackBar(content: Text(AppLocalizations.of(context).historyNoOtherVideoToCompare)),
       );
       return;
     }
@@ -2379,6 +2436,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     // 計算屬於此影片的切片（按擊球時間排序）
     final clips = widget.allEntries
         .where((e) =>
@@ -2445,7 +2503,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              '${widget.formattedTime} · ${widget.entry.durationSeconds}秒',
+                              AppLocalizations.of(context).historyDurationLine(widget.formattedTime, widget.entry.durationSeconds),
                               style: TextStyle(
                                   fontSize: 11, color: context.textHint),
                               maxLines: 1,
@@ -2461,7 +2519,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
-                                '${widget.formattedImportTime!}${widget.entry.sharerName != null ? '  · 來自 ${widget.entry.sharerName}' : ''}',
+                                '${widget.formattedImportTime!}${widget.entry.sharerName != null ? '  · ${AppLocalizations.of(context).historyImportedFrom(widget.entry.sharerName!)}' : ''}',
                                 style: TextStyle(
                                     fontSize: 11, color: context.textHint),
                                 maxLines: 1,
@@ -2481,20 +2539,20 @@ class _HistoryTileState extends State<_HistoryTile> {
                           runSpacing: 4,
                           children: [
                             _badge(
-                              _isLongVideo ? '長影片' : '短影片',
+                              _isLongVideo ? l10n.historyFilterLongVideo : l10n.historyFilterShortVideo,
                               _isLongVideo
                                   ? const Color(0xFF1565C0)
                                   : const Color(0xFF757575),
                             ),
                             if (widget.entry.videoType == VideoType.original &&
                                 widget.entry.isClipped)
-                              _badge('已切片', const Color(0xFFFF9800)),
+                              _badge(l10n.historyFilterClipped, const Color(0xFFFF9800)),
                             if (widget.entry.audioTags
                                     ?.contains('no_audio') ==
                                 true)
-                              _badge('無聲音', const Color(0xFF9E9E9E)),
+                              _badge(l10n.historyBadgeNoAudio, const Color(0xFF9E9E9E)),
                             if (widget.entry.isAnalyzed)
-                              _badge('已分析', const Color(0xFF1AA87C)),
+                              _badge(l10n.historyFilterAnalyzed, kGoodColor),
                             if (widget.entry.hasAiCoachAnalysis)
                               _badgeWithIcon('AI', const Color(0xFF7C3AED),
                                   Icons.psychology_rounded),
@@ -2552,7 +2610,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 ),
                                 const SizedBox(width: 10),
                                 Text(
-                                  '甜蜜點',
+                                  l10n.historySweetSpot,
                                   style: TextStyle(
                                       fontSize: 11, color: context.textHint),
                                 ),
@@ -2569,9 +2627,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                                   ),
                                   child: Text(
                                     goodShot == true
-                                        ? '命中'
+                                        ? l10n.historySweetSpotHit
                                         : goodShot == false
-                                            ? '未命中'
+                                            ? l10n.historySweetSpotMiss
                                             : '—',
                                     style: TextStyle(
                                       fontSize: 11,
@@ -2630,7 +2688,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
                   child: HitsSummaryExpansionTile(
                     hitsSummary: snapshot.data!,
-                    title: '擊球摘要',
+                    title: l10n.historyHitSummary,
                     initiallyExpanded: false,
                   ),
                 );
@@ -2643,7 +2701,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                 children: [
                   _actionBtn(
                     icon: Icons.bar_chart_rounded,
-                    label: '圖表',
+                    label: l10n.historyActionChart,
                     color: const Color(0xFF1565C0),
                     onTap: () => Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) =>
@@ -2653,8 +2711,8 @@ class _HistoryTileState extends State<_HistoryTile> {
                       width: 1, thickness: 1, color: context.borderColor),
                   _actionBtn(
                     icon: Icons.play_arrow_rounded,
-                    label: '播放',
-                    color: const Color(0xFF1AA87C),
+                    label: l10n.historyActionPlay,
+                    color: kBrandPrimary,
                     onTap: widget.onTap,
                   ),
                   VerticalDivider(
@@ -2664,14 +2722,14 @@ class _HistoryTileState extends State<_HistoryTile> {
                       icon: _isExpanded
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
-                      label: _isExpanded ? '折疊擊球' : '展開擊球',
+                      label: _isExpanded ? l10n.historyActionCollapse : l10n.historyActionExpand,
                       color: const Color(0xFFE65100),
                       onTap: () => setState(() => _isExpanded = !_isExpanded),
                     )
                   else if (_isLongVideo && _isOriginalVideo && !widget.entry.isClipped)
                     _actionBtn(
                       icon: Icons.sports_golf_rounded,
-                      label: '偵測擊球',
+                      label: l10n.historyActionDetect,
                       color: const Color(0xFFE65100),
                       loading: _isDetecting,
                       onTap: _runDetection,
@@ -2679,7 +2737,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                   else if (!_isAnalyzed)
                     _actionBtn(
                       icon: Icons.analytics_rounded,
-                      label: '完整分析',
+                      label: l10n.historyActionFullAnalysis,
                       color: const Color(0xFF00838F),
                       loading: _isAnalyzing,
                       onTap: _runCombinedAnalysis,
@@ -2687,7 +2745,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                   else
                     _actionBtn(
                       icon: Icons.psychology_rounded,
-                      label: 'AI 分析',
+                      label: l10n.historyActionAiAnalysis,
                       color: const Color(0xFF7C3AED),
                       loading: _isSubmittingAi,
                       onTap: _runAiAnalysis,
@@ -2703,7 +2761,7 @@ class _HistoryTileState extends State<_HistoryTile> {
           top: 4,
           right: 4,
           child: PopupMenuButton<_HistoryMenuAction>(
-            tooltip: '更多操作',
+            tooltip: l10n.historyMoreActions,
             icon: Icon(
                 Icons.more_vert_rounded,
                 color: context.textHint,
@@ -2733,6 +2791,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                   case _HistoryMenuAction.download:
                     _downloadVideo();
                     break;
+                  case _HistoryMenuAction.customExport:
+                    _customExport();
+                    break;
                   case _HistoryMenuAction.uploadReward:
                     _claimUploadReward();
                     break;
@@ -2752,23 +2813,23 @@ class _HistoryTileState extends State<_HistoryTile> {
                   .isNotEmpty;
               final canShare = !_isLongVideo && _isAnalyzed;
               return [
-                const PopupMenuItem<_HistoryMenuAction>(
+                PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.rename,
-                  child: Text('重新命名'),
+                  child: Text(l10n.historyMenuRename),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.note,
                   child: Text(
                       (widget.entry.note?.trim().isNotEmpty ?? false)
-                          ? '編輯備註'
-                          : '新增備註'),
+                          ? l10n.historyMenuEditNote
+                          : l10n.historyMenuAddNote),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.analyze,
                   enabled: canAnalyze && !_isAnalyzing,
                   child: Row(children: [
                     Text(
-                        _isAnalyzing ? '分析中...' : '完整分析',
+                        _isAnalyzing ? l10n.historyMenuAnalyzing : l10n.historyActionFullAnalysis,
                         style: TextStyle(
                             color: (!canAnalyze || _isAnalyzing)
                                 ? Colors.grey
@@ -2786,7 +2847,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.compare,
                   enabled: canCompare,
-                  child: Text('與另一部影片比較',
+                  child: Text(l10n.historyMenuCompare,
                       style: TextStyle(
                           color: canCompare ? null : Colors.grey)),
                 ),
@@ -2797,10 +2858,10 @@ class _HistoryTileState extends State<_HistoryTile> {
                     Icon(Icons.share_outlined,
                         size: 16,
                         color: canShare
-                            ? const Color(0xFF1AA87C)
+                            ? kBrandPrimary
                             : Colors.grey),
                     const SizedBox(width: 8),
-                    Text('分享連結',
+                    Text(l10n.historyMenuShare,
                         style: TextStyle(
                             color: canShare ? null : Colors.grey)),
                   ]),
@@ -2813,9 +2874,20 @@ class _HistoryTileState extends State<_HistoryTile> {
                         size: 16,
                         color: _isDownloading
                             ? Colors.grey
-                            : const Color(0xFF1AA87C)),
+                            : kBrandPrimary),
                     const SizedBox(width: 8),
-                    Text(_isDownloading ? '下載中...' : '下載影片'),
+                    Text(_isDownloading ? l10n.historyMenuDownloading : l10n.historyMenuDownload),
+                  ]),
+                ),
+                PopupMenuItem<_HistoryMenuAction>(
+                  value: _HistoryMenuAction.customExport,
+                  enabled: !_isDownloading,
+                  child: Row(children: [
+                    Icon(Icons.tune_rounded,
+                        size: 16,
+                        color: _isDownloading ? Colors.grey : kBrandPrimary),
+                    const SizedBox(width: 8),
+                    Text(l10n.exportCustomTitle),
                   ]),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
@@ -2832,8 +2904,8 @@ class _HistoryTileState extends State<_HistoryTile> {
                     const SizedBox(width: 8),
                     Text(
                       widget.entry.isEffectivelyUploaded
-                          ? '已上傳資料'
-                          : '上傳獎勵 +${RewardType.uploadData.ballsPerAction} 球',
+                          ? l10n.historyMenuUploaded
+                          : l10n.historyMenuUploadReward(RewardType.uploadData.ballsPerAction),
                       style: TextStyle(
                           color: (widget.entry.isAnalyzed &&
                                   !widget.entry.isEffectivelyUploaded)
@@ -2842,9 +2914,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                     ),
                   ]),
                 ),
-                const PopupMenuItem<_HistoryMenuAction>(
+                PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.delete,
-                  child: Text('刪除影片'),
+                  child: Text(l10n.historyMenuDeleteVideo),
                 ),
               ];
             },
@@ -2948,7 +3020,7 @@ class _HistoryPreview extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: overlayDeco,
-            child: Text('第$roundIndex輪', style: overlayStyle),
+            child: Text(AppLocalizations.of(context).historyRoundLabel(roundIndex), style: overlayStyle),
           ),
         ),
         // 時長 — 右下角
@@ -2995,25 +3067,26 @@ class _ClipSubCardState extends State<_ClipSubCard> {
   /// 重新命名切片
   Future<void> _rename() async {
     final clip = widget.clip;
+    final l10n = AppLocalizations.of(context);
     final initial = clip.customName?.trim().isNotEmpty == true
         ? clip.customName!.trim()
-        : '第 ${widget.clipIndex} 球';
+        : l10n.historyClipDefaultName(widget.clipIndex);
     String tempName = initial;
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('重新命名切片'),
+        title: Text(l10n.historyRenameClipTitle),
         content: TextField(
           controller: TextEditingController(text: initial),
           maxLength: 40,
-          decoration: const InputDecoration(labelText: '名稱', helperText: '可留空以恢復預設'),
+          decoration: InputDecoration(labelText: l10n.historyRenameLabel, helperText: l10n.historyRenameHelper),
           onChanged: (v) => tempName = v,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(l10n.commonCancel)),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(tempName),
-            child: const Text('確定'),
+            child: Text(l10n.commonOk),
           ),
         ],
       ),
@@ -3065,6 +3138,17 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     }
   }
 
+  /// 自訂匯出切片（勾選疊加元素 + 浮水印分級）
+  Future<void> _customExport() async {
+    if (_isDownloading) return;
+    setState(() => _isDownloading = true);
+    try {
+      await _runCustomExportFlow(context, widget.clip);
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
+    }
+  }
+
   /// 完整分析（短影片）
   Future<void> _runCombinedAnalysis() async {
     if (_isAnalyzing) return;
@@ -3097,14 +3181,15 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final progressNotifier = ValueNotifier<(double, String)>((0.0, '準備中...'));
+    final l10n = AppLocalizations.of(context);
+    final progressNotifier = ValueNotifier<(double, String)>((0.0, l10n.historyProgressPreparing));
     final cancelToken = _CancelToken();
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => _ProgressWithAdDialog(
-        title: '🎬 完整分析中',
+        title: l10n.historyFullAnalysisTitle,
         progressNotifier: progressNotifier,
         progressColor: Colors.cyan,
         onCancel: () {
@@ -3112,7 +3197,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
           unawaited(_cancelNativeAnalysis());   // 通知 Kotlin 停止分析迴圈
           navigator.pop();
           if (mounted) setState(() => _isAnalyzing = false);
-          messenger.showSnackBar(const SnackBar(content: Text('已取消完整分析')));
+          messenger.showSnackBar(SnackBar(content: Text(l10n.historyCancelledAnalysis)));
         },
       ),
     );
@@ -3124,10 +3209,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       final durationSeconds = clip.durationSeconds;
 
       if (durationSeconds < 1 || durationSeconds > 600) {
-        throw '影片時長 ($durationSeconds 秒) 不符合要求 (1-600 秒)';
+        throw l10n.historyInvalidDuration(durationSeconds);
       }
 
-      progressNotifier.value = (0.0, '視頻分析中...');
+      progressNotifier.value = (0.0, l10n.historyProgressPreparing);
       final result = await ClipPipelineService.analyze(
         clipPath: clipPath,
         sessionDir: sessionDir,
@@ -3149,7 +3234,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
       if (cancelToken.isCancelled) return;
 
-      progressNotifier.value = (0.7, '音頻分析中...');
+      progressNotifier.value = (0.7, l10n.historyProgressAudioAnalysis);
       final audioResult = await _analyzeWavFile(
         sessionDir:    sessionDir,
         clipPath:      clipPath,
@@ -3165,7 +3250,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       // 完整分析後重新偵測揮桿 8 階段（含 V2 切片完整分析後的情況）
       if (hasCsvLocal) {
         try {
-          progressNotifier.value = (0.68, '偵測揮桿階段...');
+          progressNotifier.value = (0.68, l10n.historyProgressDetectingPhase);
           final phaseHits = await SwingImpactDetector.detect(csvPath: csvPathLocal);
           if (phaseHits.isNotEmpty) {
             await ClipPipelineService.savePhasesJson(
@@ -3231,7 +3316,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       final audioMsg = audioResult != null ? '\n🎵 音頻：${audioResult.feedbackLabel}' : '';
       await AdService.showFullAnalysisInterstitial();
       messenger.showSnackBar(SnackBar(
-        content: Text('完整分析完成 ✅$audioMsg'),
+        content: Text(l10n.historyAnalysisComplete(audioMsg)),
         duration: const Duration(seconds: 4),
       ));
     } catch (e) {
@@ -3239,7 +3324,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
       navigator.pop();
       if (mounted) setState(() => _isAnalyzing = false);
       messenger.showSnackBar(SnackBar(
-        content: Text('完整分析失敗: $e'),
+        content: Text(l10n.historyAnalysisFailed(e.toString())),
         backgroundColor: Colors.red,
       ));
     } finally {
@@ -3252,7 +3337,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     if (!await file.exists()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('影片檔案不存在，可能已被刪除')),
+          SnackBar(content: Text(AppLocalizations.of(context).historyClipFileNotExist)),
         );
       }
       return;
@@ -3263,6 +3348,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         builder: (_) => VideoPlayerPage(
           videoPath: widget.clip.filePath,
           entry: widget.clip, // 傳入 entry 以顯示圖表與 AI 分析面板
+          onEntryUpdated: widget.onEntryUpdated,
         ),
       ),
     );
@@ -3326,15 +3412,14 @@ class _ClipSubCardState extends State<_ClipSubCard> {
           builder: (_) => AlertDialog(
             icon: const Icon(Icons.sports_golf_rounded,
                 color: Color(0xFF7C3AED), size: 32),
-            title: const Text('今日球數已用完'),
+            title: Text(AppLocalizations.of(context).historyQuotaExhaustedTitle),
             content: Text(
-              '今日已使用 ${planStatus.todayUsed} 次，已達上限 ${planStatus.totalLimit} 次。\n\n'
-              '明天可繼續使用，或升級方案取得更多次數。',
+              AppLocalizations.of(context).historyQuotaExhaustedContent(planStatus.todayUsed, planStatus.totalLimit),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('知道了'),
+                child: Text(AppLocalizations.of(context).historyGotIt),
               ),
             ],
           ),
@@ -3351,12 +3436,12 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         final result = await showDialog<_ConfirmResult>(
           context: context,
           barrierDismissible: true,
-          builder: (_) => const _ConfirmActionDialog(
+          builder: (_) => _ConfirmActionDialog(
             icon: Icons.psychology_rounded,
-            iconColor: Color(0xFF7C3AED),
-            title: '確定送出 AI 分析？',
-            description: '影片將上傳至 AI 教練系統進行分析，請確認網路連線正常。',
-            confirmLabel: '送出分析',
+            iconColor: const Color(0xFF7C3AED),
+            title: AppLocalizations.of(context).historyAiAnalysisConfirmTitle,
+            description: AppLocalizations.of(context).historyAiAnalysisConfirmDesc,
+            confirmLabel: AppLocalizations.of(context).historyAiAnalysisConfirmBtn,
           ),
         );
         if (result == null) return; // 使用者取消
@@ -3432,7 +3517,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content:
-                  Text('AI 分析提交失敗：${AnalysisService.friendlyError(e)}'),
+                  Text(AppLocalizations.of(context).historyAiSubmitFailed(AnalysisService.friendlyError(e))),
               backgroundColor: Colors.red),
         );
       }
@@ -3443,6 +3528,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final clip = widget.clip;
 
     return Row(
@@ -3513,7 +3599,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                               Text(
                                 clip.customName?.trim().isNotEmpty == true
                                     ? clip.customName!.trim()
-                                    : '第 ${widget.clipIndex} 球',
+                                    : l10n.historyClipDefaultName(widget.clipIndex),
                                 style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
@@ -3528,7 +3614,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                       size: 11, color: Color(0xFFE65100)),
                                   const SizedBox(width: 3),
                                   Text(
-                                    '擊球 @ ${clip.hitSecond!.toStringAsFixed(1)}s',
+                                    l10n.historyClipHitAt(clip.hitSecond!.toStringAsFixed(1)),
                                     style: TextStyle(
                                         fontSize: 11,
                                         color: context.textHint),
@@ -3539,7 +3625,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                   clip.endSecond != null) ...[
                                 const SizedBox(height: 2),
                                 Text(
-                                  '片段 ${clip.startSecond!.toStringAsFixed(1)}s ~ ${clip.endSecond!.toStringAsFixed(1)}s',
+                                  l10n.historyClipRange(clip.startSecond!.toStringAsFixed(1), clip.endSecond!.toStringAsFixed(1)),
                                   style: TextStyle(
                                       fontSize: 11,
                                       color: context.textHint),
@@ -3556,7 +3642,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                 runSpacing: 3,
                                 children: [
                                   if (clip.isAnalyzed)
-                                    _smallBadge('已分析', const Color(0xFF1AA87C)),
+                                    _smallBadge(l10n.historyFilterAnalyzed, kGoodColor),
                                   if (clip.hasAiCoachAnalysis)
                                     _smallBadge('AI', const Color(0xFF7C3AED)),
                                   if (clip.swingPostureLabel != null)
@@ -3572,7 +3658,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                       Icons.auto_awesome_rounded,
                                     ),
                                   if (clip.audioTags?.contains('no_audio') == true)
-                                    _smallBadge('無聲音', const Color(0xFF9E9E9E)),
+                                    _smallBadge(l10n.historyBadgeNoAudio, const Color(0xFF9E9E9E)),
                                 ],
                               ),
                               // ── 速度 + 甜蜜點 數據行（未分析時反灰）──
@@ -3611,7 +3697,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                         color: context.borderColor),
                                     const SizedBox(width: 8),
                                     Text(
-                                      '甜蜜點',
+                                      l10n.historySweetSpot,
                                       style: TextStyle(
                                           fontSize: 10,
                                           color: context.textHint),
@@ -3628,9 +3714,9 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                       ),
                                       child: Text(
                                         goodShot == true
-                                            ? '命中'
+                                            ? l10n.historySweetSpotHit
                                             : goodShot == false
-                                                ? '未命中'
+                                                ? l10n.historySweetSpotMiss
                                                 : '—',
                                         style: TextStyle(
                                           fontSize: 10,
@@ -3681,7 +3767,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                       children: [
                         _clipBtn(
                           icon: Icons.bar_chart_rounded,
-                          label: '圖表',
+                          label: l10n.historyActionChart,
                           color: const Color(0xFF1565C0),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
@@ -3693,8 +3779,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                             width: 1, thickness: 1, color: context.borderColor),
                         _clipBtn(
                           icon: Icons.play_arrow_rounded,
-                          label: '播放',
-                          color: const Color(0xFF1AA87C),
+                          label: l10n.historyActionPlay,
+                          color: kBrandPrimary,
                           onTap: _play,
                         ),
                         VerticalDivider(
@@ -3702,7 +3788,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         if (!clip.isAnalyzed)
                           _clipBtn(
                             icon: Icons.analytics_rounded,
-                            label: '完整分析',
+                            label: l10n.historyActionFullAnalysis,
                             color: const Color(0xFF00838F),
                             loading: _isAnalyzing,
                             onTap: _runCombinedAnalysis,
@@ -3710,7 +3796,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         else
                           _clipBtn(
                             icon: Icons.psychology_rounded,
-                            label: 'AI 分析',
+                            label: l10n.historyActionAiAnalysis,
                             color: const Color(0xFF7C3AED),
                             loading: _isSubmittingAi,
                             onTap: _runAiAnalysis,
@@ -3727,7 +3813,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
             top: 2,
             right: 2,
             child: PopupMenuButton<_ClipMenuAction>(
-              tooltip: '更多操作',
+              tooltip: l10n.historyMoreActions,
               icon: Icon(Icons.more_vert_rounded,
                   size: 18, color: context.textHint),
               padding: EdgeInsets.zero,
@@ -3743,6 +3829,9 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     case _ClipMenuAction.download:
                       _downloadVideo();
                       break;
+                    case _ClipMenuAction.customExport:
+                      _customExport();
+                      break;
                     case _ClipMenuAction.note:
                       _editNote();
                       break;
@@ -3756,16 +3845,16 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                 });
               },
               itemBuilder: (context) => [
-                const PopupMenuItem<_ClipMenuAction>(
+                PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.rename,
-                  child: Text('重新命名'),
+                  child: Text(l10n.historyMenuRename),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.note,
                   child: Text(
                       (clip.note?.trim().isNotEmpty ?? false)
-                          ? '編輯備註'
-                          : '新增備註'),
+                          ? l10n.historyMenuEditNote
+                          : l10n.historyMenuAddNote),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.share,
@@ -3774,10 +3863,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     Icon(Icons.share_outlined,
                         size: 16,
                         color: clip.isAnalyzed
-                            ? const Color(0xFF1AA87C)
+                            ? kBrandPrimary
                             : Colors.grey),
                     const SizedBox(width: 8),
-                    Text('分享連結',
+                    Text(l10n.historyMenuShare,
                         style: TextStyle(
                             color:
                                 clip.isAnalyzed ? null : Colors.grey)),
@@ -3791,9 +3880,20 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         size: 16,
                         color: _isDownloading
                             ? Colors.grey
-                            : const Color(0xFF1AA87C)),
+                            : kBrandPrimary),
                     const SizedBox(width: 8),
-                    Text(_isDownloading ? '下載中...' : '下載影片'),
+                    Text(_isDownloading ? l10n.historyMenuDownloading : l10n.historyMenuDownload),
+                  ]),
+                ),
+                PopupMenuItem<_ClipMenuAction>(
+                  value: _ClipMenuAction.customExport,
+                  enabled: !_isDownloading,
+                  child: Row(children: [
+                    Icon(Icons.tune_rounded,
+                        size: 16,
+                        color: _isDownloading ? Colors.grey : kBrandPrimary),
+                    const SizedBox(width: 8),
+                    Text(l10n.exportCustomTitle),
                   ]),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
@@ -3808,8 +3908,8 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     const SizedBox(width: 8),
                     Text(
                       clip.isEffectivelyUploaded
-                          ? '已上傳資料'
-                          : '上傳獎勵 +${RewardType.uploadData.ballsPerAction} 球',
+                          ? l10n.historyMenuUploaded
+                          : l10n.historyMenuUploadReward(RewardType.uploadData.ballsPerAction),
                       style: TextStyle(
                           color: (clip.isAnalyzed &&
                                   !clip.isEffectivelyUploaded)
@@ -3818,10 +3918,10 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     ),
                   ]),
                 ),
-                const PopupMenuItem<_ClipMenuAction>(
+                PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.delete,
-                  child: Text('刪除影片',
-                      style: TextStyle(color: Colors.red)),
+                  child: Text(l10n.historyMenuDeleteVideo,
+                      style: const TextStyle(color: Colors.red)),
                 ),
               ],
             ),
@@ -4013,7 +4113,7 @@ class _ComparePickerSheet extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '⚖️ 選擇比較影片',
+                      AppLocalizations.of(context).historyCompareTitle,
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -4022,7 +4122,7 @@ class _ComparePickerSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '將與「${currentEntry.displayTitle}」對軸比較',
+                      AppLocalizations.of(context).historyCompareSubtitle(currentEntry.displayTitle),
                       style: TextStyle(fontSize: 12, color: context.textSecondary),
                     ),
                   ],
@@ -4067,8 +4167,8 @@ class _DateRangeChip extends StatelessWidget {
     required this.onPicked,
   });
 
-  String get _label {
-    if (!selected || dateFrom == null) return '自訂日期';
+  String _label(BuildContext context) {
+    if (!selected || dateFrom == null) return AppLocalizations.of(context).historyFilterCustomDate;
     final from = dateFrom!;
     final to   = dateTo ?? from;
     String fmt(DateTime d) => '${d.month}/${d.day}';
@@ -4092,10 +4192,10 @@ class _DateRangeChip extends StatelessWidget {
                   end: now,
                 ),
           locale: const Locale('zh', 'TW'),
-          helpText: '選擇日期範圍',
-          cancelText: '取消',
-          confirmText: '確定',
-          saveText: '確定',
+          helpText: AppLocalizations.of(context).historyDateRangeHelp,
+          cancelText: AppLocalizations.of(context).commonCancel,
+          confirmText: AppLocalizations.of(context).commonOk,
+          saveText: AppLocalizations.of(context).commonOk,
         );
         if (picked != null) {
           onPicked(picked.start, DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59));
@@ -4122,7 +4222,7 @@ class _DateRangeChip extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             Text(
-              _label,
+              _label(context),
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -4213,8 +4313,8 @@ Future<_AiModeResult?> _showAiModeDialog(
     if (!await phasesFile.exists()) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('找不到 phases.json，請先執行完整分析再選擇此模式'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context).historyPhasesJsonMissing),
             backgroundColor: Colors.orange,
           ),
         );
@@ -4227,8 +4327,8 @@ Future<_AiModeResult?> _showAiModeDialog(
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('phases.json 格式錯誤'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context).historyPhasesJsonInvalid),
             backgroundColor: Colors.red,
           ),
         );
@@ -4246,24 +4346,27 @@ class _SelectAiModeDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('選擇 AI 分析模式'),
+      title: Text(AppLocalizations.of(context).historySelectAiModeTitle),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           _modeTile(context, 'v1', Icons.flash_on_rounded,
-              '原版提示詞（快速）', '標準提示，速度最快'),
+              AppLocalizations.of(context).historyAiModeV1Title,
+              AppLocalizations.of(context).historyAiModeV1Desc),
           const SizedBox(height: 8),
           _modeTile(context, 'v2', Icons.videocam_rounded,
-              '完整讀取影片版本（精確）', '讓 AI 完整閱讀影片後分析'),
+              AppLocalizations.of(context).historyAiModeV2Title,
+              AppLocalizations.of(context).historyAiModeV2Desc),
           const SizedBox(height: 8),
           _modeTile(context, 'v3', Icons.photo_library_rounded,
-              '讀取關鍵禎版本（8 大姿勢圖）', '從 phases.json 提取關鍵幀時間點'),
+              AppLocalizations.of(context).historyAiModeV3Title,
+              AppLocalizations.of(context).historyAiModeV3Desc),
         ],
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(AppLocalizations.of(context).commonCancel),
         ),
       ],
     );
@@ -4361,14 +4464,14 @@ class _ConfirmActionDialog extends StatefulWidget {
   final Color iconColor;
   final String title;
   final String description;
-  final String confirmLabel;
+  final String? confirmLabel;
 
   const _ConfirmActionDialog({
     required this.icon,
     required this.iconColor,
     required this.title,
     required this.description,
-    this.confirmLabel = '確定',
+    this.confirmLabel,
   });
 
   @override
@@ -4424,7 +4527,7 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '今日不再提醒',
+                  AppLocalizations.of(context).historySkipToday,
                   style: TextStyle(fontSize: 12.5, color: context.textSecondary),
                 ),
               ],
@@ -4436,7 +4539,7 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
-          child: Text('取消', style: TextStyle(color: context.textSecondary)),
+          child: Text(AppLocalizations.of(context).commonCancel, style: TextStyle(color: context.textSecondary)),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
@@ -4444,7 +4547,7 @@ class _ConfirmActionDialogState extends State<_ConfirmActionDialog> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           onPressed: () => Navigator.of(context).pop(_ConfirmResult(skipToday: _skipToday)),
-          child: Text(widget.confirmLabel),
+          child: Text(widget.confirmLabel ?? AppLocalizations.of(context).commonOk),
         ),
       ],
     );
@@ -4475,7 +4578,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
   SkeletonAnalysisMode _mode = SkeletonAnalysisMode.v1;
   bool _skipToday = false;
 
-  static const _kGreen  = Color(0xFF1AA87C);
+  static const _kGreen  = kBrandPrimary;
   static const _kOrange = Color(0xFFE65100);
   static const _kBlue   = Color(0xFF1565C0);
 
@@ -4486,10 +4589,10 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-      title: const Row(children: [
-        Icon(Icons.sports_golf_rounded, color: Color(0xFFE65100), size: 22),
-        SizedBox(width: 8),
-        Text('選擇偵測模式', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      title: Row(children: [
+        const Icon(Icons.sports_golf_rounded, color: Color(0xFFE65100), size: 22),
+        const SizedBox(width: 8),
+        Text(AppLocalizations.of(context).historySelectDetectModeTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
       ]),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -4499,11 +4602,11 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
             mode: SkeletonAnalysisMode.v1,
             icon: Icons.accessibility_new_rounded,
             color: _kGreen,
-            title: 'V1 骨架分析',
-            subtitle: '全幀 ML Kit → 依手腕速度偵測',
-            badge: '精準',
+            title: AppLocalizations.of(context).historyDetectV1Title,
+            subtitle: AppLocalizations.of(context).historyDetectV1Desc,
+            badge: AppLocalizations.of(context).historyDetectBadgePrecise,
             badgeColor: _kGreen,
-            timeHint: '需 1–3 分鐘',
+            timeHint: AppLocalizations.of(context).historyDetectV1Time,
           ),
           const SizedBox(height: 8),
           const SizedBox(height: 8),
@@ -4511,22 +4614,22 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
             mode: SkeletonAnalysisMode.v2,
             icon: Icons.graphic_eq_rounded,
             color: _kOrange,
-            title: 'V2 音訊快速偵測',
-            subtitle: '掃描擊球聲波峰值，無需骨架',
-            badge: '快速',
+            title: AppLocalizations.of(context).historyDetectV2Title,
+            subtitle: AppLocalizations.of(context).historyDetectV2Desc,
+            badge: AppLocalizations.of(context).historyDetectBadgeFast,
             badgeColor: _kOrange,
-            timeHint: '數秒內完成',
+            timeHint: AppLocalizations.of(context).historyDetectV2Time,
           ),
           const SizedBox(height: 8),
           _modeCard(
             mode: SkeletonAnalysisMode.v3,
             icon: Icons.track_changes_rounded,
             color: _kBlue,
-            title: 'V3 音訊 + 局部骨架',
-            subtitle: '音訊找候選(±3s)→骨架精確定位→切片(±2.5s)',
-            badge: '均衡',
+            title: AppLocalizations.of(context).historyDetectV3Title,
+            subtitle: AppLocalizations.of(context).historyDetectV3Desc,
+            badge: AppLocalizations.of(context).historyDetectBadgeBalanced,
             badgeColor: _kBlue,
-            timeHint: '每球約 5–15 秒',
+            timeHint: AppLocalizations.of(context).historyDetectV3Time,
           ),
           // ── 今日不再提醒 ──
           Divider(height: 16, thickness: 0.8, color: context.borderColor),
@@ -4548,7 +4651,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text('今日不再提醒', style: TextStyle(fontSize: 12.5, color: context.textSecondary)),
+                Text(AppLocalizations.of(context).historySkipToday, style: TextStyle(fontSize: 12.5, color: context.textSecondary)),
               ]),
             ),
           ),
@@ -4558,7 +4661,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
-          child: Text('取消', style: TextStyle(color: context.textSecondary)),
+          child: Text(AppLocalizations.of(context).commonCancel, style: TextStyle(color: context.textSecondary)),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
@@ -4570,7 +4673,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
           onPressed: () => Navigator.of(context).pop(
             _DetectionModeResult(mode: _mode, skipToday: _skipToday),
           ),
-          child: const Text('開始偵測'),
+          child: Text(AppLocalizations.of(context).historyStartDetect),
         ),
       ],
     );
@@ -4660,11 +4763,11 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-      title: const Row(
+      title: Row(
         children: [
-          Icon(Icons.high_quality_rounded, color: Color(0xFF1AA87C), size: 22),
-          SizedBox(width: 8),
-          Text('選擇輸出品質', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const Icon(Icons.high_quality_rounded, color: kBrandPrimary, size: 22),
+          const SizedBox(width: 8),
+          Text(AppLocalizations.of(context).historySelectQualityTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         ],
       ),
       content: Column(
@@ -4681,12 +4784,12 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF1AA87C).withValues(alpha: 0.08)
+                      ? kBrandPrimary.withValues(alpha: 0.08)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isSelected
-                        ? const Color(0xFF1AA87C)
+                        ? kBrandPrimary
                         : context.borderColor,
                     width: isSelected ? 1.5 : 1.0,
                   ),
@@ -4698,7 +4801,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                           ? Icons.radio_button_checked_rounded
                           : Icons.radio_button_off_rounded,
                       color: isSelected
-                          ? const Color(0xFF1AA87C)
+                          ? kBrandPrimary
                           : context.textHint,
                       size: 20,
                     ),
@@ -4714,7 +4817,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                               fontWeight:
                                   isSelected ? FontWeight.w700 : FontWeight.w500,
                               color: isSelected
-                                  ? const Color(0xFF1AA87C)
+                                  ? kBrandPrimary
                                   : context.textPrimary,
                             ),
                           ),
@@ -4732,7 +4835,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                       style: TextStyle(
                         fontSize: 11,
                         color: isSelected
-                            ? const Color(0xFF1AA87C)
+                            ? kBrandPrimary
                             : context.textHint,
                         fontWeight: FontWeight.w500,
                       ),
@@ -4767,7 +4870,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '今日不再提醒',
+                    AppLocalizations.of(context).historySkipToday,
                     style:
                         TextStyle(fontSize: 12.5, color: context.textSecondary),
                   ),
@@ -4782,18 +4885,18 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
           child:
-              Text('取消', style: TextStyle(color: context.textSecondary)),
+              Text(AppLocalizations.of(context).commonCancel, style: TextStyle(color: context.textSecondary)),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF1AA87C),
+            backgroundColor: kBrandPrimary,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
           onPressed: () => Navigator.of(context).pop(
             _QualityDialogResult(quality: _selected, skipToday: _skipToday),
           ),
-          child: const Text('開始分析'),
+          child: Text(AppLocalizations.of(context).historyStartAnalysis),
         ),
       ],
     );
@@ -4855,6 +4958,7 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
   }
 
   void _loadBanner() {
+    if (!AdService.adsEnabled) return; // Pro / Elite 免廣告
     final ad = BannerAd(
       adUnitId: AdService.bannerAdUnitId,
       size: AdSize.banner, // 320×50 dp
@@ -4927,7 +5031,7 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
             ? [
                 TextButton(
                   onPressed: widget.onCancel,
-                  child: const Text('取消', style: TextStyle(color: Colors.white54)),
+                  child: Text(AppLocalizations.of(context).commonCancel, style: const TextStyle(color: Colors.white54)),
                 ),
               ]
             : null,
@@ -4953,33 +5057,36 @@ class _DlOption {
 }
 
 /// 所有可能的下載選項（依優先顯示順序）
-const _kDlOptions = [
-  _DlOption(
-    file: 'final.mp4', label: '完整分析',
-    desc: '骨架 + 球軌跡 overlay',
-    icon: Icons.sports_golf_rounded, color: Color(0xFF1AA87C),
-  ),
-  _DlOption(
-    file: 'skeleton.mp4', label: '骨架版',
-    desc: '只含骨架 overlay',
-    icon: Icons.accessibility_new_rounded, color: Color(0xFF7C3AED),
-  ),
-  _DlOption(
-    file: 'clip.mp4', label: '原始切片',
-    desc: '無 overlay 的原始切片',
-    icon: Icons.content_cut_rounded, color: Color(0xFF1565C0),
-  ),
-  _DlOption(
-    file: 'swing.mp4', label: '原始影片',
-    desc: '無任何 overlay',
-    icon: Icons.videocam_rounded, color: Color(0xFF546E7A),
-  ),
-  _DlOption(
-    file: 'swing.mov', label: '原始影片 (MOV)',
-    desc: '原始 MOV 檔',
-    icon: Icons.videocam_rounded, color: Color(0xFF546E7A),
-  ),
-];
+List<_DlOption> _kDlOptions(BuildContext context) {
+  final l10n = AppLocalizations.of(context);
+  return [
+    _DlOption(
+      file: 'final.mp4', label: l10n.historyDlLabelFull,
+      desc: l10n.historyDlDescFull,
+      icon: Icons.sports_golf_rounded, color: const Color(0xFF1AA87C),
+    ),
+    _DlOption(
+      file: 'skeleton.mp4', label: l10n.historyDlLabelSkeleton,
+      desc: l10n.historyDlDescSkeleton,
+      icon: Icons.accessibility_new_rounded, color: const Color(0xFF7C3AED),
+    ),
+    _DlOption(
+      file: 'clip.mp4', label: l10n.historyDlLabelClip,
+      desc: l10n.historyDlDescClip,
+      icon: Icons.content_cut_rounded, color: const Color(0xFF1565C0),
+    ),
+    _DlOption(
+      file: 'swing.mp4', label: l10n.historyDlLabelRaw,
+      desc: l10n.historyDlDescRaw,
+      icon: Icons.videocam_rounded, color: const Color(0xFF546E7A),
+    ),
+    _DlOption(
+      file: 'swing.mov', label: l10n.historyDlLabelRawMov,
+      desc: l10n.historyDlDescRawMov,
+      icon: Icons.videocam_rounded, color: const Color(0xFF546E7A),
+    ),
+  ];
+}
 
 /// 共用上傳獎勵流程（原始影片與切片皆走此路）：
 /// 確認 → 上傳分析資料領獎勵 → 標記 isUploaded。
@@ -4993,21 +5100,18 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('上傳分析資料'),
+      title: Text(AppLocalizations.of(context).historyUploadRewardTitle),
       content: Text(
-        '將上傳「${entry.displayTitle}」的分析資料，\n'
-        '用於改善揮桿偵測模型。\n\n'
-        '上傳後需經審核，審核通過將發放 +$balls 球獎勵。\n\n'
-        '確定上傳？',
+        AppLocalizations.of(context).historyUploadRewardContent(entry.displayTitle, balls),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('取消'),
+          child: Text(AppLocalizations.of(context).commonCancel),
         ),
         FilledButton(
           onPressed: () => Navigator.of(ctx).pop(true),
-          child: const Text('上傳送審'),
+          child: Text(AppLocalizations.of(context).historyUploadSubmit),
         ),
       ],
     ),
@@ -5019,15 +5123,15 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
   showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => const PopScope(
+    builder: (_) => PopScope(
       canPop: false,
       child: AlertDialog(
         content: Row(children: [
-          SizedBox(
+          const SizedBox(
               width: 24, height: 24,
               child: CircularProgressIndicator(strokeWidth: 2.5)),
-          SizedBox(width: 16),
-          Expanded(child: Text('上傳影片與分析資料中…')),
+          const SizedBox(width: 16),
+          Expanded(child: Text(AppLocalizations.of(context).historyUploadingProgress)),
         ]),
       ),
     ),
@@ -5038,7 +5142,7 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('上傳失敗：$e'),
+        content: Text(AppLocalizations.of(context).historyUploadFailed(e.toString())),
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
       ));
@@ -5065,9 +5169,8 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
     // 審核制不允許重送），不標記 isUploaded，讓使用者可在排除問題後重試。
     if (pending == 0) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('送審未成功：此影片可能已提交過（含審核未通過者不可重送），'
-              '或網路異常請稍後再試'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(AppLocalizations.of(context).historyUploadSubmitFailed),
           backgroundColor: Colors.orange,
           behavior: SnackBarBehavior.floating,
         ));
@@ -5079,7 +5182,7 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
     await RecordingHistoryStorage.instance.upsertEntry(updated);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('已送出審核，通過後將發放 +$balls 球'),
+        content: Text(AppLocalizations.of(context).historyUploadReviewPending(balls)),
         backgroundColor: Colors.green,
         behavior: SnackBarBehavior.floating,
       ));
@@ -5088,7 +5191,7 @@ Future<RecordingHistoryEntry?> _runUploadRewardFlow(
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('上傳失敗：$e'),
+        content: Text(AppLocalizations.of(context).historyUploadFailed(e.toString())),
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
       ));
@@ -5104,28 +5207,28 @@ Future<String?> _showNoteDialog(BuildContext context, String? initial) {
   return showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('影片備註'),
+      title: Text(AppLocalizations.of(context).historyNoteDialogTitle),
       content: TextField(
         controller: TextEditingController(text: initial ?? ''),
         maxLength: 200,
         maxLines: 4,
         minLines: 2,
         autofocus: true,
-        decoration: const InputDecoration(
-          hintText: '記下練習心得、場地、使用桿型…',
-          helperText: '可留空以清除備註',
-          border: OutlineInputBorder(),
+        decoration: InputDecoration(
+          hintText: AppLocalizations.of(context).historyNoteHint,
+          helperText: AppLocalizations.of(context).historyNoteHelper,
+          border: const OutlineInputBorder(),
         ),
         onChanged: (v) => tempNote = v,
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('取消'),
+          child: Text(AppLocalizations.of(context).commonCancel),
         ),
         FilledButton(
           onPressed: () => Navigator.of(ctx).pop(tempNote.trim()),
-          child: const Text('儲存'),
+          child: Text(AppLocalizations.of(context).commonSave),
         ),
       ],
     ),
@@ -5141,7 +5244,7 @@ class _NoteLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(children: [
       const Icon(Icons.sticky_note_2_outlined,
-          size: 12, color: kPrimaryGreen),
+          size: 12, color: kBrandPrimary),
       const SizedBox(width: 4),
       Expanded(
         child: Text(
@@ -5182,17 +5285,70 @@ Future<void> _runDownloadFlow(
   _showExportResultSnackBar(context, result, chosen.label);
 }
 
+/// 自訂匯出流程（原始影片與切片共用）：勾選疊加元素 → 單 pass 合成 →
+/// 選儲存位置 → 匯出。浮水印由方案決定（免費強制）。
+Future<void> _runCustomExportFlow(
+    BuildContext context, RecordingHistoryEntry entry) async {
+  final l10n = AppLocalizations.of(context);
+  final sessionDir = p.dirname(entry.filePath);
+  if (!OverlayBurnService.canCompose(sessionDir)) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(l10n.recDetailNoVideoFound),
+      backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
+    ));
+    return;
+  }
+  final hasSkeleton   = resolveSkeletonCsv(sessionDir) != null;
+  final hasTrajectory = File(p.join(sessionDir, 'trajectory.json')).existsSync();
+  final isFree        = context.read<PlanProvider>().plan == UserPlan.free;
+
+  final spec = await showModalBottomSheet<ExportSpec>(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (_) => CustomExportSheet(
+      hasSkeleton: hasSkeleton,
+      hasTrajectory: hasTrajectory,
+      isFree: isFree,
+    ),
+  );
+  if (spec == null || !context.mounted) return;
+
+  final toFolder = await _showSaveLocationPicker(context);
+  if (toFolder == null || !context.mounted) return;
+
+  final burned = await OverlayBurnService.composeForExport(sessionDir, spec);
+  if (burned == null) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(l10n.recDetailBurnFailed),
+      backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
+    ));
+    return;
+  }
+  final baseName = (entry.customName?.isNotEmpty == true)
+      ? '${entry.customName!}_${l10n.exportCustomTitle}'
+      : '${p.basenameWithoutExtension(entry.filePath)}_${l10n.exportCustomTitle}';
+  final result = toFolder
+      ? await VideoExportService.downloadToFolder(burned, displayName: baseName)
+      : await VideoExportService.download(burned, displayName: baseName);
+  if (!context.mounted) return;
+  _showExportResultSnackBar(context, result, l10n.exportCustomTitle);
+}
+
 void _showExportResultSnackBar(
     BuildContext context, ExportResult result, String label) {
   switch (result.status) {
     case ExportStatus.savedToDownloads:
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('「$label」已儲存 ✅'),
+        content: Text(AppLocalizations.of(context).historyExportSaved(label)),
         backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
       ));
     case ExportStatus.savedToPhotos:
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('「$label」已儲存到相機膠卷 ✅'),
+        content: Text(AppLocalizations.of(context).historyExportSavedPhotos(label)),
         backgroundColor: Colors.green, behavior: SnackBarBehavior.floating,
       ));
     case ExportStatus.sharedViaSheet:
@@ -5200,7 +5356,7 @@ void _showExportResultSnackBar(
     case ExportStatus.failed:
       if (result.detail != 'cancelled') {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('下載失敗：${result.detail}'),
+          content: Text(AppLocalizations.of(context).historyExportFailed(result.detail ?? '')),
           backgroundColor: Colors.red, behavior: SnackBarBehavior.floating,
         ));
       }
@@ -5225,18 +5381,18 @@ Future<bool?> _showSaveLocationPicker(BuildContext ctx) {
           Container(width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
-          const Text('選擇儲存位置', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(AppLocalizations.of(ctx).historySaveLocationTitle, style: const TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 8),
           ListTile(
             leading: const Icon(Icons.download, color: Colors.white70),
-            title: const Text('下載資料夾', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('儲存到系統預設下載位置', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            title: Text(AppLocalizations.of(ctx).historySaveLocationDownloads, style: const TextStyle(color: Colors.white)),
+            subtitle: Text(AppLocalizations.of(ctx).historySaveLocationDownloadsSub, style: const TextStyle(color: Colors.white54, fontSize: 12)),
             onTap: () => Navigator.pop(ctx, false),
           ),
           ListTile(
             leading: const Icon(Icons.folder_open, color: Colors.white70),
-            title: const Text('選擇資料夾', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('自訂儲存位置', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            title: Text(AppLocalizations.of(ctx).historySaveLocationPick, style: const TextStyle(color: Colors.white)),
+            subtitle: Text(AppLocalizations.of(ctx).historySaveLocationPickSub, style: const TextStyle(color: Colors.white54, fontSize: 12)),
             onTap: () => Navigator.pop(ctx, true),
           ),
           const SizedBox(height: 8),
@@ -5247,7 +5403,7 @@ Future<bool?> _showSaveLocationPicker(BuildContext ctx) {
 }
 
 Future<_DlOption?> _showDownloadPicker(BuildContext ctx, String sessionDir) {
-  final available = _kDlOptions.where((o) => File(p.join(sessionDir, o.file)).existsSync()).toList();
+  final available = _kDlOptions(ctx).where((o) => File(p.join(sessionDir, o.file)).existsSync()).toList();
   if (available.isEmpty) return Future.value(null);
 
   // 只有一個選項時直接回傳，不彈選單
@@ -5276,11 +5432,11 @@ class _DownloadVersionPicker extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
             child: Row(
               children: [
-                const Icon(Icons.download_rounded, color: Color(0xFF1AA87C), size: 22),
+                const Icon(Icons.download_rounded, color: kBrandPrimary, size: 22),
                 const SizedBox(width: 10),
-                const Expanded(
-                  child: Text('選擇下載版本',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                Expanded(
+                  child: Text(AppLocalizations.of(context).historyDownloadVersionTitle,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, size: 20),
@@ -5393,16 +5549,16 @@ class _CandidateCard extends StatelessWidget {
                       Icon(Icons.access_time, size: 12, color: context.textHint),
                       const SizedBox(width: 3),
                       Text(
-                        '${entry.durationSeconds} 秒',
+                        AppLocalizations.of(context).historyCandidateDuration(entry.durationSeconds),
                         style: TextStyle(fontSize: 11, color: context.textHint),
                       ),
                       if (entry.isAnalyzed) ...[
                         const SizedBox(width: 8),
                         const Icon(Icons.check_circle, size: 12, color: Color(0xFF4CAF50)),
                         const SizedBox(width: 2),
-                        const Text(
-                          '已分析',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF4CAF50)),
+                        Text(
+                          AppLocalizations.of(context).historyBadgeAnalyzed,
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF4CAF50)),
                         ),
                       ],
                     ],

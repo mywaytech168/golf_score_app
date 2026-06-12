@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 // ...existing code...
 
 class HighlightPreviewPage extends StatefulWidget {
@@ -44,9 +45,10 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Highlight 預覽'),
+        title: Text(l10n.highlightTitle),
       ),
       body: Column(
         children: [
@@ -62,7 +64,7 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
             padding: const EdgeInsets.all(12.0),
             child: ElevatedButton.icon(
               icon: const Icon(Icons.share),
-              label: const Text('系統分享'),
+              label: Text(l10n.highlightShareSystem),
               onPressed: _isProcessingShare ? null : _shareSystem,
             ),
           )
@@ -85,8 +87,8 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
                 Expanded(
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.download, size: 16),
-                    label: const Text(
-                      '匯出 debug',
+                    label: Text(
+                      l10n.highlightExportDebug,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -97,8 +99,8 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
                 Expanded(
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.share, size: 16),
-                    label: const Text(
-                      '分享 debug',
+                    label: Text(
+                      l10n.highlightShareDebug,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -116,7 +118,9 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
   Future<void> _shareSystem() async {
     final sharePath = await _prepareShareFile();
     if (sharePath == null) return;
-    await Share.shareXFiles([XFile(sharePath)], text: '我的揮桿 Highlight');
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    await Share.shareXFiles([XFile(sharePath)], text: l10n.highlightShareText);
   }
 
   Future<String?> _prepareShareFile() async {
@@ -141,7 +145,8 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
     final f = await _ensureDebugTempFile();
     if (f == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法建立 debug 檔')));
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.highlightDebugFileError)));
       }
       return;
     }
@@ -152,7 +157,8 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
     final f = await _ensureDebugTempFile();
     if (f == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法建立 debug 檔')));
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.highlightDebugFileError)));
       }
       return;
     }
@@ -169,7 +175,8 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
         final status = await Permission.manageExternalStorage.request();
         if (!status.isGranted && !status.isLimited) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要儲存權限以匯出至下載資料夾')));
+            final l10n = AppLocalizations.of(context);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.highlightStoragePermissionRequired)));
           }
           return;
         }
@@ -178,18 +185,21 @@ class _HighlightPreviewPageState extends State<HighlightPreviewPage> {
       final downloadsDir = await _getDownloadsDirectory();
       if (downloadsDir == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('找不到下載資料夾')));
+          final l10n = AppLocalizations.of(context);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.highlightDownloadsDirNotFound)));
         }
         return;
       }
       final dest = File(p.join(downloadsDir.path, p.basename(f.path)));
       await f.copy(dest.path);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已另存至：${dest.path}')));
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.highlightSavedTo(dest.path))));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗：$e')));
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.highlightExportFailed(e.toString()))));
       }
     }
   }

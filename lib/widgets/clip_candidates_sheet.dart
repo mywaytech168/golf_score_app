@@ -2,9 +2,52 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:video_player/video_player.dart';
 
+import '../services/swing_impact_detector.dart';
 import '../theme/app_theme.dart';
+
+/// 剪輯邊界配色（與長影片播放頁一致）：綠=開始、紅=結束、橙=擊球。
+const Color kClipStartColor = Color(0xFF22C55E);
+const Color kClipEndColor = Color(0xFFEF4444);
+const Color kClipImpactColor = Color(0xFFFF8F00);
+
+/// 時間軸配色小圖例：綠=開始、紅=結束、橙=擊球。
+/// 長影片播放頁與切片前確認 sheet 共用，讓使用者一眼看懂標記顏色。
+class ClipBoundaryLegend extends StatelessWidget {
+  const ClipBoundaryLegend({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _item(kClipStartColor, l10n.clipLegendStart),
+        const SizedBox(width: 14),
+        _item(kClipImpactColor, l10n.playerPhaseImpact),
+        const SizedBox(width: 14),
+        _item(kClipEndColor, l10n.clipLegendEnd),
+      ],
+    );
+  }
+
+  Widget _item(Color c, String label) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8, height: 8,
+            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10, color: Color(0xFF9E9E9E)),
+          ),
+        ],
+      );
+}
 
 /// 使用者在切片前確認的結果。
 class ClipSelection {
@@ -139,8 +182,9 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
     if (start == null) return;
     final end = _playheadSec;
     if (end - start < 0.5) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('切片區段需至少 0.5 秒（終點需在起點之後）'),
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(l10n.clipCandRangeTooShort),
         backgroundColor: Colors.orange,
       ));
       return;
@@ -162,6 +206,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final c = _controller;
     return DraggableScrollableSheet(
       initialChildSize: 0.92,
@@ -190,7 +235,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      '確認擊球片段（${widget.candidates.length} 個候選）',
+                      l10n.clipCandTitle(widget.candidates.length),
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -199,7 +244,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                     ),
                   ),
                   Text(
-                    '點候選可預覽',
+                    l10n.clipCandTapToPreview,
                     style:
                         TextStyle(fontSize: 12, color: context.textSecondary),
                   ),
@@ -226,7 +271,12 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                       ],
                     )
                   : const Center(
-                      child: CircularProgressIndicator(color: kPrimaryGreen)),
+                      child: CircularProgressIndicator(color: kBrandPrimary)),
+            ),
+            // ── 剪輯邊界配色圖例 ─────────────────────────────────────
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: kSpaceXS),
+              child: ClipBoundaryLegend(),
             ),
             // ── 自由切片工具列 ───────────────────────────────────────
             _buildManualToolbar(),
@@ -255,7 +305,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('取消'),
+                        child: Text(l10n.commonCancel),
                       ),
                     ),
                     const SizedBox(width: kSpaceMD),
@@ -263,7 +313,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                       flex: 2,
                       child: FilledButton(
                         style:
-                            FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
+                            FilledButton.styleFrom(backgroundColor: kBrandPrimary),
                         onPressed: _selectedCount == 0
                             ? null
                             : () {
@@ -280,7 +330,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                                   ),
                                 );
                               },
-                        child: Text('切出 $_selectedCount 個片段'),
+                        child: Text(l10n.clipCandConfirmClip(_selectedCount)),
                       ),
                     ),
                   ],
@@ -327,6 +377,18 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                             for (final cand in widget.candidates)
                               cand.sec / dur,
                           ],
+                          ranges: [
+                            // 自動候選：以擊球點推得 5 秒剪輯起迄
+                            for (final cand in widget.candidates)
+                              _normRange(
+                                SwingImpactDetector.calculateClipBoundaries(
+                                  hitSec: cand.sec, totalDurationSec: dur),
+                                dur,
+                              ),
+                            // 手動自由切片區段
+                            for (final r in _manualRanges)
+                              (start: r.startSec / dur, end: r.endSec / dur),
+                          ],
                         ),
                       ),
                     ),
@@ -363,6 +425,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
 
   Widget _buildManualToolbar() {
     final hasStart = _manualStartSec != null;
+    final l10n = AppLocalizations.of(context);
     return Container(
       color: context.bgInset,
       padding:
@@ -374,24 +437,24 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
           Expanded(
             child: Text(
               hasStart
-                  ? '起點 ${_fmt(_manualStartSec!)} → 拖到終點後按「加入區段」'
-                  : '自由切片：拖時間軸到起點',
+                  ? l10n.clipCandManualHint(_fmt(_manualStartSec!))
+                  : l10n.clipCandManualPrompt,
               style: TextStyle(fontSize: 12, color: context.textSecondary),
             ),
           ),
           if (!hasStart)
             TextButton(
               onPressed: _controller == null ? null : _setManualStart,
-              child: const Text('設為起點'),
+              child: Text(l10n.clipCandSetStart),
             )
           else ...[
             TextButton(
               onPressed: () => setState(() => _manualStartSec = null),
-              child: const Text('重設'),
+              child: Text(l10n.clipCandReset),
             ),
             FilledButton.tonal(
               onPressed: _addManualRange,
-              child: const Text('加入區段'),
+              child: Text(l10n.clipCandAddRange),
             ),
           ],
         ],
@@ -402,6 +465,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
   Widget _buildCandidateTile(int i) {
     final cand = widget.candidates[i];
     final previewing = _previewingIndex == i;
+    final l10n = AppLocalizations.of(context);
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(top: kSpaceSM),
@@ -409,17 +473,17 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(kRadiusSM),
         side: BorderSide(
-            color: previewing ? kPrimaryGreen : context.borderColor),
+            color: previewing ? kBrandPrimary : context.borderColor),
       ),
       child: ListTile(
         dense: true,
         onTap: () => _previewCandidate(i),
         leading: Icon(
           cand.fromAudio ? Icons.graphic_eq : Icons.directions_run,
-          color: _kept[i] ? kPrimaryGreen : context.textHint,
+          color: _kept[i] ? kBrandPrimary : context.textHint,
         ),
         title: Text(
-          '候選 ${i + 1} ・ ${_fmt(cand.sec)}',
+          l10n.clipCandCandidateLabel(i + 1, _fmt(cand.sec)),
           style: TextStyle(
             color: _kept[i] ? context.textPrimary : context.textHint,
             fontWeight: FontWeight.w600,
@@ -427,12 +491,12 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
           ),
         ),
         subtitle: Text(
-          cand.fromAudio ? '擊球聲偵測' : '錄影中動作偵測',
+          cand.fromAudio ? l10n.clipCandFromAudio : l10n.clipCandFromMotion,
           style: TextStyle(fontSize: 12, color: context.textSecondary),
         ),
         trailing: Checkbox(
           value: _kept[i],
-          activeColor: kPrimaryGreen,
+          activeColor: kBrandPrimary,
           onChanged: (v) => setState(() => _kept[i] = v ?? true),
         ),
       ),
@@ -441,6 +505,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
 
   Widget _buildManualTile(int i) {
     final r = _manualRanges[i];
+    final l10n = AppLocalizations.of(context);
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(top: kSpaceSM),
@@ -454,7 +519,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
         onTap: () => _previewManualRange(r),
         leading: const Icon(Icons.content_cut, color: kSpeedColor),
         title: Text(
-          '自訂區段 ・ ${_fmt(r.startSec)} - ${_fmt(r.endSec)}',
+          l10n.clipCandManualRangeLabel(_fmt(r.startSec), _fmt(r.endSec)),
           style: TextStyle(
             color: context.textPrimary,
             fontWeight: FontWeight.w600,
@@ -462,7 +527,7 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
           ),
         ),
         subtitle: Text(
-          '長度 ${(r.endSec - r.startSec).toStringAsFixed(1)} 秒',
+          l10n.clipCandRangeDuration((r.endSec - r.startSec).toStringAsFixed(1)),
           style: TextStyle(fontSize: 12, color: context.textSecondary),
         ),
         trailing: IconButton(
@@ -474,14 +539,26 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
   }
 }
 
-/// 時間軸上的候選位置刻度。
-class _CandidateTickPainter extends CustomPainter {
-  final List<double> ticks; // 0~1 normalized
+/// 將 (startSec, endSec) 換算成 0~1 normalized 區段。
+({double start, double end}) _normRange((double, double) b, double dur) =>
+    (start: b.$1 / dur, end: b.$2 / dur);
 
-  const _CandidateTickPainter({required this.ticks});
+/// 時間軸上的候選位置刻度（青=擊球點）＋剪輯起迄邊界（綠=開始、紅=結束）。
+class _CandidateTickPainter extends CustomPainter {
+  final List<double> ticks; // 0~1 normalized：擊球/候選中心
+  final List<({double start, double end})> ranges; // 0~1 normalized：剪輯起迄
+
+  const _CandidateTickPainter({required this.ticks, this.ranges = const []});
 
   @override
   void paint(Canvas canvas, Size size) {
+    // ── 剪輯起迄邊界（畫在中心 tick 下層）──
+    for (final r in ranges) {
+      _boundary(canvas, size, r.start, kClipStartColor);
+      _boundary(canvas, size, r.end, kClipEndColor);
+    }
+
+    // ── 候選/擊球中心 tick ──
     final paint = Paint()
       ..color = kCrispColor
       ..strokeWidth = 2;
@@ -495,6 +572,18 @@ class _CandidateTickPainter extends CustomPainter {
     }
   }
 
+  void _boundary(Canvas canvas, Size size, double t, Color color) {
+    final x = t.clamp(0.0, 1.0) * size.width;
+    canvas.drawLine(
+      Offset(x, size.height * 0.12),
+      Offset(x, size.height * 0.88),
+      Paint()
+        ..color = color.withValues(alpha: 0.70)
+        ..strokeWidth = 1.4,
+    );
+  }
+
   @override
-  bool shouldRepaint(_CandidateTickPainter old) => old.ticks != ticks;
+  bool shouldRepaint(_CandidateTickPainter old) =>
+      old.ticks != ticks || old.ranges != ranges;
 }

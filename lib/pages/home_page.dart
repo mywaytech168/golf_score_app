@@ -287,7 +287,7 @@ class _HomePageState extends State<HomePage> {
                         await _initializeStatistics();
                         await _loadRewardStatus();
                       },
-                      color: kPrimaryGreen,
+                      color: kBrandPrimary,
                       child: SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(
@@ -528,23 +528,15 @@ class _HomePageState extends State<HomePage> {
     final l = AppLocalizations.of(context);
 
     // 頭像
-    final avatar = Container(
+    final avatar = SizedBox(
       width: 40,
       height: 40,
-      decoration: BoxDecoration(
-        color: Colors.white24,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white38, width: 1.5),
-      ),
       child: user.avatarPath != null
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(8),
               child: Image.file(File(user.avatarPath!), fit: BoxFit.cover),
             )
-          : Padding(
-              padding: const EdgeInsets.all(7),
-              child: Image.asset('assets/branding/logo_icon.png', fit: BoxFit.contain),
-            ),
+          : Image.asset('assets/branding/logo_icon.png', fit: BoxFit.contain),
     );
 
     // 方案 badge
@@ -785,7 +777,7 @@ class _HitAnalysisCard extends StatelessWidget {
                 child: loading
                     ? const Center(
                         child: CircularProgressIndicator(
-                            color: kPrimaryGreen))
+                            color: kBrandPrimary))
                     : shots == 0
                         ? Center(
                             child: Text(
@@ -934,7 +926,7 @@ class _FocusBanner extends StatelessWidget {
               child: Row(
                 children: [
                   const Icon(Icons.error_outline_rounded,
-                      size: 18, color: kPrimaryGreen),
+                      size: 18, color: kBrandPrimary),
                   const SizedBox(width: kSpaceSM),
                   Expanded(
                     child: Text(
@@ -953,11 +945,11 @@ class _FocusBanner extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: kPrimaryGreen,
+                      color: kBrandPrimary,
                     ),
                   ),
                   const Icon(Icons.chevron_right_rounded,
-                      size: 18, color: kPrimaryGreen),
+                      size: 18, color: kBrandPrimary),
                 ],
               ),
             ),
@@ -1131,11 +1123,11 @@ class _PracticeSuggestionsCard extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.sports_golf_rounded,
-                  color: kPrimaryGreen, size: 20),
+                  color: kBrandPrimary, size: 20),
               const SizedBox(width: kSpaceSM),
               Expanded(
                 child: Text(
-                  '目前訓練建議',
+                  AppLocalizations.of(context).homeCurrentSuggestions,
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
@@ -1148,7 +1140,7 @@ class _PracticeSuggestionsCard extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: kPrimaryGreen,
+                  color: kBrandPrimary,
                 ),
               ),
             ],
@@ -1168,18 +1160,18 @@ class _PracticeSuggestionsCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(kSpaceSM),
               decoration: BoxDecoration(
-                color: kPrimaryGreen.withValues(alpha: 0.08),
+                color: kBrandPrimary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(kRadiusSM),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(Icons.flag_rounded,
-                      color: kPrimaryGreen, size: 16),
+                      color: kBrandPrimary, size: 16),
                   const SizedBox(width: kSpaceXS),
                   Expanded(
                     child: Text(
-                      '下次目標：$goal',
+                      AppLocalizations.of(context).homeNextGoal(goal),
                       style: TextStyle(
                           fontSize: 12, color: context.textSecondary),
                     ),
@@ -1227,7 +1219,7 @@ class _SuggestionTile extends StatelessWidget {
               child: Checkbox(
                 value: done,
                 onChanged: (v) => onChanged(v ?? false),
-                activeColor: kPrimaryGreen,
+                activeColor: kBrandPrimary,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: VisualDensity.compact,
               ),
@@ -1245,7 +1237,7 @@ class _SuggestionTile extends StatelessWidget {
                         Text(
                           suggestion.reps,
                           style: const TextStyle(
-                              fontSize: 11, color: kPrimaryGreen),
+                              fontSize: 11, color: kBrandPrimary),
                         ),
                       ],
                     ],

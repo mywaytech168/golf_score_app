@@ -54,13 +54,14 @@ class _RewardPageState extends State<RewardPage> {
 
   void _showEarned(int balls, String source) {
     if (balls <= 0 || !mounted) return;
+    final l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(children: [
           const Text('🎯 ', style: TextStyle(fontSize: 18)),
-          Text('透過「$source」獲得 +$balls 額外球數！'),
+          Text(l10n.rewardEarnedSnackbar(source, balls)),
         ]),
-        backgroundColor: kPrimaryGreen,
+        backgroundColor: kBrandPrimary,
         duration: const Duration(seconds: 3),
       ),
     );
@@ -69,12 +70,13 @@ class _RewardPageState extends State<RewardPage> {
 
   void _showUploadSubmitted(int pending) {
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(pending > 0
-            ? '已送出 $pending 筆審核，通過後將發放球數獎勵'
-            : '資料已提交（重複資料不再送審）'),
-        backgroundColor: kPrimaryGreen,
+            ? l10n.rewardUploadSubmittedPending(pending)
+            : l10n.rewardUploadSubmittedDuplicate),
+        backgroundColor: kBrandPrimary,
         duration: const Duration(seconds: 3),
       ),
     );
@@ -95,17 +97,15 @@ class _RewardPageState extends State<RewardPage> {
       body: Column(
         children: [
           GreenPageHeader(
-            title: '獎勵球數',
-            subtitle: _loading
-                ? '載入中...'
-                : '累積獎勵：${_status.bonusBalls} 球',
+            title: AppLocalizations.of(context).rewardTitle,
+            subtitle: _loading ? AppLocalizations.of(context).commonLoading : AppLocalizations.of(context).rewardSubtitle,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kOnGradient, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: [
               IconButton(
-                tooltip: '使用紀錄',
+                tooltip: AppLocalizations.of(context).rewardUsageHistoryTooltip,
                 icon: const Icon(Icons.receipt_long_rounded,
                     color: Colors.white, size: 22),
                 onPressed: () => Navigator.of(context).push(
@@ -123,13 +123,13 @@ class _RewardPageState extends State<RewardPage> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _load,
-              color: kPrimaryGreen,
+              color: kBrandPrimary,
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                 children: [
                   _WatchAdCard(
                     status: _status,
-                    onEarned: (b) => _showEarned(b, '看廣告'),
+                    onEarned: (b) => _showEarned(b, AppLocalizations.of(context).rewardWatchAdTitle),
                     onError: _showError,
                   ),
                   const SizedBox(height: 12),
@@ -143,7 +143,7 @@ class _RewardPageState extends State<RewardPage> {
                   // 輸入邀請碼（未套用過才顯示）
                   if (!_status.hasAppliedInviteCode) ...[
                     _EnterInviteCodeCard(
-                      onEarned: (b) => _showEarned(b, '輸入邀請碼'),
+                      onEarned: (b) => _showEarned(b, AppLocalizations.of(context).rewardEnterCodeTitle),
                       onError: _showError,
                       onApplied: _load,
                     ),
@@ -152,7 +152,7 @@ class _RewardPageState extends State<RewardPage> {
 
                   _FeedbackCard(
                     status: _status,
-                    onEarned: (b) => _showEarned(b, '問題回饋'),
+                    onEarned: (b) => _showEarned(b, AppLocalizations.of(context).rewardFeedbackTitle),
                     onError: _showError,
                   ),
                   const SizedBox(height: 6),
@@ -208,15 +208,18 @@ class _BonusSummaryBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         boxShadow: context.cardShadow,
       ),
-      child: Row(
-        children: [
-          _StatCell(label: '累積獎勵', value: '${status.bonusBalls}', unit: '球', color: kPrimaryGreen),
-          _divider(context),
-          _StatCell(label: '今日廣告', value: '${status.adClaimedToday}', unit: '/ 5 次', color: const Color(0xFF4285F4)),
-          _divider(context),
-          _StatCell(label: '邀請好友', value: '${status.inviteCount}', unit: '位', color: const Color(0xFFFF6B35)),
-        ],
-      ),
+      child: Builder(builder: (context) {
+        final l10n = AppLocalizations.of(context);
+        return Row(
+          children: [
+            _StatCell(label: l10n.rewardStatBonusBalls, value: '${status.bonusBalls}', unit: l10n.rewardUnitBall, color: kBrandPrimary),
+            _divider(context),
+            _StatCell(label: l10n.rewardStatAdToday, value: '${status.adClaimedToday}', unit: l10n.rewardAdDailyUnit, color: const Color(0xFF4285F4)),
+            _divider(context),
+            _StatCell(label: l10n.rewardStatInvites, value: '${status.inviteCount}', unit: l10n.rewardUnitPerson, color: const Color(0xFFFF6B35)),
+          ],
+        );
+      }),
     );
   }
 
@@ -342,7 +345,7 @@ class _RewardCard extends StatelessWidget {
                     border: Border.all(color: iconBg.withValues(alpha: 0.3)),
                   ),
                   child: Text(
-                    '+$balls 球',
+                    AppLocalizations.of(context).rewardBallsBadge(balls),
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: iconBg),
                   ),
                 ),
@@ -364,7 +367,7 @@ class _RewardCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('${usedToday ?? 0} / $dailyCap 次', style: TextStyle(fontSize: 11, color: context.textSecondary)),
+                  Text(AppLocalizations.of(context).rewardAdProgress(usedToday ?? 0, dailyCap!), style: TextStyle(fontSize: 11, color: context.textSecondary)),
                 ],
               ),
             ],
@@ -404,7 +407,7 @@ class _RewardCard extends StatelessWidget {
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                claimed ? '今日已完成' : (buttonLabel ?? ''),
+                                claimed ? AppLocalizations.of(context).rewardDoneToday : (buttonLabel ?? ''),
                                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                                 overflow: TextOverflow.ellipsis,
                                 maxLines: 1,
@@ -445,13 +448,13 @@ class _WatchAdCardState extends State<_WatchAdCard> {
     try {
       final rewarded = await AdService.showRewardedAiCoach();
       if (!rewarded) {
-        widget.onError('廣告未播放完成或暫時無法載入，請稍後再試');
+        if (mounted) widget.onError(AppLocalizations.of(context).rewardAdNotCompleted);
         return;
       }
       final balls = await RewardService.claimAdReward();
       widget.onEarned(balls);
     } catch (e) {
-      widget.onError('廣告獎勵失敗：$e');
+      if (mounted) widget.onError(AppLocalizations.of(context).rewardAdFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -460,16 +463,17 @@ class _WatchAdCardState extends State<_WatchAdCard> {
   @override
   Widget build(BuildContext context) {
     final s = widget.status;
+    final l10n = AppLocalizations.of(context);
     return _RewardCard(
       iconBg: const Color(0xFF4285F4),
       icon: Icons.play_circle_filled_rounded,
-      title: '看廣告',
+      title: l10n.rewardWatchAdTitle,
       description: RewardType.watchAd.description,
       balls: RewardType.watchAd.ballsPerAction,
       dailyCap: RewardType.watchAd.dailyCap,
       usedToday: s.adClaimedToday,
       claimed: !s.canWatchAd,
-      buttonLabel: '觀看廣告 +${RewardType.watchAd.ballsPerAction} 球',
+      buttonLabel: l10n.rewardWatchAdButton(RewardType.watchAd.ballsPerAction),
       buttonBusy: _busy,
       onTap: _onTap,
     );
@@ -533,7 +537,7 @@ class _InviteCardState extends State<_InviteCard> {
       _friends = rawList.map((e) {
         final m = e as Map<String, dynamic>;
         return _InvitedFriend(
-          displayName: m['displayName'] as String? ?? '好友',
+          displayName: m['displayName'] as String? ?? AppLocalizations.of(context).rewardFriendFallbackName,
           avatarUrl:   m['avatarUrl']   as String?,
           joinedAt:    DateTime.tryParse(m['joinedAt'] as String? ?? '') ?? DateTime.now(),
           ballsEarned: (m['ballsEarned'] as num?)?.toInt() ?? 0,
@@ -549,18 +553,19 @@ class _InviteCardState extends State<_InviteCard> {
     if (_code == null) return;
     Clipboard.setData(ClipboardData(text: _code!));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('邀請碼已複製'), duration: Duration(seconds: 2)),
+      SnackBar(content: Text(AppLocalizations.of(context).rewardInviteCodeCopied), duration: const Duration(seconds: 2)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final s = widget.status;
+    final l10n = AppLocalizations.of(context);
     return _RewardCard(
       iconBg: const Color(0xFFFF6B35),
       icon: Icons.group_add_rounded,
-      title: '邀請好友',
-      description: '好友使用邀請碼註冊後，你獲得 +${RewardType.inviteFriend.ballsPerAction} 球，好友也獲得 +${RewardType.inviteFriend.ballsPerAction} 球',
+      title: l10n.rewardInviteFriendTitle,
+      description: l10n.rewardInviteFriendDesc(RewardType.inviteFriend.ballsPerAction),
       balls: RewardType.inviteFriend.ballsPerAction,
       bottomWidget: _loadingCode
           ? const Center(child: Padding(
@@ -571,13 +576,13 @@ class _InviteCardState extends State<_InviteCard> {
               ? TextButton.icon(
                   onPressed: _fetchCode,
                   icon: const Icon(Icons.refresh_rounded, size: 16),
-                  label: const Text('取得邀請碼'),
+                  label: Text(l10n.rewardGetInviteCode),
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ── 邀請碼顯示 ────────────────────────────────
-                    Text('你的邀請碼', style: TextStyle(fontSize: 11, color: context.textSecondary)),
+                    Text(l10n.rewardYourInviteCode, style: TextStyle(fontSize: 11, color: context.textSecondary)),
                     const SizedBox(height: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -619,7 +624,7 @@ class _InviteCardState extends State<_InviteCard> {
                             const Icon(Icons.people_alt_rounded, size: 16, color: Color(0xFFFF6B35)),
                             const SizedBox(width: 6),
                             Text(
-                              '已邀請好友',
+                              l10n.rewardInvitedFriends,
                               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFE55A1C)),
                             ),
                             const SizedBox(width: 6),
@@ -630,7 +635,7 @@ class _InviteCardState extends State<_InviteCard> {
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
-                                '${s.inviteCount} 位',
+                                '${s.inviteCount} ${l10n.rewardUnitPerson}',
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFE55A1C)),
                               ),
                             ),
@@ -698,9 +703,9 @@ class _EmptyFriendsList extends StatelessWidget {
         children: [
           Icon(Icons.person_search_rounded, size: 36, color: context.textHint),
           const SizedBox(height: 8),
-          Text('尚無邀請紀錄', style: TextStyle(fontSize: 13, color: context.textHint)),
+          Text(AppLocalizations.of(context).rewardNoInviteHistory, style: TextStyle(fontSize: 13, color: context.textHint)),
           const SizedBox(height: 4),
-          Text('分享你的邀請碼，邀請好友一起練習！',
+          Text(AppLocalizations.of(context).rewardShareInviteHint,
               style: TextStyle(fontSize: 11, color: context.textHint)),
         ],
       ),
@@ -858,7 +863,7 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
 
   Future<void> _submit() async {
     final code = _ctrl.text.trim().toUpperCase();
-    if (code.isEmpty) { widget.onError('請輸入邀請碼'); return; }
+    if (code.isEmpty) { widget.onError(AppLocalizations.of(context).rewardEnterCodeEmpty); return; }
 
     setState(() => _busy = true);
     try {
@@ -870,10 +875,10 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
         widget.onEarned(r.balls);
         widget.onApplied(); // 刷新狀態，卡片消失
       } else {
-        widget.onError(r.message.isNotEmpty ? r.message : '邀請碼無效');
+        widget.onError(r.message.isNotEmpty ? r.message : AppLocalizations.of(context).rewardInviteCodeInvalid);
       }
     } catch (e) {
-      if (mounted) widget.onError('套用失敗：$e');
+      if (mounted) widget.onError(AppLocalizations.of(context).rewardApplyFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -881,11 +886,12 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return _RewardCard(
       iconBg: const Color(0xFF7B61FF),
       icon: Icons.card_giftcard_rounded,
-      title: '輸入邀請碼',
-      description: '輸入好友的邀請碼，你獲得 +${RewardType.inviteFriend.ballsPerAction} 球，好友也獲得 +${RewardType.inviteFriend.ballsPerAction} 球',
+      title: l10n.rewardEnterCodeTitle,
+      description: l10n.rewardEnterCodeDesc(RewardType.inviteFriend.ballsPerAction),
       balls: RewardType.inviteFriend.ballsPerAction,
       bottomWidget: _expanded
           ? Column(
@@ -936,7 +942,7 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
                   children: [
                     TextButton(
                       onPressed: _busy ? null : () => setState(() { _expanded = false; _ctrl.clear(); }),
-                      child: const Text('取消'),
+                      child: Text(l10n.commonCancel),
                     ),
                     const Spacer(),
                     SizedBox(
@@ -946,7 +952,7 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
                         icon: _busy
                             ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                             : const Icon(Icons.check_circle_rounded, size: 16),
-                        label: Text(_busy ? '套用中...' : '套用 +${RewardType.inviteFriend.ballsPerAction} 球'),
+                        label: Text(_busy ? l10n.rewardApplying : l10n.rewardApplyButton(RewardType.inviteFriend.ballsPerAction)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF7B61FF),
                           foregroundColor: Colors.white,
@@ -960,7 +966,7 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
               ],
             )
           : null,
-      buttonLabel: _expanded ? null : '輸入好友邀請碼',
+      buttonLabel: _expanded ? null : l10n.rewardEnterFriendCode,
       onTap: () => setState(() => _expanded = true),
     );
   }
@@ -1044,9 +1050,10 @@ class _FeedbackCardState extends State<_FeedbackCard> {
   }
 
   Future<void> _submit() async {
+    final l10n = AppLocalizations.of(context);
     final text = _ctrl.text.trim();
     if (text.isEmpty) {
-      widget.onError('請輸入回饋內容');
+      widget.onError(l10n.rewardFeedbackEmpty);
       return;
     }
     setState(() => _busy = true);
@@ -1096,13 +1103,13 @@ class _FeedbackCardState extends State<_FeedbackCard> {
         widget.onEarned(balls);
       } else if (mounted) {
         // 今日獎勵已領取：回饋照常送出，僅不發球
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('回饋已送出，感謝你的意見！'),
-          backgroundColor: kPrimaryGreen,
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l10n.rewardFeedbackSubmitted),
+          backgroundColor: kBrandPrimary,
         ));
       }
     } catch (e) {
-      widget.onError('提交失敗：$e');
+      widget.onError(l10n.rewardSubmitFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1110,11 +1117,12 @@ class _FeedbackCardState extends State<_FeedbackCard> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final claimed = widget.status.feedbackClaimedToday;
     return _RewardCard(
       iconBg: const Color(0xFF9C27B0),
       icon: Icons.feedback_rounded,
-      title: '問題回饋',
+      title: l10n.rewardFeedbackTitle,
       description: RewardType.submitFeedback.description,
       balls: RewardType.submitFeedback.ballsPerAction,
       claimed: claimed,
@@ -1130,9 +1138,9 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                   spacing: 8,
                   runSpacing: 6,
                   children: [
-                    _TypeChip(label: '🐛 問題回報', value: 'bug',     selected: _type, onTap: (v) => setState(() => _type = v)),
-                    _TypeChip(label: '💡 功能建議', value: 'feature', selected: _type, onTap: (v) => setState(() => _type = v)),
-                    _TypeChip(label: '💬 其他',    value: 'other',   selected: _type, onTap: (v) => setState(() => _type = v)),
+                    _TypeChip(label: l10n.rewardFeedbackTypeBug,     value: 'bug',     selected: _type, onTap: (v) => setState(() => _type = v)),
+                    _TypeChip(label: l10n.rewardFeedbackTypeFeature, value: 'feature', selected: _type, onTap: (v) => setState(() => _type = v)),
+                    _TypeChip(label: l10n.rewardFeedbackTypeOther,   value: 'other',   selected: _type, onTap: (v) => setState(() => _type = v)),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -1141,7 +1149,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                   maxLines: 3,
                   maxLength: 500,
                   decoration: InputDecoration(
-                    hintText: '請詳細描述你的回饋...',
+                    hintText: l10n.rewardFeedbackHint,
                     hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
                     filled: true,
                     fillColor: context.isDarkMode
@@ -1169,13 +1177,13 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                   children: [
                     _attachBtn(
                       icon: Icons.videocam_rounded,
-                      label: _selectedVideo == null ? '選擇影片' : '更換影片',
+                      label: _selectedVideo == null ? l10n.rewardSelectVideo : l10n.rewardChangeVideo,
                       onTap: _pickVideo,
                     ),
                     const SizedBox(width: 8),
                     _attachBtn(
                       icon: Icons.image_rounded,
-                      label: _selectedImageFile == null ? '上傳圖片' : '更換圖片',
+                      label: _selectedImageFile == null ? l10n.rewardUploadImage : l10n.rewardChangeImage,
                       onTap: _pickImage,
                     ),
                   ],
@@ -1295,7 +1303,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                   children: [
                     TextButton(
                       onPressed: () => setState(() => _expanded = false),
-                      child: const Text('取消'),
+                      child: Text(l10n.commonCancel),
                     ),
                     const Spacer(),
                     SizedBox(
@@ -1311,8 +1319,8 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                         child: _busy
                             ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                             : Text(claimed
-                                ? '送出回饋'
-                                : '送出回饋 +${RewardType.submitFeedback.ballsPerAction} 球'),
+                                ? l10n.rewardSubmitFeedback
+                                : l10n.rewardSubmitFeedbackWithBalls(RewardType.submitFeedback.ballsPerAction)),
                       ),
                     ),
                   ],
@@ -1323,8 +1331,8 @@ class _FeedbackCardState extends State<_FeedbackCard> {
       buttonLabel: _expanded
           ? null
           : (claimed
-              ? '填寫回饋'
-              : '填寫回饋 +${RewardType.submitFeedback.ballsPerAction} 球'),
+              ? l10n.rewardWriteFeedback
+              : l10n.rewardWriteFeedbackWithBalls(RewardType.submitFeedback.ballsPerAction)),
       buttonBusy: _busy,
       onTap: () => setState(() => _expanded = true),
     );
@@ -1438,7 +1446,7 @@ class _VideoPickerSheet extends StatelessWidget {
                 const Icon(Icons.videocam_rounded,
                     color: Color(0xFF9C27B0), size: 18),
                 const SizedBox(width: 8),
-                Text('選擇影片',
+                Text(AppLocalizations.of(context).rewardSelectVideo,
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -1450,7 +1458,7 @@ class _VideoPickerSheet extends StatelessWidget {
           if (usable.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('尚無歷史錄影',
+              child: Text(AppLocalizations.of(context).rewardNoVideoHistory,
                   style: TextStyle(color: context.textSecondary, fontSize: 13)),
             )
           else
@@ -1493,7 +1501,7 @@ class _VideoPickerSheet extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  '$durStr · ${e.durationSeconds > 5 && e.durationSeconds <= 600 ? '長影片' : '短影片'}',
+                                  '$durStr · ${e.durationSeconds > 5 && e.durationSeconds <= 600 ? AppLocalizations.of(context).rewardLongVideo : AppLocalizations.of(context).rewardShortVideo}',
                                   style: TextStyle(
                                       fontSize: 11, color: context.textSecondary),
                                 ),
@@ -1612,7 +1620,7 @@ class _UploadCardState extends State<_UploadCard> {
 
   Future<void> _openPicker() async {
     if (_uploadable.isEmpty) {
-      widget.onError('目前沒有可上傳的分析資料');
+      widget.onError(AppLocalizations.of(context).rewardNoUploadable);
       return;
     }
     if (!mounted) return;
@@ -1644,11 +1652,11 @@ class _UploadCardState extends State<_UploadCard> {
       }
 
       if (payload.isEmpty) {
-        if (mounted) widget.onError('上傳失敗，請稍後再試');
+        if (mounted) widget.onError(AppLocalizations.of(context).rewardUploadFailed);
         return;
       }
       if (failed > 0 && mounted) {
-        widget.onError('$failed 筆上傳失敗，已略過');
+        widget.onError(AppLocalizations.of(context).rewardUploadPartialFail(failed));
       }
 
       final pending = await RewardService.claimUploadReward(sessions: payload);
@@ -1657,8 +1665,7 @@ class _UploadCardState extends State<_UploadCard> {
       // 不標記 isUploaded，讓使用者可在排除問題後重試。
       if (pending == 0) {
         if (mounted) {
-          widget.onError('送審未成功：資料可能已提交過（含審核未通過者不可重送），'
-              '或網路異常請稍後再試');
+          widget.onError(AppLocalizations.of(context).rewardUploadResubmitBlocked);
         }
         return;
       }
@@ -1676,7 +1683,7 @@ class _UploadCardState extends State<_UploadCard> {
 
       if (mounted) widget.onSubmitted(pending);
     } catch (e) {
-      if (mounted) widget.onError('上傳失敗：$e');
+      if (mounted) widget.onError(AppLocalizations.of(context).rewardUploadError(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1698,10 +1705,11 @@ class _UploadCardState extends State<_UploadCard> {
   Widget build(BuildContext context) {
     final canUpload = _uploadable.isNotEmpty;
 
+    final l10n = AppLocalizations.of(context);
     return _RewardCard(
       iconBg: const Color(0xFF00897B),
       icon: Icons.cloud_upload_rounded,
-      title: '上傳分析資料',
+      title: l10n.rewardUploadDataTitle,
       description: RewardType.uploadData.description,
       balls: RewardType.uploadData.ballsPerAction,
       bottomWidget: !_loaded
@@ -1729,8 +1737,8 @@ class _UploadCardState extends State<_UploadCard> {
                     children: [
                       Text(
                         canUpload
-                            ? '可上傳 ${_uploadable.length} 筆，已上傳 $_alreadyCount 筆'
-                            : '所有分析資料已上傳（共 $_alreadyCount 筆）',
+                            ? l10n.rewardUploadAvailableCount(_uploadable.length, _alreadyCount)
+                            : l10n.rewardUploadAllDone(_alreadyCount),
                         style: TextStyle(
                             fontSize: 12,
                             color: canUpload
@@ -1740,16 +1748,16 @@ class _UploadCardState extends State<_UploadCard> {
                       if (_pendingCount != null) ...[
                         const SizedBox(height: 2),
                         Text(
-                          '審核中 $_pendingCount 筆 / 已通過 $_approvedCount 筆'
-                          '${(_rejectedCount ?? 0) > 0 ? ' / 未通過 $_rejectedCount 筆' : ''}',
+                          l10n.rewardUploadReviewStatus(_pendingCount!, _approvedCount!) +
+                          ((_rejectedCount ?? 0) > 0 ? l10n.rewardUploadRejectedSuffix(_rejectedCount!) : ''),
                           style: TextStyle(
                               fontSize: 11, color: context.textSecondary),
                         ),
                         if ((_rejectedCount ?? 0) > 0) ...[
                           const SizedBox(height: 2),
-                          const Text(
-                            '未通過審核的資料不可重新提交',
-                            style: TextStyle(
+                          Text(
+                            l10n.rewardUploadRejectedNote,
+                            style: const TextStyle(
                                 fontSize: 11, color: Color(0xFFE65100)),
                           ),
                         ],
@@ -1759,7 +1767,7 @@ class _UploadCardState extends State<_UploadCard> {
                 ),
               ]),
             ),
-      buttonLabel: canUpload ? '選擇要上傳的錄影' : null,
+      buttonLabel: canUpload ? l10n.rewardSelectUploadVideo : null,
       buttonBusy: _busy,
       onTap: canUpload ? _openPicker : null,
     );
@@ -1827,12 +1835,12 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('選擇要上傳的錄影',
+                        Text(AppLocalizations.of(context).rewardSelectUploadVideo,
                             style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 color: context.textPrimary)),
-                        Text('選擇一筆後按「確認上傳」獲得獎勵',
+                        Text(AppLocalizations.of(context).rewardSelectUploadSubtitle,
                             style: TextStyle(
                                 fontSize: 12, color: context.textSecondary)),
                       ],
@@ -1870,21 +1878,21 @@ class _UploadPickerSheetState extends State<_UploadPickerSheet> {
                 child: Row(
                   children: [
                     Text(
-                      _selectedPath == null ? '尚未選擇' : '已選 1 筆',
+                      _selectedPath == null ? AppLocalizations.of(context).rewardNoneSelected : AppLocalizations.of(context).rewardOneSelected,
                       style: TextStyle(
                           fontSize: 13, color: context.textSecondary),
                     ),
                     const Spacer(),
                     TextButton(
                       onPressed: () => Navigator.pop(context, null),
-                      child: const Text('取消'),
+                      child: Text(AppLocalizations.of(context).commonCancel),
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
                       onPressed: _selectedPath == null ? null : _confirm,
                       icon: const Icon(Icons.upload_rounded, size: 16),
                       label: Text(
-                          '確認上傳 +${RewardType.uploadData.ballsPerAction} 球'),
+                          AppLocalizations.of(context).rewardConfirmUpload(RewardType.uploadData.ballsPerAction)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF00897B),
                         foregroundColor: Colors.white,
@@ -1980,7 +1988,7 @@ class _UploadCandidateTile extends StatelessWidget {
                     Icon(Icons.access_time_rounded,
                         size: 11, color: context.textHint),
                     const SizedBox(width: 3),
-                    Text('${entry.durationSeconds} 秒',
+                    Text(AppLocalizations.of(context).rewardDurationSec(entry.durationSeconds),
                         style: TextStyle(
                             fontSize: 11, color: context.textSecondary)),
                     if (entry.isAnalyzed) ...[
@@ -1993,8 +2001,8 @@ class _UploadCandidateTile extends StatelessWidget {
                               .withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text('已分析',
-                            style: TextStyle(
+                        child: Text(AppLocalizations.of(context).rewardAnalyzed,
+                            style: const TextStyle(
                                 fontSize: 10,
                                 color: Color(0xFF00695C),
                                 fontWeight: FontWeight.w600)),

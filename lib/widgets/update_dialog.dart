@@ -78,7 +78,7 @@ class _UpdateDialog extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: context.isDarkMode ? kPrimaryGreen : kPrimaryDark,
+                          color: context.isDarkMode ? kBrandPrimary : kBrandPrimaryDark,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -90,7 +90,7 @@ class _UpdateDialog extends StatelessWidget {
                             children: [
                               const Text('• ',
                                   style: TextStyle(
-                                      color: kPrimaryGreen,
+                                      color: kBrandPrimary,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 14)),
                               Expanded(
@@ -157,7 +157,7 @@ class _UpdateDialog extends StatelessWidget {
                           style: const TextStyle(
                               fontSize: 15, fontWeight: FontWeight.bold)),
                       style: FilledButton.styleFrom(
-                        backgroundColor: kPrimaryGreen,
+                        backgroundColor: kBrandPrimary,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
@@ -220,13 +220,14 @@ class _Header extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isForced
-              ? [const Color(0xFFB71C1C), const Color(0xFFE53935)]
-              : [const Color(0xFF1AA87C), const Color(0xFF0F5C46)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        // 強制更新＝紅底白字(危險語意)；一般更新＝品牌漸層配深前景
+        gradient: isForced
+            ? const LinearGradient(
+                colors: [Color(0xFFB71C1C), Color(0xFFE53935)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : kPrimaryGradient,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Row(
@@ -235,7 +236,7 @@ class _Header extends StatelessWidget {
             isForced
                 ? Icons.system_update_rounded
                 : Icons.new_releases_rounded,
-            color: Colors.white,
+            color: isForced ? Colors.white : kOnGradient,
             size: 28,
           ),
           const SizedBox(width: 12),
@@ -246,8 +247,8 @@ class _Header extends StatelessWidget {
                 isForced
                     ? AppLocalizations.of(context).updateRequiredTitle
                     : AppLocalizations.of(context).updateFoundTitle,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: isForced ? Colors.white : kOnGradient,
                   fontSize: 17,
                   fontWeight: FontWeight.bold,
                 ),
@@ -256,7 +257,11 @@ class _Header extends StatelessWidget {
                 isForced
                     ? AppLocalizations.of(context).updateRequiredSubtitle
                     : AppLocalizations.of(context).updateFoundSubtitle,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(
+                    color: isForced
+                        ? Colors.white70
+                        : kOnGradient.withValues(alpha: 0.72),
+                    fontSize: 12),
               ),
             ],
           ),
@@ -293,7 +298,7 @@ class _VersionRow extends StatelessWidget {
           _VersionChip(
             label: AppLocalizations.of(context).updateLatestVersion,
             version: result.latestVersion,
-            color: kPrimaryGreen,
+            color: kBrandPrimary,
           ),
           if (result.releaseDate.isNotEmpty) ...[
             const Spacer(),

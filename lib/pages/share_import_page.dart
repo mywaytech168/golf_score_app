@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import '../theme/app_theme.dart';
 import '../services/share_service.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 從分享碼取得影片頁面
 class ShareImportPage extends StatefulWidget {
@@ -94,12 +95,13 @@ class _ShareImportPageState extends State<ShareImportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('從分享連結取得', style: TextStyle(fontSize: 16)),
+            Text(l10n.shareImportTitle, style: const TextStyle(fontSize: 16)),
             Text(
               context.watch<UserProvider>().displayName,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: context.textSecondary),
@@ -134,20 +136,21 @@ class _ShareImportPageState extends State<ShareImportPage> {
   // ── 輸入分享碼 ───────────────────────────────────────────────
 
   Widget _buildInputSection() {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 32),
-        const Icon(Icons.download_for_offline_outlined, size: 64, color: Color(0xFF1AA87C)),
+        const Icon(Icons.download_for_offline_outlined, size: 64, color: kBrandPrimary),
         const SizedBox(height: 24),
         Text(
-          '輸入 16 碼分享碼',
+          l10n.shareImportEnterCodeTitle,
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.textPrimary),
         ),
         const SizedBox(height: 8),
         Text(
-          '對方分享後，輸入分享碼即可下載影片到本機',
+          l10n.shareImportEnterCodeDesc,
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13, color: context.textSecondary),
         ),
@@ -167,7 +170,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
             ),
             style: const TextStyle(letterSpacing: 2, fontFamily: 'monospace', fontSize: 16),
             validator: (v) {
-              if (v == null || v.trim().length != 16) return '請輸入完整的 16 碼分享碼';
+              if (v == null || v.trim().length != 16) return l10n.shareImportCodeValidator;
               return null;
             },
           ),
@@ -182,9 +185,9 @@ class _ShareImportPageState extends State<ShareImportPage> {
           icon: _phase == _ImportPhase.looking
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Icon(Icons.search),
-          label: Text(_phase == _ImportPhase.looking ? '查詢中…' : '查詢'),
+          label: Text(_phase == _ImportPhase.looking ? l10n.shareImportLooking : l10n.shareImportLookup),
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF1AA87C),
+            backgroundColor: kBrandPrimary,
             minimumSize: const Size.fromHeight(50),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -196,6 +199,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
   // ── 預覽 ─────────────────────────────────────────────────────
 
   Widget _buildPreviewSection() {
+    final l10n = AppLocalizations.of(context);
     final info = _info!;
     final sizeMb = (info.sizeBytes / 1024 / 1024).toStringAsFixed(1);
     final expiryStr = DateFormat('MM/dd HH:mm').format(info.expiresAt.toLocal());
@@ -213,9 +217,9 @@ class _ShareImportPageState extends State<ShareImportPage> {
         ),
         const SizedBox(height: 20),
         if (info.sharerName != null && info.sharerName!.isNotEmpty)
-          _infoRow(Icons.person_outline, '來自', info.sharerName!),
-        _infoRow(Icons.storage_outlined, '大小', '$sizeMb MB'),
-        _infoRow(Icons.schedule_outlined, '到期', expiryStr),
+          _infoRow(Icons.person_outline, l10n.shareImportFrom, info.sharerName!),
+        _infoRow(Icons.storage_outlined, l10n.shareImportSize, '$sizeMb MB'),
+        _infoRow(Icons.schedule_outlined, l10n.shareImportExpiry, expiryStr),
         if (_error != null) ...[
           const SizedBox(height: 12),
           Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
@@ -230,7 +234,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
                   minimumSize: const Size.fromHeight(50),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: const Text('重新輸入'),
+                child: Text(l10n.shareImportReenter),
               ),
             ),
             const SizedBox(width: 12),
@@ -238,7 +242,7 @@ class _ShareImportPageState extends State<ShareImportPage> {
               child: FilledButton.icon(
                 onPressed: _download,
                 icon: const Icon(Icons.download),
-                label: const Text('下載到本機'),
+                label: Text(l10n.shareImportDownload),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF1565C0),
                   minimumSize: const Size.fromHeight(50),
@@ -270,10 +274,11 @@ class _ShareImportPageState extends State<ShareImportPage> {
   // ── 下載中 ───────────────────────────────────────────────────
 
   Widget _buildDownloadingSection() {
+    final l10n = AppLocalizations.of(context);
     final label = switch (_downloadSub) {
-      _DownloadSub.preparing   => '準備下載…',
-      _DownloadSub.downloading => '下載中…',
-      _DownloadSub.extracting  => '解壓縮中…',
+      _DownloadSub.preparing   => l10n.shareImportPreparing,
+      _DownloadSub.downloading => l10n.shareImportDownloading,
+      _DownloadSub.extracting  => l10n.shareImportExtracting,
     };
 
     // preparing / extracting → 不定式；downloading → 顯示百分比
@@ -315,24 +320,25 @@ class _ShareImportPageState extends State<ShareImportPage> {
   // ── 完成 ─────────────────────────────────────────────────────
 
   Widget _buildDoneSection() {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.check_circle_outline, size: 80, color: Color(0xFF1AA87C)),
+          const Icon(Icons.check_circle_outline, size: 80, color: kGoodColor),
           const SizedBox(height: 24),
-          Text('下載完成！', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary)),
+          Text(l10n.shareImportDoneTitle, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: context.textPrimary)),
           const SizedBox(height: 8),
-          Text('影片已加入歷史記錄', style: TextStyle(color: context.textSecondary)),
+          Text(l10n.shareImportDoneDesc, style: TextStyle(color: context.textSecondary)),
           const SizedBox(height: 40),
           FilledButton(
             onPressed: () => Navigator.pop(context),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1AA87C),
+              backgroundColor: kBrandPrimary,
               minimumSize: const Size(200, 50),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: const Text('返回'),
+            child: Text(l10n.shareImportBack),
           ),
         ],
       ),

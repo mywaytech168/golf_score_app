@@ -435,7 +435,7 @@ class _LoginPageState extends State<LoginPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.redAccent : kPrimaryGreen,
+        backgroundColor: isError ? Colors.redAccent : kBrandPrimary,
       ),
     );
   }
@@ -514,12 +514,13 @@ class _LoginPageState extends State<LoginPage> {
         height: double.infinity,
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            // 深色模式用深綠→墨黑，避免黑卡片浮在亮綠背景上
+            // 淺色:品牌三色 Cyan→Blue→Purple 水平由左到右(疊深字)。
+            // 深色:深靛→墨黑(疊白字),避免黑卡浮在亮色上。
             colors: context.isDarkMode
-                ? const [Color(0xFF0E2B22), kOrviaInk]
-                : const [kPrimaryGreen, kPrimaryDark],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+                ? const [Color(0xFF13122E), kOrviaInk]
+                : const [kOrviaMint, kOrviaBlue, kOrviaViolet],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
         ),
         child: SafeArea(
@@ -540,12 +541,16 @@ class _LoginPageState extends State<LoginPage> {
                 Text(
                   _isRegisterMode ? l10n.authRegisterTitle : l10n.authWelcomeBack,
                   style: theme.textTheme.headlineMedium?.copyWith(
-                    color: Colors.white, fontWeight: FontWeight.w700),
+                    color: context.isDarkMode ? Colors.white : kOnGradient,
+                    fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   _isRegisterMode ? l10n.authRegisterSubtitle : l10n.authLoginSubtitle,
-                  style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white70),
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: context.isDarkMode
+                        ? Colors.white70
+                        : kOnGradient.withValues(alpha: 0.72)),
                 ),
                 const SizedBox(height: 16),
                 if (!_arePermissionsAllGranted && !_isRegisterMode)
@@ -597,7 +602,7 @@ class _LoginPageState extends State<LoginPage> {
         Text(l10n.authLoginTitle,
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold,
-              color: context.isDarkMode ? kPrimaryLight : kPrimaryDark)),
+              color: context.isDarkMode ? kPrimaryLight : kBrandPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _identifierController,
@@ -605,6 +610,7 @@ class _LoginPageState extends State<LoginPage> {
           decoration: InputDecoration(
             labelText: l10n.authUsernameOrEmail,
             hintText: l10n.authUsernameHint,
+            hintMaxLines: 1,
             prefixIcon: const Icon(Icons.person_outline),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -653,7 +659,7 @@ class _LoginPageState extends State<LoginPage> {
             onPressed: _isLoading ? null : _handleLogin,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: kPrimaryGreen,
+              backgroundColor: kBrandPrimary,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
             child: _isLoading
@@ -723,7 +729,7 @@ class _LoginPageState extends State<LoginPage> {
         Center(
           child: TextButton(
             onPressed: _isLoading ? null : () => _switchMode(true),
-            child: Text(l10n.authNoAccount, style: const TextStyle(color: kPrimaryGreen)),
+            child: Text(l10n.authNoAccount, style: const TextStyle(color: kBrandPrimary)),
           ),
         ),
       ],
@@ -739,13 +745,14 @@ class _LoginPageState extends State<LoginPage> {
         Text(l10n.authRegisterTitle,
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold,
-              color: context.isDarkMode ? kPrimaryLight : kPrimaryDark)),
+              color: context.isDarkMode ? kPrimaryLight : kBrandPrimaryDark)),
         const SizedBox(height: 24),
         TextFormField(
           controller: _usernameController,
           decoration: InputDecoration(
             labelText: l10n.authUsername,
             hintText: l10n.authUsernameHintReg,
+            hintMaxLines: 1,
             prefixIcon: const Icon(Icons.person_outline),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -776,6 +783,7 @@ class _LoginPageState extends State<LoginPage> {
           decoration: InputDecoration(
             labelText: l10n.authDisplayName,
             hintText: l10n.authDisplayNameHint,
+            hintMaxLines: 1,
             prefixIcon: const Icon(Icons.badge_outlined),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -831,7 +839,7 @@ class _LoginPageState extends State<LoginPage> {
           Expanded(child: Divider(color: context.borderColor)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Text('選填', style: TextStyle(fontSize: 11, color: context.textHint)),
+            child: Text(l10n.authInviteCodeOptional, style: TextStyle(fontSize: 11, color: context.textHint)),
           ),
           Expanded(child: Divider(color: context.borderColor)),
         ]),
@@ -841,15 +849,16 @@ class _LoginPageState extends State<LoginPage> {
           textCapitalization: TextCapitalization.characters,
           maxLength: 12,
           decoration: InputDecoration(
-            labelText: '邀請碼',
-            hintText: '如有好友邀請碼，請在此填寫',
+            labelText: l10n.authInviteCodeLabel,
+            hintText: l10n.authInviteCodeHint,
+            hintMaxLines: 1,
             prefixIcon: const Icon(Icons.card_giftcard_rounded, color: Color(0xFFFF6B35)),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(color: Color(0xFFFF6B35), width: 1.5),
             ),
-            helperText: '填寫邀請碼，雙方各獲得 +5 球獎勵',
+            helperText: l10n.authInviteCodeHelper,
             helperStyle: TextStyle(fontSize: 11, color: context.textHint),
             counterText: '',
           ),
@@ -861,7 +870,7 @@ class _LoginPageState extends State<LoginPage> {
             onPressed: _isLoading ? null : _handleRegister,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: kPrimaryGreen,
+              backgroundColor: kBrandPrimary,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             ),
             child: _isLoading
@@ -874,7 +883,7 @@ class _LoginPageState extends State<LoginPage> {
         Center(
           child: TextButton(
             onPressed: _isLoading ? null : () => _switchMode(false),
-            child: Text(l10n.authHaveAccount, style: const TextStyle(color: kPrimaryGreen)),
+            child: Text(l10n.authHaveAccount, style: const TextStyle(color: kBrandPrimary)),
           ),
         ),
       ],
@@ -954,11 +963,11 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   const Icon(Icons.developer_mode, color: Colors.deepOrange, size: 20),
                   const SizedBox(width: 8),
-                  Text('測試帳號',
+                  Text(AppLocalizations.of(ctx).devTestAccounts,
                       style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold)),
                   const Spacer(),
-                  Text('密碼：Test1234!',
+                  Text(AppLocalizations.of(ctx).devTestPassword,
                       style: Theme.of(ctx).textTheme.labelSmall?.copyWith(
                         color: Colors.grey[600])),
                 ],
@@ -1029,7 +1038,7 @@ class _LoginPageState extends State<LoginPage> {
       return Chip(
         avatar: Icon(
           granted ? Icons.check_circle : Icons.error_outline,
-          color: granted ? kPrimaryGreen : Colors.redAccent,
+          color: granted ? kBrandPrimary : Colors.redAccent,
           size: 20,
         ),
         label: Text('${_permLabel(entry.key, l10n)}：${granted ? l10n.permGranted : l10n.permDenied}'),
@@ -1047,10 +1056,10 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             Text(l10n.permTitle,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: kPrimaryDark, fontWeight: FontWeight.bold)),
+                  color: kBrandPrimaryDark, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(l10n.permSubtitle,
-                style: theme.textTheme.bodyMedium?.copyWith(color: kPrimaryDark)),
+                style: theme.textTheme.bodyMedium?.copyWith(color: kBrandPrimaryDark)),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: chips),
             const SizedBox(height: 16),
@@ -1060,7 +1069,7 @@ class _LoginPageState extends State<LoginPage> {
                 onPressed: () => _requestBlePermissions(showDeniedDialog: true),
                 icon: const Icon(Icons.security),
                 label: Text(l10n.permCheckAgain),
-                style: ElevatedButton.styleFrom(backgroundColor: kPrimaryGreen),
+                style: ElevatedButton.styleFrom(backgroundColor: kBrandPrimary),
               ),
             ),
           ],
@@ -1108,9 +1117,10 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   }
 
   Future<void> _requestCode() async {
+    final l10n = AppLocalizations.of(context);
     final email = _emailCtrl.text.trim();
     if (email.isEmpty || !email.contains('@')) {
-      setState(() => _errorMsg = '請輸入有效的 Email');
+      setState(() => _errorMsg = l10n.forgotEnterValidEmail);
       return;
     }
     setState(() { _loading = true; _errorMsg = null; });
@@ -1120,33 +1130,34 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
       if (res['success'] == true) {
         setState(() => _step = 1);
       } else {
-        setState(() => _errorMsg = res['message'] ?? '寄送失敗');
+        setState(() => _errorMsg = res['message'] ?? AppLocalizations.of(context).forgotSendFailed);
       }
     } catch (e) {
-      if (mounted) setState(() => _errorMsg = '網路錯誤，請稍後再試');
+      if (mounted) setState(() => _errorMsg = AppLocalizations.of(context).forgotNetworkError);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _resetPassword() async {
+    final l10n = AppLocalizations.of(context);
     final code  = _codeCtrl.text.trim();
     final newPw = _newPwCtrl.text;
     final conf  = _confirmCtrl.text;
 
     if (code.length != 6) {
-      setState(() => _errorMsg = '請輸入 6 位數驗證碼');
+      setState(() => _errorMsg = l10n.forgotEnterSixDigitCode);
       return;
     }
     if (newPw.length < 8 ||
         !newPw.contains(RegExp(r'[A-Z]')) ||
         !newPw.contains(RegExp(r'[a-z]')) ||
         !newPw.contains(RegExp(r'[0-9]'))) {
-      setState(() => _errorMsg = '密碼須至少 8 位且包含大寫、小寫及數字');
+      setState(() => _errorMsg = l10n.forgotPasswordComplexity);
       return;
     }
     if (newPw != conf) {
-      setState(() => _errorMsg = '兩次密碼不一致');
+      setState(() => _errorMsg = l10n.forgotPasswordMismatch);
       return;
     }
     setState(() { _loading = true; _errorMsg = null; });
@@ -1161,16 +1172,16 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
         Navigator.pop(context);
         widget.onDone?.call(_emailCtrl.text.trim());
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('密碼已重設，請用新密碼登入'),
-            backgroundColor: kPrimaryGreen,
+          SnackBar(
+            content: Text(AppLocalizations.of(context).forgotResetSuccess),
+            backgroundColor: kBrandPrimary,
           ),
         );
       } else {
-        setState(() => _errorMsg = res['message'] ?? '重設失敗');
+        setState(() => _errorMsg = res['message'] ?? AppLocalizations.of(context).forgotResetFailed);
       }
     } catch (e) {
-      if (mounted) setState(() => _errorMsg = '網路錯誤，請稍後再試');
+      if (mounted) setState(() => _errorMsg = AppLocalizations.of(context).forgotNetworkError);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -1178,6 +1189,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -1205,10 +1217,10 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
             const SizedBox(height: 20),
             // 標題
             Row(children: [
-              const Icon(Icons.lock_reset_rounded, color: kPrimaryGreen, size: 24),
+              const Icon(Icons.lock_reset_rounded, color: kBrandPrimary, size: 24),
               const SizedBox(width: 10),
               Text(
-                _step == 0 ? '忘記密碼' : '輸入驗證碼',
+                _step == 0 ? l10n.forgotTitle : l10n.forgotEnterCodeTitle,
                 style: TextStyle(
                   fontSize: 18, fontWeight: FontWeight.w700, color: context.textPrimary),
               ),
@@ -1216,8 +1228,8 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
             const SizedBox(height: 6),
             Text(
               _step == 0
-                  ? '輸入您的 Email，我們將寄送 6 位數驗證碼'
-                  : '驗證碼已寄至 ${_emailCtrl.text.trim()}',
+                  ? l10n.forgotEmailSubtitle
+                  : l10n.forgotCodeSentSubtitle(_emailCtrl.text.trim()),
               style: TextStyle(fontSize: 13, color: context.textSecondary),
             ),
             const SizedBox(height: 20),
@@ -1247,7 +1259,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700,
                     letterSpacing: 10),
                 decoration: InputDecoration(
-                  labelText: '6 位驗證碼',
+                  labelText: l10n.forgotSixDigitCodeLabel,
                   counterText: '',
                   prefixIcon: const Icon(Icons.pin_outlined),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -1258,8 +1270,9 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 controller: _newPwCtrl,
                 obscureText: _obscureNew,
                 decoration: InputDecoration(
-                  labelText: '新密碼',
-                  hintText: '至少 8 位，含大寫、小寫、數字',
+                  labelText: l10n.forgotNewPasswordLabel,
+                  hintText: l10n.forgotNewPasswordHint,
+                  hintMaxLines: 1,
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(_obscureNew ? Icons.visibility : Icons.visibility_off),
@@ -1273,7 +1286,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                 controller: _confirmCtrl,
                 obscureText: _obscureConfirm,
                 decoration: InputDecoration(
-                  labelText: '確認新密碼',
+                  labelText: l10n.forgotConfirmPasswordLabel,
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(_obscureConfirm ? Icons.visibility : Icons.visibility_off),
@@ -1304,7 +1317,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
               child: ElevatedButton(
                 onPressed: _loading ? null : (_step == 0 ? _requestCode : _resetPassword),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: kPrimaryGreen,
+                  backgroundColor: kBrandPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
@@ -1313,7 +1326,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                     ? const SizedBox(width: 18, height: 18,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
-                    : Text(_step == 0 ? '寄送驗證碼' : '確認重設密碼',
+                    : Text(_step == 0 ? l10n.forgotSendCodeButton : l10n.forgotConfirmResetButton,
                         style: const TextStyle(fontSize: 15)),
               ),
             ),
@@ -1328,7 +1341,7 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
                     _confirmCtrl.clear();
                     _errorMsg = null;
                   }),
-                  child: Text('重新輸入 Email',
+                  child: Text(l10n.forgotReEnterEmail,
                       style: TextStyle(color: context.textHint)),
                 ),
               ),

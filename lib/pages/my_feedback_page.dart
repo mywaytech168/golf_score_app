@@ -138,7 +138,7 @@ class _MyFeedbackPageState extends State<MyFeedbackPage> {
             subtitle: l.myFeedbackSubtitle,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white, size: 20),
+                  color: kOnGradient, size: 20),
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: const [],
@@ -146,7 +146,7 @@ class _MyFeedbackPageState extends State<MyFeedbackPage> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: () => _loadMore(reset: true),
-              color: kPrimaryGreen,
+              color: kBrandPrimary,
               child: CustomScrollView(
                 controller: _scrollCtrl,
                 slivers: [
@@ -298,10 +298,10 @@ class _FeedbackTile extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: kPrimaryGreen.withValues(alpha: 0.08),
+                color: kBrandPrimary.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
                 border:
-                    Border.all(color: kPrimaryGreen.withValues(alpha: 0.25)),
+                    Border.all(color: kBrandPrimary.withValues(alpha: 0.25)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,13 +309,13 @@ class _FeedbackTile extends StatelessWidget {
                   Row(
                     children: [
                       const Icon(Icons.support_agent_rounded,
-                          size: 16, color: kPrimaryGreen),
+                          size: 16, color: kBrandPrimary),
                       const SizedBox(width: 5),
                       Text(l.myFeedbackAdminReply,
                           style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: kPrimaryGreen)),
+                              color: kBrandPrimary)),
                       const Spacer(),
                       if (item.repliedAt != null)
                         Text(

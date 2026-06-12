@@ -24,6 +24,9 @@ import 'pose_result.dart';
 import 'recording_config.dart';
 import 'recording_widgets.dart';
 import 'widgets/recording_indicator.dart';
+import 'widgets/impact_glow_overlay.dart';
+import '../theme/app_theme.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 typedef RecordCompleteCallback = void Function({
   required String videoPath,
@@ -59,8 +62,15 @@ class _RecordScreenState extends State<RecordScreen> {
 
   // 即時揮桿偵測：錄影中記錄擊球時刻（影片時鐘），錄後與音訊峰值聯集做自動切片
   late final LiveSwingDetector _liveDetector =
-      LiveSwingDetector(onImpact: _liveImpacts.add);
+      LiveSwingDetector(onImpact: _onLiveImpact);
   final List<double> _liveImpacts = [];
+
+  /// 即時偵測到擊球：記錄時刻並立即 rebuild，讓光圈/徽章在擊球當下觸發
+  /// （不依賴計時器 tick，避免最多 ~1s 的視覺延遲）。
+  void _onLiveImpact(double impactTimeSec) {
+    _liveImpacts.add(impactTimeSec);
+    if (mounted) setState(() {});
+  }
 
   bool _recording  = false;
   bool get _isRecording => _recording;
@@ -107,21 +117,22 @@ class _RecordScreenState extends State<RecordScreen> {
         (statuses[Permission.camera]?.isPermanentlyDenied ?? false) ||
         (statuses[Permission.microphone]?.isPermanentlyDenied ?? false);
     if (mounted) {
+      final l10n = AppLocalizations.of(context);
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('需要相機與麥克風權限'),
+          title: Text(l10n.recordPermissionTitle),
           content: Text(camOk
-              ? '錄影需要麥克風權限以收錄擊球聲，請開啟後再試。'
-              : '揮桿錄影需要相機與麥克風權限，請開啟後再試。'),
+              ? l10n.recordPermissionMicOnly
+              : l10n.recordPermissionCameraAndMic),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
             FilledButton(
               onPressed: () { Navigator.pop(ctx); if (permanentlyDenied) openAppSettings(); },
-              child: Text(permanentlyDenied ? '前往設定' : '知道了'),
+              child: Text(permanentlyDenied ? l10n.recordGoToSettings : l10n.recordGotIt),
             ),
           ],
         ),
@@ -248,10 +259,10 @@ class _RecordScreenState extends State<RecordScreen> {
           backgroundColor: Colors.black87,
           foregroundColor: Colors.white,
           elevation: 0,
-          title: const Text('高爾夫揮桿錄製'),
+          title: Text(AppLocalizations.of(context).recordTitle),
           actions: [
             IconButton(
-              tooltip: '輪廓疊加切換',
+              tooltip: AppLocalizations.of(context).recordOverlayToggle,
               icon: Icon(Icons.person_outline_rounded,
                   color: _showOverlay ? Colors.greenAccent : Colors.white38),
               onPressed:
@@ -259,7 +270,7 @@ class _RecordScreenState extends State<RecordScreen> {
             ),
             // Skeleton visibility controlled natively (always shown when pose detected)
             IconButton(
-              tooltip: '錄製設定',
+              tooltip: AppLocalizations.of(context).recordSettings,
               icon: const Icon(Icons.settings_rounded),
               onPressed: (_isRecording || _saving) ? null : _showSettingsSheet,
             ),
@@ -303,6 +314,15 @@ class _RecordScreenState extends State<RecordScreen> {
           ),
         // 戶外強光下的高可見度錄製指示：全螢幕脈動紅框
         if (_isRecording) const Positioned.fill(child: RecordingBorderOverlay()),
+        // 即時擊球視覺回饋：中性光圈 + 「第 N 桿」彈出
+        if (_isRecording)
+          Positioned.fill(
+            child: ImpactGlowOverlay(
+              impactCount: _liveImpacts.length,
+              labelBuilder: (n) =>
+                  AppLocalizations.of(context).recImpactShot(n),
+            ),
+          ),
         if (_isRecording)
           Positioned(
             top: 16, right: 16,
@@ -431,9 +451,9 @@ class _RecordScreenState extends State<RecordScreen> {
     if (!_supportsVideoAndAnalysis) {
       setState(() => _pauseAnalysis = true);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('此裝置不支援錄影期間同步骨架偵測，錄影結束後恢復'),
-          duration: Duration(seconds: 3),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(AppLocalizations.of(context).recordLowEndDeviceWarning),
+          duration: const Duration(seconds: 3),
           backgroundColor: Colors.orange,
         ));
       }
@@ -477,10 +497,10 @@ class _RecordScreenState extends State<RecordScreen> {
       try { await _audioService.stop(); } catch (_) {}
       if (mounted) setState(() => _saving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('本次錄製失敗（未取得有效影像），請重新錄製'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(AppLocalizations.of(context).recordFailed),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 3),
+          duration: const Duration(seconds: 3),
         ));
       }
       if (mounted && !_recording) unawaited(_preWarmRecordingSession());
@@ -650,6 +670,7 @@ class _RecordScreenState extends State<RecordScreen> {
     FrameRate            pendingFps     = _config.fps;
     RecordingAspectRatio pendingRatio   = _config.aspectRatio;
     bool                 pendingAudio   = _config.enableAudio;
+    final l10n = AppLocalizations.of(context);
 
     showModalBottomSheet<void>(
       context: context,
@@ -666,10 +687,10 @@ class _RecordScreenState extends State<RecordScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    const Icon(Icons.videocam_rounded, color: Color(0xFF1AA87C), size: 20),
+                    const Icon(Icons.videocam_rounded, color: kBrandPrimary, size: 20),
                     const SizedBox(width: 8),
-                    const Text('錄製設定',
-                        style: TextStyle(color: Colors.white, fontSize: 16,
+                    Text(l10n.recordSettings,
+                        style: const TextStyle(color: Colors.white, fontSize: 16,
                             fontWeight: FontWeight.w700)),
                     const Spacer(),
                     IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 20),
@@ -677,7 +698,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   ]),
                   const Divider(color: Colors.white12, height: 20),
 
-                  const Text('影片畫質', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  Text(l10n.recordVideoQuality, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 10),
                   Row(children: VideoQuality.values.map((q) {
                     return Expanded(child: Padding(
@@ -691,7 +712,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   }).toList()),
                   const SizedBox(height: 20),
 
-                  const Text('幀率', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  Text(l10n.recordFrameRate, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 10),
                   Row(children: FrameRate.values.map((f) {
                     return Expanded(child: Padding(
@@ -708,12 +729,12 @@ class _RecordScreenState extends State<RecordScreen> {
                   Row(children: [
                     const Icon(Icons.mic_rounded, color: Colors.white54, size: 16),
                     const SizedBox(width: 6),
-                    const Text('錄製音訊', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    Text(l10n.recordAudio, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                     const Spacer(),
                     Switch(
                       value: pendingAudio,
                       onChanged: (v) => setSheet(() => pendingAudio = v),
-                      activeThumbColor: const Color(0xFF1AA87C),
+                      activeThumbColor: kBrandPrimary,
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ]),
@@ -723,7 +744,7 @@ class _RecordScreenState extends State<RecordScreen> {
                     width: double.infinity,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF1AA87C),
+                        backgroundColor: kBrandPrimary,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -745,8 +766,8 @@ class _RecordScreenState extends State<RecordScreen> {
                           await _initCamera();
                         }
                       },
-                      child: const Text('套用',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      child: Text(l10n.recordApply,
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                     ),
                   ),
                   const SizedBox(height: 8),

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../services/ad_service.dart';
 import '../services/plan_service.dart';
 
 /// 全域方案狀態 Provider
@@ -26,6 +27,8 @@ class PlanProvider with ChangeNotifier {
     notifyListeners();
     try {
       _status = await PlanService.getPlanStatus();
+      // Pro / Elite 免廣告；Free 顯示廣告
+      AdService.adsEnabled = _status.plan == UserPlan.free;
     } catch (e) {
       debugPrint('[PlanProvider] refresh 失敗: $e');
     } finally {

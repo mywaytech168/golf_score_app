@@ -513,6 +513,10 @@ private func btBfsBlobs(
   var visited = [Bool](repeating: false, count: w * h)
   var blobs   = [BlobResult]()
 
+  // 超過此面積即視為非球（whole-frame 曝光變化等）：仍 flood-fill 標記 visited
+  // 以免重複掃描，但停止累積 pixels 並直接否決，避免巨型區域的記憶體尖峰。
+  let areaCap = max(areaHi * 4, 4096)
+
   for start in 0..<(w * h) {
     guard mask[start] != 0 && !visited[start] else { continue }
 
@@ -521,6 +525,8 @@ private func btBfsBlobs(
     queue.append(start); pixels.append(start)
     visited[start] = true
     var qi = 0
+    var area = 1
+    var oversized = false
 
     while qi < queue.count {
       let cur = queue[qi]; qi += 1
@@ -531,12 +537,17 @@ private func btBfsBlobs(
         let nb = nj * w + ni
         guard !visited[nb] && mask[nb] != 0 else { continue }
         visited[nb] = true
-        queue.append(nb); pixels.append(nb)
+        queue.append(nb)
+        area += 1
+        if area > areaCap {
+          oversized = true            // 之後僅 flood-fill 標記 visited，不再留存 pixels
+        } else if !oversized {
+          pixels.append(nb)
+        }
       }
     }
 
-    let area = pixels.count
-    guard area >= areaLo && area <= areaHi else { continue }
+    guard !oversized && area >= areaLo && area <= areaHi else { continue }
 
     var sumX = 0, sumY = 0, sumDiff = 0, perim = 0
     for px in pixels {

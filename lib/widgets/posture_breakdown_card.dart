@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../models/swing_posture.dart';
 import '../theme/app_theme.dart';
@@ -20,6 +21,7 @@ class PostureBreakdownCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.all(kSpaceMD),
       decoration: BoxDecoration(
@@ -34,11 +36,11 @@ class PostureBreakdownCard extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.accessibility_new_rounded,
-                  color: kPrimaryGreen, size: 18),
+                  color: kBrandPrimary, size: 18),
               const SizedBox(width: kSpaceSM),
               Expanded(
                 child: Text(
-                  title ?? '姿勢分析',
+                  title ?? l10n.postureTitle,
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
@@ -48,7 +50,7 @@ class PostureBreakdownCard extends StatelessWidget {
               ),
               if (!_hasData)
                 Text(
-                  '尚無 AI 分析資料',
+                  l10n.postureNoData,
                   style: TextStyle(fontSize: 11, color: context.textHint),
                 ),
             ],

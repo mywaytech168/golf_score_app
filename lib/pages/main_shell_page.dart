@@ -310,7 +310,7 @@ class _BottomNavItem extends StatelessWidget {
         children: [
           Icon(
             icon,
-            color: isActive ? kPrimaryGreen : Colors.grey,
+            color: isActive ? kBrandPrimary : Colors.grey,
             size: 24,
           ),
           const SizedBox(height: 4),
@@ -319,7 +319,7 @@ class _BottomNavItem extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: isActive ? kPrimaryGreen : Colors.grey,
+              color: isActive ? kBrandPrimary : Colors.grey,
             ),
           ),
         ],
@@ -353,11 +353,7 @@ class _QuickStartNavItem extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: isActive
-                  ? const LinearGradient(
-                      colors: [kPrimaryGreen, kPrimaryLight],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    )
+                  ? kOrviaGradient
                   : LinearGradient(
                       colors: [Colors.grey[400]!, Colors.grey[500]!],
                       begin: Alignment.topLeft,
@@ -365,7 +361,7 @@ class _QuickStartNavItem extends StatelessWidget {
                     ),
               boxShadow: [
                 BoxShadow(
-                  color: (isActive ? kPrimaryGreen : Colors.grey).withValues(alpha: 0.3),
+                  color: (isActive ? kBrandPrimary : Colors.grey).withValues(alpha: 0.3),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -385,7 +381,7 @@ class _QuickStartNavItem extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: isActive ? kPrimaryGreen : Colors.grey,
+              color: isActive ? kBrandPrimary : Colors.grey,
             ),
           ),
         ],

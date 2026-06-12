@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../models/recording_history_entry.dart';
 
 /// 錄影歷史列表顯示組件
@@ -41,10 +42,11 @@ class _RecordingHistoryTabsState extends State<RecordingHistoryTabs> {
   @override
   Widget build(BuildContext context) {
     final entries = sortedEntries;
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('錄影歷史 (${entries.length})'),
+        title: Text(l10n.recTabsTitle(entries.length)),
         centerTitle: true,
       ),
       body: entries.isEmpty
@@ -55,14 +57,14 @@ class _RecordingHistoryTabsState extends State<RecordingHistoryTabs> {
                   Icon(Icons.folder_open, size: 64, color: Colors.grey[400]),
                   const SizedBox(height: 16),
                   Text(
-                    '沒有錄影紀錄',
+                    l10n.recTabsEmpty,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           color: Colors.grey[600],
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '完成新的錄影後，將在此顯示',
+                    l10n.recTabsEmptyHint,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey[500],
                         ),
@@ -87,6 +89,7 @@ class _RecordingHistoryTabsState extends State<RecordingHistoryTabs> {
   /// 構建單項錄影卡片
   Widget _buildEntryCard(
       BuildContext context, RecordingHistoryEntry entry, int index) {
+    final l10n = AppLocalizations.of(context);
     return GestureDetector(
       onTap: () => widget.onEntryTapped?.call(entry),
       child: Card(
@@ -132,7 +135,7 @@ class _RecordingHistoryTabsState extends State<RecordingHistoryTabs> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _formatDateTime(entry.recordedAt),
+                          _formatDateTime(entry.recordedAt, l10n),
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 color: Colors.grey[600],
                               ),
@@ -155,12 +158,12 @@ class _RecordingHistoryTabsState extends State<RecordingHistoryTabs> {
                     children: [
                       Expanded(
                         child: Text(
-                          '模式：${entry.videoType.label}',
+                          l10n.recTabsMode(entry.videoType.label),
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
                       ),
                       Text(
-                        '時長：${entry.durationSeconds}秒',
+                        l10n.recTabsDuration(entry.durationSeconds),
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
                     ],
@@ -195,18 +198,18 @@ class _RecordingHistoryTabsState extends State<RecordingHistoryTabs> {
   }
 
   /// 格式化日期時間顯示
-  String _formatDateTime(DateTime dateTime) {
+  String _formatDateTime(DateTime dateTime, AppLocalizations l10n) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final targetDay = DateTime(dateTime.year, dateTime.month, dateTime.day);
 
     String dayPart;
     if (targetDay == today) {
-      dayPart = '今天';
+      dayPart = l10n.recTabsToday;
     } else if (targetDay == today.subtract(const Duration(days: 1))) {
-      dayPart = '昨天';
+      dayPart = l10n.recTabsYesterday;
     } else {
-      dayPart = '${dateTime.month}月${dateTime.day}日';
+      dayPart = l10n.recTabsDateMonthDay(dateTime.month, dateTime.day);
     }
 
     return '$dayPart ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';

@@ -28,6 +28,9 @@ import 'pose_result.dart';
 import 'recording_config.dart';
 import 'recording_widgets.dart';
 import 'widgets/recording_indicator.dart';
+import 'widgets/impact_glow_overlay.dart';
+import '../theme/app_theme.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 const int _autoNextShotDelaySec = 3;
 
@@ -75,7 +78,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   static const int _addressTimeoutSec = 60;
 
   double? _impactTimeSec;
-  String _processingLabel = '分析中…';
+  int _impactSeq = 0; // 每次即時偵測到擊球 +1，驅動光圈特效
+  String _processingLabel = '';
   int _sessionRoundIndex = 1;
   int _shotCount = 0;
   RecordingHistoryEntry? _latestEntry;
@@ -318,7 +322,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       Duration(seconds: _addressTimeoutSec),
       () {
         if (_state == ShotState.addressing) {
-          _showError('未偵測到準備姿勢，已取消');
+          _showError(AppLocalizations.of(context).shotRecAddressTimeout);
           _cancelShot();
         }
       },
@@ -354,9 +358,9 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
     if (!_supportsVideoAndAnalysis) {
       setState(() => _pauseAnalysis = true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('此裝置不支援錄影期間同步骨架偵測，仍會自動偵測揮桿'),
-        duration: Duration(seconds: 3), backgroundColor: Colors.orange,
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(AppLocalizations.of(context).shotRecNoAnalysisWarning),
+        duration: const Duration(seconds: 3), backgroundColor: Colors.orange,
       ));
     }
 
@@ -414,7 +418,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     //   會被麥克風錄進 mp4 音軌 → 誤判為擊球峰值，破壞擊球聲分類。
     //   錄製中亦不震動（馬達嗡聲會入軌）；錄製停止後的 playRecordingDone() 給聽覺確認。
     // 倒數需與實際 postImpact 收尾時長一致（3.2s = 2.5s buffer + 封口餘裕）
-    setState(() { _state = ShotState.postImpact; _countdown = 3.2; });
+    setState(() { _state = ShotState.postImpact; _countdown = 3.2; _impactSeq++; });
     _countdownTick = Timer.periodic(const Duration(milliseconds: 100), (t) {
       if (!mounted) { t.cancel(); return; }
       setState(() { _countdown = (_countdown - 0.1).clamp(0.0, 9.9); });
@@ -428,7 +432,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   Future<void> _onPostImpactComplete() async {
     _cancelAllTimers();
     if (!mounted) return;
-    setState(() => _state = ShotState.processing);
+    setState(() { _state = ShotState.processing; _processingLabel = AppLocalizations.of(context).shotRecAnalyzing; });
     if (await _stopRecordingSafely()) {
       await _finishShotRecording();
     } else {
@@ -444,7 +448,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       final dur = _elapsed.inMilliseconds / 1000.0;
       _impactTimeSec = (dur - 1.0).clamp(0.5, dur);
     }
-    setState(() => _state = ShotState.processing);
+    setState(() { _state = ShotState.processing; _processingLabel = AppLocalizations.of(context).shotRecAnalyzing; });
     if (await _stopRecordingSafely()) {
       await _finishShotRecording();
     } else {
@@ -476,10 +480,10 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     _prewarmVideoPath = '';
     _prewarmReady = false;
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('本次揮桿錄製失敗（未取得有效影像），請重試'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(AppLocalizations.of(context).shotRecRecordFailed),
         backgroundColor: Colors.red,
-        duration: Duration(seconds: 3),
+        duration: const Duration(seconds: 3),
       ));
       setState(() => _state = ShotState.idle);
     }
@@ -501,6 +505,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   }
 
   Future<void> _finishShotRecording() async {
+    final l10n = AppLocalizations.of(context);
     _logVideoSize(_videoPath);
 
     // CSV 時鐘 → 影片時鐘（影片 t=0 = 第一個編碼幀，晚於 rec.start() ~0.2s）
@@ -513,7 +518,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       debugPrint('[ShotRecord] CSV flush: $e');
     }
 
-    if (mounted) setState(() => _processingLabel = '提取音訊…');
+    if (mounted) setState(() => _processingLabel = l10n.shotRecExtractingAudio);
     List<String>? audioTags;
     try {
       // 從 mp4 音軌抽出 audio.wav（單一麥克風來源 = 原生錄影，無收音衝突）
@@ -537,7 +542,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     // 直接用錄影即時推論的 live CSV 偵測（~15fps 取樣，零分析等待）。
     // 取樣較疏、擊球幀可能落在兩幀之間 — 已知 trade-off；
     // LiveSwingDetector 的即時擊球時間仍為兜底。
-    if (mounted) setState(() => _processingLabel = '偵測擊球…');
+    if (mounted) setState(() => _processingLabel = l10n.shotRecDetectingImpact);
     List<SwingHit> hits = [];
     try {
       hits = await SwingImpactDetector.detect(csvPath: _csvPath);
@@ -552,7 +557,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     }
 
     if (hits.isEmpty) {
-      _showError('未偵測到揮桿，請重試');
+      _showError(l10n.shotRecNoSwingDetected);
       if (mounted) setState(() => _state = ShotState.idle);
       return;
     }
@@ -569,7 +574,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
           defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
     );
 
-    if (mounted) setState(() => _processingLabel = '切片中…');
+    if (mounted) setState(() => _processingLabel = l10n.shotRecClipping);
     List<ClipResult> results = [];
     try {
       results = await ClipPipelineService.run(
@@ -580,21 +585,21 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     }
 
     if (results.isEmpty) {
-      _showError('切片失敗，請重試');
+      _showError(l10n.shotRecClipFailed);
       if (mounted) setState(() => _state = ShotState.idle);
       return;
     }
 
     final shotNum  = _shotCount + 1;
     var clipEntry = results.first.entry.copyWith(
-      customName: '即時第$shotNum桿',
+      customName: l10n.shotRecLiveShotName(shotNum),
       audioTags:  audioTags,
       createdAt:  DateTime.now(),
     );
 
     // 5 特徵音訊評分（甜蜜點）：clip 的 audio.wav 已由切片流程帶入，
     // 立即評分讓卡片不需再跑「完整分析」就有命中資訊。失敗不擋存檔。
-    if (mounted) setState(() => _processingLabel = '聲音分析中…');
+    if (mounted) setState(() => _processingLabel = l10n.shotRecScoringAudio);
     try {
       final hit = hits.first;
       final audioScore = await ClipAudioScoreService.analyzeWav(
@@ -812,10 +817,10 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         backgroundColor: Colors.black87,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('即時揮桿模式'),
+        title: Text(AppLocalizations.of(context).shotRecTitle),
         actions: [
           IconButton(
-            tooltip: '錄製設定',
+            tooltip: AppLocalizations.of(context).shotRecSettings,
             icon: const Icon(Icons.settings_rounded),
             onPressed: (_state == ShotState.addressing ||
                         _state == ShotState.recording ||
@@ -854,6 +859,14 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                       _state == ShotState.postImpact)
                     const Positioned.fill(child: RecordingBorderOverlay()),
                   ..._buildStateOverlay(),
+                  // 即時擊球視覺回饋：中性光圈 + 「第 N 桿」彈出
+                  Positioned.fill(
+                    child: ImpactGlowOverlay(
+                      impactCount: _impactSeq,
+                      labelBuilder: (_) => AppLocalizations.of(context)
+                          .recImpactShot(_shotCount + 1),
+                    ),
+                  ),
                   if (_state != ShotState.processing)
                     ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
                 ]),
@@ -899,12 +912,12 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     ),
     if (_shotCount > 0)
       Positioned(top: 16, left: 16,
-          child: _Chip(text: '已完成 $_shotCount 桿')),
+          child: _Chip(text: AppLocalizations.of(context).shotRecShotsCompleted(_shotCount))),
     Positioned(
       bottom: 52, left: 0, right: 0,
       child: Center(child: ScaleTransition(
         scale: _pulseScale,
-        child: _ShotButton(label: '準備', color: Colors.white, onTap: _startShot),
+        child: _ShotButton(label: AppLocalizations.of(context).shotRecReady, color: Colors.white, onTap: _startShot),
       )),
     ),
   ];
@@ -942,16 +955,16 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     if (!_calibrationDone)
       Positioned(
         bottom: 130, left: 0, right: 0,
-        child: Center(child: _promptChip('校準中…請保持靜止',
+        child: Center(child: _promptChip(AppLocalizations.of(context).shotRecCalibrating,
             icon: Icons.hourglass_top_rounded)),
       )
     else
       Positioned(
         bottom: 130, left: 0, right: 0,
         child: Center(child: _promptChip(
-          '請站到準備姿勢 ($_addressFrames/$_addressThreshold)',
+          AppLocalizations.of(context).shotRecAddressPrompt(_addressFrames, _addressThreshold),
           icon: Icons.sports_golf_rounded,
-          subText: '站定後將自動開始錄影',
+          subText: AppLocalizations.of(context).shotRecAddressSubText,
         )),
       ),
     // 等待站姿階段：只提供取消（尚未開始錄影，無停止鈕、無紅框/徽章）
@@ -959,7 +972,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       bottom: 52, left: 0, right: 0,
       child: Center(child: TextButton(
         onPressed: _cancelShot,
-        child: const Text('取消', style: TextStyle(color: Colors.white54, fontSize: 16)),
+        child: Text(AppLocalizations.of(context).commonCancel, style: const TextStyle(color: Colors.white54, fontSize: 16)),
       )),
     ),
   ];
@@ -970,13 +983,13 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         child: RecordingIndicator(elapsed: _elapsed, frameCount: _frameCount)),
     Positioned(
       bottom: 130, left: 0, right: 0,
-      child: Center(child: _promptChip('⚡ 偵測中…請揮桿',
+      child: Center(child: _promptChip(AppLocalizations.of(context).shotRecDetecting,
           color: Colors.greenAccent)),
     ),
     Positioned(
       bottom: 52, left: 0, right: 0,
       child: Center(child: _ShotButton(
-        label: '停止', color: Colors.red,
+        label: AppLocalizations.of(context).shotRecStop, color: Colors.red,
         onTap: () => _stopAndProcess(),
       )),
     ),
@@ -984,7 +997,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       bottom: 52, right: 24,
       child: TextButton(
         onPressed: _cancelShot,
-        child: const Text('取消', style: TextStyle(color: Colors.white38)),
+        child: Text(AppLocalizations.of(context).commonCancel, style: const TextStyle(color: Colors.white38)),
       ),
     ),
   ];
@@ -996,7 +1009,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     Positioned(
       bottom: 130, left: 0, right: 0,
       child: Center(child: _promptChip(
-        '偵測到揮桿 ✓\n倒數 ${_countdown.toStringAsFixed(1)}s',
+        AppLocalizations.of(context).shotRecSwingDetected(_countdown.toStringAsFixed(1)),
         color: Colors.greenAccent,
       )),
     ),
@@ -1016,7 +1029,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 72),
         const SizedBox(height: 16),
-        const Text('完成！', style: TextStyle(color: Colors.white,
+        Text(AppLocalizations.of(context).shotRecDone, style: const TextStyle(color: Colors.white,
             fontSize: 24, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         if (entry != null)
@@ -1037,7 +1050,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 ));
               },
               icon: const Icon(Icons.play_arrow_rounded, color: Colors.white),
-              label: const Text('觀看', style: TextStyle(color: Colors.white)),
+              label: Text(AppLocalizations.of(context).shotRecWatch, style: const TextStyle(color: Colors.white)),
               style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white38)),
             ),
           const SizedBox(width: 16),
@@ -1047,8 +1060,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
               _startShot();   // 立刻開始下一桿（不等倒數）
             },
             icon: const Icon(Icons.sports_golf_rounded),
-            label: Text('下一桿 ($_autoNextCountdown)'),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1AA87C)),
+            label: Text(AppLocalizations.of(context).shotRecNextShot(_autoNextCountdown)),
+            style: FilledButton.styleFrom(backgroundColor: kBrandPrimary),
           ),
         ]),
       ])),
@@ -1058,6 +1071,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   // ── Settings ──────────────────────────────────────────────────────────────
 
   void _showSettingsSheet() {
+    final l10n = AppLocalizations.of(context);
     VideoQuality pendingQ = _config.quality;
     FrameRate    pendingF = _config.fps;
     bool         pendingA = _config.enableAudio;
@@ -1075,9 +1089,9 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
               child: Column(mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  const Icon(Icons.settings_rounded, color: Color(0xFF1AA87C), size: 20),
+                  const Icon(Icons.settings_rounded, color: kBrandPrimary, size: 20),
                   const SizedBox(width: 8),
-                  const Text('錄製設定', style: TextStyle(color: Colors.white,
+                  Text(l10n.shotRecSettings, style: const TextStyle(color: Colors.white,
                       fontSize: 16, fontWeight: FontWeight.w700)),
                   const Spacer(),
                   IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 20),
@@ -1085,7 +1099,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 ]),
                 const Divider(color: Colors.white12, height: 20),
 
-                const Text('影片畫質', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                Text(l10n.shotRecVideoQuality, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                 const SizedBox(height: 10),
                 Row(children: VideoQuality.values.map((q) => Expanded(child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -1097,7 +1111,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 ))).toList()),
                 const SizedBox(height: 20),
 
-                const Text('幀率', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                Text(l10n.shotRecFrameRate, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                 const SizedBox(height: 10),
                 Row(children: FrameRate.values.map((f) => Expanded(child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -1112,10 +1126,10 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 Row(children: [
                   const Icon(Icons.mic_rounded, color: Colors.white54, size: 16),
                   const SizedBox(width: 6),
-                  const Text('錄製音訊', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  Text(l10n.shotRecEnableAudio, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                   const Spacer(),
                   Switch(value: pendingA, onChanged: (v) => setSheet(() => pendingA = v),
-                    activeThumbColor: const Color(0xFF1AA87C),
+                    activeThumbColor: kBrandPrimary,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                 ]),
                 const SizedBox(height: 16),
@@ -1123,7 +1137,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 SizedBox(width: double.infinity,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF1AA87C),
+                      backgroundColor: kBrandPrimary,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
@@ -1142,8 +1156,8 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                         await _initCamera();
                       }
                     },
-                    child: const Text('套用',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    child: Text(l10n.shotRecApply,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(height: 8),

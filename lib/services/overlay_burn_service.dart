@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/export_quality.dart';
+import '../models/export_spec.dart';
 import 'ball_trajectory_service.dart';
+import 'export_composer_service.dart';
 import 'skeleton_csv_locator.dart';
 import 'skeleton_overlay_service.dart';
 
@@ -40,6 +42,64 @@ class OverlayBurnService {
       startSec:   0.0,   // clip 目錄的 CSV 為 clip 相對時間
       outputPath: out,
       quality:    quality,
+    );
+  }
+
+  /// 是否具備任何可疊加素材（決定要不要顯示「自訂匯出」）。
+  static bool canCompose(String sessionDir) =>
+      File(p.join(sessionDir, 'clip.mp4')).existsSync();
+
+  /// 依 [spec] 單 pass 合成可下載影片，回傳輸出路徑（失敗回傳 null）。
+  ///
+  /// 來源固定為 clip.mp4（乾淨片段）。骨架/軌跡素材不足時自動跳過該 layer。
+  /// 相同 [spec.cacheKey] 已存在則直接重用，不重燒。
+  static Future<String?> composeForExport(
+    String sessionDir,
+    ExportSpec spec,
+  ) async {
+    final clip = p.join(sessionDir, 'clip.mp4');
+    if (!File(clip).existsSync()) {
+      debugPrint('[OverlayBurn] composeForExport: clip.mp4 不存在');
+      return null;
+    }
+
+    final out = p.join(sessionDir, '${spec.cacheKey}.mp4');
+    if (File(out).existsSync()) return out;
+
+    // 骨架素材（clip 目錄 CSV 為 clip 相對時間 → startSec=0）
+    final csv = (spec.skeleton ? resolveSkeletonCsv(sessionDir) : null);
+
+    // 軌跡素材
+    List<Map<String, dynamic>> trackPts = const [];
+    if (spec.trajectory) {
+      final trajFile = File(p.join(sessionDir, 'trajectory.json'));
+      if (trajFile.existsSync()) {
+        try {
+          final raw = jsonDecode(await trajFile.readAsString()) as Map<String, dynamic>;
+          trackPts = (raw['points'] as List)
+              .map((e) => <String, dynamic>{
+                    'x':   (e['x'] as num).round(),
+                    'y':   (e['y'] as num).round(),
+                    'pts': (e['pts'] as num).toInt(),
+                  })
+              .toList();
+        } catch (e) {
+          debugPrint('[OverlayBurn] trajectory.json 解析失敗: $e');
+        }
+      }
+    }
+
+    debugPrint('[OverlayBurn] composeForExport ${spec.cacheKey} '
+        '(skeleton=${csv != null}, trajPts=${trackPts.length}, watermark=${spec.watermark})');
+
+    return ExportComposerService.compose(
+      clipPath:   clip,
+      csvPath:    csv,
+      startSec:   0.0,
+      trackPts:   trackPts,
+      watermark:  spec.watermark,
+      outputPath: out,
+      quality:    spec.quality,
     );
   }
 

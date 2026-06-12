@@ -22,6 +22,7 @@
 		AA0001111CF9AA0000000011 /* BallYoloDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001101CF9AA0000000010 /* BallYoloDetector.swift */; };
 		AA0001131CF9AA0000000013 /* VideoTranscoderChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */; };
 		AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001141CF9AA0000000014 /* VideoExportChannel.swift */; };
+		AA00011E1CF9AA000000001E /* ExportComposerChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00011D1CF9AA000000001D /* ExportComposerChannel.swift */; };
 		AA0001171CF9AA0000000017 /* GolfAnalysisChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */; };
 		AA0001191CF9AA0000000019 /* MediaPipeCameraChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001181CF9AA0000000018 /* MediaPipeCameraChannel.swift */; };
 		AA00011B1CF9AA000000001B /* VideoOverlayChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00011A1CF9AA000000001A /* VideoOverlayChannel.swift */; };
@@ -68,6 +69,7 @@
 		AA0001101CF9AA0000000010 /* BallYoloDetector.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BallYoloDetector.swift; sourceTree = "<group>"; };
 		AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoTranscoderChannel.swift; sourceTree = "<group>"; };
 		AA0001141CF9AA0000000014 /* VideoExportChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoExportChannel.swift; sourceTree = "<group>"; };
+		AA00011D1CF9AA000000001D /* ExportComposerChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ExportComposerChannel.swift; sourceTree = "<group>"; };
 		AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GolfAnalysisChannel.swift; sourceTree = "<group>"; };
 		AA00011C1CF9AA000000001C /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
 		AA0001181CF9AA0000000018 /* MediaPipeCameraChannel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MediaPipeCameraChannel.swift; sourceTree = "<group>"; };
@@ -147,6 +149,7 @@
 				AA0001101CF9AA0000000010 /* BallYoloDetector.swift */,
 				AA0001121CF9AA0000000012 /* VideoTranscoderChannel.swift */,
 				AA0001141CF9AA0000000014 /* VideoExportChannel.swift */,
+				AA00011D1CF9AA000000001D /* ExportComposerChannel.swift */,
 				AA0001161CF9AA0000000016 /* GolfAnalysisChannel.swift */,
 				AA00011C1CF9AA000000001C /* Runner.entitlements */,
 				AA0001181CF9AA0000000018 /* MediaPipeCameraChannel.swift */,
@@ -346,6 +349,7 @@
 				AA0001111CF9AA0000000011 /* BallYoloDetector.swift in Sources */,
 				AA0001131CF9AA0000000013 /* VideoTranscoderChannel.swift in Sources */,
 				AA0001151CF9AA0000000015 /* VideoExportChannel.swift in Sources */,
+				AA00011E1CF9AA000000001E /* ExportComposerChannel.swift in Sources */,
 				AA0001171CF9AA0000000017 /* GolfAnalysisChannel.swift in Sources */,
 				AA0001191CF9AA0000000019 /* MediaPipeCameraChannel.swift in Sources */,
 				AA00011B1CF9AA000000001B /* VideoOverlayChannel.swift in Sources */,

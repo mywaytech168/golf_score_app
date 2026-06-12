@@ -1,9 +1,7 @@
 {
   "@@locale": "zh_CN",
-
   "appName": "ORVIA",
   "appTagline": "智能挥杆训练平台",
-
   "commonSave": "保存",
   "commonCancel": "取消",
   "commonConfirm": "确认",
@@ -15,7 +13,6 @@
   "commonOk": "确定",
   "commonLoading": "加载中...",
   "commonUnknownError": "发生未知错误，请稍后再试",
-
   "authWelcomeBack": "欢迎回来！",
   "authLoginSubtitle": "登录 ORVIA 以同步挥杆数据并探索最新分析报告。",
   "authRegisterTitle": "创建账号",
@@ -42,8 +39,6 @@
   "authAppleSigningIn": "Apple 登录中...",
   "authNoAccount": "还没有账号？立即注册",
   "authHaveAccount": "已有账号？返回登录",
-
-
   "validationEnterUsernameOrEmail": "请输入用户名或电子邮件",
   "validationEnterPassword": "请输入密码",
   "validationEnterEmail": "请输入电子邮件",
@@ -53,7 +48,6 @@
   "validationPasswordTooShort": "密码须至少 8 位且包含大写、小写字母及数字",
   "validationPasswordMismatch": "两次密码不一致",
   "validationEnterPasswordAgain": "请再次输入密码",
-
   "msgLoginSuccess": "登录成功，欢迎回来！",
   "msgLoginFailed": "登录失败，请检查账号密码",
   "msgLoginFailedWithError": "登录失败：{error}",
@@ -68,7 +62,6 @@
   "msgAppleLoginSuccess": "Apple 登录成功，欢迎回来！",
   "msgAppleLoginFailed": "Apple 登录失败：{error}",
   "msgAppleLoginNoToken": "Apple 登录失败：服务器未返回认证令牌",
-
   "permTitle": "请先授权蓝牙与定位",
   "permSubtitle": "首次登录时需要获取蓝牙权限。",
   "permGranted": "已允许",
@@ -85,13 +78,11 @@
   "permAndroidInstructions": "请在系统设置中允许以下权限：\n1. 进入「应用与通知」\n2. 选择 ORVIA → 权限\n3. 启用「附近设备、蓝牙」与「定位」",
   "permStatusGranted": "已允许",
   "permStatusDenied": "已拒绝",
-
   "navHome": "首页",
   "navData": "数据",
   "navRecord": "录制",
   "navHistory": "历史",
   "navPremium": "付费",
-
   "homeLogout": "退出登录",
   "homeConfirmLogout": "确认退出",
   "homeConfirmLogoutMsg": "您确定要退出登录吗？",
@@ -108,7 +99,6 @@
   "homeAvgScore": "平均分数",
   "homeNoDataYet": "今日暂无数据",
   "homeStartRecording": "开始录制",
-
   "recTitle": "新建录制",
   "recStartRecording": "开始录制",
   "recSelectLocalVideo": "选择本地视频",
@@ -118,12 +108,10 @@
   "recSuccess": "导入成功",
   "recFailed": "导入失败",
   "recCancelled": "已取消",
-
   "historyTitle": "录制历史",
   "historyEmpty": "暂无录制记录",
   "historyDeleteConfirm": "删除此录制？",
   "historyDeleteConfirmMsg": "此操作无法撤销。",
-
   "upgradeTitle": "升级方案",
   "upgradeFreeForever": "永久免费",
   "upgradePerMonth": "/月",
@@ -150,31 +138,26 @@
   "upgradeHistoryCompare": "历史比较",
   "upgradeNoAds": "无广告",
   "upgradeAdvanced": "高级",
-
   "todayTitle": "今日数据",
   "todaySwingCount": "挥杆次数",
   "todayGoodRate": "好球率",
   "todayAvgSpeed": "平均速度",
-
   "aiCoachTitle": "AI 教练分析",
   "aiCoachAnalyzing": "分析中，通常需要 10~30 秒",
   "aiCoachNoData": "暂无分析数据",
   "aiCoachBasis": "依据",
   "aiCoachSuggestion": "建议",
-
   "profileTitle": "编辑个人资料",
   "profileAvatar": "设置头像让教练更容易识别您",
   "profileRemoveAvatar": "移除头像",
   "profilePersonalInfo": "个人信息",
   "profileDisplayName": "显示名称",
   "profileSaveChanges": "保存更改",
-
   "langTitle": "语言",
   "langZhTW": "繁體中文",
   "langZhCN": "简体中文",
   "langEn": "English",
   "langSelectTitle": "选择语言",
-
   "settingsTitle": "设置",
   "settingsSectionAccount": "账号",
   "settingsChangeName": "修改名称",
@@ -198,7 +181,11 @@
   "settingsApply": "应用",
   "settingsQualityUpdated": "输出质量已更新为「{quality}」",
   "@settingsQualityUpdated": {
-    "placeholders": { "quality": {"type": "String"} }
+    "placeholders": {
+      "quality": {
+        "type": "String"
+      }
+    }
   },
   "settingsSectionSubscription": "订阅",
   "settingsViewSubscription": "查看订阅方案",
@@ -218,7 +205,11 @@
   "settingsVersionCopied": "已复制版本",
   "settingsAlreadyLatest": "已是最新版本 v{version}",
   "@settingsAlreadyLatest": {
-    "placeholders": { "version": {"type": "String"} }
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
   },
   "settingsUpdateCheckFailed": "检查更新失败，请稍后重试",
   "settingsConfirmLogout": "确定退出？",
@@ -232,22 +223,33 @@
   "settingsNameUpdated": "名称已更新",
   "settingsPickFromGallery": "从相册选择",
   "settingsRemoveAvatar": "移除头像",
-
   "homeTodayOverview": "今日概况",
   "homeHi": "嗨，{name} 👋",
   "@homeHi": {
-    "placeholders": { "name": {"type": "String"} }
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "homeRounds": "练习轮次",
   "homePractices": "练习次数",
   "homeTodayGoodRate": "今日好球率",
   "homeGoodTimes": "好球 {count} 次",
   "@homeGoodTimes": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "homeBadTimes": "坏球 {count} 次",
   "@homeBadTimes": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "homeTodayPosture": "今日姿势分析",
   "homeTopSpeed": "最佳速度",
@@ -259,13 +261,24 @@
   "homeTodayQuota": "今日用量",
   "homeQuotaBalls": "{used} / {total} 球",
   "@homeQuotaBalls": {
-    "placeholders": { "used": {"type": "int"}, "total": {"type": "int"} }
+    "placeholders": {
+      "used": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
   },
   "homeHitAnalysis": "击球分析",
   "homeHitRecordsLabel": "笔击球记录",
   "homeImprovedVsAvg": "持续进步中！本次表现较平均提升 {pct}%。",
   "@homeImprovedVsAvg": {
-    "placeholders": { "pct": {"type": "String"} }
+    "placeholders": {
+      "pct": {
+        "type": "String"
+      }
+    }
   },
   "homeTrainingFocus": "训练重点",
   "homeViewNow": "立即查看",
@@ -278,7 +291,6 @@
   "weekdayFri": "周五",
   "weekdaySat": "周六",
   "weekdaySun": "周日",
-
   "todayTitleToday": "今日概况",
   "todayTitleHistory": "历史概况",
   "todayLoadFailed": "加载失败，请下拉刷新",
@@ -290,11 +302,14 @@
   "todayGoRecord": "去录一次挥杆吧！",
   "todayPostureToday": "今日姿势分析",
   "todayPosture": "姿势分析",
-
   "annBoardTitle": "公告栏",
   "annUnreadCount": "{count} 条未读",
   "@annUnreadCount": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annAllAnnouncements": "全部公告",
   "annMarkAllRead": "全部已读",
@@ -302,24 +317,39 @@
   "annLoadFailed": "加载失败，请下拉重试",
   "annMinutesAgo": "{count} 分钟前",
   "@annMinutesAgo": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annHoursAgo": "{count} 小时前",
   "@annHoursAgo": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annDaysAgo": "{count} 天前",
   "@annDaysAgo": {
-    "placeholders": { "count": {"type": "int"} }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "annDetailTitle": "公告详情",
   "annExpiresAt": "有效期至 {date}",
   "@annExpiresAt": {
-    "placeholders": { "date": {"type": "String"} }
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
   },
   "annEmpty": "暂无公告",
   "annEmptySubtitle": "新公告将显示在这里",
-
   "updateNotes": "更新内容",
   "updateForcedWarning": "此版本已停止支持，请更新后继续使用",
   "updateNow": "立即更新",
@@ -332,14 +362,17 @@
   "updateFoundSubtitle": "建议更新以获得最佳体验",
   "updateCurrentVersion": "当前版本",
   "updateLatestVersion": "最新版本",
-
   "upgradePageTitle": "升级您的方案",
   "upgradePageSubtitle": "解锁更多挥杆分析功能，提升您的球技",
   "upgradeFullComparison": "完整功能对比",
   "upgradeFeatureColumn": "功能",
   "upgradeSubscribePlan": "升级 {plan} 方案",
   "@upgradeSubscribePlan": {
-    "placeholders": { "plan": {"type": "String"} }
+    "placeholders": {
+      "plan": {
+        "type": "String"
+      }
+    }
   },
   "upgradeSelectPayment": "选择付款方式",
   "upgradeApplePayFailed": "Apple Pay 配置加载失败",
@@ -347,12 +380,10 @@
   "upgradePaymentFailed": "付款验证失败，请稍后重试",
   "upgradeSuccessMsg": "升级成功",
   "upgradeAlreadyFree": "您目前使用的已是免费方案",
-
   "learningTitle": "挥杆学习",
   "learningMoreComing": "更多课程持续更新中",
   "learningVideoComingSoon": "示范视频待补充，先提供重点与标记供对照学习。",
   "learningKeyMarkers": "关键标记",
-
   "myFeedbackTitle": "我的反馈",
   "myFeedbackSubtitle": "已提交的反馈与官方回复",
   "myFeedbackEntry": "查看我的反馈",
@@ -365,7 +396,6 @@
   "myFeedbackAdminReply": "官方回复",
   "myFeedbackNoReply": "等待回复中",
   "myFeedbackAttachedVideo": "已附视频",
-
   "onboardingSkip": "跳过",
   "onboardingNext": "下一步",
   "onboardingStart": "开始使用",
@@ -380,7 +410,7 @@
   "settingsReplayTutorial": "重看教学引导",
   "recFrameCount": "{count} 帧",
   "recDetectedShots": "已检测 {count} 杆",
-
+  "recImpactShot": "第 {number} 杆",
   "privacySettingsTitle": "隐私与分析",
   "privacySectionDataCollection": "数据收集说明",
   "privacyDataCollectionDesc": "你的视频与分析数据只会在你主动操作时上传——AI 分析、分享、上传奖励或反馈附件。ORVIA 没有后台上传，也没有隐藏的遥测。",
@@ -389,5 +419,1664 @@
   "privacyUploadDesc": "你可以自愿提交挥杆视频与传感 CSV 数据，帮助改善挥杆检测模型。每笔提交都会人工审核，通过后发放奖励球。",
   "privacyUploadStatusEntry": "查看我的上传审核状态",
   "privacySectionAccount": "账号",
-  "privacyDeleteAccountSubtitle": "软删除：将无法再登录，数据会被匿名化"
+  "privacyDeleteAccountSubtitle": "软删除：将无法再登录，数据会被匿名化",
+  "rewardSubtitle": "完成任务累积球数，兑换分析次数",
+  "historyFilterReset": "重置",
+  "aiCoachUpgradeFailed": "升级失败: {error}",
+  "@aiCoachUpgradeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "aiCoachQuotaExhaustedTitle": "今日球数已用完",
+  "aiCoachQuotaExhaustedBody": "今日已使用 {todayUsed} 次，已达上限 {totalLimit} 次。\n\n明天可继续使用，或升级方案获取更多次数。",
+  "@aiCoachQuotaExhaustedBody": {
+    "placeholders": {
+      "todayUsed": {
+        "type": "int"
+      },
+      "totalLimit": {
+        "type": "int"
+      }
+    }
+  },
+  "aiCoachGotIt": "知道了",
+  "aiCoachAnalysisFailed": "分析失败，请重试",
+  "aiCoachStatusPending": "准备中...",
+  "aiCoachStatusQueued": "等待分析队列...",
+  "aiCoachStatusProcessing": "AI 教练正在分析视频...",
+  "aiCoachStatusIdle": "等待 AI 教练分析...",
+  "aiCoachStatusConnecting": "连接中...",
+  "aiCoachLoadingHint": "通常需要 10~30 秒",
+  "aiCoachPostureAnalysisDone": "已完成错误姿势分析",
+  "aiCoachSubmitting": "提交中...",
+  "aiCoachStartAnalysis": "开始 AI 教练分析",
+  "aiCoachAnalysisHint": "* AI 教练将依据姿势分析结果，提供详细教练评语与训练建议",
+  "aiCoachEvidence": "依据",
+  "aiCoachSeverityHigh": "严重",
+  "aiCoachSeverityMedium": "中等",
+  "aiCoachSeverityLow": "轻微",
+  "aiCoachImpactPremiumSweetSpot": "高品质甜蜜点",
+  "aiCoachImpactSweetSpot": "甜蜜点",
+  "aiCoachImpactNearSweetSpot": "接近甜蜜点",
+  "aiCoachImpactFair": "普通",
+  "aiCoachImpactPoor": "击球偏虚",
+  "aiCoachImpactQualityTitle": "击球品质（音频）",
+  "aiCoachImpactFeatureCount": "{passCount} / {totalFeatures} 项特征符合甜蜜点范围",
+  "@aiCoachImpactFeatureCount": {
+    "placeholders": {
+      "passCount": {
+        "type": "int"
+      },
+      "totalFeatures": {
+        "type": "int"
+      }
+    }
+  },
+  "aiCoachFeedbackTitle": "教练评语",
+  "aiCoachPracticeTitle": "训练建议",
+  "aiCoachNextGoalTitle": "下次练习目标",
+  "aiCoachReanalyzeSubmitting": "提交重新分析中...",
+  "aiCoachReanalyzeFailed": "重新分析失败: {error}",
+  "@aiCoachReanalyzeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "ballTuneTitle": "球轨迹调参",
+  "ballTuneHudInit": "初始化中…",
+  "ballTuneHudDetecting": "检测中…",
+  "ballTuneHudBlobFailed": "blob 提取失败",
+  "ballTuneRoiBadge": "ROI r={r}px  margin={margin}",
+  "@ballTuneRoiBadge": {
+    "placeholders": {
+      "r": {
+        "type": "String"
+      },
+      "margin": {
+        "type": "String"
+      }
+    }
+  },
+  "ballTuneRoiToggleTooltip": "ROI 叠图开关",
+  "ballTuneSectionRealtime": "实时（拉了立刻重绘）",
+  "ballTuneSliderResidual": "质量门控 残差上限",
+  "ballTuneSliderP1MaxDist": "P1 最远距离",
+  "ballTuneRoiMaskSection": "ROI / 遮罩（可直接在预览上拖拉）",
+  "ballTuneSliderRoiRadius": "ROI 半径",
+  "ballTuneSliderGolferMargin": "球员遮罩 margin",
+  "ballTuneSliderRoiMissScale": "ROI miss 大扩张×",
+  "ballTuneSliderRoiRadiusMax": "ROI 半径上限",
+  "ballTuneSliderStepMaxPost": "击球后 step 上限",
+  "ballTuneSliderPredMaxPost": "击球后 pred 上限",
+  "ballTuneSliderMissPatiencePost": "击球后 miss 容忍",
+  "ballTuneSectionReextract": "重新提取（改完按下方按钮）",
+  "ballTuneSliderDiffThresh": "diffThresh 帧差门槛",
+  "ballTuneRedetectButton": "重新检测（应用 diffThresh）",
+  "clipCandTitle": "确认击球片段（{count} 个候选）",
+  "@clipCandTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "clipCandTapToPreview": "点候选可预览",
+  "clipCandRangeTooShort": "切片区段需至少 0.5 秒（终点需在起点之后）",
+  "clipCandConfirmClip": "切出 {count} 个片段",
+  "@clipCandConfirmClip": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "clipCandManualHint": "起点 {start} → 拖到终点后按「加入区段」",
+  "@clipCandManualHint": {
+    "placeholders": {
+      "start": {
+        "type": "String"
+      }
+    }
+  },
+  "clipCandManualPrompt": "自由切片：拖时间轴到起点",
+  "clipCandSetStart": "设为起点",
+  "clipCandReset": "重设",
+  "clipCandAddRange": "加入区段",
+  "clipCandCandidateLabel": "候选 {index} ・ {time}",
+  "@clipCandCandidateLabel": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "clipCandFromAudio": "击球声检测",
+  "clipCandFromMotion": "录影中动作检测",
+  "clipCandManualRangeLabel": "自定区段 ・ {start} - {end}",
+  "@clipCandManualRangeLabel": {
+    "placeholders": {
+      "start": {
+        "type": "String"
+      },
+      "end": {
+        "type": "String"
+      }
+    }
+  },
+  "clipCandRangeDuration": "长度 {seconds} 秒",
+  "@clipCandRangeDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "compareLoadingVideos": "加载视频中…",
+  "highlightTitle": "Highlight 预览",
+  "highlightShareSystem": "系统分享",
+  "highlightExportDebug": "导出 debug",
+  "highlightShareDebug": "分享 debug",
+  "highlightShareText": "我的挥杆 Highlight",
+  "highlightDebugFileError": "无法创建 debug 文件",
+  "highlightStoragePermissionRequired": "需要存储权限以导出至下载文件夹",
+  "highlightDownloadsDirNotFound": "找不到下载文件夹",
+  "highlightSavedTo": "已另存至：{path}",
+  "@highlightSavedTo": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "highlightExportFailed": "导出失败：{error}",
+  "@highlightExportFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "historySubtitle": "共 {total} 笔 · 好球 {good} · 坏球 {bad}",
+  "historySearchHint": "搜索录影…",
+  "historySearchResult": "搜索结果 {count} / {total} 笔",
+  "@historySearchResult": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historySearchNoResult": "找不到匹配的记录",
+  "historySearchNoResultHint": "没有符合「{query}」的结果",
+  "@historySearchNoResultHint": {
+    "placeholders": {
+      "query": {
+        "type": "Object"
+      }
+    }
+  },
+  "historySearchClear": "清除搜索",
+  "historyEmptyTitle": "还没有任何录影",
+  "historyEmptySubtitle": "开始录制挥杆来累积记录吧",
+  "historyFilterLabelSort": "排序",
+  "historyFilterLabelDate": "日期",
+  "historyFilterLabelVideo": "影片",
+  "historyFilterLabelGoodBad": "评级",
+  "historyFilterLabelAnalysis": "分析",
+  "historyFilterLabelClip": "切片",
+  "historyFilterLabelAI": "AI",
+  "historyFilterLabelPosture": "姿势",
+  "historyFilterAll": "全部",
+  "historyFilterToday": "今天",
+  "historyFilterWeek": "本周",
+  "historyFilterMonth": "本月",
+  "historyFilterCustomDate": "自定日期范围",
+  "historyFilterSort": "排序方式",
+  "historyFilterGood": "优",
+  "historyFilterBad": "劣",
+  "historyFilterAnalyzed": "已分析",
+  "historyFilterNotAnalyzed": "未分析",
+  "historyFilterAiAnalyzed": "AI 已分析",
+  "historyFilterAiNotAnalyzed": "AI 未分析",
+  "historyFilterClipped": "已切片",
+  "historyFilterNotClipped": "未切片",
+  "historyFilterLongVideo": "长影片",
+  "historyFilterShortVideo": "短影片",
+  "historySortDate": "时间",
+  "historySortPeakSpeed": "最佳速度",
+  "historySortClipTime": "片段时间",
+  "historyDateRangeHelp": "选择日期范围",
+  "historyDeleteTitle": "删除录影",
+  "historyDeleteClipConfirm": "确定删除切片「{title}」？",
+  "@historyDeleteClipConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeleteVideoConfirm": "确定删除录影「{title}」？",
+  "@historyDeleteVideoConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeleteVideoWithClipsConfirm": "确定删除「{title}」及其 {count} 个切片？",
+  "@historyDeleteVideoWithClipsConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      },
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeletedSnack": "已删除 {name}",
+  "@historyDeletedSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDeletedWithClipsSnack": "已删除 {name} 及 {count} 个切片",
+  "@historyDeletedWithClipsSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      },
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyRenameTitle": "重命名录影",
+  "historyRenameClipTitle": "重命名切片",
+  "historyRenameLabel": "新名称",
+  "historyRenameHelper": "留空以还原默认名称",
+  "historyRenameValidation": "名称不能为空白",
+  "historyRenamedSnack": "已重命名为「{name}」",
+  "@historyRenamedSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyRenameResetSnack": "已还原默认名称「{name}」",
+  "@historyRenameResetSnack": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyFileNotFound": "找不到文件：{name}",
+  "@historyFileNotFound": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipFileNotExist": "切片文件不存在，请重新检测",
+  "historyAlreadyClipped": "此影片已有切片，重新检测将取代现有切片。",
+  "historyProgressPreparingSkeleton": "准备骨架分析…",
+  "historyProgressPreparing": "准备中…",
+  "historyDetectingShots": "检测挥杆中",
+  "historyCancelledDetection": "已取消检测",
+  "historyCancelledAnalysis": "已取消分析",
+  "historyV2NoAudio": "未找到音频轨，无法使用音频检测模式",
+  "historyV3NoShot": "骨架分析未检测到任何挥杆",
+  "historyV3NoValidHit": "过滤后无有效击球点",
+  "historyNoShotDetected": "未检测到挥杆",
+  "historyClipFailed": "切片生成失败",
+  "historyClipsGenerated": "已生成 {count} 个切片",
+  "@historyClipsGenerated": {
+    "placeholders": {
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipsGeneratedBg": "已将 {count} 个切片存入记录",
+  "@historyClipsGeneratedBg": {
+    "placeholders": {
+      "count": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDetectFailed": "检测失败：{error}",
+  "@historyDetectFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyLongVideoTitle": "长影片提示",
+  "historyLongVideoContent": "此影片长达 {seconds} 秒，完整分析可能需要较长时间。",
+  "@historyLongVideoContent": {
+    "placeholders": {
+      "seconds": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyContinueAnalysis": "继续分析",
+  "historyFullAnalysisTitle": "分析中",
+  "historyInvalidDuration": "影片时长无效：{seconds} 秒",
+  "@historyInvalidDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyAnalysisComplete": "分析完成{audio}",
+  "@historyAnalysisComplete": {
+    "placeholders": {
+      "audio": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyAnalysisFailed": "分析失败：{error}",
+  "@historyAnalysisFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyQuotaExhaustedTitle": "今日配额已用尽",
+  "historyQuotaExhaustedContent": "今日已使用 {used}/{total} 次，升级方案以继续使用。",
+  "@historyQuotaExhaustedContent": {
+    "placeholders": {
+      "used": {
+        "type": "Object"
+      },
+      "total": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyGotIt": "知道了",
+  "historyAiAnalysisConfirmTitle": "AI 分析",
+  "historyAiAnalysisConfirmDesc": "提交此挥杆进行 AI 分析，将消耗 1 颗球。",
+  "historyAiAnalysisConfirmBtn": "开始分析",
+  "historyAiSubmitFailed": "提交失败：{error}",
+  "@historyAiSubmitFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyNoOtherVideoToCompare": "没有其他影片可供比较",
+  "historyCompareTitle": "比较挥杆",
+  "historyCompareSubtitle": "选择要与「{title}」比较的影片",
+  "@historyCompareSubtitle": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyPhasesJsonMissing": "找不到 phases.json，请重新分析",
+  "historyPhasesJsonInvalid": "phases.json 格式错误，请重新分析",
+  "historySelectAiModeTitle": "选择 AI 模式",
+  "historyAiModeV1Title": "基础 (V1)",
+  "historyAiModeV1Desc": "音频峰值检测",
+  "historyAiModeV2Title": "标准 (V2)",
+  "historyAiModeV2Desc": "音频 + 骨架混合",
+  "historyAiModeV3Title": "进阶 (V3)",
+  "historyAiModeV3Desc": "骨架主导加音频精修",
+  "historySelectDetectModeTitle": "选择检测模式",
+  "historyDetectV1Title": "骨架检测 (V1)",
+  "historyDetectV1Desc": "MediaPipe 姿势估计",
+  "historyDetectBadgePrecise": "精准",
+  "historyDetectV1Time": "~10 秒",
+  "historyDetectV2Title": "音频检测 (V2)",
+  "historyDetectV2Desc": "快速音频峰值检测",
+  "historyDetectBadgeFast": "快速",
+  "historyDetectV2Time": "~30 秒",
+  "historyDetectV3Title": "混合检测 (V3)",
+  "historyDetectV3Desc": "骨架主导加音频精修",
+  "historyDetectBadgeBalanced": "均衡",
+  "historyDetectV3Time": "~45 秒",
+  "historySkipToday": "今日不再提醒",
+  "historyStartDetect": "开始检测",
+  "historySelectQualityTitle": "选择导出质量",
+  "historyStartAnalysis": "开始分析",
+  "historyActionDetect": "检测杆数",
+  "historyActionAiAnalysis": "AI 分析",
+  "historyActionFullAnalysis": "完整分析",
+  "historyActionChart": "统计图表",
+  "historyActionPlay": "播放",
+  "historyActionExpand": "展开切片",
+  "historyActionCollapse": "收合切片",
+  "historyMenuRename": "重命名",
+  "historyMenuAddNote": "新增备注",
+  "historyMenuEditNote": "编辑备注",
+  "historyMenuShare": "分享",
+  "historyMenuDownload": "下载",
+  "historyMenuDownloading": "下载中…",
+  "historyMenuCompare": "比较",
+  "historyMenuUploadReward": "上传奖励 +{balls} 球",
+  "historyMenuUploaded": "已上传",
+  "historyMenuAnalyzing": "分析中…",
+  "historyMenuDeleteVideo": "删除影片",
+  "historyMoreActions": "更多操作",
+  "historyBadgeNoAudio": "无音频",
+  "historyBadgeAnalyzed": "已分析",
+  "historySweetSpot": "甜蜜点",
+  "historySweetSpotHit": "命中",
+  "historySweetSpotMiss": "未命中",
+  "historyHitSummary": "击球统计",
+  "historyClipDefaultName": "第 {index} 杆",
+  "@historyClipDefaultName": {
+    "placeholders": {
+      "index": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipHitAt": "击球 @ {time}",
+  "@historyClipHitAt": {
+    "placeholders": {
+      "time": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyClipRange": "片段 {start}–{end} 秒",
+  "@historyClipRange": {
+    "placeholders": {
+      "start": {
+        "type": "Object"
+      },
+      "end": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyRoundLabel": "第 {index} 轮",
+  "@historyRoundLabel": {
+    "placeholders": {
+      "index": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyDurationLine": "{time} · {seconds} 秒",
+  "@historyDurationLine": {
+    "placeholders": {
+      "time": {
+        "type": "Object"
+      },
+      "seconds": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyImportedFrom": "来自 {name}",
+  "@historyImportedFrom": {
+    "placeholders": {
+      "name": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyNoteDialogTitle": "影片备注",
+  "historyNoteHint": "记下练习心得、场地、使用杆型…",
+  "historyNoteHelper": "可留空以清除备注",
+  "historySaveLocationTitle": "选择保存位置",
+  "historySaveLocationDownloads": "下载文件夹",
+  "historySaveLocationDownloadsSub": "保存到系统默认下载位置",
+  "historySaveLocationPick": "选择文件夹",
+  "historySaveLocationPickSub": "自定保存位置",
+  "historyDownloadVersionTitle": "选择下载版本",
+  "historyExportSaved": "「{label}」已保存 ✅",
+  "@historyExportSaved": {
+    "placeholders": {
+      "label": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyExportSavedPhotos": "「{label}」已保存到相机胶卷 ✅",
+  "@historyExportSavedPhotos": {
+    "placeholders": {
+      "label": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyExportFailed": "下载失败：{detail}",
+  "@historyExportFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyUploadRewardTitle": "上传分析资料",
+  "historyUploadRewardContent": "将上传「{title}」的分析资料，用于改善挥杆检测模型。\n\n上传后需经审核，审核通过将发放 +{balls} 球奖励。\n\n确定上传？",
+  "@historyUploadRewardContent": {
+    "placeholders": {
+      "title": {
+        "type": "Object"
+      },
+      "balls": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyUploadSubmit": "上传送审",
+  "historyUploadingProgress": "上传影片与分析资料中…",
+  "historyUploadFailed": "上传失败：{error}",
+  "@historyUploadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "Object"
+      }
+    }
+  },
+  "historyUploadSubmitFailed": "送审未成功：此影片可能已提交过（含审核未通过者不可重送），或网络异常请稍后再试",
+  "historyUploadReviewPending": "已送出审核，通过后将发放 +{balls} 球",
+  "@historyUploadReviewPending": {
+    "placeholders": {
+      "balls": {
+        "type": "Object"
+      }
+    }
+  },
+  "hitsSummaryEmpty": "尚未检测到任何挥杆",
+  "hitsSummaryHitIndex": "第 {index} 杆",
+  "@hitsSummaryHitIndex": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "hitsSummaryPeak": "峰值",
+  "hitsSummaryDuration": "时长",
+  "hitsSummaryStart": "开始",
+  "hitsSummaryEnd": "结束",
+  "hitsSummaryDetectFrom": "检测来源：{source}",
+  "@hitsSummaryDetectFrom": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "hitsSummaryTitle": "挥杆摘要",
+  "hitsSummaryCount": "共 {count} 杆",
+  "@hitsSummaryCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeCurrentSuggestions": "目前训练建议",
+  "homeNextGoal": "下次目标：{goal}",
+  "@homeNextGoal": {
+    "placeholders": {
+      "goal": {
+        "type": "String"
+      }
+    }
+  },
+  "authInviteCodeOptional": "选填",
+  "authInviteCodeLabel": "邀请码",
+  "authInviteCodeHint": "如有好友邀请码，请在此填写",
+  "authInviteCodeHelper": "填写邀请码，双方各获得 +5 球奖励",
+  "devTestAccounts": "测试账号",
+  "devTestPassword": "密码：Test1234!",
+  "forgotTitle": "忘记密码",
+  "forgotEnterCodeTitle": "输入验证码",
+  "forgotEmailSubtitle": "输入您的 Email，我们将发送 6 位数验证码",
+  "forgotCodeSentSubtitle": "验证码已发送至 {email}",
+  "@forgotCodeSentSubtitle": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "forgotSixDigitCodeLabel": "6 位验证码",
+  "forgotNewPasswordLabel": "新密码",
+  "forgotNewPasswordHint": "至少 8 位，含大写、小写、数字",
+  "forgotConfirmPasswordLabel": "确认新密码",
+  "forgotSendCodeButton": "发送验证码",
+  "forgotConfirmResetButton": "确认重置密码",
+  "forgotReEnterEmail": "重新输入 Email",
+  "forgotEnterValidEmail": "请输入有效的 Email",
+  "forgotSendFailed": "发送失败",
+  "forgotNetworkError": "网络错误，请稍后再试",
+  "forgotEnterSixDigitCode": "请输入 6 位数验证码",
+  "forgotPasswordComplexity": "密码须至少 8 位且包含大写、小写及数字",
+  "forgotPasswordMismatch": "两次密码不一致",
+  "forgotResetSuccess": "密码已重置，请用新密码登录",
+  "forgotResetFailed": "重置失败",
+  "playerTitle": "视频查看",
+  "playerNoteAdd": "添加备注",
+  "playerNoteEdit": "编辑备注",
+  "playerNoteCleared": "已清除备注",
+  "playerNoteSaved": "已保存备注",
+  "playerVideoNotFound": "找不到视频文件",
+  "playerVideoLoadFailed": "视频加载失败",
+  "playerSkeletonNotFound": "骨架数据不存在",
+  "playerOverlaySkeleton": "骨架",
+  "playerOverlayTrajectory": "轨迹",
+  "playerOverlayEffect": "特效",
+  "playerTrajectoryTuning": "轨迹调参",
+  "playerShotLabel": "第{index}球 {time}",
+  "@playerShotLabel": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "playerStatsEmpty": "暂无统计数据（需轨迹或阶段分析）",
+  "playerStatLaunchAngle": "发射角",
+  "playerStatTempo": "节奏 (上杆:下杆)",
+  "playerStatBackDownswing": "上杆 / 下杆",
+  "playerStatFlightTime": "入镜飞行",
+  "playerChartEmpty": "暂无图表数据，请先完成分析",
+  "playerChartNoData": "无数据",
+  "playerChartAudioEmpty": "声音峰值 无数据",
+  "playerChartWristYEmpty": "手腕 Y 无数据",
+  "playerChartSpeedEmpty": "速度 无数据",
+  "playerChartTabAudio": "声音峰值",
+  "playerChartTabWristY": "手腕 Y",
+  "playerChartTabSpeed": "速度",
+  "playerChartTabPosture": "姿势",
+  "playerChartTabAudioFeature": "音频特征",
+  "playerLoadDetailScore": "加载详细分数",
+  "playerPostureEmpty": "暂无姿势分析，请先完成分析",
+  "playerAudioPassCount": "{count} / 5 项通过",
+  "@playerAudioPassCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "playerAudioEmpty": "暂无音频分析",
+  "playerAiAnalysisFailed": "AI 分析失败: {error}",
+  "@playerAiAnalysisFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "playerAiNotStarted": "尚未进行 AI 教练分析",
+  "playerAiStartAnalysis": "开始分析",
+  "playerAiViewProgress": "查看进度",
+  "playerAiCoachTitle": "AI 教练分析",
+  "playerAiPrimaryIssue": "主要问题",
+  "playerAiCoachFeedback": "教练评语",
+  "playerAiPracticeSuggestions": "训练建议",
+  "playerAiNextGoal": "下次目标",
+  "playerAiReanalyze": "重新分析",
+  "playerAiViewDetail": "查看详细",
+  "playerAiStatusPending": "准备中...",
+  "playerAiStatusQueued": "等待分析队列...",
+  "playerAiStatusProcessing": "AI 教练分析中...",
+  "playerAiStatusAnalyzing": "分析中...",
+  "playerSeverityHigh": "严重",
+  "playerSeverityMedium": "中等",
+  "playerSeverityLow": "轻微",
+  "playerHighlightPreview": "精彩片段预览",
+  "playerSweetSpotHit": "甜蜜点命中",
+  "playerSweetSpot": "甜蜜点",
+  "playerThinShot": "偏虚球",
+  "playerAudioPassCountBadge": "{count}/5 特征符合",
+  "@playerAudioPassCountBadge": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "playerNoteDialogTitle": "视频备注",
+  "playerNoteHint": "记下练习心得、场地、使用杆型…",
+  "playerNoteHelper": "可留空以清除备注",
+  "playerPhaseAddress": "准备",
+  "playerPhaseTakeaway": "起杆",
+  "playerPhaseBackswing": "上杆",
+  "playerPhaseTop": "顶点",
+  "playerPhaseDownswing": "下杆",
+  "playerPhaseImpact": "击球",
+  "clipLegendStart": "开始",
+  "clipLegendEnd": "结束",
+  "playerPhaseFollowthrough": "送杆",
+  "playerPhaseFinish": "收杆",
+  "postureTitle": "姿势分析",
+  "postureNoData": "暂无 AI 分析数据",
+  "profileSubtitle": "调整个人信息以获得更精准的挥杆分析，完成后记得保存。",
+  "profileAvatarHint": "设置个人头像让教练更容易识别",
+  "profileAvatarSaveFailed": "保存头像失败，请稍后再试。",
+  "profileDisplayNameLabel": "昵称",
+  "profileDisplayNameHint": "输入想在首页显示的名称",
+  "profileDisplayNameRequired": "请输入昵称",
+  "profileEmailLabel": "电子邮件",
+  "profilePhoneLabel": "联系电话",
+  "profilePhoneHint": "例：0912-345-678",
+  "profileHandicapLabel": "差点",
+  "profileHandicapHint": "可填写目前差点或目标数值",
+  "purchaseTestPanelTitle": "🧪 购买测试面板",
+  "purchaseTestSimulateSuccessMsg": "✅ 模拟购买成功！用户已设置为高级用户",
+  "purchaseTestErrorMsg": "❌ 错误: {error}",
+  "@purchaseTestErrorMsg": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "purchaseTestClearSuccessMsg": "🔄 已清除购买记录！用户现在是普通用户",
+  "purchaseTestPremiumStatusLabel": "高级用户状态: ",
+  "purchaseTestStatusPurchased": "✅ 已购买",
+  "purchaseTestStatusNotPurchased": "❌ 未购买",
+  "purchaseTestPaymentMethod": "支付方式: {method}",
+  "@purchaseTestPaymentMethod": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      }
+    }
+  },
+  "purchaseTestPaymentMethodNone": "无",
+  "purchaseTestSimulateBtn": "模拟购买成功",
+  "purchaseTestClearBtn": "清除购买",
+  "purchaseTestRefreshBtn": "刷新状态",
+  "purchaseTestDialogTitle": "🧪 购买功能测试",
+  "recDetailDownloadVideo": "下载视频",
+  "exportCustomTitle": "自定义导出",
+  "exportCustomSubtitle": "选择要烧录到视频上的元素",
+  "exportElementSkeleton": "骨架",
+  "exportElementSkeletonDesc": "挥杆姿势关节骨架",
+  "exportElementTrajectory": "球轨迹",
+  "exportElementTrajectoryDesc": "击球后球体飞行轨迹",
+  "exportNoOverlayMaterial": "此视频没有可叠加的分析素材，将输出原片。",
+  "exportWatermarkFree": "免费版成品将含 ORVIA 水印，升级可移除",
+  "exportWatermarkPaid": "已订阅：成品不含水印",
+  "exportComposeAndDownload": "合成并下载",
+  "recDetailNoVideoFound": "找不到可下载的视频",
+  "recDetailBurning": "渲染「{label}」中…",
+  "@recDetailBurning": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailBurnFailed": "渲染失败，请稍后重试",
+  "recDetailSavedToDownloads": "「{label}」已保存到下载文件夹 ✅",
+  "@recDetailSavedToDownloads": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailSavedToPhotos": "「{label}」已保存到相册 ✅",
+  "@recDetailSavedToPhotos": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailSharedViaSheet": "已打开分享 ✅",
+  "recDetailDownloadFailed": "下载失败：{detail}",
+  "@recDetailDownloadFailed": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailSkeletonPreview": "骨架预览",
+  "recDetailSkeletonLoadFailed": "骨架预览加载失败",
+  "recDetailAudioPeak": "声音峰值",
+  "recDetailAudioPeakSubtitle": "RMS dBFS",
+  "recDetailAudioPeakMissing": "需完成音频分析",
+  "recDetailWristY": "手腕 Y",
+  "recDetailWristYSubtitle": "右手腕 Y 位置（像素）",
+  "recDetailPoseMissing": "需完成姿势分析",
+  "recDetailSpeedSubtitle": "手腕移动速度（px/frame）",
+  "recDetailSpeedMissing": "速度",
+  "recDetailSweetSpot": "甜蜜点",
+  "recDetailOffCenter": "击球偏虚",
+  "recDetailAudioFeaturesTitle": "音频特征分析",
+  "recDetailFeaturePassCount": "{count} / 5 项特征符合甜蜜点范围",
+  "@recDetailFeaturePassCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recDetailAutoAnalyzing": "姿势分析上传中，请稍候…",
+  "recDetailOnnxTitle": "ONNX 姿势分析",
+  "recDetailOnnxLoadFailed": "加载失败: {error}",
+  "@recDetailOnnxLoadFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recDetailOnnxNoResult": "暂无 ONNX 结果",
+  "recDetailOnnxNoScores": "无分数数据",
+  "recDetailSwingPhases": "挥杆阶段",
+  "recDetailRegenerate": "重新生成",
+  "recDetailGeneratePhases": "生成阶段",
+  "recDetailNoChartData": "暂无图表数据",
+  "recDetailNoChartHint": "请先完成音频分析与姿势分析",
+  "recDetailLoadFailed": "加载失败",
+  "recDetailSelectDownloadVersion": "选择下载版本",
+  "recDetailOptLabelFull": "分析完整版",
+  "recDetailOptDescFull": "骨架 + 球轨迹",
+  "recDetailOptLabelSkeleton": "骨架版",
+  "recDetailOptDescSkeleton": "仅含骨架 overlay",
+  "recDetailOptLabelClip": "原始片段",
+  "recDetailOptDescNoOverlay": "无任何 overlay",
+  "recDetailOptLabelRaw": "原始视频",
+  "recDetailOptLabelRawMov": "原始视频 (MOV)",
+  "recDetailOptDescRawMov": "原始 MOV 文件",
+  "recDetailPhaseAddress": "①准备",
+  "recDetailPhaseTakeaway": "②起杆",
+  "recDetailPhaseBackswing": "③上杆",
+  "recDetailPhaseTop": "④顶点",
+  "recDetailPhaseDownswing": "⑤下杆",
+  "recDetailPhaseImpact": "⑥击球",
+  "recDetailPhaseFollowthrough": "⑦送杆",
+  "recDetailPhaseFinish": "⑧收杆",
+  "recHistSheetEmptyHint": "目前没有录影记录，完成录影后会自动显示在此处。",
+  "recHistSheetPickFromFolder": "从文件文件夹选取视频",
+  "recHistSheetDurationSeconds": "{count} 秒",
+  "@recHistSheetDurationSeconds": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recSelPreparingProgress": "准备中...",
+  "recSelAnalyzingDialogTitle": "影片分析中",
+  "recSelNoFileSelected": "❌ 未选择任何文件",
+  "recSelVideoTooLong": "❌ 影片超过 10 分钟限制（{durationSec} 秒）\n请选择 600 秒以内的影片",
+  "@recSelVideoTooLong": {
+    "placeholders": {
+      "durationSec": {
+        "type": "int"
+      }
+    }
+  },
+  "recSelVideoDurationOk": "✅ 影片时长 {durationSec} 秒，符合 10 分钟限制",
+  "@recSelVideoDurationOk": {
+    "placeholders": {
+      "durationSec": {
+        "type": "int"
+      }
+    }
+  },
+  "recSelImportFailed": "❌ 导入失败\n文件可能不存在或格式不支持",
+  "recSelImportSuccess": "✅ 导入成功！\n{name}\n时长: {duration}",
+  "@recSelImportSuccess": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "recSelImportError": "❌ 导入出错\n{error}",
+  "@recSelImportError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recSelImportingVideo": "正在导入影片...",
+  "recSelDoNotClose": "请勿关闭应用",
+  "recSelShotModeTitle": "即时挥杆模式",
+  "recSelShotModeSubtitle": "挥杆自动检测并切片，无需录长影片",
+  "recSelNewFeatureBadge": "新功能",
+  "recSelRecordTitle": "开始录制",
+  "recSelRecordSubtitle": "即时拍摄并进行挥杆分析",
+  "recSelLocalVideoTitle": "选择本地影片",
+  "recSelLocalVideoSubtitle": "从设备中选择已有影片（上限 10 分钟）",
+  "recSelShareLinkTitle": "从分享链接获取",
+  "recSelShareLinkSubtitle": "输入 16 位分享码下载影片",
+  "recSelHeaderTitle": "选择录制方式",
+  "recSelHeaderSubtitle": "即时拍摄、导入本地影片或通过分享码获取",
+  "recSelIOSSourceSheetTitle": "选择影片来源",
+  "recSelPhotoLibrary": "相册",
+  "recSelFilesApp": "文件 App（文件夹）",
+  "recTabsTitle": "录影历史 ({count})",
+  "@recTabsTitle": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "recTabsEmpty": "没有录影记录",
+  "recTabsEmptyHint": "完成新的录影后，将在此显示",
+  "recTabsMode": "模式：{label}",
+  "@recTabsMode": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "recTabsDuration": "时长：{seconds}秒",
+  "@recTabsDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "recordTitle": "高尔夫挥杆录制",
+  "recordOverlayToggle": "轮廓叠加切换",
+  "recordSettings": "录制设置",
+  "recordPermissionTitle": "需要相机与麦克风权限",
+  "recordPermissionMicOnly": "录影需要麦克风权限以录制击球声，请开启后再试。",
+  "recordPermissionCameraAndMic": "挥杆录影需要相机与麦克风权限，请开启后再试。",
+  "recordGoToSettings": "前往设置",
+  "recordGotIt": "知道了",
+  "recordLowEndDeviceWarning": "此设备不支持录影期间同步骨架检测，录影结束后恢复",
+  "recordFailed": "本次录制失败（未取得有效影像），请重新录制",
+  "recordVideoQuality": "视频画质",
+  "recordFrameRate": "帧率",
+  "recordAudio": "录制音频",
+  "recordApply": "套用",
+  "rewardTitle": "奖励球数",
+  "rewardUsageHistoryTooltip": "使用记录",
+  "rewardEarnedSnackbar": "通过「{source}」获得 +{balls} 额外球数！",
+  "@rewardEarnedSnackbar": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      },
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadSubmittedPending": "已送出 {pending} 笔审核，通过后将发放球数奖励",
+  "@rewardUploadSubmittedPending": {
+    "placeholders": {
+      "pending": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadSubmittedDuplicate": "资料已提交（重复资料不再送审）",
+  "rewardStatBonusBalls": "累计奖励",
+  "rewardUnitBall": "球",
+  "rewardStatAdToday": "今日广告",
+  "rewardAdDailyUnit": "/ 5 次",
+  "rewardStatInvites": "邀请好友",
+  "rewardUnitPerson": "位",
+  "rewardBallsBadge": "+{balls} 球",
+  "@rewardBallsBadge": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardAdProgress": "{used} / {cap} 次",
+  "@rewardAdProgress": {
+    "placeholders": {
+      "used": {
+        "type": "int"
+      },
+      "cap": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardDoneToday": "今日已完成",
+  "rewardAdNotCompleted": "广告未播放完成或暂时无法加载，请稍后再试",
+  "rewardAdFailed": "广告奖励失败：{error}",
+  "@rewardAdFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardWatchAdTitle": "看广告",
+  "rewardWatchAdButton": "观看广告 +{balls} 球",
+  "@rewardWatchAdButton": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardInviteFriendTitle": "邀请好友",
+  "rewardInviteFriendDesc": "好友使用邀请码注册后，你获得 +{balls} 球，好友也获得 +{balls} 球",
+  "@rewardInviteFriendDesc": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardGetInviteCode": "获取邀请码",
+  "rewardYourInviteCode": "你的邀请码",
+  "rewardInviteCodeCopied": "邀请码已复制",
+  "rewardInvitedFriends": "已邀请好友",
+  "rewardNoInviteHistory": "暂无邀请记录",
+  "rewardShareInviteHint": "分享你的邀请码，邀请好友一起练习！",
+  "rewardEnterCodeTitle": "输入邀请码",
+  "rewardEnterCodeDesc": "输入好友的邀请码，你获得 +{balls} 球，好友也获得 +{balls} 球",
+  "@rewardEnterCodeDesc": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardEnterCodeEmpty": "请输入邀请码",
+  "rewardInviteCodeInvalid": "邀请码无效",
+  "rewardApplyFailed": "套用失败：{error}",
+  "@rewardApplyFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardApplying": "套用中...",
+  "rewardApplyButton": "套用 +{balls} 球",
+  "@rewardApplyButton": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardEnterFriendCode": "输入好友邀请码",
+  "rewardFeedbackTitle": "问题反馈",
+  "rewardFeedbackTypeBug": "🐛 问题反馈",
+  "rewardFeedbackTypeFeature": "💡 功能建议",
+  "rewardFeedbackTypeOther": "💬 其他",
+  "rewardFeedbackHint": "请详细描述你的反馈...",
+  "rewardSelectVideo": "选择影片",
+  "rewardChangeVideo": "更换影片",
+  "rewardUploadImage": "上传图片",
+  "rewardChangeImage": "更换图片",
+  "rewardFeedbackEmpty": "请输入反馈内容",
+  "rewardFeedbackSubmitted": "反馈已送出，感谢你的意见！",
+  "rewardSubmitFailed": "提交失败：{error}",
+  "@rewardSubmitFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardSubmitFeedback": "送出反馈",
+  "rewardSubmitFeedbackWithBalls": "送出反馈 +{balls} 球",
+  "@rewardSubmitFeedbackWithBalls": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardWriteFeedback": "填写反馈",
+  "rewardWriteFeedbackWithBalls": "填写反馈 +{balls} 球",
+  "@rewardWriteFeedbackWithBalls": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardNoVideoHistory": "暂无历史录影",
+  "rewardLongVideo": "长影片",
+  "rewardShortVideo": "短影片",
+  "rewardUploadDataTitle": "上传分析资料",
+  "rewardNoUploadable": "目前没有可上传的分析资料",
+  "rewardUploadPartialFail": "{count} 笔上传失败，已略过",
+  "@rewardUploadPartialFail": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadFailed": "上传失败，请稍后再试",
+  "rewardUploadResubmitBlocked": "送审未成功：资料可能已提交过（含审核未通过者不可重送），或网络异常请稍后再试",
+  "rewardUploadError": "上传失败：{error}",
+  "@rewardUploadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "rewardUploadAvailableCount": "可上传 {available} 笔，已上传 {uploaded} 笔",
+  "@rewardUploadAvailableCount": {
+    "placeholders": {
+      "available": {
+        "type": "int"
+      },
+      "uploaded": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadAllDone": "所有分析资料已上传（共 {count} 笔）",
+  "@rewardUploadAllDone": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadReviewStatus": "审核中 {pending} 笔 / 已通过 {approved} 笔",
+  "@rewardUploadReviewStatus": {
+    "placeholders": {
+      "pending": {
+        "type": "int"
+      },
+      "approved": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadRejectedSuffix": " / 未通过 {count} 笔",
+  "@rewardUploadRejectedSuffix": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardUploadRejectedNote": "未通过审核的资料不可重新提交",
+  "rewardSelectUploadVideo": "选择要上传的录影",
+  "rewardSelectUploadSubtitle": "选择一笔后按「确认上传」获得奖励",
+  "rewardNoneSelected": "尚未选择",
+  "rewardOneSelected": "已选 1 笔",
+  "rewardConfirmUpload": "确认上传 +{balls} 球",
+  "@rewardConfirmUpload": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "rewardAnalyzed": "已分析",
+  "rewardDurationSec": "{seconds} 秒",
+  "@rewardDurationSec": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsNameSyncFailed": "名称已更新，但服务器同步失败",
+  "settingsGoogleCredentialFailed": "无法获取 Google 凭证，请重试",
+  "settingsGoogleLinkFailed": "Google 绑定失败，请稍后再试",
+  "shareImportTitle": "从分享链接获取",
+  "shareImportEnterCodeTitle": "输入 16 位分享码",
+  "shareImportEnterCodeDesc": "对方分享后，输入分享码即可下载影片到本机",
+  "shareImportCodeValidator": "请输入完整的 16 位分享码",
+  "shareImportLooking": "查询中…",
+  "shareImportLookup": "查询",
+  "shareImportFrom": "来自",
+  "shareImportSize": "大小",
+  "shareImportExpiry": "到期",
+  "shareImportReenter": "重新输入",
+  "shareImportDownload": "下载到本机",
+  "shareImportPreparing": "准备下载…",
+  "shareImportDownloading": "下载中…",
+  "shareImportExtracting": "解压缩中…",
+  "shareImportDoneTitle": "下载完成！",
+  "shareImportDoneDesc": "影片已加入历史记录",
+  "shareImportBack": "返回",
+  "shareUploadTitle": "分享链接",
+  "shareUploadChecking": "检查分享状态…",
+  "shareUploadCompressing": "压缩中…",
+  "shareUploadUnknownError": "未知错误",
+  "shareUploadUploading": "上传中…  {percent}%",
+  "@shareUploadUploading": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "shareUploadCodeReused": "现有分享码（尚未过期）",
+  "shareUploadCodeNew": "分享码（有效 1 天）",
+  "shareUploadCopy": "复制",
+  "shareUploadCopied": "已复制分享码",
+  "shareUploadShareText": "高尔夫挥杆分享码：{code}\n（有效 1 天，请在 App 中输入此码获取视频）",
+  "@shareUploadShareText": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "shareUploadSystemShare": "系统分享",
+  "shotRecTitle": "实时挥杆模式",
+  "shotRecSettings": "录制设置",
+  "shotRecShotsCompleted": "已完成 {count} 杆",
+  "@shotRecShotsCompleted": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "shotRecReady": "准备",
+  "shotRecCalibrating": "校准中…请保持静止",
+  "shotRecAddressPrompt": "请站到准备姿势 ({current}/{total})",
+  "@shotRecAddressPrompt": {
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "shotRecAddressSubText": "站定后将自动开始录影",
+  "shotRecDetecting": "⚡ 检测中…请挥杆",
+  "shotRecStop": "停止",
+  "shotRecSwingDetected": "检测到挥杆 ✓\n倒数 {seconds}s",
+  "@shotRecSwingDetected": {
+    "placeholders": {
+      "seconds": {
+        "type": "String"
+      }
+    }
+  },
+  "shotRecAnalyzing": "分析中…",
+  "shotRecExtractingAudio": "提取音频…",
+  "shotRecDetectingImpact": "检测击球…",
+  "shotRecClipping": "切片中…",
+  "shotRecScoringAudio": "声音分析中…",
+  "shotRecDone": "完成！",
+  "shotRecWatch": "观看",
+  "shotRecNextShot": "下一杆 ({countdown})",
+  "@shotRecNextShot": {
+    "placeholders": {
+      "countdown": {
+        "type": "int"
+      }
+    }
+  },
+  "shotRecVideoQuality": "视频画质",
+  "shotRecFrameRate": "帧率",
+  "shotRecEnableAudio": "录制音频",
+  "shotRecApply": "套用",
+  "shotRecAddressTimeout": "未检测到准备姿势，已取消",
+  "shotRecNoAnalysisWarning": "此设备不支持录影期间同步骨架检测，仍会自动检测挥杆",
+  "shotRecRecordFailed": "本次挥杆录制失败（未取得有效影像），请重试",
+  "shotRecNoSwingDetected": "未检测到挥杆，请重试",
+  "shotRecClipFailed": "切片失败，请重试",
+  "shotRecLiveShotName": "即时第{number}杆",
+  "@shotRecLiveShotName": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "termsPageSubtitle": "用户条款与隐私政策",
+  "termsReadPrompt": "请阅读以下条款后，勾选同意即可开始使用",
+  "termsScrolledToBottom": "已阅读至条款末端，请返回顶部勾选同意。",
+  "termsDeclineTitle": "确认离开",
+  "termsDeclineContent": "不同意用户条款将无法使用 ORVIA。确定要离开吗？",
+  "termsDeclineBack": "返回",
+  "termsDeclineExit": "离开",
+  "termsPrivacyOpenFailed": "无法打开隐私政策页面，请稍后再试",
+  "termsAgreePrefix": "我已阅读并同意《用户条款》与《",
+  "termsPrivacyLink": "隐私政策",
+  "termsAgreeSuffix": "》",
+  "termsAnalyticsTitle": "允许使用统计追踪（可选）",
+  "termsAnalyticsDesc": "协助我们改善 App 体验，不包含个人身份信息",
+  "termsScrollFirst": "请先滑动阅读完整条款后方可勾选同意",
+  "termsDisagree": "不同意",
+  "termsAgreeAndContinue": "同意并继续",
+  "termsOpenPrivacyFull": "打开完整隐私政策",
+  "termsSec1Title": "一、服务说明",
+  "termsSec1Body": "ORVIA（以下简称「本服务」）由 ORVIA 团队提供，旨在协助用户通过移动设备录制、分析高尔夫挥杆动作，并提供相关数据统计与建议。\n\n使用本服务前，请仔细阅读以下条款。一旦您开始使用本服务，即表示您已阅读、理解并同意本条款的所有内容。",
+  "termsSec2Title": "二、账号与安全",
+  "termsSec2Body": "1. 您须通过电子邮件或 Google 账号完成注册，方可使用完整功能。\n2. 您有责任妥善保管账号密码，并对所有使用您账号进行的活动负责。\n3. 若发现账号遭未授权使用，请立即通知我们。\n4. 您不得将账号转让给他人。",
+  "termsSec3Title": "三、用户行为规范",
+  "termsSec3Body": "使用本服务时，您同意：\n\n1. 仅上传您本人拍摄或拥有合法授权的视频内容。\n2. 不上传任何违法、侵权或不当内容。\n3. 不干扰或破坏本服务的正常运作。\n4. 不尝试未授权访问本服务的系统或数据。",
+  "termsSec4Title": "四、视频与数据处理",
+  "termsSec4Body": "1. 您上传的视频与分析数据将储存于本服务的云端系统，以提供挥杆分析功能。\n2. 分享功能生成的分享链接有效期为 1 天，到期后将自动删除相关文件。\n3. 您可随时在 App 内删除个人数据及录影记录。\n4. 我们不会将您的个人视频提供给未经授权的第三方。",
+  "termsSec5Title": "五、隐私政策",
+  "termsSec5Body": "我们重视您的隐私，并依照以下原则收集与使用您的信息：\n\n收集的信息：\n• 账号信息（电子邮件、显示名称）\n• 挥杆视频及分析结果\n• 设备信息与使用记录\n\n使用统计追踪（需您同意）：\n• 我们可能收集匿名使用数据（功能点击、页面浏览等）\n• 用于改善 App 体验与功能设计\n• 不包含个人身份信息，可随时在设置中关闭\n\n数据保护：\n• 所有数据传输采用 TLS 加密\n• 服务器端数据进行加密存储\n• 定期进行安全审计\n\n完整隐私政策请见：https://orvia.atk.tw/privacy.html",
+  "termsSec6Title": "六、知识产权",
+  "termsSec6Body": "1. 本服务的软件、界面设计、商标及所有相关内容均属 ORVIA 所有，受著作权法保护。\n2. 您上传的视频著作权归您所有，但您授予本服务使用这些内容以提供分析服务的有限授权。\n3. 未经授权，您不得复制、修改或散布本服务的任何部分。",
+  "termsSec7Title": "七、免责声明",
+  "termsSec7Body": "1. 本服务提供的挥杆分析结果仅供参考，不构成专业运动指导建议。\n2. 本服务以「现状」提供，不保证服务永远不中断或无误差。\n3. 对于因使用本服务所产生的任何直接或间接损失，本服务不负赔偿责任。\n4. 挥杆练习涉及身体活动，请在安全环境下进行，并自行评估身体状况。",
+  "termsSec8Title": "八、服务变更与终止",
+  "termsSec8Body": "1. 我们保留在任何时间修改、暂停或终止本服务的权利。\n2. 若本条款有重大变更，我们将通过 App 通知您。\n3. 继续使用本服务视为接受更新后的条款。",
+  "termsSec9Title": "九、联系我们",
+  "termsSec9Body": "若您对本条款有任何疑问，请通过以下方式联系我们：\n\n电子邮件：support@atk.tw\n服务网站：https://orvia.atk.tw\n隐私政策：https://orvia.atk.tw/privacy.html\n\n本条款最后更新日期：2026 年 5 月 25 日",
+  "testVideoTitle": "选择测试视频",
+  "testVideoLoadError": "加载视频失败\n{error}",
+  "@testVideoLoadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "testVideoEmpty": "暂无已导入的视频",
+  "testVideoSelect": "选择",
+  "testVideoHint": "💡 提示：选择一个视频作为测试录制，用于演示和测试分析功能",
+  "upgradeSubscribed": "已订阅",
+  "upgradeCurrentPlanActive": "当前方案",
+  "upgradeMonthly": "月付",
+  "upgradeYearly": "年付（享约 2 个月折扣）",
+  "upgradeSubscribeFailed": "订阅失败：{error}",
+  "@upgradeSubscribeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "upgradeProductLoadFailed": "商品加载失败，请稍后再试",
+  "upgradeAppStoreSubscribe": "App Store 订阅",
+  "upgradeGooglePlaySubscribe": "Google Play 订阅",
+  "upgradeManageSubscriptionIos": "订阅后可随时在 App Store 管理或取消",
+  "upgradeManageSubscriptionAndroid": "订阅后可随时在 Google Play 管理或取消",
+  "upgradeBuyBalls": "单买球数",
+  "upgradeNoExpiry": "不限时间使用",
+  "upgradeBallCount": "{count} 球",
+  "@upgradeBallCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "upgradeBallPackValidity": "永久有效，随时使用",
+  "upgradeBuyButton": "购买",
+  "upgradePurchaseFailed": "购买失败：{error}",
+  "@upgradePurchaseFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "upgradeBuyBallCount": "购买 {count} 球",
+  "@upgradeBuyBallCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "upgradeBallPackDescription": "球数永久有效，不限时间使用。用完每日配额后自动消耗。",
+  "upgradeAppStorePurchase": "App Store 购买",
+  "upgradeGooglePlayPurchase": "Google Play 购买",
+  "usageTitle": "使用记录",
+  "usageSubtitle": "AI 分析 & 球数流水账",
+  "usageTabAnalysis": "AI 分析记录",
+  "usageTabBalls": "球数流水账",
+  "usageLoadFailed": "加载失败，请下拉重试",
+  "usageLoadError": "加载错误：{error}",
+  "@usageLoadError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "usageEmptyAnalysis": "暂无分析记录",
+  "usageAllLoaded": "已加载全部记录",
+  "usageSummaryTotalAnalysis": "累计分析",
+  "usageUnitTimes": "次",
+  "usageSummaryTodayUsed": "今日已用",
+  "usageAnalysisItemTitle": "AI 挥杆分析",
+  "usageSourceDailyQuota": "每日配额",
+  "usageSourceBonusBall": "奖励球",
+  "usageSourceDailyQuotaDesc": "使用每日配额",
+  "usageSourceBonusBallDesc": "消耗 1 颗球",
+  "usageEmptyBalls": "暂无球数记录",
+  "usageSummaryTotalRecords": "累计笔数",
+  "usageUnitRecords": "笔",
+  "usageSummaryCurrentBalls": "当前球数",
+  "usageUnitBalls": "球",
+  "usageBallBalance": "余额 {balance} 球",
+  "@usageBallBalance": {
+    "placeholders": {
+      "balance": {
+        "type": "int"
+      }
+    }
+  },
+  "usageDateToday": "今天",
+  "usageDateYesterday": "昨天",
+  "waveformCrispScore": "清脆度 {score}",
+  "@waveformCrispScore": {
+    "placeholders": {
+      "score": {
+        "type": "int"
+      }
+    }
+  },
+  "waveformPeakLabel": "峰值 {level}",
+  "@waveformPeakLabel": {
+    "placeholders": {
+      "level": {
+        "type": "String"
+      }
+    }
+  },
+  "@historySubtitle": {
+    "placeholders": {
+      "total": {
+        "type": "int"
+      },
+      "good": {
+        "type": "int"
+      },
+      "bad": {
+        "type": "int"
+      }
+    }
+  },
+  "@historyMenuUploadReward": {
+    "placeholders": {
+      "balls": {
+        "type": "int"
+      }
+    }
+  },
+  "extImportProgressCopying": "复制视频中...",
+  "extImportProgressTranscoding": "转档准备中...",
+  "extImportProgressDurationInvalid": "视频时长不符 (需 1-600 秒)",
+  "extImportProgressThumbnail": "生成缩图中...",
+  "extImportProgressDone": "导入完成 ✅",
+  "learnHubGoodSwingTitle": "良好挥杆示范",
+  "learnHubGoodSwingDesc": "节奏平顺、重心稳定、击球后收杆完整。",
+  "learnHubEarlyReleaseTitle": "常见错误：提前释放",
+  "learnHubEarlyReleaseDesc": "手腕提前放松，导致杆头加速度不足，球路弱/右曲。",
+  "learnHubMarkerBackswingTop": "上杆顶点",
+  "learnHubMarkerBackswingTopNote": "重心仍在脚中，杆身与手臂成直线",
+  "learnHubMarkerImpact": "击球瞬间",
+  "learnHubMarkerImpactNote": "手位在球前方，身体旋转带动击球",
+  "learnHubMarkerFinish": "收杆",
+  "learnHubMarkerFinishNote": "重心转向前脚，身体保持平衡",
+  "learnHubMarkerEarlyReleaseTopNote": "手腕角度过早放松，杆头落后",
+  "learnHubMarkerPreImpact": "击球前",
+  "learnHubMarkerPreImpactNote": "手部领先不足，重心偏后",
+  "learnHubMarkerEarlyReleaseFinishNote": "重心未移到前脚，平衡不佳",
+  "playerTimelineAbbrAddress": "准",
+  "playerTimelineAbbrTakeaway": "起",
+  "playerTimelineAbbrBackswing": "上",
+  "playerTimelineAbbrTop": "顶",
+  "playerTimelineAbbrDownswing": "下",
+  "playerTimelineAbbrImpact": "击",
+  "playerTimelineAbbrFollowthrough": "送",
+  "playerTimelineAbbrFinish": "收",
+  "recHistSheetTitle": "曾经录影记录",
+  "recTabsToday": "今天",
+  "recTabsYesterday": "昨天",
+  "recTabsDateMonthDay": "{month}月{day}日",
+  "@recTabsDateMonthDay": {
+    "placeholders": {
+      "month": {
+        "type": "int"
+      },
+      "day": {
+        "type": "int"
+      }
+    }
+  },
+  "recWidgetsZoomWide": "最广",
+  "recWidgetsSavingVideo": "保存视频中…",
+  "rewardFriendFallbackName": "好友",
+  "upgradeHighlightFullFeatured": "完整录影与分析功能",
+  "upgradeHighlightAiDaily10": "AI 教练分析每日 10 次",
+  "upgradeHighlightBuyMore": "球数用完可购买加值",
+  "upgradeHighlightAiDaily90": "AI 教练分析每日 90 次",
+  "upgradeHighlightAiUnlimited": "AI 教练分析无限次",
+  "upgradeFeatureAutoClip": "长视频自动切片",
+  "upgradeFeatureVoiceHint": "实时语音提示",
+  "upgradeFeatureAudioScore": "音频分析（击球评分）",
+  "upgradeFeatureDualVideo": "双视频比较",
+  "upgradeFeatureAiCoachAnalysis": "AI 教练分析",
+  "upgradeQuotaDaily10": "每日10球",
+  "upgradeQuotaDaily90": "每日90球",
+  "upgradeQuotaUnlimited": "无限",
+  "upgradeBadgePopular": "热门",
+  "upgradeBadgeValue": "划算",
+  "upgradeBadgeBestDeal": "最优惠",
+  "upgradePerYear": "/年",
+  "usageReasonAd": "看广告奖励",
+  "usageReasonFeedback": "问题反馈奖励",
+  "usageReasonInvite": "邀请好友奖励",
+  "usageReasonUpload": "上传数据奖励",
+  "usageReasonAnalysis": "AI 分析消耗",
+  "usageReasonManual": "手动调整",
+  "usageReasonOther": "其他",
+  "waveformPeakHigh": "高",
+  "waveformPeakMid": "中",
+  "waveformPeakLow": "低",
+  "waveformFreqCrispy": "偏清脆",
+  "waveformFreqMid": "中音",
+  "waveformFreqMuffled": "偏闷",
+  "historyProgressV2AudioScan": "V2 音频扫描中...",
+  "historyProgressV3AudioScan": "V3 音频扫描中...",
+  "historyProgressWaitingConfirm": "等待确认片段...",
+  "historyProgressClipping": "裁切片段中...",
+  "historyProgressClippingPct": "裁切片段中... {pct}% ({cur}/{total})",
+  "@historyProgressClippingPct": {
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      },
+      "cur": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProgressV3SkeletonAnalysis": "V3 骨架分析 {cur}/{total}",
+  "@historyProgressV3SkeletonAnalysis": {
+    "placeholders": {
+      "cur": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProgressV3SkeletonItem": "第{cur}/{total}个",
+  "@historyProgressV3SkeletonItem": {
+    "placeholders": {
+      "cur": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "historyProgressDetectingHit": "检测击球中...",
+  "historyProgressVideoAnalysis": "视频分析中...",
+  "historyProgressDetectingPhase": "检测挥杆阶段...",
+  "historyProgressAudioAnalysis": "音频分析中...",
+  "historyDlLabelFull": "完整分析",
+  "historyDlDescFull": "骨架 + 球轨迹 overlay",
+  "historyDlLabelSkeleton": "骨架版",
+  "historyDlDescSkeleton": "只含骨架 overlay",
+  "historyDlLabelClip": "原始切片",
+  "historyDlDescClip": "无 overlay 的原始切片",
+  "historyDlLabelRaw": "原始影片",
+  "historyDlDescRaw": "无任何 overlay",
+  "historyDlLabelRawMov": "原始影片 (MOV)",
+  "historyDlDescRawMov": "原始 MOV 文件",
+  "historyCandidateDuration": "{seconds} 秒",
+  "@historyCandidateDuration": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "recDetailPointCount": "{count} 点",
+  "@recDetailPointCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  }
 }

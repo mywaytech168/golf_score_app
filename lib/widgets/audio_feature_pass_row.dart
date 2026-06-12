@@ -27,7 +27,7 @@ class AudioFeaturePassRow extends StatelessWidget {
           final color = !hasData
               ? dimColor
               : passed
-                  ? kPrimaryGreen
+                  ? kGoodColor
                   : const Color(0xFFE05252);
           return <Widget>[
             if (i > 0) const SizedBox(width: 4),

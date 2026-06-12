@@ -132,7 +132,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   width: active ? 22 : 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: active ? kPrimaryGreen : context.borderColor,
+                    color: active ? kBrandPrimary : context.borderColor,
                     borderRadius: BorderRadius.circular(4),
                   ),
                 );
@@ -188,7 +188,7 @@ class _OnboardingStepView extends StatelessWidget {
               color: context.mintTint,
               borderRadius: BorderRadius.circular(kRadiusXL),
             ),
-            child: Icon(step.icon, size: 72, color: kPrimaryGreen),
+            child: Icon(step.icon, size: 72, color: kBrandPrimary),
           ),
           const SizedBox(height: kSpaceXL),
           Text(

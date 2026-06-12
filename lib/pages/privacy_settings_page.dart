@@ -27,7 +27,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? Colors.red : const Color(0xFF1AA87C),
+      backgroundColor: isError ? Colors.red : kBrandPrimary,
       duration: const Duration(seconds: 2),
     ));
   }
@@ -158,7 +158,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
       backgroundColor: context.bgPage,
       appBar: AppBar(
         backgroundColor:
-            context.isDarkMode ? context.bgPage : const Color(0xFF1AA87C),
+            context.isDarkMode ? context.bgPage : kBrandPrimary,
         foregroundColor:
             context.isDarkMode ? context.textPrimary : Colors.white,
         elevation: 0,
@@ -173,7 +173,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
           _SectionHeader(l.privacySectionDataCollection),
           _InfoCard(
             icon: Icons.cloud_off_rounded,
-            iconColor: const Color(0xFF1AA87C),
+            iconColor: kBrandPrimary,
             text: l.privacyDataCollectionDesc,
           ),
           const SizedBox(height: 16),

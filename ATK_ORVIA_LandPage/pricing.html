@@ -16,10 +16,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0A0A0A;--bg-soft:#111111;--card:#1A1A1A;--border:#262626;--green:#2BD9A0;--text:#F5F5F5;--muted:#8a8a8a}
+:root{--bg:#0A0A0A;--bg-soft:#111111;--card:#1A1A1A;--border:#262626;--green:#4A7FFF;--grad:linear-gradient(135deg,#00E5CC,#4A7FFF,#6B4FD8);--grad-start:#00E5CC;--grad-end:#6B4FD8;--text:#F5F5F5;--muted:#8a8a8a}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;line-height:1.7;-webkit-font-smoothing:antialiased}
-a{color:var(--green);text-decoration:none}
+a{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;text-decoration:none}
 a:hover{text-decoration:underline}
 nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,10,10,.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
 .nav-inner{max-width:860px;margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
@@ -28,7 +28,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,10,10,.8)
 .wrap{max-width:860px;margin:0 auto;padding:120px 24px 80px}
 h1{font-size:2.2rem;font-weight:800;letter-spacing:-.02em;margin-bottom:8px}
 .meta{color:var(--muted);font-size:.95rem;margin-bottom:40px}
-h2{font-size:1.3rem;font-weight:700;margin:40px 0 12px;color:var(--green)}
+h2{font-size:1.3rem;font-weight:700;margin:40px 0 12px;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
 p{margin-bottom:14px;color:#d4d4d4}
 ul{margin:0 0 14px 22px;color:#d4d4d4}
 li{margin-bottom:6px}
@@ -36,17 +36,17 @@ li{margin-bottom:6px}
 .plan{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px}
 .plan.hot{border-color:var(--green)}
 .plan h3{font-size:1.1rem;margin-bottom:4px}
-.plan .tier{color:var(--green);font-weight:700;font-size:.8rem;letter-spacing:.06em}
+.plan .tier{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:700;font-size:.8rem;letter-spacing:.06em}
 .plan ul{margin-top:10px;margin-left:18px;font-size:.92rem}
-.cta{display:inline-block;background:var(--green);color:#00261A;font-weight:700;padding:12px 28px;border-radius:10px;margin-top:12px}
+.cta{display:inline-block;background:var(--grad);color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box;font-weight:700;padding:12px 28px;border-radius:10px;margin-top:12px}
 .cta:hover{text-decoration:none;opacity:.9}
 footer{border-top:1px solid var(--border);padding:32px 24px;text-align:center;color:var(--muted);font-size:.85rem}
 footer a{margin:0 8px}
-</style>
+.brand-name{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:800}</style>
 </head>
 <body>
 <nav><div class="nav-inner">
-  <a class="brand" href="index.html"><img src="images/brand-icon.png" alt="ORVIA">ORVIA</a>
+  <a class="brand" href="index.html"><img src="images/brand-icon.png" alt="ORVIA"><span class="brand-name">ORVIA</span></a>
 </div></nav>
 
 <div class="wrap">

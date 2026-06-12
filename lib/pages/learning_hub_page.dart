@@ -6,7 +6,7 @@ class LearningHubPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final contents = _demoContents;
+    final contents = _buildDemoContents(context);
     return Scaffold(
       appBar: AppBar(title: Text(AppLocalizations.of(context).learningTitle)),
       body: ListView.separated(
@@ -126,25 +126,28 @@ class _Marker {
   const _Marker({required this.time, required this.label, required this.note});
 }
 
-final List<_LearningContent> _demoContents = [
-  _LearningContent(
-    title: '良好揮桿示範',
-    description: '節奏平順、重心穩定、擊球後收桿完整。',
-    type: 'good',
-    markers: const [
-      _Marker(time: 0.80, label: '上桿頂點', note: '重心仍在腳中，桿身與手臂成直線'),
-      _Marker(time: 1.20, label: '擊球瞬間', note: '手位在球前方，身體旋轉帶動擊球'),
-      _Marker(time: 1.60, label: '收桿', note: '重心轉向前腳，身體保持平衡'),
-    ],
-  ),
-  _LearningContent(
-    title: '常見錯誤：提前釋放',
-    description: '手腕提前放鬆，導致桿頭加速度不足，球路弱/右曲。',
-    type: 'error',
-    markers: const [
-      _Marker(time: 0.70, label: '上桿頂點', note: '手腕角度過早放鬆，桿頭落後'),
-      _Marker(time: 1.05, label: '擊球前', note: '手部領先不足，重心偏後'),
-      _Marker(time: 1.40, label: '收桿', note: '重心未移到前腳，平衡不佳'),
-    ],
-  ),
-];
+List<_LearningContent> _buildDemoContents(BuildContext context) {
+  final l10n = AppLocalizations.of(context);
+  return [
+    _LearningContent(
+      title: l10n.learnHubGoodSwingTitle,
+      description: l10n.learnHubGoodSwingDesc,
+      type: 'good',
+      markers: [
+        _Marker(time: 0.80, label: l10n.learnHubMarkerBackswingTop, note: l10n.learnHubMarkerBackswingTopNote),
+        _Marker(time: 1.20, label: l10n.learnHubMarkerImpact, note: l10n.learnHubMarkerImpactNote),
+        _Marker(time: 1.60, label: l10n.learnHubMarkerFinish, note: l10n.learnHubMarkerFinishNote),
+      ],
+    ),
+    _LearningContent(
+      title: l10n.learnHubEarlyReleaseTitle,
+      description: l10n.learnHubEarlyReleaseDesc,
+      type: 'error',
+      markers: [
+        _Marker(time: 0.70, label: l10n.learnHubMarkerBackswingTop, note: l10n.learnHubMarkerEarlyReleaseTopNote),
+        _Marker(time: 1.05, label: l10n.learnHubMarkerPreImpact, note: l10n.learnHubMarkerPreImpactNote),
+        _Marker(time: 1.40, label: l10n.learnHubMarkerFinish, note: l10n.learnHubMarkerEarlyReleaseFinishNote),
+      ],
+    ),
+  ];
+}

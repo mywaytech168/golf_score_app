@@ -57,6 +57,11 @@ class BallBlobExtractor {
     private var nativeDiffBuf   = ByteArray(0)   // |cur-prev| 差值
     private var nativeOpenedBuf = ByteArray(0)   // 0/1，形態開運算結果
 
+    // BFS 連通域重用緩衝（避免每幀 BooleanArray(N) 配置造成 GC churn，
+    // 並以 primitive IntArray 取代 ArrayDeque<Int> 避免 Integer 裝箱 → OOM）
+    private var visitedBuf = BooleanArray(0)     // 已訪問標記
+    private var stackBuf   = IntArray(0)         // flood-fill 堆疊（像素索引）
+
     // ────────────────────────────────────────────────────────────
     // 動態檢測配置
     // ────────────────────────────────────────────────────────────
@@ -289,15 +294,24 @@ class BallBlobExtractor {
         )
 
         // ── Step 3：BFS 連通域（4-連通），使用 nativeOpenedBuf (0/1) ──
-        val visited = BooleanArray(N)
+        // 重用 visited/stack 緩衝；primitive IntArray 堆疊取代 ArrayDeque<Int>，
+        // 避免每像素 Integer 裝箱（巨型連通域曾導致 OOM）。
+        if (visitedBuf.size < N) visitedBuf = BooleanArray(N)
+        else java.util.Arrays.fill(visitedBuf, 0, N, false)
+        if (stackBuf.size < N) stackBuf = IntArray(N)
+        val visited = visitedBuf
+        val stack   = stackBuf
         val blobs   = mutableListOf<Map<String, Any>>()
-        val queue   = ArrayDeque<Int>(256)
+
+        // 超過此面積即視為非球（whole-frame 曝光變化等），仍 flood-fill 標記 visited
+        // 以免重複掃描，但停止 centroid 累積。給足上限避免邊界誤殺。
+        val areaCap = max(config.areaHi * 4, 4096)
 
         for (start in 0 until N) {
             if (nativeOpenedBuf[start] == 0.toByte() || visited[start]) continue
 
-            queue.clear()
-            queue.add(start)
+            var sp = 0
+            stack[sp++] = start
             visited[start] = true
 
             var sumX    = 0L
@@ -305,15 +319,19 @@ class BallBlobExtractor {
             var area    = 0
             var perim   = 0
             var diffSum = 0L
+            var oversized = false
 
-            while (queue.isNotEmpty()) {
-                val idx = queue.removeFirst()
+            while (sp > 0) {
+                val idx = stack[--sp]
                 val px  = idx % w
                 val py  = idx / w
-                sumX   += px
-                sumY   += py
                 area++
-                diffSum += nativeDiffBuf[idx].toInt() and 0xFF
+                if (!oversized) {
+                    sumX   += px
+                    sumY   += py
+                    diffSum += nativeDiffBuf[idx].toInt() and 0xFF
+                    if (area > areaCap) oversized = true  // 之後僅標記 visited，不再累積
+                }
 
                 var isBorder = false
                 val ns = intArrayOf(
@@ -324,12 +342,12 @@ class BallBlobExtractor {
                 )
                 for (n in ns) {
                     if (n < 0 || nativeOpenedBuf[n] == 0.toByte()) { isBorder = true; continue }
-                    if (!visited[n]) { visited[n] = true; queue.add(n) }
+                    if (!visited[n]) { visited[n] = true; stack[sp++] = n }
                 }
                 if (isBorder) perim++
             }
 
-            if (area !in config.areaLo..config.areaHi) continue
+            if (oversized || area !in config.areaLo..config.areaHi) continue
 
             val circ = if (perim < 1) 0.0
                        else 4.0 * Math.PI * area / (perim.toDouble() * perim)

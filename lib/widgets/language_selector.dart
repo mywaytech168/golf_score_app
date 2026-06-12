@@ -60,10 +60,10 @@ class LanguageSelectorSheet extends StatelessWidget {
                 ),
                 title: Text(provider.displayName(locale)),
                 trailing: isSelected
-                    ? const Icon(Icons.check_rounded, color: kPrimaryGreen)
+                    ? const Icon(Icons.check_rounded, color: kBrandPrimary)
                     : null,
                 selected: isSelected,
-                selectedTileColor: kPrimaryGreen.withValues(alpha: 0.08),
+                selectedTileColor: kBrandPrimary.withValues(alpha: 0.08),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 onTap: () {
                   provider.setLocale(locale);

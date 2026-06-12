@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
 
@@ -23,6 +24,7 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Dialog(
       backgroundColor: Colors.grey[900],
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -44,9 +46,9 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    '選擇測試影片',
-                    style: TextStyle(
+                  Text(
+                    l10n.testVideoTitle,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -78,7 +80,7 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
                           const Icon(Icons.error, color: Colors.red, size: 48),
                           const SizedBox(height: 16),
                           Text(
-                            '載入影片失敗\n${snapshot.error}',
+                            l10n.testVideoLoadError(snapshot.error.toString()),
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 14,
@@ -102,9 +104,9 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
                             size: 48,
                           ),
                           const SizedBox(height: 16),
-                          const Text(
-                            '尚無已導入的影片',
-                            style: TextStyle(
+                          Text(
+                            l10n.testVideoEmpty,
+                            style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 16,
                             ),
@@ -178,9 +180,9 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
                                 horizontal: 12,
                                 vertical: 6,
                               ),
-                              child: const Text(
-                                '選擇',
-                                style: TextStyle(
+                              child: Text(
+                                l10n.testVideoSelect,
+                                style: const TextStyle(
                                   color: Colors.green,
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
@@ -207,8 +209,8 @@ class _TestVideoSelectorDialogState extends State<TestVideoSelectorDialog> {
                 ),
               ),
               child: Text(
-                '💡 提示：選擇一支影片作為測試錄製，用於演示和測試分析功能',
-                style: TextStyle(
+                l10n.testVideoHint,
+                style: const TextStyle(
                   color: Colors.white54,
                   fontSize: 12,
                   height: 1.5,

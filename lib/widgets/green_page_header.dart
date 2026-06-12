@@ -54,7 +54,7 @@ class GreenPageHeader extends StatelessWidget {
                     Text(
                       title,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: kOnGradient,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
@@ -65,8 +65,8 @@ class GreenPageHeader extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         subtitle!,
-                        style: const TextStyle(
-                          color: Colors.white70,
+                        style: TextStyle(
+                          color: kOnGradient.withValues(alpha: 0.72),
                           fontSize: 13,
                         ),
                         maxLines: 1,

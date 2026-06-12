@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
+import '../../theme/app_theme.dart';
+
 /// 錄影中指示器（RecordScreen / ShotRecordScreen 共用）：
 /// 閃爍紅點 + REC + 已錄時間（mm:ss）+ 幀數，
 /// 可選 [impactCount] 顯示「已偵測 N 桿」badge，每偵測到新的一桿短暫高亮。
@@ -124,7 +126,7 @@ class _RecordingIndicatorState extends State<RecordingIndicator>
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Color.lerp(Colors.black.withValues(alpha: 0.6),
-                      const Color(0xFF1AA87C), t),
+                      kBrandPrimary, t),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                       color: Color.lerp(

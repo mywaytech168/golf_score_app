@@ -28,31 +28,32 @@ extension _PlanX on _Plan {
   String get price {
     switch (this) {
       case _Plan.free:  return 'NT\$0';
-      case _Plan.pro:   return 'NT\$598';
-      case _Plan.elite: return 'NT\$1,198';
+      case _Plan.pro:   return 'NT\$600';
+      case _Plan.elite: return 'NT\$1,200';
     }
   }
 
   String get priceYearly {
     switch (this) {
       case _Plan.free:  return 'NT\$0';
-      case _Plan.pro:   return 'NT\$5,980';
-      case _Plan.elite: return 'NT\$11,980';
+      case _Plan.pro:   return 'NT\$6,000';
+      case _Plan.elite: return 'NT\$12,000';
     }
   }
 
-  String get period {
+  String period(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     switch (this) {
-      case _Plan.free:  return '永久免費';
-      case _Plan.pro:   return '/月';
-      case _Plan.elite: return '/月';
+      case _Plan.free:  return l10n.upgradeFreeForever;
+      case _Plan.pro:   return l10n.upgradePerMonth;
+      case _Plan.elite: return l10n.upgradePerMonth;
     }
   }
 
   Color get primaryColor {
     switch (this) {
       case _Plan.free:  return const Color(0xFF78909C);
-      case _Plan.pro:   return kPrimaryGreen;
+      case _Plan.pro:   return kBrandPrimary;
       case _Plan.elite: return const Color(0xFFB8860B);
     }
   }
@@ -66,14 +67,15 @@ extension _PlanX on _Plan {
     }
   }
 
-  List<String> get highlights {
+  List<String> highlights(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     switch (this) {
       case _Plan.free:
-        return ['基礎錄影分析', '每項功能限10球', '每日統計報告', '廣告支援'];
+        return [l10n.upgradeHighlightFullFeatured, l10n.upgradeHighlightAiDaily10, l10n.upgradeHighlightBuyMore];
       case _Plan.pro:
-        return ['每項功能擴充至90球', '細項揮桿分數', '錯誤偵測AI模型', '無廣告'];
+        return [l10n.upgradeHighlightFullFeatured, l10n.upgradeHighlightAiDaily90, l10n.upgradeNoAds];
       case _Plan.elite:
-        return ['所有功能無限制', '高畫質錄影', '個人化AI教練推薦', '弱點分析報告', '進階比較功能'];
+        return [l10n.upgradeHighlightFullFeatured, l10n.upgradeHighlightAiUnlimited, l10n.upgradeNoAds];
     }
   }
 
@@ -90,33 +92,42 @@ class _FeatureRow {
   const _FeatureRow(this.name, this.free, this.pro, this.elite);
 }
 
-const _features = <_FeatureRow>[
-  _FeatureRow('揮桿錄影',         '✓',      '✓',      '高畫質'),
-  _FeatureRow('長影片切片分析',    '10球',   '90球',   '無限制'),
-  _FeatureRow('即時語音',         '10球',   '90球',   '無限制'),
-  _FeatureRow('球軌跡分析',        '10球',   '90球',   '歷史比較'),
-  _FeatureRow('疊影分析',          '10球',   '90球',   '無限制'),
-  _FeatureRow('桿頭軌跡分析',      '10球',   '90球',   '無限制'),
-  _FeatureRow('骨架姿勢分析',      '10球',   '90球',   '無限制'),
-  _FeatureRow('節奏 / 速度分析',   '10球',   '90球',   '無限制'),
-  _FeatureRow('揮桿分數估估',      '簡單分數', '細項分數', '進步趨勢'),
-  _FeatureRow('AI 姿勢建議',      '綜合評分', '錯誤偵測', '評估+建議'),
-  _FeatureRow('訓練建議',          '影片連結', '固定模板', '個人化推薦'),
-  _FeatureRow('修正追蹤',          '基本文字', '基本文字', 'AI教練核心'),
-  _FeatureRow('每日 / 月報告',     '每日',   '無弱點分析', '含弱點分析'),
-  _FeatureRow('與他人比較',        '基礎',   '基礎',   '進階'),
-  _FeatureRow('廣告',             '有',     null,     null),
-];
+List<_FeatureRow> _buildFeatures(BuildContext context) {
+  final l10n = AppLocalizations.of(context);
+  return [
+    _FeatureRow(l10n.upgradeFeatureSwingRecording,    '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeatureAutoClip,           '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeatureVoiceHint,          '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeatureBallTrack,          '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeaturePose,               '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeatureAudioScore,         '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeatureDualVideo,          '✓',                      '✓',                      '✓'),
+    _FeatureRow(l10n.upgradeFeatureAiCoachAnalysis,    l10n.upgradeQuotaDaily10, l10n.upgradeQuotaDaily90, l10n.upgradeQuotaUnlimited),
+    _FeatureRow(l10n.upgradeNoAds,                     null,                     '✓',                      '✓'),
+  ];
+}
 
 // ════════════════════════════════════════════════════════════════
 // 球數包資料
 // ════════════════════════════════════════════════════════════════
 
+enum _BallBadge { popular, value, bestDeal }
+
+extension _BallBadgeX on _BallBadge {
+  String label(AppLocalizations l10n) {
+    switch (this) {
+      case _BallBadge.popular:  return l10n.upgradeBadgePopular;
+      case _BallBadge.value:    return l10n.upgradeBadgeValue;
+      case _BallBadge.bestDeal: return l10n.upgradeBadgeBestDeal;
+    }
+  }
+}
+
 class _BallPack {
   final String productId;
   final int balls;
   final String price;      // fallback hardcode price
-  final String? badge;
+  final _BallBadge? badge;
 
   const _BallPack({
     required this.productId,
@@ -129,9 +140,9 @@ class _BallPack {
 const _ballPacks = <_BallPack>[
   _BallPack(productId: 'orvia_golf_balls_1',   balls: 1,   price: 'NT\$60'),
   _BallPack(productId: 'orvia_golf_balls_5',   balls: 5,   price: 'NT\$240'),
-  _BallPack(productId: 'orvia_golf_balls_10',  balls: 10,  price: 'NT\$398',  badge: '熱門'),
-  _BallPack(productId: 'orvia_golf_balls_50',  balls: 50,  price: 'NT\$1,598', badge: '划算'),
-  _BallPack(productId: 'orvia_golf_balls_100', balls: 100, price: 'NT\$2,580', badge: '最優惠'),
+  _BallPack(productId: 'orvia_golf_balls_10',  balls: 10,  price: 'NT\$400',   badge: _BallBadge.popular),
+  _BallPack(productId: 'orvia_golf_balls_50',  balls: 50,  price: 'NT\$1,600', badge: _BallBadge.value),
+  _BallPack(productId: 'orvia_golf_balls_100', balls: 100, price: 'NT\$2,600', badge: _BallBadge.bestDeal),
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -327,7 +338,7 @@ class _SelectedPlanCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(color: plan.primaryColor, borderRadius: BorderRadius.circular(10)),
-                  child: const Text('已訂閱', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                  child: Text(AppLocalizations.of(context).upgradeSubscribed, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                 ),
               ],
               const Spacer(),
@@ -335,7 +346,7 @@ class _SelectedPlanCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(plan.price, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: plan.primaryColor)),
-                  Text(plan.period, style: TextStyle(fontSize: 12, color: context.textSecondary)),
+                  Text(plan.period(context), style: TextStyle(fontSize: 12, color: context.textSecondary)),
                 ],
               ),
             ],
@@ -344,7 +355,7 @@ class _SelectedPlanCard extends StatelessWidget {
           const Divider(height: 1),
           const SizedBox(height: 14),
           // 功能亮點
-          ...plan.highlights.map((h) => Padding(
+          ...plan.highlights(context).map((h) => Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
@@ -410,7 +421,7 @@ class _FeatureTable extends StatelessWidget {
                           child: Column(
                             children: [
                               _headerCell(AppLocalizations.of(context).upgradeFeatureColumn, null),
-                              ..._features.asMap().entries.map((e) =>
+                              ..._buildFeatures(context).asMap().entries.map((e) =>
                                 _featureNameCell(context, e.value.name, e.key.isOdd),
                               ),
                             ],
@@ -422,7 +433,7 @@ class _FeatureTable extends StatelessWidget {
                           return _PlanColumn(
                             plan: plan,
                             isHighlighted: isHighlighted,
-                            features: _features,
+                            features: _buildFeatures(context),
                             rowH: _rowH,
                             colW: colW,
                           );
@@ -649,7 +660,7 @@ class _CtaButton extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 isSubscribed
-                    ? '目前方案'
+                    ? AppLocalizations.of(context).upgradeCurrentPlanActive
                     : isFree
                         ? AppLocalizations.of(context).upgradeCurrentPlan
                         : AppLocalizations.of(context).upgradeSubscribePlan(plan.label),
@@ -739,7 +750,7 @@ class _PaySheetState extends State<_PaySheet> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('訂閱失敗：$e')),
+        SnackBar(content: Text(AppLocalizations.of(context).upgradeSubscribeFailed(e.toString()))),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -747,11 +758,11 @@ class _PaySheetState extends State<_PaySheet> {
   }
 
   /// 顯示的價格：優先用 Store 回傳的本地貨幣，fallback 用 hardcode
-  String get _displayPrice {
+  String _displayPrice(BuildContext context) {
     if (_productDetails != null) return _productDetails!.price;
     return _yearly
-        ? '${widget.plan.priceYearly}/年'
-        : '${widget.plan.price}${widget.plan.period}';
+        ? '${widget.plan.priceYearly}${AppLocalizations.of(context).upgradePerYear}'
+        : '${widget.plan.price}${widget.plan.period(context)}';
   }
 
   @override
@@ -779,7 +790,7 @@ class _PaySheetState extends State<_PaySheet> {
                       )
                     else
                       Text(
-                        _displayPrice,
+                        _displayPrice(context),
                         style: TextStyle(fontSize: 13, color: widget.plan.primaryColor, fontWeight: FontWeight.w600),
                       ),
                   ],
@@ -790,9 +801,9 @@ class _PaySheetState extends State<_PaySheet> {
             // 月繳 / 年繳 切換
             Center(
               child: SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, label: Text('月繳')),
-                  ButtonSegment(value: true, label: Text('年繳（享約 2 個月折扣）')),
+                segments: [
+                  ButtonSegment(value: false, label: Text(AppLocalizations.of(context).upgradeMonthly)),
+                  ButtonSegment(value: true, label: Text(AppLocalizations.of(context).upgradeYearly)),
                 ],
                 selected: {_yearly},
                 onSelectionChanged: _loading
@@ -826,10 +837,10 @@ class _PaySheetState extends State<_PaySheet> {
                         ? const SizedBox(width: 22, height: 22,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : _productDetails == null
-                            ? const Text('商品載入失敗，請稍後再試',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500))
+                            ? Text(AppLocalizations.of(context).upgradeProductLoadFailed,
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))
                             : Text(
-                                Platform.isIOS ? 'App Store 訂閱' : 'Google Play 訂閱',
+                                Platform.isIOS ? AppLocalizations.of(context).upgradeAppStoreSubscribe : AppLocalizations.of(context).upgradeGooglePlaySubscribe,
                                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                               ),
               ),
@@ -837,7 +848,7 @@ class _PaySheetState extends State<_PaySheet> {
             const SizedBox(height: 8),
             Center(
               child: Text(
-                '訂閱後可隨時在 ${Platform.isIOS ? "App Store" : "Google Play"} 管理或取消',
+                Platform.isIOS ? AppLocalizations.of(context).upgradeManageSubscriptionIos : AppLocalizations.of(context).upgradeManageSubscriptionAndroid,
                 style: TextStyle(fontSize: 11, color: context.textSecondary),
                 textAlign: TextAlign.center,
               ),
@@ -868,10 +879,10 @@ class _BallShopSection extends StatelessWidget {
             padding: const EdgeInsets.only(left: 8, bottom: 12),
             child: Row(
               children: [
-                const Icon(Icons.sports_golf_rounded, size: 18, color: kPrimaryGreen),
+                const Icon(Icons.sports_golf_rounded, size: 18, color: kBrandPrimary),
                 const SizedBox(width: 6),
                 Text(
-                  '單買球數',
+                  AppLocalizations.of(context).upgradeBuyBalls,
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: context.textPrimary),
                 ),
                 const SizedBox(width: 8),
@@ -879,12 +890,12 @@ class _BallShopSection extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: context.isDarkMode
-                        ? kPrimaryGreen.withValues(alpha: 0.18)
+                        ? kBrandPrimary.withValues(alpha: 0.18)
                         : const Color(0xFFE8F5EE),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: kPrimaryGreen.withValues(alpha: 0.4)),
+                    border: Border.all(color: kBrandPrimary.withValues(alpha: 0.4)),
                   ),
-                  child: const Text('不限時間使用', style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                  child: Text(AppLocalizations.of(context).upgradeNoExpiry, style: const TextStyle(fontSize: 11, color: kBrandPrimary, fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
@@ -926,11 +937,11 @@ class _BallPackTile extends StatelessWidget {
                   height: 44,
                   decoration: BoxDecoration(
                     color: context.isDarkMode
-                        ? kPrimaryGreen.withValues(alpha: 0.18)
+                        ? kBrandPrimary.withValues(alpha: 0.18)
                         : const Color(0xFFE8F5EE),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.sports_golf_rounded, color: kPrimaryGreen, size: 22),
+                  child: const Icon(Icons.sports_golf_rounded, color: kBrandPrimary, size: 22),
                 ),
                 const SizedBox(width: 14),
                 // 球數 + badge
@@ -941,7 +952,7 @@ class _BallPackTile extends StatelessWidget {
                       Row(
                         children: [
                           Text(
-                            '${pack.balls} 球',
+                            AppLocalizations.of(context).upgradeBallCount(pack.balls),
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.textPrimary),
                           ),
                           if (pack.badge != null) ...[
@@ -952,14 +963,14 @@ class _BallPackTile extends StatelessWidget {
                                 color: Colors.orange,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: Text(pack.badge!, style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
+                              child: Text(pack.badge!.label(AppLocalizations.of(context)), style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
                             ),
                           ],
                         ],
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '永久有效，隨時使用',
+                        AppLocalizations.of(context).upgradeBallPackValidity,
                         style: TextStyle(fontSize: 11, color: context.textSecondary),
                       ),
                     ],
@@ -971,16 +982,16 @@ class _BallPackTile extends StatelessWidget {
                   children: [
                     Text(
                       pack.price,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kPrimaryGreen),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kBrandPrimary),
                     ),
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       decoration: BoxDecoration(
-                        color: kPrimaryGreen,
+                        color: kBrandPrimary,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text('購買', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
+                      child: Text(AppLocalizations.of(context).upgradeBuyButton, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
                     ),
                   ],
                 ),
@@ -1045,7 +1056,7 @@ class _BallBuySheetState extends State<_BallBuySheet> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('購買失敗：$e')),
+        SnackBar(content: Text(AppLocalizations.of(context).upgradePurchaseFailed(e.toString()))),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -1068,25 +1079,25 @@ class _BallBuySheetState extends State<_BallBuySheet> {
           children: [
             Row(
               children: [
-                const Icon(Icons.sports_golf_rounded, color: kPrimaryGreen, size: 24),
+                const Icon(Icons.sports_golf_rounded, color: kBrandPrimary, size: 24),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('購買 ${widget.pack.balls} 球',
+                    Text(AppLocalizations.of(context).upgradeBuyBallCount(widget.pack.balls),
                         style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                     if (_queryingProduct)
                       const SizedBox(width: 60, height: 14, child: LinearProgressIndicator(minHeight: 2))
                     else
                       Text(_displayPrice,
-                          style: const TextStyle(fontSize: 13, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                          style: const TextStyle(fontSize: 13, color: kBrandPrimary, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 10),
             Text(
-              '球數永久有效，不限時間使用。用完每日配額後自動消耗。',
+              AppLocalizations.of(context).upgradeBallPackDescription,
               style: TextStyle(fontSize: 12, color: context.textSecondary),
             ),
             const SizedBox(height: 16),
@@ -1098,7 +1109,7 @@ class _BallBuySheetState extends State<_BallBuySheet> {
               child: ElevatedButton(
                 onPressed: (_loading || _queryingProduct || _productDetails == null) ? null : _buy,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: kPrimaryGreen,
+                  backgroundColor: kBrandPrimary,
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.grey[300],
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1107,9 +1118,9 @@ class _BallBuySheetState extends State<_BallBuySheet> {
                     ? const SizedBox(width: 22, height: 22,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : _productDetails == null
-                        ? const Text('商品載入失敗，請稍後再試', style: TextStyle(fontSize: 14))
+                        ? Text(AppLocalizations.of(context).upgradeProductLoadFailed, style: const TextStyle(fontSize: 14))
                         : Text(
-                            Platform.isIOS ? 'App Store 購買' : 'Google Play 購買',
+                            Platform.isIOS ? AppLocalizations.of(context).upgradeAppStorePurchase : AppLocalizations.of(context).upgradeGooglePlayPurchase,
                             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                           ),
               ),

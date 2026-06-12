@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../services/chart_data_service.dart';
+import '../theme/app_theme.dart';
 
 /// 聲音波形橫條，顯示在影片播放器底部。
 /// 高度約 68px，包含波形圖（CustomPaint）與下方指標列。
@@ -33,12 +35,12 @@ class AudioWaveformStrip extends StatelessWidget {
     return (c / 50).clamp(0.0, 100.0).round();
   }
 
-  String get _peakLabel {
+  String _peakLabel(AppLocalizations l10n) {
     final p = peakDbfs;
     if (p == null) return '--';
-    if (p > -8) return '高';
-    if (p > -18) return '中';
-    return '低';
+    if (p > -8) return l10n.waveformPeakHigh;
+    if (p > -18) return l10n.waveformPeakMid;
+    return l10n.waveformPeakLow;
   }
 
   Color get _peakColor {
@@ -49,12 +51,12 @@ class AudioWaveformStrip extends StatelessWidget {
     return const Color(0xFFEF5350);
   }
 
-  String get _freqChar {
+  String _freqChar(AppLocalizations l10n) {
     final c = spectralCentroid;
     if (c == null) return '--';
-    if (c > 4000) return '偏清脆';
-    if (c > 3000) return '中音';
-    return '偏悶';
+    if (c > 4000) return l10n.waveformFreqCrispy;
+    if (c > 3000) return l10n.waveformFreqMid;
+    return l10n.waveformFreqMuffled;
   }
 
   // ── Seek 手勢 ─────────────────────────────────────────────────
@@ -68,6 +70,7 @@ class AudioWaveformStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Container(
       color: const Color(0xFF080808),
       height: 68,
@@ -91,11 +94,11 @@ class AudioWaveformStrip extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   if (spectralCentroid != null) ...[
-                    _chip('清脆度 $_crispScore', const Color(0xFF1AA87C)),
+                    _chip(l10n.waveformCrispScore(_crispScore), kGoodColor),
                     const SizedBox(width: 5),
-                    _chip('峰值 $_peakLabel', _peakColor),
+                    _chip(l10n.waveformPeakLabel(_peakLabel(l10n)), _peakColor),
                     const SizedBox(width: 5),
-                    _chip(_freqChar, Colors.white38),
+                    _chip(_freqChar(l10n), Colors.white38),
                   ],
                 ],
               ),
@@ -186,7 +189,7 @@ class _WaveformPainter extends CustomPainter {
         ? ((hitSecond! / totalSeconds) * numBars).floor().clamp(0, numBars - 1)
         : -1;
 
-    final paintPlayed = Paint()..color = const Color(0xFF1AA87C);
+    final paintPlayed = Paint()..color = kBrandPrimary;
     final paintFuture = Paint()..color = Colors.white.withValues(alpha: 0.22);
     final paintHit    = Paint()..color = const Color(0xFFFF8F00);
     final paintGlow   = Paint()
