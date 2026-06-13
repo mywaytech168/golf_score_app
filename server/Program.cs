@@ -88,10 +88,6 @@ builder.Services.AddHostedService<AiCoachWorkerService>();
 // 高爾夫揮桿 TCN 分析服務（Singleton：InferenceSession 執行緒安全且建立成本高）
 builder.Services.AddSingleton<UploadServer.Services.GolfSwingAnalyzerService>();
 
-// 球軌跡後端運算（Python worker subprocess）
-builder.Services.AddSingleton<UploadServer.Services.BallTrajectoryPythonService>();
-builder.Services.AddHostedService<UploadServer.Services.BallTrajectoryWorkerService>();
-
 // 後台服務 - 排程器
 builder.Services.AddHostedService<ShareCleanupService>();
 
