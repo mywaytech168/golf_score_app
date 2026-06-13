@@ -43,8 +43,10 @@ class MediaPipeVideoAnalyzer(private val context: Context) {
     fun setup(): Boolean {
         for (delegate in listOf(Delegate.GPU, Delegate.CPU)) {
             try {
+                // ★ setModelAssetBuffer 讀 bytes，繞開 setModelAssetPath 的 openFd 對未壓縮
+                //   asset 的依賴（AAB 打包後 .task 可能被壓縮 → openFd 失敗 → 離線骨架全無）。
                 val base = BaseOptions.builder()
-                    .setModelAssetPath(MODEL)
+                    .setModelAssetBuffer(loadModelBuffer(MODEL))
                     .setDelegate(delegate)
                     .build()
                 val opts = PoseLandmarkerOptions.builder()
@@ -64,6 +66,15 @@ class MediaPipeVideoAnalyzer(private val context: Context) {
         }
         Log.e(TAG, "setup failed — GPU and CPU both unavailable")
         return false
+    }
+
+    /** 從 assets 讀模型成 direct ByteBuffer（繞開 openFd 對未壓縮 asset 的依賴）。 */
+    private fun loadModelBuffer(assetPath: String): java.nio.ByteBuffer {
+        val bytes = context.assets.open(assetPath).use { it.readBytes() }
+        return java.nio.ByteBuffer.allocateDirect(bytes.size).apply {
+            put(bytes)
+            rewind()
+        }
     }
 
     /**

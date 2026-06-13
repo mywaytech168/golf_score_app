@@ -186,8 +186,11 @@ class MediaPipePoseHelper(
     }
 
     private fun build(delegate: Delegate) {
+        // ★ 用 setModelAssetBuffer 讀 bytes，而非 setModelAssetPath（後者走 openFd 要求 asset
+        //   未壓縮；AAB 打包時 noCompress glob 不一定傳遞到 bundle → Play 安裝版 .task 被壓縮 →
+        //   openFd 失敗 → 骨架全無，但 debug 正常）。讀 bytes 不管壓縮，與球 YOLO 載入方式一致。
         val base = BaseOptions.builder()
-            .setModelAssetPath(MODEL_LITE)
+            .setModelAssetBuffer(loadModelBuffer(MODEL_LITE))
             .setDelegate(delegate)
             .build()
         val opts = PoseLandmarkerOptions.builder()
@@ -206,6 +209,15 @@ class MediaPipePoseHelper(
             }
             .build()
         poseLandmarker = PoseLandmarker.createFromOptions(context, opts)
+    }
+
+    /** 從 assets 讀模型成 direct ByteBuffer（繞開 openFd 對未壓縮 asset 的依賴）。 */
+    private fun loadModelBuffer(assetPath: String): java.nio.ByteBuffer {
+        val bytes = context.assets.open(assetPath).use { it.readBytes() }
+        return java.nio.ByteBuffer.allocateDirect(bytes.size).apply {
+            put(bytes)
+            rewind()
+        }
     }
 
     // ── 送幀 ──────────────────────────────────────────────────────────────────

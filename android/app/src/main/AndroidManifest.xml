@@ -10,9 +10,10 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"/>
-    <!-- Android 13+ 分媒體類型權限（取代舊版 READ_EXTERNAL_STORAGE） -->
+    <!-- 影片匯入走 SAF 系統文件挑選器（file_picker），不需媒體權限；強制移除依賴可能合併進來的 READ_MEDIA_VIDEO -->
     <uses-permission
-        android:name="android.permission.READ_MEDIA_VIDEO"/>
+        android:name="android.permission.READ_MEDIA_VIDEO"
+        tools:node="remove"/>
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
