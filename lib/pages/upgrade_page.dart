@@ -164,7 +164,7 @@ class _UpgradePageState extends State<UpgradePage> {
     final currentPlan = context.watch<PlanProvider>().plan;
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           GreenPageHeader(
             title: AppLocalizations.of(context).upgradePageTitle,
@@ -190,7 +190,7 @@ class _UpgradePageState extends State<UpgradePage> {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 

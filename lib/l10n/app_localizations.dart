@@ -1480,6 +1480,12 @@ abstract class AppLocalizations {
   /// **'{used} / {total} balls'**
   String homeQuotaBalls(int used, int total);
 
+  /// No description provided for @homeBallsUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'{balls} balls'**
+  String homeBallsUnit(int balls);
+
   /// No description provided for @homeHitAnalysis.
   ///
   /// In en, this message translates to:
@@ -3172,6 +3178,24 @@ abstract class AppLocalizations {
   /// **'Balanced'**
   String get historyDetectBadgeBalanced;
 
+  /// No description provided for @historyDetectV4Title.
+  ///
+  /// In en, this message translates to:
+  /// **'Anchor (V4)'**
+  String get historyDetectV4Title;
+
+  /// No description provided for @historyDetectV4Desc.
+  ///
+  /// In en, this message translates to:
+  /// **'Uses the ball/grip spot tapped while recording; impact = dominant wrist closest to the anchor.'**
+  String get historyDetectV4Desc;
+
+  /// No description provided for @historyDetectBadgeAnchor.
+  ///
+  /// In en, this message translates to:
+  /// **'Anchor'**
+  String get historyDetectBadgeAnchor;
+
   /// No description provided for @historyDetectV3Time.
   ///
   /// In en, this message translates to:
@@ -3202,10 +3226,16 @@ abstract class AppLocalizations {
   /// **'Start analysis'**
   String get historyStartAnalysis;
 
+  /// No description provided for @historyMenuAddClip.
+  ///
+  /// In en, this message translates to:
+  /// **'Add clip'**
+  String get historyMenuAddClip;
+
   /// No description provided for @historyActionDetect.
   ///
   /// In en, this message translates to:
-  /// **'Detect shots'**
+  /// **'Detect swings'**
   String get historyActionDetect;
 
   /// No description provided for @historyActionAiAnalysis.
@@ -3724,6 +3754,12 @@ abstract class AppLocalizations {
   /// **'Video Review'**
   String get playerTitle;
 
+  /// No description provided for @playerNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Note'**
+  String get playerNote;
+
   /// No description provided for @playerNoteAdd.
   ///
   /// In en, this message translates to:
@@ -3765,6 +3801,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Skeleton data not available'**
   String get playerSkeletonNotFound;
+
+  /// No description provided for @playerOverlaySync.
+  ///
+  /// In en, this message translates to:
+  /// **'Overlay sync'**
+  String get playerOverlaySync;
+
+  /// No description provided for @playerOverlaySyncDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Time offset between skeleton/trajectory and video. Lagging behind → increase; ahead → decrease.'**
+  String get playerOverlaySyncDesc;
 
   /// No description provided for @playerOverlaySkeleton.
   ///
@@ -4291,7 +4339,7 @@ abstract class AppLocalizations {
   /// No description provided for @exportCustomTitle.
   ///
   /// In en, this message translates to:
-  /// **'Custom export'**
+  /// **'Export'**
   String get exportCustomTitle;
 
   /// No description provided for @exportCustomSubtitle.
@@ -4887,6 +4935,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Toggle outline overlay'**
   String get recordOverlayToggle;
+
+  /// No description provided for @recTapSetImpactPoint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to set impact point'**
+  String get recTapSetImpactPoint;
+
+  /// No description provided for @recSwingSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Swing speed threshold'**
+  String get recSwingSpeed;
+
+  /// No description provided for @recShowTelemetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Show wrist values (debug)'**
+  String get recShowTelemetry;
+
+  /// No description provided for @recAnchorRadius.
+  ///
+  /// In en, this message translates to:
+  /// **'Anchor hit radius (smaller = stricter)'**
+  String get recAnchorRadius;
+
+  /// No description provided for @recAnchorGate.
+  ///
+  /// In en, this message translates to:
+  /// **'Anchor detection gate'**
+  String get recAnchorGate;
+
+  /// No description provided for @recAnchorGateDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Only count a swing if the wrist passes within the anchor radius; random/off-target swings are ignored.'**
+  String get recAnchorGateDesc;
+
+  /// No description provided for @recUseAnchor.
+  ///
+  /// In en, this message translates to:
+  /// **'Anchor impact (V4)'**
+  String get recUseAnchor;
+
+  /// No description provided for @recUseAnchorDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the tapped ball spot as the impact point; off keeps the spot but falls back to wrist arc-bottom'**
+  String get recUseAnchorDesc;
+
+  /// No description provided for @recGlowDelay.
+  ///
+  /// In en, this message translates to:
+  /// **'Impact glow delay'**
+  String get recGlowDelay;
 
   /// No description provided for @recordSettings.
   ///

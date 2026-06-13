@@ -62,6 +62,9 @@ namespace UploadServer.DTOs
 
         /// <summary>Flutter 依序直傳 keyframe_0.jpg ... keyframe_N.jpg 到 B2（KeyframeCount>0 時才有值）</summary>
         public List<string>? KeyframeUploadUrls { get; set; }
+
+        /// <summary>Flutter 用此 URL 直傳診斷 meta.json（偵測 log/錨點/即時擊球等）到 B2</summary>
+        public string? MetaUploadUrl { get; set; }
     }
 
     public class AnalysisStatusResponse

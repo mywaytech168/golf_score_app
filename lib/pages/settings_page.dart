@@ -779,7 +779,7 @@ class _SettingsPageState extends State<SettingsPage> {
         title: Text(l.settingsTitle, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         centerTitle: true,
       ),
-      body: ListView(
+      body: SafeArea(top: false, child: ListView(
         padding: EdgeInsets.zero,
         children: [
           // ── 個人資料卡 ──────────────────────────────────────
@@ -985,7 +985,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 40),
         ],
-      ),
+      )),
     );
   }
 }

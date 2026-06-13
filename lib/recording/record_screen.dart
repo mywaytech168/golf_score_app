@@ -17,6 +17,8 @@ import '../services/swing_auto_clip_service.dart';
 import '../services/swing_detect_prefs.dart';
 import 'device_capability.dart';
 import 'live_swing_detector.dart';
+import 'widgets/anchor_marker.dart';
+import 'widgets/wrist_telemetry_hud.dart';
 import 'native_camera_service.dart';
 import 'pose_csv_writer.dart';
 import 'prewarm_cleanup.dart';
@@ -66,6 +68,22 @@ class _RecordScreenState extends State<RecordScreen> {
       LiveSwingDetector(onImpact: _onLiveImpact);
   final List<double> _liveImpacts = [];
   bool _bothHands = false; // 雙手判斷（設定可切換）
+  int _glowDelayMs = SwingDetectPrefs.defaultGlowDelayMs; // 擊球光暈延遲（設定可調）
+  double? _anchorX, _anchorY; // 擊球錨點（點選預覽設定的球位，歸一化）
+  bool _useAnchor = true; // 擊球時刻 V4（錨點）；關閉＝V1 弧底
+  bool _anchorGate = false; // 錨點偵測閘門：揮桿須經過錨點才算
+  double _anchorRadius = SwingDetectPrefs.defaultAnchorRadius; // 錨點命中半徑
+  double _swingFloor = SwingDetectPrefs.defaultSwingSpeedFloor; // 揮桿速度門檻
+  bool _showTelemetry = false; // 除錯 HUD：顯示左右腕 Y + 速度
+
+  /// 套用偵測器錨點：座標永遠帶入（供閘門用），V4 時刻 / 閘門各自獨立開關。
+  void _applyAnchorToDetector() {
+    final hasCoord = _anchorX != null && _anchorY != null;
+    _liveDetector.anchorX = hasCoord ? _anchorX : null;
+    _liveDetector.anchorY = hasCoord ? _anchorY : null;
+    _liveDetector.useAnchorHit = _useAnchor && hasCoord;
+    _liveDetector.anchorGate = _anchorGate && hasCoord;
+  }
 
   /// 即時偵測到擊球：記錄時刻並立即 rebuild，讓光圈/徽章在擊球當下觸發
   /// （不依賴計時器 tick，避免最多 ~1s 的視覺延遲）。
@@ -104,6 +122,37 @@ class _RecordScreenState extends State<RecordScreen> {
       if (!mounted) return;
       setState(() => _bothHands = v);
       _liveDetector.bothHands = v;
+    });
+    SwingDetectPrefs.getGlowDelayMs().then((v) {
+      if (mounted) setState(() => _glowDelayMs = v);
+    });
+    SwingDetectPrefs.getUseAnchor().then((v) {
+      if (!mounted) return;
+      setState(() => _useAnchor = v);
+      _applyAnchorToDetector();
+    });
+    SwingDetectPrefs.getAnchorGate().then((v) {
+      if (!mounted) return;
+      setState(() => _anchorGate = v);
+      _applyAnchorToDetector();
+    });
+    SwingDetectPrefs.getAnchorRadius().then((v) {
+      if (!mounted) return;
+      setState(() => _anchorRadius = v);
+      _liveDetector.anchorHitRadius = v;
+    });
+    SwingDetectPrefs.getSwingSpeedFloor().then((v) {
+      if (!mounted) return;
+      setState(() => _swingFloor = v);
+      _liveDetector.swingSpeedFloor = v;
+    });
+    SwingDetectPrefs.getShowTelemetry().then((v) {
+      if (mounted) setState(() => _showTelemetry = v);
+    });
+    SwingDetectPrefs.getAnchor().then((a) {
+      if (!mounted || a == null) return;
+      setState(() { _anchorX = a.$1; _anchorY = a.$2; });
+      _applyAnchorToDetector();
     });
   }
 
@@ -301,14 +350,35 @@ class _RecordScreenState extends State<RecordScreen> {
 
   // ─── Camera Overlay ────────────────────────────────────────────────────────
 
+  /// 點選預覽設定擊球錨點（球位）。錄製中不可改（避免誤觸）。
+  void _setAnchorAt(Offset local, Size size) {
+    if (_isRecording || size.width <= 0 || size.height <= 0) return;
+    final ax = (local.dx / size.width).clamp(0.0, 1.0);
+    final ay = (local.dy / size.height).clamp(0.0, 1.0);
+    setState(() { _anchorX = ax; _anchorY = ay; });
+    _applyAnchorToDetector();
+    unawaited(SwingDetectPrefs.setAnchor(ax, ay));
+  }
+
+  void _clearAnchor() {
+    setState(() { _anchorX = null; _anchorY = null; });
+    _applyAnchorToDetector();
+    unawaited(SwingDetectPrefs.clearAnchor());
+  }
+
   Widget _buildOverlay() {
-    return GestureDetector(
+    return LayoutBuilder(builder: (context, constraints) {
+      final pw = constraints.maxWidth, ph = constraints.maxHeight;
+      return GestureDetector(
       onScaleStart: (_) => _baseZoom = _currentZoom,
       onScaleUpdate: (d) {
         if (d.pointerCount < 2) return;
         final z = (_baseZoom + (d.scale - 1.0) * 0.6).clamp(0.0, 1.0);
         _setZoom(z);
       },
+      onTapUp: _isRecording
+          ? null
+          : (d) => _setAnchorAt(d.localPosition, Size(pw, ph)),
       child: Stack(fit: StackFit.expand, children: [
         // Skeleton is drawn natively on the camera Texture (SkeletonRenderer.kt / CoreGraphics)
         // No Dart-side SkeletonPainter needed.
@@ -326,6 +396,14 @@ class _RecordScreenState extends State<RecordScreen> {
           Positioned.fill(
             child: ImpactGlowOverlay(
               impactCount: _liveImpacts.length,
+              // 錨點 V4：光暈畫在錨點(球位)、延遲歸零（開火時刻已是手到錨點）；
+              // 否則固定偏下中央 + 弧底延遲補償。
+              center: (_useAnchor && _anchorX != null && _anchorY != null)
+                  ? Alignment(_anchorX! * 2 - 1, _anchorY! * 2 - 1)
+                  : const Alignment(0.0, 0.35),
+              triggerDelay: (_useAnchor && _anchorX != null)
+                  ? Duration.zero
+                  : Duration(milliseconds: _glowDelayMs),
               labelBuilder: (n) =>
                   AppLocalizations.of(context).recImpactShot(n),
             ),
@@ -366,8 +444,51 @@ class _RecordScreenState extends State<RecordScreen> {
           )),
         ),
         ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
+
+        // 除錯 HUD：即時左右腕 Y + 速度
+        if (_showTelemetry)
+          Positioned(
+            top: 16, left: 16,
+            child: WristTelemetryHud(detector: _liveDetector),
+          ),
+
+        // 擊球錨點標記（點選預覽設定的球位）+ 清除鈕
+        if (_anchorX != null && _anchorY != null) ...[
+          Positioned(
+            left: _anchorX! * pw - 16,
+            top:  _anchorY! * ph - 16,
+            child: const AnchorMarker(),
+          ),
+          if (!_isRecording)
+            Positioned(
+              left: _anchorX! * pw + 14,
+              top:  _anchorY! * ph - 14,
+              child: GestureDetector(
+                onTap: _clearAnchor,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: Colors.black54, shape: BoxShape.circle),
+                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+                ),
+              ),
+            ),
+        ],
+        // 提示：尚未設錨點且未錄製
+        if (_anchorX == null && !_isRecording)
+          Positioned(
+            bottom: 120, right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+              child: Text(AppLocalizations.of(context).recTapSetImpactPoint,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+            ),
+          ),
       ]),
     );
+    });
   }
 
   void _setZoom(double v) {
@@ -562,6 +683,11 @@ class _RecordScreenState extends State<RecordScreen> {
     //   分析成本 = O(揮桿數)，與影片長度無關。
     await SwingAutoClipService.saveLiveImpacts(
         p.dirname(_videoPath), List.of(_liveImpacts));
+    // 存錄製時使用的錨點（離線 V4 偵測用）——僅在啟用且已設座標時
+    if (_useAnchor && _anchorX != null && _anchorY != null) {
+      await SwingAutoClipService.saveAnchor(
+          p.dirname(_videoPath), _anchorX, _anchorY);
+    }
     final autoClipSource = RecordingHistoryEntry(
       filePath:            _videoPath,
       roundIndex:          1,
@@ -678,16 +804,24 @@ class _RecordScreenState extends State<RecordScreen> {
     RecordingAspectRatio pendingRatio   = _config.aspectRatio;
     bool                 pendingAudio   = _config.enableAudio;
     bool                 pendingBoth    = _bothHands;
+    double               pendingFloor   = _swingFloor;
+    int                  pendingGlow    = _glowDelayMs;
+    bool                 pendingUseAnchor = _useAnchor;
+    bool                 pendingGate      = _anchorGate;
+    double               pendingRadius    = _anchorRadius;
+    bool                 pendingTelemetry = _showTelemetry;
     final l10n = AppLocalizations.of(context);
 
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E1E),
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setSheet) {
           return SafeArea(
+            child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Column(
@@ -767,7 +901,122 @@ class _RecordScreenState extends State<RecordScreen> {
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ]),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+
+                  // 揮桿速度門檻：峰值（嚴格雙手下兩手）需達此速度才算揮桿
+                  Row(children: [
+                    const Icon(Icons.speed_rounded, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(l10n.recSwingSpeed,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
+                    Text(pendingFloor.toStringAsFixed(2),
+                        style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  ]),
+                  Slider(
+                    value: pendingFloor.clamp(0.05, 0.30),
+                    min: 0.05, max: 0.30, divisions: 25,
+                    activeColor: kBrandPrimary,
+                    label: pendingFloor.toStringAsFixed(2),
+                    onChanged: (v) => setSheet(() => pendingFloor = v),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // 錨點擊球（V4）：用點選的球位當擊球點；關閉退回手腕弧底
+                  Row(children: [
+                    const Icon(Icons.center_focus_strong_outlined, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(l10n.recUseAnchor,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(l10n.recUseAnchorDesc,
+                            style: const TextStyle(color: Colors.white38, fontSize: 10.5)),
+                      ]),
+                    ),
+                    Switch(
+                      value: pendingUseAnchor,
+                      onChanged: (v) => setSheet(() => pendingUseAnchor = v),
+                      activeThumbColor: kBrandPrimary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ]),
+                  // 錨點偵測閘門：揮桿須經過錨點半徑內才算一桿（亂揮/未經過 → 不算）
+                  Row(children: [
+                    const Icon(Icons.gps_fixed_rounded, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(l10n.recAnchorGate,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(l10n.recAnchorGateDesc,
+                            style: const TextStyle(color: Colors.white38, fontSize: 10.5)),
+                      ]),
+                    ),
+                    Switch(
+                      value: pendingGate,
+                      onChanged: (v) => setSheet(() => pendingGate = v),
+                      activeThumbColor: kBrandPrimary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ]),
+                  // 錨點命中半徑：V4 時刻 或 閘門 任一啟用時可調
+                  if (pendingUseAnchor || pendingGate) ...[
+                    Row(children: [
+                      const SizedBox(width: 22),
+                      Expanded(
+                        child: Text(l10n.recAnchorRadius,
+                            style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
+                      ),
+                      Text(pendingRadius.toStringAsFixed(2),
+                          style: const TextStyle(color: Colors.white, fontSize: 12)),
+                    ]),
+                    Slider(
+                      value: pendingRadius.clamp(0.05, 0.80),
+                      min: 0.05, max: 0.80, divisions: 30,
+                      activeColor: kBrandPrimary,
+                      label: pendingRadius.toStringAsFixed(2),
+                      onChanged: (v) => setSheet(() => pendingRadius = v),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+
+                  // 顯示腕點數值（除錯 HUD）
+                  Row(children: [
+                    const Icon(Icons.show_chart_rounded, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(l10n.recShowTelemetry,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
+                    Switch(
+                      value: pendingTelemetry,
+                      onChanged: (v) => setSheet(() => pendingTelemetry = v),
+                      activeThumbColor: kBrandPrimary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+
+                  // 擊球光暈延遲（對齊桿頭觸球；偏早調大、偏晚調小）
+                  Row(children: [
+                    const Icon(Icons.blur_on_rounded, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Text(l10n.recGlowDelay,
+                        style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    Text('${pendingGlow}ms',
+                        style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  ]),
+                  Slider(
+                    value: pendingGlow.toDouble().clamp(0, 2000),
+                    min: 0, max: 2000, divisions: 40,
+                    activeColor: kBrandPrimary,
+                    label: '${pendingGlow}ms',
+                    onChanged: (v) => setSheet(() => pendingGlow = v.round()),
+                  ),
+                  const SizedBox(height: 8),
 
                   SizedBox(
                     width: double.infinity,
@@ -784,6 +1033,34 @@ class _RecordScreenState extends State<RecordScreen> {
                           setState(() => _bothHands = pendingBoth);
                           _liveDetector.bothHands = pendingBoth;
                           unawaited(SwingDetectPrefs.setBothHands(pendingBoth));
+                        }
+                        if (pendingFloor != _swingFloor) {
+                          setState(() => _swingFloor = pendingFloor);
+                          _liveDetector.swingSpeedFloor = pendingFloor;
+                          unawaited(SwingDetectPrefs.setSwingSpeedFloor(pendingFloor));
+                        }
+                        if (pendingGlow != _glowDelayMs) {
+                          setState(() => _glowDelayMs = pendingGlow);
+                          unawaited(SwingDetectPrefs.setGlowDelayMs(pendingGlow));
+                        }
+                        if (pendingUseAnchor != _useAnchor) {
+                          setState(() => _useAnchor = pendingUseAnchor);
+                          _applyAnchorToDetector();
+                          unawaited(SwingDetectPrefs.setUseAnchor(pendingUseAnchor));
+                        }
+                        if (pendingGate != _anchorGate) {
+                          setState(() => _anchorGate = pendingGate);
+                          _applyAnchorToDetector();
+                          unawaited(SwingDetectPrefs.setAnchorGate(pendingGate));
+                        }
+                        if (pendingRadius != _anchorRadius) {
+                          setState(() => _anchorRadius = pendingRadius);
+                          _liveDetector.anchorHitRadius = pendingRadius;
+                          unawaited(SwingDetectPrefs.setAnchorRadius(pendingRadius));
+                        }
+                        if (pendingTelemetry != _showTelemetry) {
+                          setState(() => _showTelemetry = pendingTelemetry);
+                          unawaited(SwingDetectPrefs.setShowTelemetry(pendingTelemetry));
                         }
                         if (pendingQuality != _config.quality ||
                             pendingFps     != _config.fps     ||
@@ -807,6 +1084,7 @@ class _RecordScreenState extends State<RecordScreen> {
                   const SizedBox(height: 8),
                 ],
               ),
+            ),
             ),
           );
         });

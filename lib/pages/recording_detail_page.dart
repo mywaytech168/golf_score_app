@@ -144,110 +144,6 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
     return name.length > 24 ? '${name.substring(0, 24)}…' : name;
   }
 
-  // ── 下載影片 ────────────────────────────────────────────────────
-
-  /// 可下載的影片項目定義
-  static List<_VideoOption> _buildDownloadOptions(AppLocalizations l10n) => [
-    _VideoOption(
-      file:  'final.mp4',
-      label: l10n.recDetailOptLabelFull,
-      desc:  l10n.recDetailOptDescFull,
-      icon:  Icons.sports_golf_rounded,
-    ),
-    _VideoOption(
-      file:  'skeleton.mp4',
-      label: l10n.recDetailOptLabelSkeleton,
-      desc:  l10n.recDetailOptDescSkeleton,
-      icon:  Icons.accessibility_new_rounded,
-    ),
-    _VideoOption(
-      file:  'clip.mp4',
-      label: l10n.recDetailOptLabelClip,
-      desc:  l10n.recDetailOptDescNoOverlay,
-      icon:  Icons.videocam_rounded,
-    ),
-    _VideoOption(
-      file:  'swing.mp4',
-      label: l10n.recDetailOptLabelRaw,
-      desc:  l10n.recDetailOptDescNoOverlay,
-      icon:  Icons.videocam_rounded,
-    ),
-    _VideoOption(
-      file:  'swing.mov',
-      label: l10n.recDetailOptLabelRawMov,
-      desc:  l10n.recDetailOptDescRawMov,
-      icon:  Icons.videocam_rounded,
-    ),
-  ];
-
-  /// 顯示下載選單 → 使用者選擇 → 執行下載。
-  /// 燒錄版（final/skeleton）改為下載時隨選燒錄：分析階段已不產生燒錄影片，
-  /// 只要素材齊全（clip + CSV / trajectory.json）選項就會出現，選了現場燒。
-  Future<void> _downloadVideo() async {
-    final l10n = AppLocalizations.of(context);
-    final sessionDir = p.dirname(widget.entry.filePath);
-
-    bool isAvailable(_VideoOption o) {
-      if (File(p.join(sessionDir, o.file)).existsSync()) return true;
-      return switch (o.file) {
-        'final.mp4'    => OverlayBurnService.canBurnFinal(sessionDir),
-        'skeleton.mp4' => OverlayBurnService.canBurnSkeleton(sessionDir),
-        _              => false,
-      };
-    }
-
-    final available = _buildDownloadOptions(l10n).where(isAvailable).toList();
-
-    if (available.isEmpty) {
-      _showSnack(AppLocalizations.of(context).recDetailNoVideoFound, isError: true);
-      return;
-    }
-
-    // 彈出選單
-    final chosen = await showModalBottomSheet<_VideoOption>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => _DownloadPicker(options: available),
-    );
-    if (chosen == null || !mounted) return;
-
-    // 執行下載（燒錄版不存在時先隨選燒錄）
-    setState(() => _isDownloading = true);
-    try {
-      var videoPath = p.join(sessionDir, chosen.file);
-      if (!File(videoPath).existsSync()) {
-        _showSnack(l10n.recDetailBurning(chosen.label));
-        final burned = switch (chosen.file) {
-          'final.mp4'    => await OverlayBurnService.ensureFinalVideo(sessionDir),
-          'skeleton.mp4' => await OverlayBurnService.ensureSkeletonVideo(sessionDir),
-          _              => null,
-        };
-        if (burned == null) {
-          _showSnack(l10n.recDetailBurnFailed, isError: true);
-          return;
-        }
-        videoPath = burned;
-      }
-      final displayName = '${_title.replaceAll(RegExp(r'[^\w一-龥]'), '_')}_${chosen.label}';
-      final result = await VideoExportService.download(videoPath, displayName: displayName);
-
-      if (!mounted) return;
-      switch (result.status) {
-        case ExportStatus.savedToDownloads:
-          _showSnack(l10n.recDetailSavedToDownloads(chosen.label));
-        case ExportStatus.savedToPhotos:
-          _showSnack(l10n.recDetailSavedToPhotos(chosen.label));
-        case ExportStatus.sharedViaSheet:
-          _showSnack(l10n.recDetailSharedViaSheet);
-        case ExportStatus.failed:
-          _showSnack(l10n.recDetailDownloadFailed(result.detail ?? ''), isError: true);
-      }
-    } finally {
-      if (mounted) setState(() => _isDownloading = false);
-    }
-  }
 
   /// 自訂匯出：勾選疊加元素 → 單 pass 合成 → 下載。
   /// 浮水印由方案決定（免費強制，UI 不可關）。
@@ -333,7 +229,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
         elevation: 0,
         title: Text(_title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         actions: [
-          // ── 下載影片 ───────────────────────────────────────
+          // ── 匯出（勾選疊加元素 → 合成下載）─────────────────
           if (_isDownloading)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 12),
@@ -342,18 +238,12 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               ),
             )
-          else ...[
+          else
             IconButton(
-              icon: const Icon(Icons.tune_rounded),
+              icon: const Icon(Icons.download_rounded),
               tooltip: AppLocalizations.of(context).exportCustomTitle,
               onPressed: _customExportFlow,
             ),
-            IconButton(
-              icon: const Icon(Icons.download_rounded),
-              tooltip: AppLocalizations.of(context).recDetailDownloadVideo,
-              onPressed: _downloadVideo,
-            ),
-          ],
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
@@ -363,7 +253,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
           ),
         ],
       ),
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           _MetaHeader(entry: widget.entry),
           Expanded(
@@ -376,7 +266,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
                         : _ChartsBody(data: _data!, hitSecond: widget.entry.hitSecond, entry: widget.entry, postureAnalysisId: _postureAnalysisId, isAutoAnalyzing: _isAutoAnalyzing),
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -1675,123 +1565,6 @@ class _PhaseChip extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
-// 下載影片選項資料類
-// ════════════════════════════════════════════════════════════════
-
-class _VideoOption {
-  final String file;
-  final String label;
-  final String desc;
-  final IconData icon;
-
-  const _VideoOption({
-    required this.file,
-    required this.label,
-    required this.desc,
-    required this.icon,
-  });
-}
-
-// ════════════════════════════════════════════════════════════════
-// 下載選擇 Bottom Sheet
-// ════════════════════════════════════════════════════════════════
-
-class _DownloadPicker extends StatelessWidget {
-  final List<_VideoOption> options;
-  const _DownloadPicker({required this.options});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ── 標題列 ──────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.download_rounded, color: kBrandPrimary, size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    AppLocalizations.of(context).recDetailSelectDownloadVersion,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-
-          // ── 選項列表 ──────────────────────────────────────────
-          ...options.map((opt) => _OptionTile(
-            option: opt,
-            onTap: () => Navigator.pop(context, opt),
-          )),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _OptionTile extends StatelessWidget {
-  final _VideoOption option;
-  final VoidCallback onTap;
-  const _OptionTile({required this.option, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(
-          children: [
-            // 圖示
-            Container(
-              width: 42, height: 42,
-              decoration: BoxDecoration(
-                color: kBrandPrimary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(option.icon, color: kBrandPrimary, size: 22),
-            ),
-            const SizedBox(width: 14),
-            // 文字
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    option.label,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    option.desc,
-                    style: TextStyle(fontSize: 12, color: context.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            // 箭頭
-            Icon(Icons.chevron_right_rounded, color: context.textHint),
-          ],
-        ),
       ),
     );
   }

@@ -171,8 +171,13 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
               ),
 
               // ── 條款內文 ─────────────────────────────────────
+              // 本頁背景固定深靛→墨黑（兩模式皆深色），故卡片強制套深色主題，
+              // 避免淺色主題下白底卡片與深色頁面對比過高刺眼。
               Expanded(
-                child: Container(
+                child: Theme(
+                  data: theme.copyWith(brightness: Brightness.dark),
+                  child: Builder(builder: (context) {
+                    return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
                     color: context.bgCard,
@@ -214,12 +219,14 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                           child: SingleChildScrollView(
                             controller: _scrollController,
                             padding: const EdgeInsets.all(20),
-                            child: _buildTermsContent(theme, l10n),
+                            child: _buildTermsContent(context, theme, l10n),
                           ),
                         ),
                       ),
                     ],
                   ),
+                    );
+                  }),
                 ),
               ),
 
@@ -372,7 +379,8 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
     );
   }
 
-  Widget _buildTermsContent(ThemeData theme, AppLocalizations l10n) {
+  Widget _buildTermsContent(
+      BuildContext context, ThemeData theme, AppLocalizations l10n) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

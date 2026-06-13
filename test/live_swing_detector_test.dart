@@ -78,8 +78,36 @@ void main() {
         det.feed(poseBothWrists(x, 0.5, x - 0.1, 0.5), t); // 雙腕同步前進
         t += 1 / 30;
       }
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 8; i++) {
         det.feed(poseBothWrists(x, 0.5, x - 0.1, 0.5), t);
+        t += 1 / 30;
+      }
+      expect(impacts, 1);
+    });
+
+    test('窗內確認：兩手在不同禎達門檻（非同禎）→ 仍觸發', () {
+      var impacts = 0;
+      final det = LiveSwingDetector(
+        calibrationSec: 3.0, bothHands: true, onImpact: (_) => impacts++,
+      );
+      var t = feedIdleBoth(det, 0, 4.0);
+      // 右腕先衝（左腕該禎僅微動 <0.12），下一段換左腕衝（右腕微動）——從不同禎達標，
+      // 但兩腕全程都可見且夠近（gap≈0.1）。窗內確認應成立。
+      var rx = 0.5, lx = 0.4;
+      // 第一段：右腕大步、左腕小步
+      for (final dx in [0.06, 0.14, 0.22]) {
+        rx += dx; lx += 0.02;
+        det.feed(poseBothWrists(rx, 0.5, lx, 0.5), t);
+        t += 1 / 30;
+      }
+      // 第二段：左腕大步、右腕小步
+      for (final dx in [0.14, 0.22, 0.16]) {
+        lx += dx; rx += 0.02;
+        det.feed(poseBothWrists(rx, 0.5, lx, 0.5), t);
+        t += 1 / 30;
+      }
+      for (var i = 0; i < 8; i++) {
+        det.feed(poseBothWrists(rx, 0.5, lx, 0.5), t);
         t += 1 / 30;
       }
       expect(impacts, 1);
@@ -97,7 +125,7 @@ void main() {
         det.feed(poseBothWrists(x, 0.5, 0.4, 0.5), t); // 左腕固定不動（同站姿位）
         t += 1 / 30;
       }
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 8; i++) {
         det.feed(poseBothWrists(x, 0.5, 0.4, 0.5), t);
         t += 1 / 30;
       }
@@ -118,7 +146,7 @@ void main() {
         det.feed(poseBothWrists(x, 0.5, 0.2, 0.5, lVis: 0.0), t);
         t += 1 / 30;
       }
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 8; i++) {
         det.feed(poseBothWrists(x, 0.5, 0.2, 0.5, lVis: 0.0), t);
         t += 1 / 30;
       }
@@ -138,7 +166,7 @@ void main() {
         det.feed(poseBothWrists(x, 0.5, 0.2, 0.5), t); // 左腕靜止亦觸發
         t += 1 / 30;
       }
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 8; i++) {
         det.feed(poseBothWrists(x, 0.5, 0.2, 0.5), t);
         t += 1 / 30;
       }
@@ -175,7 +203,7 @@ void main() {
         t += 1 / 30;
       }
       // 峰值後回落（< peak × 0.80）連續 2 禎 → fired
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 8; i++) {
         det.feed(poseAtWrist(x, 0.5), t); // 靜止，速度 0
         t += 1 / 30;
       }
@@ -185,7 +213,7 @@ void main() {
       expect(impactAt!, closeTo(peakTime, 1e-9));
     });
 
-    test('垂直揮桿：開火時刻為弧線底部（下→上 過零），晚於腕速峰值', () {
+    test('垂直揮桿：開火時刻為弧線底部（位置最低 + 窗確認），晚於腕速峰值', () {
       double? impactAt;
       final det = LiveSwingDetector(
         calibrationSec: 3.0,
@@ -193,27 +221,165 @@ void main() {
       );
       var t = feedIdleBoth(det, 0, 4.0);
 
-      // 下桿：y 遞增（向下）且加速，腕速峰值落在最大 dy 那禎
+      // 下桿：y 遞增（向下）且加速，腕速峰值落在最大 dy 那禎、最低點在最後一個下降幀
       double y = 0.30;
-      double peakTime = 0;
+      double peakTime = 0, bottomTime = 0;
       final downDys = [0.05, 0.12, 0.20, 0.18];
-      for (final dy in downDys) {
+      for (var i = 0; i < downDys.length; i++) {
+        final dy = downDys[i];
         y += dy;
-        if (dy == 0.20) peakTime = t; // 峰值時刻（最大位移）
+        if (dy == 0.20) peakTime = t;                    // 腕速峰值時刻
+        if (i == downDys.length - 1) bottomTime = t;     // 最低點（影像 y 最大）那一幀
         det.feed(poseAtWrist(0.5, y), t);
         t += 1 / 30;
       }
-      // 弧線底部後上揚：y 遞減（向上）→ 垂直速度由 + 轉 −，應於此禎開火
-      final crossTime = t;
-      y -= 0.10;
-      det.feed(poseAtWrist(0.5, y), t);
-      t += 1 / 30;
+      // 弧底後連續上升 2 幀（窗確認）→ 開火，回報最低點那一幀的時刻
+      y -= 0.10; det.feed(poseAtWrist(0.5, y), t); t += 1 / 30;
+      y -= 0.10; det.feed(poseAtWrist(0.5, y), t); t += 1 / 30;
 
       expect(det.state, SwingDetectState.fired);
       expect(impactAt, isNotNull);
-      // 開火時刻 = 過零禎（弧底），且嚴格晚於腕速峰值時刻
-      expect(impactAt!, closeTo(crossTime, 1e-9));
+      // 開火時刻 = 最低點那一幀（非偵測當下），且嚴格晚於腕速峰值時刻
+      expect(impactAt!, closeTo(bottomTime, 1e-9));
       expect(impactAt!, greaterThan(peakTime));
+    });
+
+    test('錨點模式：開火於主導腕回到錨點(球位)最近那一幀', () {
+      double? impactAt;
+      final det = LiveSwingDetector(
+        calibrationSec: 3.0,
+        onImpact: (t) => impactAt = t,
+      )
+        ..anchorX = 0.5
+        ..anchorY = 0.70 // 點選預覽設定的球位
+        ..useAnchorHit = true;
+      // 站姿在錨點上方靜止
+      var t = feedIdle(det, 0, 4.0, x: 0.5, y: 0.30);
+      // 下桿：腕由上往下逼近錨點，最近在 y=0.70，之後越過遠離（連續 2 幀遠離確認）
+      final ys = [0.45, 0.60, 0.70, 0.74, 0.78];
+      double closestTime = 0;
+      for (final y in ys) {
+        if (y == 0.70) closestTime = t;
+        det.feed(poseAtWrist(0.5, y), t);
+        t += 1 / 30;
+      }
+      expect(det.state, SwingDetectState.fired);
+      expect(impactAt, isNotNull);
+      // 擊球時刻 = 最接近錨點那一幀（非弧底、非偵測當下）
+      expect(impactAt!, closeTo(closestTime, 1e-9));
+    });
+
+    test('錨點模式：純水平揮（無向下運動）仍由「回歸錨點」開火，不退回峰值', () {
+      double? impactAt;
+      final det = LiveSwingDetector(
+        calibrationSec: 3.0,
+        onImpact: (t) => impactAt = t,
+      )
+        ..anchorX = 0.30
+        ..anchorY = 0.50 // 球位在左側，水平揮過去
+        ..useAnchorHit = true;
+      // 站姿在錨點上靜止（address＝impact＝同點）
+      var t = feedIdle(det, 0, 4.0, x: 0.30, y: 0.50);
+      // 上桿：水平向右離開錨點（y 不變→無向下運動，_sawDownward 永遠 false）
+      final back = [0.42, 0.55, 0.66];
+      for (final x in back) {
+        det.feed(poseAtWrist(x, 0.50), t);
+        t += 1 / 30;
+      }
+      // 下桿：水平回到錨點再越過（最近在 x=0.30）
+      final fwd = [0.50, 0.38, 0.30, 0.24, 0.18];
+      double closestTime = 0;
+      for (final x in fwd) {
+        if (x == 0.30) closestTime = t;
+        det.feed(poseAtWrist(x, 0.50), t);
+        t += 1 / 30;
+      }
+      expect(det.state, SwingDetectState.fired);
+      expect(impactAt, isNotNull);
+      // 開火於最接近錨點那一幀，而非速度峰值（驗證 _sawDownward 邊際漏洞已修）
+      expect(impactAt!, closeTo(closestTime, 1e-9));
+    });
+
+    test('錨點模式：回歸最近距離超出命中半徑 → 不採錨點時刻，退回峰值', () {
+      double? impactAt;
+      final det = LiveSwingDetector(
+        calibrationSec: 3.0,
+        onImpact: (t) => impactAt = t,
+      )
+        ..anchorX = 0.20
+        ..anchorY = 0.50
+        ..useAnchorHit = true
+        ..swingSpeedFloor = 0.10 // 本測測半徑非門檻，壓低門檻讓合成揮桿能開火
+        ..anchorHitRadius = 0.08; // 收緊：最近須 ≤0.08
+      var t = feedIdle(det, 0, 4.0, x: 0.50, y: 0.50);
+      // 水平揮：離開錨點後回歸，但最近只到 x=0.40（距錨點 0.20 > 半徑 0.08）
+      final xs = [0.62, 0.74, 0.62, 0.48, 0.40, 0.50, 0.62];
+      double closestTime = 0;
+      for (final x in xs) {
+        if (x == 0.40) closestTime = t; // 距錨點最近的那一幀（但仍 >半徑）
+        det.feed(poseAtWrist(x, 0.50), t);
+        t += 1 / 30;
+      }
+      // 補幾幀讓 fallback 視窗成立
+      for (var i = 0; i < 8; i++) {
+        det.feed(poseAtWrist(0.62, 0.50), t);
+        t += 1 / 30;
+      }
+      expect(det.state, SwingDetectState.fired);
+      expect(impactAt, isNotNull);
+      // 最近距離超出半徑 → 不應停在「錨點最近幀」，而是退回峰值時刻（不同幀）
+      expect((impactAt! - closestTime).abs(), greaterThan(1 / 60));
+    });
+
+    test('錨點閘門：揮桿未經過錨點半徑內 → 不算一桿（亂揮不誤判）', () {
+      var impacts = 0;
+      final det = LiveSwingDetector(
+        calibrationSec: 3.0,
+        onImpact: (_) => impacts++,
+      )
+        ..anchorX = 0.10
+        ..anchorY = 0.10     // 錨點在左上角
+        ..anchorGate = true  // 閘門開（時刻方法維持 V1 弧底）
+        ..anchorHitRadius = 0.15;
+      // 在畫面右下大幅揮桿（離錨點很遠，從未進入半徑）
+      var t = feedIdle(det, 0, 4.0, x: 0.80, y: 0.80);
+      double y = 0.80;
+      for (final dy in [0.05, 0.12, 0.20, 0.18]) {
+        y += dy;
+        det.feed(poseAtWrist(0.80, y), t);
+        t += 1 / 30;
+      }
+      for (var i = 0; i < 8; i++) {
+        det.feed(poseAtWrist(0.80, y), t);
+        t += 1 / 30;
+      }
+      expect(impacts, 0); // 閘門擋下：揮桿未經過錨點
+      expect(det.state, SwingDetectState.listening);
+    });
+
+    test('錨點閘門：揮桿有經過錨點半徑內 → 正常算一桿', () {
+      var impacts = 0;
+      final det = LiveSwingDetector(
+        calibrationSec: 3.0,
+        onImpact: (_) => impacts++,
+      )
+        ..anchorX = 0.50
+        ..anchorY = 0.80     // 錨點在揮桿路徑底部
+        ..anchorGate = true
+        ..anchorHitRadius = 0.15;
+      var t = feedIdle(det, 0, 4.0, x: 0.50, y: 0.50);
+      double y = 0.50;
+      // 向下揮經過 y≈0.80（進入錨點半徑）
+      for (final dy in [0.08, 0.14, 0.20]) {
+        y += dy;
+        det.feed(poseAtWrist(0.50, y), t);
+        t += 1 / 30;
+      }
+      for (var i = 0; i < 8; i++) {
+        det.feed(poseAtWrist(0.50, y), t);
+        t += 1 / 30;
+      }
+      expect(impacts, 1);
     });
 
     test('邊際峰值（< 門檻 1.5 倍）視為誤觸，不開火', () {
@@ -229,7 +395,7 @@ void main() {
       t += 1 / 30;
       expect(det.state, SwingDetectState.triggered);
 
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 8; i++) {
         det.feed(poseAtWrist(0.5 + 0.014, 0.5), t);
         t += 1 / 30;
       }
@@ -254,7 +420,7 @@ void main() {
           det.feed(poseAtWrist(x, 0.5), t);
           t += 1 / 30;
         }
-        for (var i = 0; i < 3; i++) {
+        for (var i = 0; i < 8; i++) {
           det.feed(poseAtWrist(x, 0.5), t);
           t += 1 / 30;
         }

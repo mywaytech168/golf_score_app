@@ -9,7 +9,7 @@ class LearningHubPage extends StatelessWidget {
     final contents = _buildDemoContents(context);
     return Scaffold(
       appBar: AppBar(title: Text(AppLocalizations.of(context).learningTitle)),
-      body: ListView.separated(
+      body: SafeArea(top: false, child: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: contents.length + 1,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -49,7 +49,7 @@ class LearningHubPage extends StatelessWidget {
             ),
           );
         },
-      ),
+      )),
     );
   }
 }
@@ -62,7 +62,7 @@ class _LearningDetailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(content.title)),
-      body: Padding(
+      body: SafeArea(top: false, child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -106,7 +106,7 @@ class _LearningDetailPage extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }

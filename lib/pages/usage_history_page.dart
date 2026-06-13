@@ -88,7 +88,7 @@ class _UsageHistoryPageState extends State<UsageHistoryPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           GreenPageHeader(
             title: AppLocalizations.of(context).usageTitle,
@@ -134,7 +134,7 @@ class _UsageHistoryPageState extends State<UsageHistoryPage>
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 }

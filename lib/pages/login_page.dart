@@ -557,9 +557,19 @@ class _LoginPageState extends State<LoginPage> {
                   _buildPermissionReminder(theme),
                 const SizedBox(height: 32),
                 Card(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                  elevation: 16,
-                  shadowColor: Colors.black26,
+                  // 淺色:霧面白(透明度加大,漸層透出更多→卡吃到品牌色不再死白硬跳);深色:維持深卡
+                  color: context.isDarkMode
+                      ? null
+                      : Colors.white.withValues(alpha: 0.80),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    // 極淡白邊柔化卡與漸層的邊界
+                    side: context.isDarkMode
+                        ? BorderSide.none
+                        : BorderSide(color: Colors.white.withValues(alpha: 0.55), width: 1),
+                  ),
+                  elevation: 2,
+                  shadowColor: Colors.black.withValues(alpha: 0.12),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
                     child: Form(

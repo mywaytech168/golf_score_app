@@ -94,7 +94,7 @@ class _RewardPageState extends State<RewardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           GreenPageHeader(
             title: AppLocalizations.of(context).rewardTitle,
@@ -185,7 +185,7 @@ class _RewardPageState extends State<RewardPage> {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 }

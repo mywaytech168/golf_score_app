@@ -279,7 +279,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
         elevation: 0,
         actions: const [],
       ),
-      body: _buildBody(),
+      body: SafeArea(top: false, child: _buildBody()),
     );
   }
 

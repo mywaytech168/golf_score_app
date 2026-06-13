@@ -27,7 +27,8 @@ import 'skeleton_csv_locator.dart';
 /// - [v1]：全影片逐幀 ML Kit → CSV → 骨架疊加影片（完整，較慢）
 /// - [v2]：音訊峰值直接切片，不做骨架（最快）
 /// - [v3]：音訊找候選時間點（±3s）→ 局部 ML Kit 精準定位擊球（±2.5s 切片）
-enum SkeletonAnalysisMode { v1, v2, v3 }
+/// - [v4]：錨點（球位/握把）偵測——骨架找揮桿窗，擊球幀＝主導腕距錨點最近（鏡像即時 V4）
+enum SkeletonAnalysisMode { v1, v2, v3, v4 }
 
 /// 單一擊球片段的裁切結果
 class ClipResult {

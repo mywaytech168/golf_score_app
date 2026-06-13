@@ -66,7 +66,7 @@ class _AnnouncementPageState extends State<AnnouncementPage> {
     final l = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           GreenPageHeader(
             leading: IconButton(
@@ -115,7 +115,7 @@ class _AnnouncementPageState extends State<AnnouncementPage> {
                           ),
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -274,7 +274,7 @@ class _AnnouncementDetailPage extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           GreenPageHeader(
             leading: IconButton(
@@ -396,7 +396,7 @@ class _AnnouncementDetailPage extends StatelessWidget {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 

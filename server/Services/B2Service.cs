@@ -237,6 +237,44 @@ namespace UploadServer.Services
             return _s3.GetPreSignedURL(request);
         }
 
+        public static string DatasetMetaKey(string uploadId) =>
+            $"dataset/{uploadId}/meta.json";
+
+        /// <summary>產生資料集診斷 meta.json 上傳的 pre-signed PUT URL（偵測 log/錨點/即時擊球等）</summary>
+        public string GenerateDatasetMetaUploadUrl(string uploadId, int expiryMinutes = 30)
+        {
+            var key = DatasetMetaKey(uploadId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "application/json",
+            };
+            _logger.LogInformation("產生資料集 meta PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
+        public static string AiCoachMetaKey(string analysisId) =>
+            $"ai_coach/{analysisId}/meta.json";
+
+        /// <summary>產生 AI 分析診斷 meta.json 上傳的 pre-signed PUT URL</summary>
+        public string GenerateMetaUploadUrl(string analysisId, int expiryMinutes = 20)
+        {
+            var key = AiCoachMetaKey(analysisId);
+            var request = new GetPreSignedUrlRequest
+            {
+                BucketName  = _bucketName,
+                Key         = key,
+                Verb        = HttpVerb.PUT,
+                Expires     = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                ContentType = "application/json",
+            };
+            _logger.LogInformation("產生 AI 分析 meta PUT URL: {Key}", key);
+            return _s3.GetPreSignedURL(request);
+        }
+
         // ── 問題回饋圖片路徑規則 ────────────────────────────────────────
         public static string FeedbackImageKey(string imageId) =>
             $"feedback_images/{imageId}.jpg";

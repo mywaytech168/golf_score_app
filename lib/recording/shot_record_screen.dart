@@ -21,6 +21,8 @@ import '../services/swing_impact_detector.dart';
 import 'device_capability.dart';
 import '../services/swing_detect_prefs.dart';
 import 'live_swing_detector.dart';
+import 'widgets/anchor_marker.dart';
+import 'widgets/wrist_telemetry_hud.dart';
 import 'native_camera_service.dart';
 import 'pose_csv_writer.dart';
 import 'prewarm_cleanup.dart';
@@ -54,6 +56,22 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   final _soundService = ShotSoundService();
   late final LiveSwingDetector _detector;
   bool _bothHands = false; // 雙手判斷（設定可切換）
+  int _glowDelayMs = SwingDetectPrefs.defaultGlowDelayMs; // 擊球光暈延遲（設定可調）
+  double? _anchorX, _anchorY; // 擊球錨點（點選預覽設定的球位，歸一化）
+  bool _useAnchor = true; // 擊球時刻 V4（錨點）；關閉＝V1 弧底
+  bool _anchorGate = false; // 錨點偵測閘門：揮桿須經過錨點才算
+  double _anchorRadius = SwingDetectPrefs.defaultAnchorRadius; // 錨點命中半徑
+  double _swingFloor = SwingDetectPrefs.defaultSwingSpeedFloor; // 揮桿速度門檻
+  bool _showTelemetry = false; // 除錯 HUD：顯示左右腕 Y + 速度
+
+  /// 套用偵測器錨點：座標永遠帶入（供閘門用），V4 時刻 / 閘門各自獨立開關。
+  void _applyAnchorToDetector() {
+    final hasCoord = _anchorX != null && _anchorY != null;
+    _detector.anchorX = hasCoord ? _anchorX : null;
+    _detector.anchorY = hasCoord ? _anchorY : null;
+    _detector.useAnchorHit = _useAnchor && hasCoord;
+    _detector.anchorGate = _anchorGate && hasCoord;
+  }
 
   // ── Recording paths ───────────────────────────────────────────────────────
   String _sessionId = '';
@@ -135,6 +153,37 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       if (!mounted) return;
       setState(() => _bothHands = v);
       _detector.bothHands = v;
+    });
+    SwingDetectPrefs.getGlowDelayMs().then((v) {
+      if (mounted) setState(() => _glowDelayMs = v);
+    });
+    SwingDetectPrefs.getUseAnchor().then((v) {
+      if (!mounted) return;
+      setState(() => _useAnchor = v);
+      _applyAnchorToDetector();
+    });
+    SwingDetectPrefs.getAnchorGate().then((v) {
+      if (!mounted) return;
+      setState(() => _anchorGate = v);
+      _applyAnchorToDetector();
+    });
+    SwingDetectPrefs.getAnchorRadius().then((v) {
+      if (!mounted) return;
+      setState(() => _anchorRadius = v);
+      _detector.anchorHitRadius = v;
+    });
+    SwingDetectPrefs.getSwingSpeedFloor().then((v) {
+      if (!mounted) return;
+      setState(() => _swingFloor = v);
+      _detector.swingSpeedFloor = v;
+    });
+    SwingDetectPrefs.getShowTelemetry().then((v) {
+      if (mounted) setState(() => _showTelemetry = v);
+    });
+    SwingDetectPrefs.getAnchor().then((a) {
+      if (!mounted || a == null) return;
+      setState(() { _anchorX = a.$1; _anchorY = a.$2; });
+      _applyAnchorToDetector();
     });
     _loadRoundIndex();
     unawaited(cleanupStalePrewarmDirs());
@@ -840,7 +889,11 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
         ],
       ),
       body: _cameraReady
-          ? Stack(fit: StackFit.expand, children: [
+          ? LayoutBuilder(builder: (context, constraints) {
+            final pw = constraints.maxWidth, ph = constraints.maxHeight;
+            final canSetAnchor =
+                _state == ShotState.idle || _state == ShotState.result;
+            return Stack(fit: StackFit.expand, children: [
               _camera.buildPreviewWidget(),
               GestureDetector(
                 onScaleStart: (_) => _baseZoom = _currentZoom,
@@ -849,6 +902,15 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                   final z = (_baseZoom + (d.scale - 1.0) * 0.6).clamp(0.0, 1.0);
                   _setZoom(z);
                 },
+                onTapUp: !canSetAnchor
+                    ? null
+                    : (d) {
+                        final ax = (d.localPosition.dx / pw).clamp(0.0, 1.0);
+                        final ay = (d.localPosition.dy / ph).clamp(0.0, 1.0);
+                        setState(() { _anchorX = ax; _anchorY = ay; });
+                        _applyAnchorToDetector();
+                        unawaited(SwingDetectPrefs.setAnchor(ax, ay));
+                      },
                 child: Stack(fit: StackFit.expand, children: [
                   if (_state == ShotState.idle      ||
                       _state == ShotState.addressing ||
@@ -870,15 +932,66 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                   Positioned.fill(
                     child: ImpactGlowOverlay(
                       impactCount: _impactSeq,
+                      // 錨點 V4：光暈畫在錨點(球位)、延遲歸零；否則固定中央 + 弧底延遲
+                      center: (_useAnchor && _anchorX != null && _anchorY != null)
+                          ? Alignment(_anchorX! * 2 - 1, _anchorY! * 2 - 1)
+                          : const Alignment(0.0, 0.35),
+                      triggerDelay: (_useAnchor && _anchorX != null)
+                          ? Duration.zero
+                          : Duration(milliseconds: _glowDelayMs),
                       labelBuilder: (_) => AppLocalizations.of(context)
                           .recImpactShot(_shotCount + 1),
                     ),
                   ),
                   if (_state != ShotState.processing)
                     ZoomSlider(zoom: _currentZoom, onChanged: _setZoom),
+
+                  // 除錯 HUD：即時左右腕 Y + 速度
+                  if (_showTelemetry)
+                    Positioned(
+                      top: 16, left: 16,
+                      child: WristTelemetryHud(detector: _detector),
+                    ),
+
+                  // 擊球錨點標記 + 清除 + 提示
+                  if (_anchorX != null && _anchorY != null) ...[
+                    Positioned(
+                      left: _anchorX! * pw - 16, top: _anchorY! * ph - 16,
+                      child: const AnchorMarker(),
+                    ),
+                    if (canSetAnchor)
+                      Positioned(
+                        left: _anchorX! * pw + 14, top: _anchorY! * ph - 14,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() { _anchorX = null; _anchorY = null; });
+                            _applyAnchorToDetector();
+                            unawaited(SwingDetectPrefs.clearAnchor());
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: const BoxDecoration(
+                              color: Colors.black54, shape: BoxShape.circle),
+                            child: const Icon(Icons.close, color: Colors.white, size: 14),
+                          ),
+                        ),
+                      ),
+                  ],
+                  if (_anchorX == null && canSetAnchor)
+                    Positioned(
+                      bottom: 130, right: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                        child: Text(AppLocalizations.of(context).recTapSetImpactPoint,
+                            style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                      ),
+                    ),
                 ]),
               ),
-            ])
+            ]);
+          })
           : Container(
               color: Colors.black,
               child: const Center(child: CircularProgressIndicator(color: Colors.white54)),
@@ -1083,15 +1196,23 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     FrameRate    pendingF = _config.fps;
     bool         pendingA = _config.enableAudio;
     bool         pendingBoth = _bothHands;
+    double       pendingFloor = _swingFloor;
+    int          pendingGlow = _glowDelayMs;
+    bool         pendingUseAnchor = _useAnchor;
+    bool         pendingGate      = _anchorGate;
+    double       pendingRadius    = _anchorRadius;
+    bool         pendingTelemetry = _showTelemetry;
 
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1E1E1E),
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setSheet) {
           return SafeArea(
+            child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Column(mainAxisSize: MainAxisSize.min,
@@ -1158,7 +1279,112 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                     activeThumbColor: kBrandPrimary,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                 ]),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+
+                // 揮桿速度門檻：峰值（嚴格雙手下兩手）需達此速度才算揮桿
+                Row(children: [
+                  const Icon(Icons.speed_rounded, color: Colors.white54, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(l10n.recSwingSpeed,
+                        style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                  Text(pendingFloor.toStringAsFixed(2),
+                      style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ]),
+                Slider(
+                  value: pendingFloor.clamp(0.05, 0.30),
+                  min: 0.05, max: 0.30, divisions: 25,
+                  activeColor: kBrandPrimary,
+                  label: pendingFloor.toStringAsFixed(2),
+                  onChanged: (v) => setSheet(() => pendingFloor = v),
+                ),
+                const SizedBox(height: 12),
+
+                // 錨點擊球（V4）：用點選的球位當擊球點；關閉退回手腕弧底
+                Row(children: [
+                  const Icon(Icons.center_focus_strong_outlined, color: Colors.white54, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(l10n.recUseAnchor,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(l10n.recUseAnchorDesc,
+                          style: const TextStyle(color: Colors.white38, fontSize: 10.5)),
+                    ]),
+                  ),
+                  Switch(value: pendingUseAnchor, onChanged: (v) => setSheet(() => pendingUseAnchor = v),
+                    activeThumbColor: kBrandPrimary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ]),
+                // 錨點偵測閘門：揮桿須經過錨點半徑內才算一桿
+                Row(children: [
+                  const Icon(Icons.gps_fixed_rounded, color: Colors.white54, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(l10n.recAnchorGate,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(l10n.recAnchorGateDesc,
+                          style: const TextStyle(color: Colors.white38, fontSize: 10.5)),
+                    ]),
+                  ),
+                  Switch(value: pendingGate, onChanged: (v) => setSheet(() => pendingGate = v),
+                    activeThumbColor: kBrandPrimary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ]),
+                // 錨點命中半徑：V4 時刻 或 閘門 任一啟用時可調
+                if (pendingUseAnchor || pendingGate) ...[
+                  Row(children: [
+                    const SizedBox(width: 22),
+                    Expanded(
+                      child: Text(l10n.recAnchorRadius,
+                          style: const TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    ),
+                    Text(pendingRadius.toStringAsFixed(2),
+                        style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  ]),
+                  Slider(
+                    value: pendingRadius.clamp(0.05, 0.80),
+                    min: 0.05, max: 0.80, divisions: 30,
+                    activeColor: kBrandPrimary,
+                    label: pendingRadius.toStringAsFixed(2),
+                    onChanged: (v) => setSheet(() => pendingRadius = v),
+                  ),
+                ],
+                const SizedBox(height: 12),
+
+                // 顯示腕點數值（除錯 HUD）
+                Row(children: [
+                  const Icon(Icons.show_chart_rounded, color: Colors.white54, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(l10n.recShowTelemetry,
+                        style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                  Switch(value: pendingTelemetry, onChanged: (v) => setSheet(() => pendingTelemetry = v),
+                    activeThumbColor: kBrandPrimary,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                ]),
+                const SizedBox(height: 12),
+
+                // 擊球光暈延遲（對齊桿頭觸球；偏早調大、偏晚調小）
+                Row(children: [
+                  const Icon(Icons.blur_on_rounded, color: Colors.white54, size: 16),
+                  const SizedBox(width: 6),
+                  Text(l10n.recGlowDelay,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text('${pendingGlow}ms', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ]),
+                Slider(
+                  value: pendingGlow.toDouble().clamp(0, 2000),
+                  min: 0, max: 2000, divisions: 40,
+                  activeColor: kBrandPrimary,
+                  label: '${pendingGlow}ms',
+                  onChanged: (v) => setSheet(() => pendingGlow = v.round()),
+                ),
+                const SizedBox(height: 8),
 
                 SizedBox(width: double.infinity,
                   child: FilledButton(
@@ -1173,6 +1399,34 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                         setState(() => _bothHands = pendingBoth);
                         _detector.bothHands = pendingBoth;
                         unawaited(SwingDetectPrefs.setBothHands(pendingBoth));
+                      }
+                      if (pendingFloor != _swingFloor) {
+                        setState(() => _swingFloor = pendingFloor);
+                        _detector.swingSpeedFloor = pendingFloor;
+                        unawaited(SwingDetectPrefs.setSwingSpeedFloor(pendingFloor));
+                      }
+                      if (pendingGlow != _glowDelayMs) {
+                        setState(() => _glowDelayMs = pendingGlow);
+                        unawaited(SwingDetectPrefs.setGlowDelayMs(pendingGlow));
+                      }
+                      if (pendingUseAnchor != _useAnchor) {
+                        setState(() => _useAnchor = pendingUseAnchor);
+                        _applyAnchorToDetector();
+                        unawaited(SwingDetectPrefs.setUseAnchor(pendingUseAnchor));
+                      }
+                      if (pendingGate != _anchorGate) {
+                        setState(() => _anchorGate = pendingGate);
+                        _applyAnchorToDetector();
+                        unawaited(SwingDetectPrefs.setAnchorGate(pendingGate));
+                      }
+                      if (pendingRadius != _anchorRadius) {
+                        setState(() => _anchorRadius = pendingRadius);
+                        _detector.anchorHitRadius = pendingRadius;
+                        unawaited(SwingDetectPrefs.setAnchorRadius(pendingRadius));
+                      }
+                      if (pendingTelemetry != _showTelemetry) {
+                        setState(() => _showTelemetry = pendingTelemetry);
+                        unawaited(SwingDetectPrefs.setShowTelemetry(pendingTelemetry));
                       }
                       if (pendingQ != _config.quality || pendingF != _config.fps ||
                           pendingA != _config.enableAudio) {
@@ -1193,6 +1447,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
                 ),
                 const SizedBox(height: 8),
               ]),
+            ),
             ),
           );
         });

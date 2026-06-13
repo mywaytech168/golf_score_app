@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -19,9 +20,11 @@ import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/skeleton_csv_locator.dart';
+import '../services/swing_detect_prefs.dart';
 import '../services/swing_stats_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/clip_candidates_sheet.dart';
+import '../widgets/zoomable_timeline.dart';
 import 'ai_coach_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
@@ -57,9 +60,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
   /// 目前備註（可即時編輯，與 widget.entry.note 脫鉤以便就地更新標題列圖示）
   String? _note;
+  bool _noteExpanded = false; // 底部備註條是否展開
 
   // 60Hz 播放頭（骨架/軌跡疊圖專用，見 _onTick）
   final ValueNotifier<double> _playheadSec = ValueNotifier(0.0);
+
+  /// 疊圖播放補償（秒）：video_player 回報的 position 與實際顯示的影片幀之間有
+  /// 解碼/呈現延遲，直接用 position 取樣 CSV 會讓骨架落後顯示幀（即時錄製端無此
+  /// 問題，因骨架直接畫在當下相機幀）。取樣時間提前此值，把疊圖往前拉對齊顯示幀。
+  /// 實機觀察可調（查看影片設定）：骨架仍落後→調大、變超前→調小。
+  double _overlayLeadSec = SwingDetectPrefs.defaultOverlayLeadMs / 1000.0;
   Ticker? _playheadTicker;
   Duration _lastReportedPos = Duration.zero;
   DateTime? _lastReportAt;
@@ -145,6 +155,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       duration: const Duration(milliseconds: 1500),
     );
     _playheadTicker = createTicker(_onTick)..start();
+    SwingDetectPrefs.getOverlayLeadMs().then((v) {
+      if (mounted) setState(() => _overlayLeadSec = v / 1000.0);
+    });
 
     // ── 單一影片 + checkbox 疊層（取代舊 原始/骨架/分析 Tab 切換）──────────
     // base 影片優先乾淨 clip.mp4（與 CSV/trajectory 時間軸對齊），
@@ -467,6 +480,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             _buildStatsPanel(),
             _buildChartsPanel(),
             _buildAiPanel(),
+            // 最底部備註條（可展開/折疊）
+            if (widget.entry != null) _buildNoteBar(),
           ],
         ),
       ),
@@ -493,21 +508,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
             ),
           ),
-          if (widget.entry != null)
-            IconButton(
-              icon: Icon(
-                (_note ?? '').trim().isEmpty
-                    ? Icons.sticky_note_2_outlined
-                    : Icons.sticky_note_2,
-                color: (_note ?? '').trim().isEmpty
-                    ? Colors.white70
-                    : kBrandPrimary,
-                size: 20,
-              ),
-              tooltip: (_note ?? '').trim().isEmpty ? l10n.playerNoteAdd : l10n.playerNoteEdit,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              onPressed: _editVideoNote,
-            ),
           if (widget.avatarPath != null) ...[
             CircleAvatar(
               radius: 14,
@@ -515,6 +515,91 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             ),
             const SizedBox(width: 8),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// 底部備註條：可展開/折疊。折疊只顯示圖示+標題(+片段)，展開顯示完整備註。
+  Widget _buildNoteBar() {
+    final l10n = AppLocalizations.of(context);
+    final note = (_note ?? '').trim();
+    final hasNote = note.isNotEmpty;
+    return Material(
+      color: Colors.black87,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── 標題列（點擊展開/折疊）──
+          InkWell(
+            onTap: () => setState(() => _noteExpanded = !_noteExpanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    hasNote ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
+                    size: 18,
+                    color: hasNote ? kBrandPrimary : Colors.white54,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(l10n.playerNote,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 8),
+                  // 折疊時顯示片段
+                  if (!_noteExpanded)
+                    Expanded(
+                      child: Text(
+                        hasNote ? note : l10n.playerNoteAdd,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: hasNote ? Colors.white60 : Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  // 編輯
+                  InkResponse(
+                    onTap: _editVideoNote,
+                    radius: 18,
+                    child: const Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.edit, size: 16, color: Colors.white54),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _noteExpanded ? Icons.expand_more_rounded : Icons.expand_less_rounded,
+                    size: 20, color: Colors.white54,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // ── 展開內容 ──
+          if (_noteExpanded)
+            InkWell(
+              onTap: _editVideoNote,
+              child: Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 140),
+                padding: const EdgeInsets.fromLTRB(40, 0, 12, 12),
+                child: SingleChildScrollView(
+                  child: Text(
+                    hasNote ? note : l10n.playerNoteAdd,
+                    style: TextStyle(
+                      color: hasNote ? Colors.white : Colors.white38,
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -609,6 +694,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
               onChanged: (v) => setState(() => _showImpactFx = v),
             ),
           ],
+          // 骨架/影片時間差校正（查看影片設定）：疊圖落後→調大、超前→調小
+          if (_hasSkeletonCsv || _hasTrajectory)
+            IconButton(
+              tooltip: l10n.playerOverlaySync,
+              onPressed: _showOverlaySyncSheet,
+              icon: const Icon(Icons.sync_alt_rounded, color: Colors.white54, size: 18),
+            ),
           const Spacer(),
           // 球軌跡調參（排查用）：對本 clip 即時調參重跑
           TextButton.icon(
@@ -630,6 +722,68 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         ],
       ),
     );
+  }
+
+  /// 骨架/影片時間差校正：滑桿即時調整疊圖取樣補償（-200~600ms），存入偏好。
+  void _showOverlaySyncSheet() {
+    final l10n = AppLocalizations.of(context);
+    int pending = (_overlayLeadSec * 1000).round();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return SafeArea(
+          child: StatefulBuilder(builder: (ctx, setSheet) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+              child: Column(mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Icon(Icons.sync_alt_rounded, color: kBrandPrimary, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(l10n.playerOverlaySync,
+                        style: const TextStyle(color: Colors.white, fontSize: 16,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                  Text('${pending}ms',
+                      style: const TextStyle(color: Colors.white, fontSize: 14)),
+                ]),
+                const SizedBox(height: 4),
+                Text(l10n.playerOverlaySyncDesc,
+                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                Slider(
+                  value: pending.toDouble().clamp(-200, 600),
+                  min: -200, max: 600, divisions: 40,
+                  activeColor: kBrandPrimary,
+                  label: '${pending}ms',
+                  onChanged: (v) {
+                    setSheet(() => pending = v.round());
+                    setState(() => _overlayLeadSec = pending / 1000.0);
+                  },
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {
+                      setSheet(() => pending = SwingDetectPrefs.defaultOverlayLeadMs);
+                      setState(() =>
+                          _overlayLeadSec = SwingDetectPrefs.defaultOverlayLeadMs / 1000.0);
+                    },
+                    child: Text(l10n.clipCandReset,
+                        style: const TextStyle(color: Colors.white54)),
+                  ),
+                ),
+              ]),
+            );
+          }),
+        );
+      },
+    ).whenComplete(() {
+      unawaited(SwingDetectPrefs.setOverlayLeadMs((_overlayLeadSec * 1000).round()));
+    });
   }
 
   Widget _buildVideo() {
@@ -654,7 +808,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 child: ValueListenableBuilder<double>(
                   valueListenable: _playheadSec,
                   builder: (_, posSec, __) {
-                    final pose = _skeletonTrack!.sampleAt(posSec);
+                    // 提前補償顯示延遲，對齊影片幀（見 _overlayLeadSec）
+                    final pose = _skeletonTrack!.sampleAt(posSec + _overlayLeadSec);
                     if (pose == null) return const SizedBox.shrink();
                     return CustomPaint(
                       painter: SkeletonPainter(pose: pose),
@@ -670,7 +825,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                   builder: (_, posSec, __) => CustomPaint(
                     painter: TrajectoryPainter(
                       track: _trajTrack!,
-                      positionSec: posSec,
+                      positionSec: posSec + _overlayLeadSec,
                     ),
                   ),
                 ),
@@ -723,7 +878,6 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     final duration = ctrl.value.duration;
     final durSec   = duration.inMilliseconds / 1000.0;
     final posSec   = position.inMilliseconds / 1000.0;
-    final progress = durSec > 0 ? (posSec / durSec).clamp(0.0, 1.0) : 0.0;
 
     final l10n = AppLocalizations.of(context);
     final timelinePhaseLabels = <String, String>{
@@ -786,47 +940,26 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                 },
               ),
             ),
-          // ── 多模態時間軸（音訊 RMS + 速度曲線 + 階段 tick + impact 鑽石）
-          SizedBox(
+          // ── 多模態時間軸（可雙指縮放 / 捲動 / 點擊 seek）─────────────
+          // 切片擊球 tick 太密時可橫向拉寬分開（pinch 或 +/- 按鈕）
+          ZoomableTimeline(
             height: 56,
-            child: Stack(
-              children: [
-                // 層1：資料可視化背景
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _MultiModalTimelinePainter(
-                      audioRms:      _chartData?.audioRms      ?? const [],
-                      wristSpeed:    _chartData?.wristSpeed    ?? const [],
-                      phases:        _phases                   ?? const {},
-                      hitSecond:     widget.entry?.hitSecond,
-                      clipMarks:     [for (final m in _clipMarks) m.sec],
-                      clipRanges:    _clipRanges,
-                      currentSecond: posSec,
-                      totalSeconds:  durSec,
-                      goodShot:      widget.entry?.goodShot,
-                      phaseLabels:   timelinePhaseLabels,
-                    ),
-                  ),
-                ),
-                // 層2：透明 track 的 Slider（保留 thumb 拖曳 seek）
-                Positioned.fill(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 0,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                      thumbColor: Colors.white,
-                      activeTrackColor: Colors.transparent,
-                      inactiveTrackColor: Colors.transparent,
-                      overlayColor: Colors.white24,
-                    ),
-                    child: Slider(
-                      value: progress,
-                      onChanged: (v) => ctrl.seekTo(duration * v),
-                    ),
-                  ),
-                ),
-              ],
+            totalSeconds: durSec,
+            currentSeconds: posSec,
+            horizontalPadding: 20,
+            onSeek: (sec) =>
+                ctrl.seekTo(Duration(milliseconds: (sec * 1000).round())),
+            painterBuilder: (w) => _MultiModalTimelinePainter(
+              audioRms:      _chartData?.audioRms      ?? const [],
+              wristSpeed:    _chartData?.wristSpeed    ?? const [],
+              phases:        _phases                   ?? const {},
+              hitSecond:     widget.entry?.hitSecond,
+              clipMarks:     [for (final m in _clipMarks) m.sec],
+              clipRanges:    _clipRanges,
+              currentSecond: posSec,
+              totalSeconds:  durSec,
+              goodShot:      widget.entry?.goodShot,
+              phaseLabels:   timelinePhaseLabels,
             ),
           ),
           // ── 剪輯邊界配色圖例（僅長影片有切片區間時顯示）──────────
@@ -2394,6 +2527,26 @@ class _MultiModalTimelinePainter extends CustomPainter {
       ),
       Paint()..color = Colors.white.withValues(alpha: 0.10),
     );
+
+    // ── 層1b：每 30 秒時間刻度 + 標籤（縮放時定位參考）──────────
+    if (totalSeconds > 30) {
+      final markPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.16)
+        ..strokeWidth = 1;
+      for (var s = 30.0; s < totalSeconds; s += 30) {
+        final x = _secToX(s, trackW);
+        canvas.drawLine(Offset(x, 2), Offset(x, size.height - 2), markPaint);
+        final mm = s ~/ 60, ss = (s % 60).toInt();
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '$mm:${ss.toString().padLeft(2, '0')}',
+            style: const TextStyle(color: Colors.white38, fontSize: 8),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(x + 2, 1));
+      }
+    }
 
     // ── 層2：音訊 RMS 波形柱（底部 46% 高度空間）──────────────
     if (audioRms.isNotEmpty) {

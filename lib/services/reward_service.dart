@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_history_entry.dart';
 import 'skeleton_csv_locator.dart';
+import 'swing_auto_clip_service.dart';
 import 'video_server_client.dart';
 
 // ════════════════════════════════════════════════════════════════
@@ -281,16 +283,19 @@ class RewardService {
     final uploadId = prep['uploadId'] as String?;
     final videoUrl = prep['videoUploadUrl'] as String?;
     final csvUrl   = prep['csvUploadUrl'] as String?;
+    final metaUrl  = prep['metaUploadUrl'] as String?;
     if (uploadId == null || videoUrl == null) {
       throw Exception('上傳授權回應格式錯誤');
     }
+
+    final sessionDir = p.dirname(entry.filePath);
 
     // 影片直傳（presigned PUT）
     await _putFile(videoUrl, videoFile, 'video/mp4');
     debugPrint('$_tag ✅ 資料集影片上傳完成 ($uploadId)');
 
     // CSV 直傳（可能不存在，略過）
-    final csvPath = resolveSkeletonCsv(p.dirname(entry.filePath));
+    final csvPath = resolveSkeletonCsv(sessionDir);
     if (csvPath != null && csvUrl != null) {
       try {
         await _putFile(csvUrl, File(csvPath), 'text/csv');
@@ -300,12 +305,27 @@ class RewardService {
       }
     }
 
+    // 診斷 meta.json 直傳（偵測 log/錨點/即時擊球等；失敗略過不阻斷）
+    if (metaUrl != null) {
+      try {
+        final meta = await SwingAutoClipService.buildSessionMetaJson(sessionDir);
+        await _putBytes(metaUrl, utf8.encode(meta), 'application/json');
+        debugPrint('$_tag ✅ 資料集 meta 上傳完成 ($uploadId)');
+      } catch (e) {
+        debugPrint('$_tag ⚠️ 資料集 meta 上傳失敗（略過）: $e');
+      }
+    }
+
     return uploadId;
   }
 
   static Future<void> _putFile(
       String url, File file, String contentType) async {
-    final bytes = await file.readAsBytes();
+    await _putBytes(url, await file.readAsBytes(), contentType);
+  }
+
+  static Future<void> _putBytes(
+      String url, List<int> bytes, String contentType) async {
     final resp = await http
         .put(
           Uri.parse(url),

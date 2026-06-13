@@ -51,9 +51,9 @@ import '../widgets/clip_candidates_sheet.dart';
 import '../services/video_export_service.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, note, detectHits, analyze, compare, share, download, customExport, uploadReward, delete }
+enum _HistoryMenuAction { rename, note, detectHits, addClip, analyze, compare, share, customExport, uploadReward, delete }
 
-enum _ClipMenuAction { rename, note, share, download, customExport, uploadReward, delete }
+enum _ClipMenuAction { rename, note, share, customExport, uploadReward, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -1266,6 +1266,107 @@ class _HistoryTileState extends State<_HistoryTile> {
     _hitsSummaryFuture = HitsSummaryStorage.loadHitsSummary(summaryPath);
   }
 
+  /// 既有切片中最大的 hit 序號（解析 `_hit_N` 目錄名），供「加入切片」接續編號。
+  int _maxExistingHitIndex() {
+    final re = RegExp(r'_hit_(\d+)');
+    var maxN = 0;
+    for (final e in widget.allEntries) {
+      if (e.sourceVideoPath != widget.entry.filePath) continue;
+      final m = re.firstMatch(e.filePath);
+      final n = m != null ? (int.tryParse(m.group(1)!) ?? 0) : 0;
+      if (n > maxN) maxN = n;
+    }
+    return maxN;
+  }
+
+  /// 加入切片（已切片長片用）：只開手動自由切片，框選一段 → 裁成新切片**附加**，
+  /// 不重跑偵測、不動既有切片。新切片序號接在既有最大值之後。
+  Future<void> _addManualClip() async {
+    if (_isDetecting) return;
+    final l10n = AppLocalizations.of(context);
+
+    // 既有切片的擊球時刻（原片座標 = clip 起點 + clip 內 hitSecond），當灰色參考標記
+    final existingMarks = <double>[
+      for (final e in widget.allEntries)
+        if (e.sourceVideoPath == widget.entry.filePath)
+          (e.startSecond ?? 0) + (e.hitSecond ?? 0),
+    ];
+
+    final selection = await showClipCandidatesSheet(
+      context,
+      videoPath: widget.entry.filePath,
+      durationSeconds: widget.entry.durationSeconds.toDouble(),
+      candidates: const [], // 純手動：無自動候選
+      existingClipMarks: existingMarks,
+    );
+    if (selection == null || selection.manualRanges.isEmpty || !mounted) return;
+
+    setState(() => _isDetecting = true);
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final progressNotifier =
+        ValueNotifier<(double, String)>((0.0, l10n.historyProgressDetectingHit));
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ProgressWithAdDialog(
+        title: l10n.historyMenuAddClip,
+        progressNotifier: progressNotifier,
+        progressColor: const Color(0xFFE65100),
+        onCancel: () {
+          navigator.pop();
+          if (mounted) setState(() => _isDetecting = false);
+        },
+      ),
+    );
+
+    // 接續既有 hit 序號，避免覆蓋現有切片目錄
+    var idx = _maxExistingHitIndex() + 1;
+    final ranges = selection.manualRanges;
+    final hits = <SwingHit>[];
+    for (var i = 0; i < ranges.length; i++) {
+      final r = ranges[i];
+      final mid = (r.startSec + r.endSec) / 2;
+      // 進度 0~0.4：逐段在框選區間內跑骨架找弧底（精修擊球點，失敗退回中點）
+      progressNotifier.value =
+          (i / (ranges.length + 1) * 0.4, l10n.historyProgressDetectingHit);
+      var hitSec = mid;
+      try {
+        final win = (((r.endSec - r.startSec) / 2) * 1000).round().clamp(500, 3000);
+        final res = await GolfAnalysisService.analyzeVideoAtCandidate(
+          videoPath:   widget.entry.filePath,
+          candidateMs: (mid * 1000).round(),
+          windowMs:    win,
+        );
+        if (res != null) {
+          hitSec = (res.impactTimeMs / 1000.0).clamp(r.startSec, r.endSec);
+        }
+      } catch (_) {
+        // 骨架分析失敗 → 沿用中點
+      }
+      hits.add(SwingHit(
+        hitIndex:   idx++,
+        hitFrame:   (hitSec * 30).round(),
+        hitSec:     hitSec,
+        startSec:   r.startSec,
+        endSec:     r.endSec,
+        speedValue: 0.0,
+        audioValue: 0.0,
+      ));
+    }
+
+    // 進切片階段前先切換 label，避免裁切太快沒回報而停在「偵測擊球」
+    progressNotifier.value = (0.4, l10n.historyProgressClippingPct(0, 0, hits.length));
+
+    await _clipAndSaveHits(
+      hits: hits,
+      navigator: navigator,
+      messenger: messenger,
+      progressNotifier: progressNotifier,
+      baseProgress: 0.4,
+    );
+  }
+
   /// 執行擊球偵測 → 裁切片段（顯示進度對話框）
   /// 前置條件：必須先進行骨架分析與音訊提取
   Future<void> _runDetection() async {
@@ -1284,11 +1385,17 @@ class _HistoryTileState extends State<_HistoryTile> {
     // ── 偵測模式選擇對話框（含 V1/V2 切換）────────────────────────────
     SkeletonAnalysisMode detectionMode = SkeletonAnalysisMode.v1;
     bool bothHands = await SwingDetectPrefs.getBothHands();
+    // 此影片錄製時是否帶錨點 → 決定是否顯示離線 V4
+    final sessionAnchor =
+        await SwingAutoClipService.loadAnchor(p.dirname(widget.entry.filePath));
     if (mounted) {
       final result = await showDialog<_DetectionModeResult>(
         context: context,
         barrierDismissible: true,
-        builder: (_) => _DetectionModeDialog(initialBothHands: bothHands),
+        builder: (_) => _DetectionModeDialog(
+          initialBothHands: bothHands,
+          hasAnchor: sessionAnchor != null,
+        ),
       );
       if (result == null) return; // 使用者取消
       detectionMode = result.mode;
@@ -1505,11 +1612,16 @@ class _HistoryTileState extends State<_HistoryTile> {
             continue;
           }
 
-          final hitMs  = result.impactTimeMs;
-          final hitSec = hitMs / 1000.0;
+          // 擊球時間取捨：音訊候選 → 保留音訊峰值（=真實觸球，骨架只做驗證）；
+          //              live 候選（無音訊時間）→ 用骨架 Y-LOW。
+          final cand   = selection.candidates[i];
+          final hitSec = cand.fromAudio
+              ? cand.sec                       // 音訊峰值 = 桿頭觸球瞬間
+              : result.impactTimeMs / 1000.0;  // live 候選 → 骨架弧底
 
-          debugPrint('[偵測擊球 V3] hit ${i+1}: audioPeak=${peak}ms → impact=${hitMs}ms '
-              '(精修 ${hitMs - peak}ms)');
+          debugPrint('[偵測擊球 V3] hit ${i+1}: '
+              '${cand.fromAudio ? "音訊峰值 ${peak}ms(保留)" : "live→骨架 ${result.impactTimeMs}ms"} '
+              '→ hitSec=${hitSec.toStringAsFixed(3)}s');
 
           final (s3, e3) = SwingImpactDetector.calculateClipBoundaries(
             hitSec: hitSec, totalDurationSec: totalDur);
@@ -1614,7 +1726,9 @@ class _HistoryTileState extends State<_HistoryTile> {
       debugPrint('[偵測擊球] 🔍 開始峰值檢測...');
       progressNotifier.value = (0.5, l10n.historyProgressDetectingHit);
       final hits = await SwingImpactDetector.detect(
-          csvPath: detectCsvPath, bothHands: bothHands);
+          csvPath: detectCsvPath, bothHands: bothHands,
+          anchorX: detectionMode == SkeletonAnalysisMode.v4 ? sessionAnchor?.$1 : null,
+          anchorY: detectionMode == SkeletonAnalysisMode.v4 ? sessionAnchor?.$2 : null);
       if (cancelToken.isCancelled) return;
       debugPrint('[偵測擊球] 📊 峰值檢測結果: ${hits.length} 個擊球');
 
@@ -2287,18 +2401,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   bool _isDownloading = false;
 
-  /// 下載影片到裝置（顯示版本選單 + 儲存位置選擇）
-  Future<void> _downloadVideo() async {
-    if (_isDownloading) return;
-    setState(() => _isDownloading = true);
-    try {
-      await _runDownloadFlow(context, widget.entry);
-    } finally {
-      if (mounted) setState(() => _isDownloading = false);
-    }
-  }
-
-  /// 自訂匯出（勾選疊加元素 + 浮水印分級）
+  /// 匯出（勾選疊加元素 + 浮水印分級 → 合成下載）
   Future<void> _customExport() async {
     if (_isDownloading) return;
     setState(() => _isDownloading = true);
@@ -2591,58 +2694,59 @@ class _HistoryTileState extends State<_HistoryTile> {
                                 : goodShot == false
                                     ? const Color(0xFFF44336)
                                     : dimColor;
-                            return Row(
+                            // 用 Wrap：窄卡放不下時甜蜜點群組換到次行，避免右側溢出
+                            return Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 10,
+                              runSpacing: 4,
                               children: [
-                                Icon(Icons.speed_rounded,
-                                    size: 13, color: speedColor),
-                                const SizedBox(width: 3),
-                                Text(
-                                  hasSpeed
-                                      ? widget.entry.bestSpeedValue!
-                                          .toStringAsFixed(1)
-                                      : '—',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: speedColor,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Container(
-                                  width: 1,
-                                  height: 13,
-                                  color: context.borderColor,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  l10n.historySweetSpot,
-                                  style: TextStyle(
-                                      fontSize: 11, color: context.textHint),
-                                ),
-                                const SizedBox(width: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: sweetColor.withValues(alpha: 0.10),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                        color:
-                                            sweetColor.withValues(alpha: 0.45)),
-                                  ),
-                                  child: Text(
-                                    goodShot == true
-                                        ? l10n.historySweetSpotHit
-                                        : goodShot == false
-                                            ? l10n.historySweetSpotMiss
-                                            : '—',
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                                  Icon(Icons.speed_rounded,
+                                      size: 13, color: speedColor),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    hasSpeed
+                                        ? widget.entry.bestSpeedValue!
+                                            .toStringAsFixed(1)
+                                        : '—',
                                     style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: sweetColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: speedColor,
                                     ),
                                   ),
-                                ),
+                                ]),
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                                  Text(
+                                    l10n.historySweetSpot,
+                                    style: TextStyle(
+                                        fontSize: 11, color: context.textHint),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: sweetColor.withValues(alpha: 0.10),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(
+                                          color: sweetColor.withValues(
+                                              alpha: 0.45)),
+                                    ),
+                                    child: Text(
+                                      goodShot == true
+                                          ? l10n.historySweetSpotHit
+                                          : goodShot == false
+                                              ? l10n.historySweetSpotMiss
+                                              : '—',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: sweetColor,
+                                      ),
+                                    ),
+                                  ),
+                                ]),
                               ],
                             );
                           }),
@@ -2784,6 +2888,9 @@ class _HistoryTileState extends State<_HistoryTile> {
                   case _HistoryMenuAction.detectHits:
                     _runDetection();
                     break;
+                  case _HistoryMenuAction.addClip:
+                    _addManualClip();
+                    break;
                   case _HistoryMenuAction.analyze:
                     _runCombinedAnalysis();
                     break;
@@ -2792,9 +2899,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                     break;
                   case _HistoryMenuAction.share:
                     _shareSession();
-                    break;
-                  case _HistoryMenuAction.download:
-                    _downloadVideo();
                     break;
                   case _HistoryMenuAction.customExport:
                     _customExport();
@@ -2829,6 +2933,31 @@ class _HistoryTileState extends State<_HistoryTile> {
                           ? l10n.historyMenuEditNote
                           : l10n.historyMenuAddNote),
                 ),
+                // 長片切片入口：未切片→整支偵測；已切片→只補加一段（不重切）
+                if (_isLongVideo && _isOriginalVideo && !widget.entry.isClipped)
+                  PopupMenuItem<_HistoryMenuAction>(
+                    value: _HistoryMenuAction.detectHits,
+                    enabled: !_isDetecting,
+                    child: Row(children: [
+                      Icon(Icons.sports_golf_rounded,
+                          size: 16,
+                          color: _isDetecting ? Colors.grey : const Color(0xFFE65100)),
+                      const SizedBox(width: 8),
+                      Text(l10n.historyActionDetect),
+                    ]),
+                  ),
+                if (_isLongVideo && _isOriginalVideo && widget.entry.isClipped)
+                  PopupMenuItem<_HistoryMenuAction>(
+                    value: _HistoryMenuAction.addClip,
+                    enabled: !_isDetecting,
+                    child: Row(children: [
+                      Icon(Icons.add_box_outlined,
+                          size: 16,
+                          color: _isDetecting ? Colors.grey : const Color(0xFFE65100)),
+                      const SizedBox(width: 8),
+                      Text(l10n.historyMenuAddClip),
+                    ]),
+                  ),
                 PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.analyze,
                   enabled: canAnalyze && !_isAnalyzing,
@@ -2872,27 +3001,14 @@ class _HistoryTileState extends State<_HistoryTile> {
                   ]),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
-                  value: _HistoryMenuAction.download,
-                  enabled: !_isDownloading,
-                  child: Row(children: [
-                    Icon(Icons.download_rounded,
-                        size: 16,
-                        color: _isDownloading
-                            ? Colors.grey
-                            : kBrandPrimary),
-                    const SizedBox(width: 8),
-                    Text(_isDownloading ? l10n.historyMenuDownloading : l10n.historyMenuDownload),
-                  ]),
-                ),
-                PopupMenuItem<_HistoryMenuAction>(
                   value: _HistoryMenuAction.customExport,
                   enabled: !_isDownloading,
                   child: Row(children: [
-                    Icon(Icons.tune_rounded,
+                    Icon(_isDownloading ? Icons.hourglass_top_rounded : Icons.download_rounded,
                         size: 16,
                         color: _isDownloading ? Colors.grey : kBrandPrimary),
                     const SizedBox(width: 8),
-                    Text(l10n.exportCustomTitle),
+                    Text(_isDownloading ? l10n.historyMenuDownloading : l10n.exportCustomTitle),
                   ]),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
@@ -2992,14 +3108,14 @@ class _HistoryPreview extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             child: Image.file(
               File(filePath),
-              width: 130,
-              height: 82,
+              width: 90,
+              height: 160,
               fit: BoxFit.cover,
             ),
           )
         : Container(
-            width: 130,
-            height: 82,
+            width: 90,
+            height: 160,
             decoration: BoxDecoration(
               color: context.bgInset,
               borderRadius: BorderRadius.circular(12),
@@ -3132,18 +3248,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
   bool _isDownloading = false;
 
-  /// 下載切片影片到裝置（顯示版本選單 + 儲存位置選擇）
-  Future<void> _downloadVideo() async {
-    if (_isDownloading) return;
-    setState(() => _isDownloading = true);
-    try {
-      await _runDownloadFlow(context, widget.clip);
-    } finally {
-      if (mounted) setState(() => _isDownloading = false);
-    }
-  }
-
-  /// 自訂匯出切片（勾選疊加元素 + 浮水印分級）
+  /// 匯出切片（勾選疊加元素 + 浮水印分級 → 合成下載）
   Future<void> _customExport() async {
     if (_isDownloading) return;
     setState(() => _isDownloading = true);
@@ -3680,56 +3785,61 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     : goodShot == false
                                         ? const Color(0xFFF44336)
                                         : dimColor;
-                                return Row(
+                                // Wrap：窄卡放不下時甜蜜點群組換行，避免右側溢出
+                                return Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 8,
+                                  runSpacing: 4,
                                   children: [
-                                    Icon(Icons.speed_rounded,
-                                        size: 12, color: speedColor),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      hasSpeed
-                                          ? clip.bestSpeedValue!.toStringAsFixed(1)
-                                          : '—',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: speedColor,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(
-                                        width: 1,
-                                        height: 11,
-                                        color: context.borderColor),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      l10n.historySweetSpot,
-                                      style: TextStyle(
-                                          fontSize: 10,
-                                          color: context.textHint),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 5, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: sweetColor.withValues(alpha: 0.10),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(
-                                            color: sweetColor.withValues(alpha: 0.45)),
-                                      ),
-                                      child: Text(
-                                        goodShot == true
-                                            ? l10n.historySweetSpotHit
-                                            : goodShot == false
-                                                ? l10n.historySweetSpotMiss
-                                                : '—',
+                                    Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Icon(Icons.speed_rounded,
+                                          size: 12, color: speedColor),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        hasSpeed
+                                            ? clip.bestSpeedValue!
+                                                .toStringAsFixed(1)
+                                            : '—',
                                         style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: sweetColor,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: speedColor,
                                         ),
                                       ),
-                                    ),
+                                    ]),
+                                    Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Text(
+                                        l10n.historySweetSpot,
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: context.textHint),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 5, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color:
+                                              sweetColor.withValues(alpha: 0.10),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(
+                                              color: sweetColor.withValues(
+                                                  alpha: 0.45)),
+                                        ),
+                                        child: Text(
+                                          goodShot == true
+                                              ? l10n.historySweetSpotHit
+                                              : goodShot == false
+                                                  ? l10n.historySweetSpotMiss
+                                                  : '—',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: sweetColor,
+                                          ),
+                                        ),
+                                      ),
+                                    ]),
                                   ],
                                 );
                               }),
@@ -3831,9 +3941,6 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     case _ClipMenuAction.share:
                       _share();
                       break;
-                    case _ClipMenuAction.download:
-                      _downloadVideo();
-                      break;
                     case _ClipMenuAction.customExport:
                       _customExport();
                       break;
@@ -3878,27 +3985,14 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                   ]),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
-                  value: _ClipMenuAction.download,
-                  enabled: !_isDownloading,
-                  child: Row(children: [
-                    Icon(Icons.download_rounded,
-                        size: 16,
-                        color: _isDownloading
-                            ? Colors.grey
-                            : kBrandPrimary),
-                    const SizedBox(width: 8),
-                    Text(_isDownloading ? l10n.historyMenuDownloading : l10n.historyMenuDownload),
-                  ]),
-                ),
-                PopupMenuItem<_ClipMenuAction>(
                   value: _ClipMenuAction.customExport,
                   enabled: !_isDownloading,
                   child: Row(children: [
-                    Icon(Icons.tune_rounded,
+                    Icon(_isDownloading ? Icons.hourglass_top_rounded : Icons.download_rounded,
                         size: 16,
                         color: _isDownloading ? Colors.grey : kBrandPrimary),
                     const SizedBox(width: 8),
-                    Text(l10n.exportCustomTitle),
+                    Text(_isDownloading ? l10n.historyMenuDownloading : l10n.exportCustomTitle),
                   ]),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
@@ -4580,7 +4674,8 @@ class _DetectionModeResult {
 
 class _DetectionModeDialog extends StatefulWidget {
   final bool initialBothHands;
-  const _DetectionModeDialog({this.initialBothHands = false});
+  final bool hasAnchor; // 此影片錄製時帶錨點 → 顯示離線 V4
+  const _DetectionModeDialog({this.initialBothHands = false, this.hasAnchor = false});
   @override
   State<_DetectionModeDialog> createState() => _DetectionModeDialogState();
 }
@@ -4593,6 +4688,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
   static const _kGreen  = kBrandPrimary;
   static const _kOrange = Color(0xFFE65100);
   static const _kBlue   = Color(0xFF1565C0);
+  static const _kViolet = Color(0xFF6B4FD8);
 
   @override
   Widget build(BuildContext context) {
@@ -4643,6 +4739,20 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
             badgeColor: _kBlue,
             timeHint: AppLocalizations.of(context).historyDetectV3Time,
           ),
+          // V4 錨點：僅在此影片錄製時帶錨點才顯示
+          if (widget.hasAnchor) ...[
+            const SizedBox(height: 8),
+            _modeCard(
+              mode: SkeletonAnalysisMode.v4,
+              icon: Icons.center_focus_strong_rounded,
+              color: _kViolet,
+              title: AppLocalizations.of(context).historyDetectV4Title,
+              subtitle: AppLocalizations.of(context).historyDetectV4Desc,
+              badge: AppLocalizations.of(context).historyDetectBadgeAnchor,
+              badgeColor: _kViolet,
+              timeHint: AppLocalizations.of(context).historyDetectV1Time,
+            ),
+          ],
           // ── 雙手判斷 ──
           Divider(height: 16, thickness: 0.8, color: context.borderColor),
           GestureDetector(
@@ -4709,6 +4819,7 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
           style: FilledButton.styleFrom(
             backgroundColor: _mode == SkeletonAnalysisMode.v2 ? _kOrange
                            : _mode == SkeletonAnalysisMode.v3 ? _kBlue
+                           : _mode == SkeletonAnalysisMode.v4 ? _kViolet
                            : _kGreen,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
@@ -5083,54 +5194,6 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 下載版本選擇（共用：HistoryTile + ClipSubCard）
-// ════════════════════════════════════════════════════════════════════════════
-
-class _DlOption {
-  final String file;
-  final String label;
-  final String desc;
-  final IconData icon;
-  final Color color;
-  const _DlOption({
-    required this.file, required this.label,
-    required this.desc, required this.icon, required this.color,
-  });
-}
-
-/// 所有可能的下載選項（依優先顯示順序）
-List<_DlOption> _kDlOptions(BuildContext context) {
-  final l10n = AppLocalizations.of(context);
-  return [
-    _DlOption(
-      file: 'final.mp4', label: l10n.historyDlLabelFull,
-      desc: l10n.historyDlDescFull,
-      icon: Icons.sports_golf_rounded, color: const Color(0xFF1AA87C),
-    ),
-    _DlOption(
-      file: 'skeleton.mp4', label: l10n.historyDlLabelSkeleton,
-      desc: l10n.historyDlDescSkeleton,
-      icon: Icons.accessibility_new_rounded, color: const Color(0xFF7C3AED),
-    ),
-    _DlOption(
-      file: 'clip.mp4', label: l10n.historyDlLabelClip,
-      desc: l10n.historyDlDescClip,
-      icon: Icons.content_cut_rounded, color: const Color(0xFF1565C0),
-    ),
-    _DlOption(
-      file: 'swing.mp4', label: l10n.historyDlLabelRaw,
-      desc: l10n.historyDlDescRaw,
-      icon: Icons.videocam_rounded, color: const Color(0xFF546E7A),
-    ),
-    _DlOption(
-      file: 'swing.mov', label: l10n.historyDlLabelRawMov,
-      desc: l10n.historyDlDescRawMov,
-      icon: Icons.videocam_rounded, color: const Color(0xFF546E7A),
-    ),
-  ];
-}
-
 /// 共用上傳獎勵流程（原始影片與切片皆走此路）：
 /// 確認 → 上傳分析資料領獎勵 → 標記 isUploaded。
 /// 回傳更新後的 entry（取消或失敗回傳 null）。
@@ -5305,30 +5368,7 @@ class _NoteLine extends StatelessWidget {
   }
 }
 
-/// 共用下載流程（原始影片與切片皆走此路）：
-/// 選版本（final/skeleton/原始）→ 選儲存位置 → 匯出 → 結果提示。
-Future<void> _runDownloadFlow(
-    BuildContext context, RecordingHistoryEntry entry) async {
-  final sessionDir = p.dirname(entry.filePath);
-
-  final chosen = await _showDownloadPicker(context, sessionDir);
-  if (chosen == null || !context.mounted) return;
-
-  final toFolder = await _showSaveLocationPicker(context);
-  if (toFolder == null || !context.mounted) return;
-
-  final videoPath = p.join(sessionDir, chosen.file);
-  final baseName  = (entry.customName?.isNotEmpty == true)
-      ? '${entry.customName!}_${chosen.label}'
-      : '${p.basenameWithoutExtension(entry.filePath)}_${chosen.label}';
-  final result = toFolder
-      ? await VideoExportService.downloadToFolder(videoPath, displayName: baseName)
-      : await VideoExportService.download(videoPath, displayName: baseName);
-  if (!context.mounted) return;
-  _showExportResultSnackBar(context, result, chosen.label);
-}
-
-/// 自訂匯出流程（原始影片與切片共用）：勾選疊加元素 → 單 pass 合成 →
+/// 匯出流程（原始影片與切片共用）：勾選疊加元素 → 單 pass 合成 →
 /// 選儲存位置 → 匯出。浮水印由方案決定（免費強制）。
 Future<void> _runCustomExportFlow(
     BuildContext context, RecordingHistoryEntry entry) async {
@@ -5451,104 +5491,6 @@ Future<bool?> _showSaveLocationPicker(BuildContext ctx) {
       ),
     ),
   );
-}
-
-Future<_DlOption?> _showDownloadPicker(BuildContext ctx, String sessionDir) {
-  final available = _kDlOptions(ctx).where((o) => File(p.join(sessionDir, o.file)).existsSync()).toList();
-  if (available.isEmpty) return Future.value(null);
-
-  // 只有一個選項時直接回傳，不彈選單
-  if (available.length == 1) return Future.value(available.first);
-
-  return showModalBottomSheet<_DlOption>(
-    context: ctx,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
-    builder: (_) => _DownloadVersionPicker(options: available),
-  );
-}
-
-class _DownloadVersionPicker extends StatelessWidget {
-  final List<_DlOption> options;
-  const _DownloadVersionPicker({required this.options});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
-            child: Row(
-              children: [
-                const Icon(Icons.download_rounded, color: kBrandPrimary, size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(AppLocalizations.of(context).historyDownloadVersionTitle,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 20),
-                  onPressed: () => Navigator.pop(context),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          ...options.map((opt) => _DlOptionTile(
-            option: opt, onTap: () => Navigator.pop(context, opt),
-          )),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _DlOptionTile extends StatelessWidget {
-  final _DlOption option;
-  final VoidCallback onTap;
-  const _DlOptionTile({required this.option, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(
-          children: [
-            Container(
-              width: 42, height: 42,
-              decoration: BoxDecoration(
-                color: option.color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(option.icon, color: option.color, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(option.label,
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 2),
-                  Text(option.desc,
-                      style: TextStyle(fontSize: 12, color: context.textSecondary)),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, color: context.textHint),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

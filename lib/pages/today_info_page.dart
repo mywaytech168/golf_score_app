@@ -165,7 +165,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
 
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           // ── 靜態 Header ─────────────────────────────────────
           _StaticHeader(
@@ -237,7 +237,7 @@ class _TodayInfoPageState extends State<TodayInfoPage> {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 }

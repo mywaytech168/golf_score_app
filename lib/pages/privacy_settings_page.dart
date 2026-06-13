@@ -166,7 +166,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         centerTitle: true,
       ),
-      body: ListView(
+      body: SafeArea(top: false, child: ListView(
         padding: const EdgeInsets.only(top: 16),
         children: [
           // ── 資料蒐集說明 ────────────────────────────────────
@@ -237,7 +237,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
           ),
           const SizedBox(height: 40),
         ],
-      ),
+      )),
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../services/swing_impact_detector.dart';
 import '../theme/app_theme.dart';
+import 'zoomable_timeline.dart';
 
 /// 剪輯邊界配色（與長影片播放頁一致）：綠=開始、紅=結束、橙=擊球。
 const Color kClipStartColor = Color(0xFF22C55E);
@@ -73,6 +74,7 @@ Future<ClipSelection?> showClipCandidatesSheet(
   required String videoPath,
   required double durationSeconds,
   required List<({double sec, bool fromAudio})> candidates,
+  List<double> existingClipMarks = const [], // 既有切片擊球時刻（秒，原片座標）—— 參考標記
 }) {
   return showModalBottomSheet<ClipSelection>(
     context: context,
@@ -82,6 +84,7 @@ Future<ClipSelection?> showClipCandidatesSheet(
       videoPath: videoPath,
       durationSeconds: durationSeconds,
       candidates: candidates,
+      existingClipMarks: existingClipMarks,
     ),
   );
 }
@@ -90,11 +93,13 @@ class _ClipCandidatesSheet extends StatefulWidget {
   final String videoPath;
   final double durationSeconds;
   final List<({double sec, bool fromAudio})> candidates;
+  final List<double> existingClipMarks;
 
   const _ClipCandidatesSheet({
     required this.videoPath,
     required this.durationSeconds,
     required this.candidates,
+    this.existingClipMarks = const [],
   });
 
   @override
@@ -365,51 +370,39 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
                   v.isPlaying ? c.pause() : c.play();
                 },
               ),
+              // 可雙指縮放 / 捲動 / 點擊 seek：候選太密時橫向拉寬分開
               Expanded(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // 候選位置 tick
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: _CandidateTickPainter(
-                          ticks: [
-                            for (final cand in widget.candidates)
-                              cand.sec / dur,
-                          ],
-                          ranges: [
-                            // 自動候選：以擊球點推得 5 秒剪輯起迄
-                            for (final cand in widget.candidates)
-                              _normRange(
-                                SwingImpactDetector.calculateClipBoundaries(
-                                  hitSec: cand.sec, totalDurationSec: dur),
-                                dur,
-                              ),
-                            // 手動自由切片區段
-                            for (final r in _manualRanges)
-                              (start: r.startSec / dur, end: r.endSec / dur),
-                          ],
+                child: ZoomableTimeline(
+                  height: 36,
+                  totalSeconds: dur,
+                  currentSeconds: pos,
+                  onSeek: (s) {
+                    _stopTimer?.cancel();
+                    c.seekTo(Duration(milliseconds: (s * 1000).round()));
+                  },
+                  painterBuilder: (w) => _CandidateTickPainter(
+                    progress: dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0,
+                    durationSeconds: dur,
+                    existingMarks: [
+                      for (final s in widget.existingClipMarks)
+                        (s / dur).clamp(0.0, 1.0),
+                    ],
+                    ticks: [
+                      for (final cand in widget.candidates) cand.sec / dur,
+                    ],
+                    ranges: [
+                      // 自動候選：以擊球點推得 5 秒剪輯起迄
+                      for (final cand in widget.candidates)
+                        _normRange(
+                          SwingImpactDetector.calculateClipBoundaries(
+                              hitSec: cand.sec, totalDurationSec: dur),
+                          dur,
                         ),
-                      ),
-                    ),
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 2,
-                        thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 6),
-                      ),
-                      child: Slider(
-                        value: pos.clamp(0.0, dur),
-                        max: dur,
-                        activeColor: kPrimaryLight,
-                        inactiveColor: Colors.white30,
-                        onChanged: (s) {
-                          _stopTimer?.cancel();
-                          c.seekTo(Duration(milliseconds: (s * 1000).round()));
-                        },
-                      ),
-                    ),
-                  ],
+                      // 手動自由切片區段
+                      for (final r in _manualRanges)
+                        (start: r.startSec / dur, end: r.endSec / dur),
+                    ],
+                  ),
                 ),
               ),
               Text(
@@ -547,11 +540,59 @@ class _ClipCandidatesSheetState extends State<_ClipCandidatesSheet> {
 class _CandidateTickPainter extends CustomPainter {
   final List<double> ticks; // 0~1 normalized：擊球/候選中心
   final List<({double start, double end})> ranges; // 0~1 normalized：剪輯起迄
+  final List<double> existingMarks; // 0~1 normalized：既有切片擊球點（參考，灰色）
+  final double progress; // 0~1：目前播放頭
+  final double durationSeconds; // 用於每 30 秒刻度
 
-  const _CandidateTickPainter({required this.ticks, this.ranges = const []});
+  const _CandidateTickPainter(
+      {required this.ticks,
+      this.ranges = const [],
+      this.existingMarks = const [],
+      this.progress = 0,
+      this.durationSeconds = 0});
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 背景軌
+    canvas.drawLine(
+      Offset(0, size.height * 0.5),
+      Offset(size.width, size.height * 0.5),
+      Paint()
+        ..color = Colors.white24
+        ..strokeWidth = 2,
+    );
+
+    // ── 每 30 秒時間刻度 + 標籤 ──
+    if (durationSeconds > 30) {
+      final markPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.16)
+        ..strokeWidth = 1;
+      for (var s = 30.0; s < durationSeconds; s += 30) {
+        final x = (s / durationSeconds) * size.width;
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), markPaint);
+        final mm = s ~/ 60, ss = (s % 60).toInt();
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '$mm:${ss.toString().padLeft(2, '0')}',
+            style: const TextStyle(color: Colors.white38, fontSize: 8),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(x + 2, 0));
+      }
+    }
+
+    // ── 既有切片擊球點（灰色參考，避免重切同一桿）──
+    final existPaint = Paint()
+      ..color = Colors.white38
+      ..strokeWidth = 2;
+    for (final t in existingMarks) {
+      final x = t.clamp(0.0, 1.0) * size.width;
+      canvas.drawLine(
+        Offset(x, size.height * 0.38), Offset(x, size.height * 0.62), existPaint);
+      canvas.drawCircle(Offset(x, size.height * 0.30), 2.5, existPaint);
+    }
+
     // ── 剪輯起迄邊界（畫在中心 tick 下層）──
     for (final r in ranges) {
       _boundary(canvas, size, r.start, kClipStartColor);
@@ -570,6 +611,18 @@ class _CandidateTickPainter extends CustomPainter {
         paint,
       );
     }
+
+    // ── 播放頭 ──
+    final px = progress.clamp(0.0, 1.0) * size.width;
+    canvas.drawLine(
+      Offset(px, 0),
+      Offset(px, size.height),
+      Paint()
+        ..color = Colors.white
+        ..strokeWidth = 2,
+    );
+    canvas.drawCircle(
+        Offset(px, size.height * 0.5), 4, Paint()..color = Colors.white);
   }
 
   void _boundary(Canvas canvas, Size size, double t, Color color) {
@@ -585,5 +638,9 @@ class _CandidateTickPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_CandidateTickPainter old) =>
-      old.ticks != ticks || old.ranges != ranges;
+      old.ticks != ticks ||
+      old.ranges != ranges ||
+      old.existingMarks != existingMarks ||
+      old.progress != progress ||
+      old.durationSeconds != durationSeconds;
 }

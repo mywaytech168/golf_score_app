@@ -191,7 +191,7 @@ class _MainShellPageState extends State<MainShellPage> {
         physics: const NeverScrollableScrollPhysics(),
         children: [
           // 第 0 頁：首頁
-          const HomePage(),
+          HomePage(onStartRecording: () => _onBottomNavTap(2)),
           
           // 第 1 頁：今日信息頁
           const TodayInfoPage(),
@@ -242,16 +242,20 @@ class _MainShellPageState extends State<MainShellPage> {
   Widget _buildBottomBar() {
     final l10n = AppLocalizations.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: context.bgCard,
         boxShadow: context.isDarkMode
             ? const []
             : const [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
+      // 底色延伸到系統手勢/按鈕列後方，內容用 SafeArea 推到其上方（不被蓋到）
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
           _BottomNavItem(
             icon: Icons.home_rounded,
             label: l10n.navHome,
@@ -281,7 +285,9 @@ class _MainShellPageState extends State<MainShellPage> {
             isActive: _currentIndex == 4,
             onTap: () => _onBottomNavTap(4),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

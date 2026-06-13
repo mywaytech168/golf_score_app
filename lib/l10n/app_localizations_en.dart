@@ -745,6 +745,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String homeBallsUnit(int balls) {
+    return '$balls balls';
+  }
+
+  @override
   String get homeHitAnalysis => 'Shot Analysis';
 
   @override
@@ -1707,6 +1712,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get historyDetectBadgeBalanced => 'Balanced';
 
   @override
+  String get historyDetectV4Title => 'Anchor (V4)';
+
+  @override
+  String get historyDetectV4Desc =>
+      'Uses the ball/grip spot tapped while recording; impact = dominant wrist closest to the anchor.';
+
+  @override
+  String get historyDetectBadgeAnchor => 'Anchor';
+
+  @override
   String get historyDetectV3Time => '~45s';
 
   @override
@@ -1722,7 +1737,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get historyStartAnalysis => 'Start analysis';
 
   @override
-  String get historyActionDetect => 'Detect shots';
+  String get historyMenuAddClip => 'Add clip';
+
+  @override
+  String get historyActionDetect => 'Detect swings';
 
   @override
   String get historyActionAiAnalysis => 'AI analysis';
@@ -2027,6 +2045,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get playerTitle => 'Video Review';
 
   @override
+  String get playerNote => 'Note';
+
+  @override
   String get playerNoteAdd => 'Add Note';
 
   @override
@@ -2046,6 +2067,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get playerSkeletonNotFound => 'Skeleton data not available';
+
+  @override
+  String get playerOverlaySync => 'Overlay sync';
+
+  @override
+  String get playerOverlaySyncDesc =>
+      'Time offset between skeleton/trajectory and video. Lagging behind → increase; ahead → decrease.';
 
   @override
   String get playerOverlaySkeleton => 'Skeleton';
@@ -2329,7 +2357,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recDetailDownloadVideo => 'Download video';
 
   @override
-  String get exportCustomTitle => 'Custom export';
+  String get exportCustomTitle => 'Export';
 
   @override
   String get exportCustomSubtitle => 'Choose elements to burn into the video';
@@ -2667,6 +2695,35 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get recordOverlayToggle => 'Toggle outline overlay';
+
+  @override
+  String get recTapSetImpactPoint => 'Tap to set impact point';
+
+  @override
+  String get recSwingSpeed => 'Swing speed threshold';
+
+  @override
+  String get recShowTelemetry => 'Show wrist values (debug)';
+
+  @override
+  String get recAnchorRadius => 'Anchor hit radius (smaller = stricter)';
+
+  @override
+  String get recAnchorGate => 'Anchor detection gate';
+
+  @override
+  String get recAnchorGateDesc =>
+      'Only count a swing if the wrist passes within the anchor radius; random/off-target swings are ignored.';
+
+  @override
+  String get recUseAnchor => 'Anchor impact (V4)';
+
+  @override
+  String get recUseAnchorDesc =>
+      'Use the tapped ball spot as the impact point; off keeps the spot but falls back to wrist arc-bottom';
+
+  @override
+  String get recGlowDelay => 'Impact glow delay';
 
   @override
   String get recordSettings => 'Recording settings';

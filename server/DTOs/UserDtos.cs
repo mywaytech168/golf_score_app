@@ -124,7 +124,8 @@ namespace UploadServer.DTOs
     public record PrepareDatasetUploadResponse(
         string UploadId,
         string VideoUploadUrl,
-        string CsvUploadUrl);
+        string CsvUploadUrl,
+        string MetaUploadUrl);
 
     // ════════════════════════════════════════════════════════════════
     // 付款購買

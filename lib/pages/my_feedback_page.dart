@@ -131,7 +131,7 @@ class _MyFeedbackPageState extends State<MyFeedbackPage> {
     final l = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: context.bgPage,
-      body: Column(
+      body: SafeArea(top: false, child: Column(
         children: [
           GreenPageHeader(
             title: l.myFeedbackTitle,
@@ -200,7 +200,7 @@ class _MyFeedbackPageState extends State<MyFeedbackPage> {
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 }

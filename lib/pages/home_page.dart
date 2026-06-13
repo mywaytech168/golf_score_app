@@ -1,5 +1,6 @@
 ﻿import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:path/path.dart' as p;
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
@@ -29,7 +30,9 @@ import 'reward_page.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  /// 點問候語「準備開始」時跳轉到錄製分頁（由 main_shell 切到 index 2）。
+  final VoidCallback? onStartRecording;
+  const HomePage({super.key, this.onStartRecording});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -314,15 +317,41 @@ class _HomePageState extends State<HomePage> {
                                 ((today?.goodShot ?? 0) +
                                         (today?.badShot ?? 0)) ==
                                     0)
-                              Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: kSpaceSM),
-                                  child: Text(
-                                    l.homeEmptyHint,
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: context.textHint),
-                                  ),
+                              Padding(
+                                padding: const EdgeInsets.only(top: kSpaceSM),
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      l.homeEmptyHint,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: context.textHint),
+                                    ),
+                                    const SizedBox(height: kSpaceMD),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: FilledButton.icon(
+                                        onPressed: widget.onStartRecording,
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: kBrandPrimary,
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 14),
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14)),
+                                        ),
+                                        icon: const Icon(
+                                            Icons.videocam_rounded, size: 20),
+                                        label: Text(
+                                          l.homeStartRecording,
+                                          style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w700),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                           ],
@@ -356,21 +385,19 @@ class _HomePageState extends State<HomePage> {
         children: [
           Text(
             l.homeHi(user.displayName),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 24,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
-              height: 1.3,
+              height: 1.25,
               color: context.textPrimary,
             ),
           ),
-          Text(
-            l.homeGreetingQuestion,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.3,
-              color: context.textPrimary,
-            ),
+          // 「準備開始」流光漸層 + 點擊跳轉錄製
+          _StartShimmerGreeting(
+            text: l.homeGreetingQuestion,
+            onTap: widget.onStartRecording,
           ),
         ],
       ),
@@ -399,22 +426,52 @@ class _HomePageState extends State<HomePage> {
           });
         }
 
-        return Column(
-          children: [
-            _QuotaRow(
-              icon: Icons.adjust_rounded,
-              label: l.homeTodayQuota,
-              value: quotaValue,
-              onTap: openRewards,
+        return Material(
+          color: context.bgCard, // 白背景（淺色主題）
+          borderRadius: BorderRadius.circular(kRadiusMD),
+          child: InkWell(
+            onTap: openRewards,
+            borderRadius: BorderRadius.circular(kRadiusMD),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(kRadiusMD),
+                border: Border.all(color: context.borderColor),
+              ),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: kSpaceMD, vertical: 14),
+              child: Row(
+                children: [
+                  _QuotaHalf(
+                    icon: Icons.adjust_rounded,
+                    label: l.homeTodayQuota,
+                    value: quotaValue,
+                  ),
+                  Container(
+                    width: 1,
+                    height: 34,
+                    color: context.borderColor,
+                    margin: const EdgeInsets.symmetric(horizontal: kSpaceSM),
+                  ),
+                  _QuotaHalf(
+                    icon: Icons.smart_display_rounded,
+                    label: l.homeRewardBalls,
+                    value: rewardValue,
+                  ),
+                  Container(
+                    width: 1,
+                    height: 34,
+                    color: context.borderColor,
+                    margin: const EdgeInsets.symmetric(horizontal: kSpaceSM),
+                  ),
+                  _QuotaHalf(
+                    icon: Icons.savings_rounded,
+                    label: l.rewardStatBonusBalls,
+                    value: l.homeBallsUnit(_rewardStatus?.bonusBalls ?? 0),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: kSpaceSM),
-            _QuotaRow(
-              icon: Icons.smart_display_rounded,
-              label: l.homeRewardBalls,
-              value: rewardValue,
-              onTap: openRewards,
-            ),
-          ],
+          ),
         );
       },
     );
@@ -513,7 +570,6 @@ class _HomePageState extends State<HomePage> {
           context: context,
           user: user,
           plan: plan,
-          planColor: Color(plan.colorValue),
         );
       },
     );
@@ -523,7 +579,6 @@ class _HomePageState extends State<HomePage> {
     required BuildContext context,
     required UserProvider user,
     required UserPlan plan,
-    required Color planColor,
   }) {
     final l = AppLocalizations.of(context);
 
@@ -539,23 +594,39 @@ class _HomePageState extends State<HomePage> {
           : Image.asset('assets/branding/logo_icon.png', fit: BoxFit.contain),
     );
 
-    // 方案 badge
+    // 方案 badge：實心白底 + 品牌深字（高對比，不再融進漸層）
     final planBadge = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.20),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white38),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
-      child: Text(
-        plan.label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: planColor == const Color(0xFF1AA87C)
-              ? Colors.white
-              : Color(plan.colorValue),
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 層級色點（金/藍/灰等）+ 深字，白底高對比
+          Container(
+            width: 6, height: 6,
+            margin: const EdgeInsets.only(right: 5),
+            decoration: BoxDecoration(
+              color: Color(plan.colorValue), shape: BoxShape.circle),
+          ),
+          Text(
+            plan.label,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF1A1A2E),
+            ),
+          ),
+        ],
       ),
     );
 
@@ -573,7 +644,8 @@ class _HomePageState extends State<HomePage> {
           children: [
             IconButton(
               tooltip: l.annBoardTitle,
-              icon: const Icon(Icons.notifications_rounded, color: Colors.white),
+              icon: const Icon(Icons.notifications_rounded,
+                  color: Colors.white, shadows: _kHeaderIconShadow),
               onPressed: _openAnnouncements,
             ),
             if (_unreadAnnouncements > 0)
@@ -605,7 +677,8 @@ class _HomePageState extends State<HomePage> {
         ),
         IconButton(
           tooltip: l.homeRewardBalls,
-          icon: const Icon(Icons.card_giftcard_rounded, color: Colors.white),
+          icon: const Icon(Icons.card_giftcard_rounded,
+              color: Colors.white, shadows: _kHeaderIconShadow),
           onPressed: () {
             final plan = context.read<PlanProvider>();
             Navigator.of(context).push(
@@ -615,7 +688,8 @@ class _HomePageState extends State<HomePage> {
         ),
         IconButton(
           tooltip: l.settingsTitle,
-          icon: const Icon(Icons.settings_rounded, color: Colors.white),
+          icon: const Icon(Icons.settings_rounded,
+              color: Colors.white, shadows: _kHeaderIconShadow),
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const SettingsPage()),
           ),
@@ -625,58 +699,157 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ── 今日用量 / 獎勵球數 列 ────────────────────────────────────────
+// ── 問候語「準備開始」流光漸層（點擊跳轉錄製）─────────────────────
 
-class _QuotaRow extends StatelessWidget {
+/// 頂部白色 icon 在亮漸層上的細陰影，提升對比。
+const _kHeaderIconShadow = <Shadow>[
+  Shadow(color: Color(0x59000000), blurRadius: 3, offset: Offset(0, 1)),
+];
+
+/// 流光品牌色碼（深青 → Blue → Purple），循環發亮。對稱排列確保旋轉無縫。
+/// 不用亮 cyan #00E5CC——它在淺色底上對比太低（看起來糊/淡），改用較深的青。
+const _shimmerColors = <Color>[
+  Color(0xFF008C99), // 深青（淺底可讀）
+  kOrviaBlue,        // #4A7FFF
+  kOrviaViolet,      // Purple #6B4FD8
+  kOrviaBlue,
+  Color(0xFF008C99),
+];
+const _shimmerStops = <double>[0.0, 0.25, 0.5, 0.75, 1.0];
+
+class _StartShimmerGreeting extends StatefulWidget {
+  final String text;
+  final VoidCallback? onTap;
+  const _StartShimmerGreeting({required this.text, this.onTap});
+
+  @override
+  State<_StartShimmerGreeting> createState() => _StartShimmerGreetingState();
+}
+
+class _StartShimmerGreetingState extends State<_StartShimmerGreeting>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 3),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textStyle = const TextStyle(
+      fontSize: 20,
+      fontWeight: FontWeight.w800,
+      height: 1.25,
+      color: Colors.white, // ShaderMask 需不透明底色
+    );
+    return GestureDetector(
+      onTap: widget.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, _) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 旋轉漸層 → 色帶流動發亮（0~2π 無縫循環）
+              Flexible(
+                child: _GradientFlowText(
+                    text: widget.text, style: textStyle, t: _ctrl.value),
+              ),
+              // 可點擊提示箭頭：實心品牌色（不用漸層，避免亮端在淺底上看不見）
+              const Padding(
+                padding: EdgeInsets.only(left: 6, top: 3),
+                child: Icon(Icons.play_circle_fill_rounded,
+                    size: 24, color: kBrandPrimary),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 以旋轉漸層填色的文字，[t] 0→1 驅動色帶流動（無縫循環）。
+class _GradientFlowText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final double t;
+  const _GradientFlowText(
+      {required this.text, required this.style, required this.t});
+
+  Widget _masked() => ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (bounds) => LinearGradient(
+          colors: _shimmerColors,
+          stops: _shimmerStops,
+          transform: GradientRotation(t * 2 * math.pi),
+        ).createShader(Rect.fromLTWH(0, 0, bounds.width, bounds.height)),
+        // 單行不換行：空間不足時整體等比縮放，避免截字
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(text, style: style, maxLines: 1, softWrap: false),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => _masked(); // 銳利漸層流光，不加模糊
+}
+
+// ── 今日用量 / 獎勵球數 半欄（合併雙欄卡用）──────────────────────
+
+class _QuotaHalf extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
-  final VoidCallback onTap;
-  const _QuotaRow({
+  const _QuotaHalf({
     required this.icon,
     required this.label,
     required this.value,
-    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: context.bgInset,
-      borderRadius: BorderRadius.circular(kRadiusMD),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(kRadiusMD),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: kSpaceMD, vertical: 14),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: context.textPrimary),
-              const SizedBox(width: kSpaceSM),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: context.textPrimary,
+    return Expanded(
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: context.textPrimary),
+          const SizedBox(width: kSpaceSM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: context.textSecondary,
+                  ),
                 ),
-              ),
-              const Spacer(),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: context.textSecondary,
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: context.textPrimary,
+                  ),
                 ),
-              ),
-              const SizedBox(width: kSpaceXS),
-              Icon(Icons.chevron_right_rounded,
-                  size: 20, color: context.textHint),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -786,7 +959,8 @@ class _HitAnalysisCard extends StatelessWidget {
                                   fontSize: 13, color: context.textHint),
                             ),
                           )
-                        : _buildDonut(context, l, shots, sweet),
+                        : _buildDonut(context, l,
+                            today?.goodShot ?? 0, today?.badShot ?? 0),
               ),
             ],
           ),
@@ -795,12 +969,11 @@ class _HitAnalysisCard extends StatelessWidget {
     );
   }
 
-  Widget _buildDonut(BuildContext context, AppLocalizations l, int shots,
-      double sweetPct) {
-    final sweet = sweetPct.clamp(0.0, 100.0);
-    final rest = 100.0 - sweet;
-    const sweetColor = kCrispColor;            // 橘
-    const restColor  = Color(0xFFF06292);      // 粉
+  Widget _buildDonut(
+      BuildContext context, AppLocalizations l, int good, int bad) {
+    final total = good + bad;
+    final goodV = good.toDouble();
+    final badV = bad.toDouble();
     return Stack(
       alignment: Alignment.center,
       children: [
@@ -811,21 +984,15 @@ class _HitAnalysisCard extends StatelessWidget {
             startDegreeOffset: -90,
             sections: [
               PieChartSectionData(
-                value: sweet > 0 ? sweet : 0.001,
-                color: sweetColor,
+                value: goodV > 0 ? goodV : (badV > 0 ? 0.0001 : 1),
+                color: kGoodColor,
                 radius: 26,
-                title: '${sweet.toStringAsFixed(1)}%',
-                titlePositionPercentageOffset: 1.6,
-                titleStyle: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: context.textSecondary,
-                ),
+                showTitle: false,
               ),
-              if (rest > 0.5)
+              if (badV > 0)
                 PieChartSectionData(
-                  value: rest,
-                  color: restColor,
+                  value: badV,
+                  color: kBadColor,
                   radius: 26,
                   showTitle: false,
                 ),
@@ -836,27 +1003,29 @@ class _HitAnalysisCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '$shots',
+              '$total',
               style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
+                fontSize: 26,
+                fontWeight: FontWeight.w900,
                 color: context.textPrimary,
               ),
             ),
             Text(
               l.homeHitRecordsLabel,
-              style:
-                  TextStyle(fontSize: 11, color: context.textSecondary),
+              style: TextStyle(fontSize: 11, color: context.textSecondary),
             ),
           ],
         ),
         Positioned(
           bottom: 0,
           right: 0,
-          child: Row(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _LegendDot(color: sweetColor, label: l.homeSweetSpot),
+              _LegendDot(color: kGoodColor, label: '${l.homeGoodShot} $good'),
+              const SizedBox(height: 2),
+              _LegendDot(color: kBadColor, label: '${l.homeBadShot} $bad'),
             ],
           ),
         ),

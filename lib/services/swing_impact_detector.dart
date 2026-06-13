@@ -80,13 +80,19 @@ class SwingImpactDetector {
   ///
   /// [bothHands] 雙手判斷：速度訊號改為「兩手都在動」才計入，其中一手遮擋時退回
   /// 另一手（見 [SwingDetectPrefs]）。
+  /// [anchorX]/[anchorY]：離線 V4 錨點（歸一化 0-1）。提供時，擊球幀改取「揮桿窗內
+  /// 主導腕距錨點最近」那一幀（鏡像即時 V4），而非手腕弧底 Y-LOW。
   static Future<List<SwingHit>> detect({
     required String csvPath,
     bool bothHands = false,
+    double? anchorX,
+    double? anchorY,
   }) async {
     final args = _DetectArgs(
       csvPath: csvPath,
       bothHands: bothHands,
+      anchorX: anchorX,
+      anchorY: anchorY,
     );
     try {
       return await Isolate.run(() => _detectIsolate(args));
@@ -156,10 +162,18 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
   final fastCenters = _speedPassageCenters(speedDn, thr, minFastFrame, mergeGap);
   debugPrint('[SwingDetect] 📍 速度通道: ${fastCenters.length} 個 FAST 幀');
 
-  // 6. 每個 FAST → Y-LOW → TOP
+  // 6. 每個 FAST → 擊球幀（錨點模式＝距錨點最近；否則 Y-LOW）→ TOP
+  final hasAnchor = args.anchorX != null && args.anchorY != null &&
+      csvResult.xNorm.length == n && csvResult.yNorm.length == n;
+  if (hasAnchor) {
+    debugPrint('[SwingDetect] 🎯 錨點模式 V4: anchor=(${args.anchorX!.toStringAsFixed(3)}, ${args.anchorY!.toStringAsFixed(3)})');
+  }
   final candidates = <_HitCandidate>[];
   for (final fast in fastCenters) {
-    final yLow = _nearestYLowFrame(ySmooth, fast, fps);
+    final yLow = hasAnchor
+        ? _nearestAnchorFrame(csvResult.xNorm, csvResult.yNorm,
+            args.anchorX!, args.anchorY!, fast, fps)
+        : _nearestYLowFrame(ySmooth, fast, fps);
     final top  = _topFrame(ySmooth, yLow, fast, fps);
     candidates.add(_HitCandidate(
       fastFrame:  fast,
@@ -271,6 +285,30 @@ List<int> _speedPassageCenters(
   }).toList();
 }
 
+// ── 錨點最近幀偵測（離線 V4，鏡像即時 LiveSwingDetector）────────────────────────
+
+/// 在 FAST 幀附近的較寬窗內，找主導腕（歸一化）距錨點最近的那一幀 = 擊球時刻。
+/// 鏡像即時錨點判定（手回到球位/握把最近）。窗口較 Y-LOW 寬，因下桿回歸需更長範圍。
+int _nearestAnchorFrame(
+    List<double> xn, List<double> yn, double ax, double ay, int center, double fps,
+    {double windowSec = 0.8}) {
+  final n = xn.length;
+  final w = math.max(1, (windowSec * fps).round());
+  final l = math.max(0, center - w);
+  final r = math.min(n, center + w + 1);
+  if (l >= r) return center.clamp(0, n - 1);
+
+  int best = -1;
+  double bestDist = double.infinity;
+  for (int i = l; i < r; i++) {
+    if (xn[i].isNaN || yn[i].isNaN) continue;
+    final dx = xn[i] - ax, dy = yn[i] - ay;
+    final d = dx * dx + dy * dy;
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return best >= 0 ? best : center.clamp(0, n - 1);
+}
+
 // ── Y-LOW 幀偵測 ─────────────────────────────────────────────────────────────
 
 /// 在 FAST 幀附近搜尋最近的 Y 局部最大值（手腕最低點 = 撞球時刻）。
@@ -376,7 +414,12 @@ class _CsvResult {
   final List<double> ySmooth;  // 插值 + 平滑後的 Y（用於 Y-LOW / TOP 偵測）
   final List<double> vis;
   final double fps;
-  _CsvResult(this.speed, this.ySmooth, this.vis, this.fps);
+  final List<double> xNorm;    // 主導腕歸一化 X（錨點距離用，與即時錨點同空間）
+  final List<double> yNorm;    // 主導腕歸一化 Y
+  _CsvResult(this.speed, this.ySmooth, this.vis, this.fps,
+      {List<double>? xNorm, List<double>? yNorm})
+      : xNorm = xNorm ?? const [],
+        yNorm = yNorm ?? const [];
 }
 
 // 左手腕 = landmark 15，右手腕 = landmark 16
@@ -384,9 +427,13 @@ class _CsvResult {
 //           [lm0_x_norm, lm0_y_norm, lm0_z, lm0_vis, lm0_x_px, lm0_y_px] × 33  (從 col 3 開始)
 // lm{i}_vis  = 3 + i*6 + 3；lm{i}_x_px = +4；lm{i}_y_px = +5
 const int _colTimeSec = 1;
+const int _colLwXn    = 93;   // 3 + 15*6 + 0（歸一化 x）
+const int _colLwYn    = 94;
 const int _colLwVis   = 96;   // 3 + 15*6 + 3
 const int _colLwXpx   = 97;
 const int _colLwYpx   = 98;
+const int _colRwXn    = 99;   // 3 + 16*6 + 0（歸一化 x）
+const int _colRwYn    = 100;
 const int _colRwVis   = 102;  // 3 + 16*6 + 3
 const int _colRwXpx   = 103;
 const int _colRwYpx   = 104;
@@ -397,17 +444,23 @@ const double _smoothWristSec = 0.17;
 class _WristTrack {
   final List<double> x = [];
   final List<double> y = [];
+  final List<double> xn = []; // 歸一化 x（錨點距離用）
+  final List<double> yn = []; // 歸一化 y
   final List<bool> okMask = []; // 該禎腕點是否有效（可見），雙手判斷用
   int valid = 0;
-  void add(double vis, double xpx, double ypx) {
+  void add(double vis, double xpx, double ypx, [double xnorm = double.nan, double ynorm = double.nan]) {
     if (vis >= _minVisibility && !xpx.isNaN && !ypx.isNaN) {
       x.add(xpx);
       y.add(ypx);
+      xn.add(xnorm);
+      yn.add(ynorm);
       okMask.add(true);
       valid++;
     } else {
       x.add(double.nan);
       y.add(double.nan);
+      xn.add(double.nan);
+      yn.add(double.nan);
       okMask.add(false);
     }
   }
@@ -482,9 +535,11 @@ _CsvResult? _parseWristSpeed(String csvPath, {bool bothHands = false}) {
       final rVis = _toDouble(row[_colRwVis]);
       times.add(_toDouble(row[_colTimeSec]));
       visList.add(rVis);
-      right.add(rVis, _toDouble(row[_colRwXpx]), _toDouble(row[_colRwYpx]));
+      right.add(rVis, _toDouble(row[_colRwXpx]), _toDouble(row[_colRwYpx]),
+          _toDouble(row[_colRwXn]), _toDouble(row[_colRwYn]));
       left.add(_toDouble(row[_colLwVis]),
-          _toDouble(row[_colLwXpx]), _toDouble(row[_colLwYpx]));
+          _toDouble(row[_colLwXpx]), _toDouble(row[_colLwYpx]),
+          _toDouble(row[_colLwXn]), _toDouble(row[_colLwYn]));
     }
 
     final n = right.x.length;
@@ -514,17 +569,20 @@ _CsvResult? _parseWristSpeed(String csvPath, {bool bothHands = false}) {
 
     // Y-LOW / TOP 仍用主導手的平滑 Y（雙手判斷僅改速度訊號）
     final domY = useLeft ? lY : rY;
+    // 主導腕歸一化座標（錨點距離用）：插值補洞、輕平滑
+    final domXn = _movingAverage(_interpNan(useLeft ? left.xn : right.xn), smoothWin);
+    final domYn = _movingAverage(_interpNan(useLeft ? left.yn : right.yn), smoothWin);
 
     if (bothHands) {
       final combined =
           _combineBothHands(rSpeed, lSpeed, right.okMask, left.okMask);
       debugPrint('[ParseCSV] 🤝 雙手判斷：合成兩手一起的速度訊號');
-      return _CsvResult(combined, domY, visList, fps);
+      return _CsvResult(combined, domY, visList, fps, xNorm: domXn, yNorm: domYn);
     }
 
     return useLeft
-        ? _CsvResult(lSpeed, lY, visList, fps)
-        : _CsvResult(rSpeed, rY, visList, fps);
+        ? _CsvResult(lSpeed, lY, visList, fps, xNorm: domXn, yNorm: domYn)
+        : _CsvResult(rSpeed, rY, visList, fps, xNorm: domXn, yNorm: domYn);
   } catch (e) {
     debugPrint('[ParseCSV] ❌ 異常: $e');
     return null;
@@ -740,8 +798,12 @@ class _HitCandidate {
 class _DetectArgs {
   final String csvPath;
   final bool bothHands;
+  final double? anchorX;
+  final double? anchorY;
   const _DetectArgs({
     required this.csvPath,
     this.bothHands = false,
+    this.anchorX,
+    this.anchorY,
   });
 }

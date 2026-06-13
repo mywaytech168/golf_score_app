@@ -322,7 +322,8 @@ namespace UploadServer.Controllers
             var uploadId = Guid.NewGuid().ToString("N");
             var videoUrl = _b2.GenerateDatasetVideoUploadUrl(uploadId);
             var csvUrl   = _b2.GenerateDatasetCsvUploadUrl(uploadId);
-            return Ok(new { data = new PrepareDatasetUploadResponse(uploadId, videoUrl, csvUrl) });
+            var metaUrl  = _b2.GenerateDatasetMetaUploadUrl(uploadId);
+            return Ok(new { data = new PrepareDatasetUploadResponse(uploadId, videoUrl, csvUrl, metaUrl) });
         }
 
         /// <summary>

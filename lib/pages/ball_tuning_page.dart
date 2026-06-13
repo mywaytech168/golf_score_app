@@ -174,7 +174,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
     return Scaffold(
       backgroundColor: const Color(0xFF101418),
       appBar: AppBar(title: Text(l10n.ballTuneTitle), backgroundColor: const Color(0xFF101418)),
-      body: Column(children: [
+      body: SafeArea(top: false, child: Column(children: [
         // ── 影片 + 軌跡疊圖 + ROI 指示 ──
         AspectRatio(
           aspectRatio: 9 / 16,
@@ -294,7 +294,7 @@ class _BallTuningPageState extends State<BallTuningPage> {
             const SizedBox(height: 24),
           ]),
         ),
-      ]),
+      ])),
     );
   }
 

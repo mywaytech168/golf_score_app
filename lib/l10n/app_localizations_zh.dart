@@ -726,6 +726,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String homeBallsUnit(int balls) {
+    return '$balls 球';
+  }
+
+  @override
   String get homeHitAnalysis => '擊球分析';
 
   @override
@@ -1662,6 +1667,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get historyDetectBadgeBalanced => '均衡';
 
   @override
+  String get historyDetectV4Title => '錨點偵測 (V4)';
+
+  @override
+  String get historyDetectV4Desc => '用錄製時點選的球位/握把當錨點，擊球＝主導腕距錨點最近那一幀。';
+
+  @override
+  String get historyDetectBadgeAnchor => '錨點';
+
+  @override
   String get historyDetectV3Time => '~45 秒';
 
   @override
@@ -1677,7 +1691,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get historyStartAnalysis => '開始分析';
 
   @override
-  String get historyActionDetect => '偵測桿數';
+  String get historyMenuAddClip => '加入切片';
+
+  @override
+  String get historyActionDetect => '偵測揮桿';
 
   @override
   String get historyActionAiAnalysis => 'AI 分析';
@@ -1975,6 +1992,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playerTitle => '影片查看';
 
   @override
+  String get playerNote => '備註';
+
+  @override
   String get playerNoteAdd => '新增備註';
 
   @override
@@ -1994,6 +2014,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get playerSkeletonNotFound => '骨架資料不存在';
+
+  @override
+  String get playerOverlaySync => '疊圖時間差';
+
+  @override
+  String get playerOverlaySyncDesc => '骨架/軌跡與影片的時間差。疊圖落後→調大、超前→調小。';
 
   @override
   String get playerOverlaySkeleton => '骨架';
@@ -2269,7 +2295,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recDetailDownloadVideo => '下載影片';
 
   @override
-  String get exportCustomTitle => '自訂匯出';
+  String get exportCustomTitle => '匯出';
 
   @override
   String get exportCustomSubtitle => '選擇要燒錄到影片上的元素';
@@ -2595,6 +2621,33 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get recordOverlayToggle => '輪廓疊加切換';
+
+  @override
+  String get recTapSetImpactPoint => '點選球的位置設定擊球點';
+
+  @override
+  String get recSwingSpeed => '揮桿速度門檻';
+
+  @override
+  String get recShowTelemetry => '顯示腕點數值（除錯）';
+
+  @override
+  String get recAnchorRadius => '錨點命中半徑（調小＝更嚴）';
+
+  @override
+  String get recAnchorGate => '錨點偵測閘門';
+
+  @override
+  String get recAnchorGateDesc => '揮桿時主導腕須經過錨點半徑內才算一桿；亂揮/沒揮到該位置則不算。';
+
+  @override
+  String get recUseAnchor => '錨點擊球（V4）';
+
+  @override
+  String get recUseAnchorDesc => '用點選的球位當擊球點；關閉則保留座標但退回手腕弧底判定';
+
+  @override
+  String get recGlowDelay => '擊球光暈延遲';
 
   @override
   String get recordSettings => '錄製設定';
@@ -4360,6 +4413,11 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   }
 
   @override
+  String homeBallsUnit(int balls) {
+    return '$balls 球';
+  }
+
+  @override
   String get homeHitAnalysis => '击球分析';
 
   @override
@@ -5296,6 +5354,15 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get historyDetectBadgeBalanced => '均衡';
 
   @override
+  String get historyDetectV4Title => '锚点检测 (V4)';
+
+  @override
+  String get historyDetectV4Desc => '用录制时点选的球位/握把当锚点，击球＝主导腕距锚点最近那一帧。';
+
+  @override
+  String get historyDetectBadgeAnchor => '锚点';
+
+  @override
   String get historyDetectV3Time => '~45 秒';
 
   @override
@@ -5311,7 +5378,10 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get historyStartAnalysis => '开始分析';
 
   @override
-  String get historyActionDetect => '检测杆数';
+  String get historyMenuAddClip => '加入切片';
+
+  @override
+  String get historyActionDetect => '检测挥杆';
 
   @override
   String get historyActionAiAnalysis => 'AI 分析';
@@ -5609,6 +5679,9 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get playerTitle => '视频查看';
 
   @override
+  String get playerNote => '备注';
+
+  @override
   String get playerNoteAdd => '添加备注';
 
   @override
@@ -5628,6 +5701,12 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get playerSkeletonNotFound => '骨架数据不存在';
+
+  @override
+  String get playerOverlaySync => '叠图时间差';
+
+  @override
+  String get playerOverlaySyncDesc => '骨架/轨迹与视频的时间差。叠图落后→调大、超前→调小。';
 
   @override
   String get playerOverlaySkeleton => '骨架';
@@ -5903,7 +5982,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get recDetailDownloadVideo => '下载视频';
 
   @override
-  String get exportCustomTitle => '自定义导出';
+  String get exportCustomTitle => '导出';
 
   @override
   String get exportCustomSubtitle => '选择要烧录到视频上的元素';
@@ -6229,6 +6308,33 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get recordOverlayToggle => '轮廓叠加切换';
+
+  @override
+  String get recTapSetImpactPoint => '点选球的位置设定击球点';
+
+  @override
+  String get recSwingSpeed => '挥杆速度门槛';
+
+  @override
+  String get recShowTelemetry => '显示腕点数值（调试）';
+
+  @override
+  String get recAnchorRadius => '锚点命中半径（调小＝更严）';
+
+  @override
+  String get recAnchorGate => '锚点检测闸门';
+
+  @override
+  String get recAnchorGateDesc => '挥杆时主导腕须经过锚点半径内才算一杆；乱挥/没挥到该位置则不算。';
+
+  @override
+  String get recUseAnchor => '锚点击球（V4）';
+
+  @override
+  String get recUseAnchorDesc => '用点选的球位当击球点；关闭则保留坐标但退回手腕弧底判定';
+
+  @override
+  String get recGlowDelay => '击球光晕延迟';
 
   @override
   String get recordSettings => '录制设置';
@@ -7994,6 +8100,11 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   }
 
   @override
+  String homeBallsUnit(int balls) {
+    return '$balls 球';
+  }
+
+  @override
   String get homeHitAnalysis => '擊球分析';
 
   @override
@@ -8930,6 +9041,15 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get historyDetectBadgeBalanced => '均衡';
 
   @override
+  String get historyDetectV4Title => '錨點偵測 (V4)';
+
+  @override
+  String get historyDetectV4Desc => '用錄製時點選的球位/握把當錨點，擊球＝主導腕距錨點最近那一幀。';
+
+  @override
+  String get historyDetectBadgeAnchor => '錨點';
+
+  @override
   String get historyDetectV3Time => '~45 秒';
 
   @override
@@ -8945,7 +9065,10 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get historyStartAnalysis => '開始分析';
 
   @override
-  String get historyActionDetect => '偵測桿數';
+  String get historyMenuAddClip => '加入切片';
+
+  @override
+  String get historyActionDetect => '偵測揮桿';
 
   @override
   String get historyActionAiAnalysis => 'AI 分析';
@@ -9243,6 +9366,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get playerTitle => '影片查看';
 
   @override
+  String get playerNote => '備註';
+
+  @override
   String get playerNoteAdd => '新增備註';
 
   @override
@@ -9262,6 +9388,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get playerSkeletonNotFound => '骨架資料不存在';
+
+  @override
+  String get playerOverlaySync => '疊圖時間差';
+
+  @override
+  String get playerOverlaySyncDesc => '骨架/軌跡與影片的時間差。疊圖落後→調大、超前→調小。';
 
   @override
   String get playerOverlaySkeleton => '骨架';
@@ -9537,7 +9669,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get recDetailDownloadVideo => '下載影片';
 
   @override
-  String get exportCustomTitle => '自訂匯出';
+  String get exportCustomTitle => '匯出';
 
   @override
   String get exportCustomSubtitle => '選擇要燒錄到影片上的元素';
@@ -9863,6 +9995,33 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get recordOverlayToggle => '輪廓疊加切換';
+
+  @override
+  String get recTapSetImpactPoint => '點選球的位置設定擊球點';
+
+  @override
+  String get recSwingSpeed => '揮桿速度門檻';
+
+  @override
+  String get recShowTelemetry => '顯示腕點數值（除錯）';
+
+  @override
+  String get recAnchorRadius => '錨點命中半徑（調小＝更嚴）';
+
+  @override
+  String get recAnchorGate => '錨點偵測閘門';
+
+  @override
+  String get recAnchorGateDesc => '揮桿時主導腕須經過錨點半徑內才算一桿；亂揮/沒揮到該位置則不算。';
+
+  @override
+  String get recUseAnchor => '錨點擊球（V4）';
+
+  @override
+  String get recUseAnchorDesc => '用點選的球位當擊球點；關閉則保留座標但退回手腕弧底判定';
+
+  @override
+  String get recGlowDelay => '擊球光暈延遲';
 
   @override
   String get recordSettings => '錄製設定';

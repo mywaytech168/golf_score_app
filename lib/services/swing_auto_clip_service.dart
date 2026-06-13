@@ -62,6 +62,7 @@ class SwingAutoClipService {
     void Function(String label)? onProgress,
   }) async {
     final totalDur = sourceEntry.durationSeconds.toDouble();
+    final sessionDir = p.dirname(videoPath);
 
     // ── 1. 候選切點：live impacts ∪ 音訊峰值 ─────────────────────────────
     onProgress?.call('偵測擊球聲...');
@@ -78,7 +79,22 @@ class SwingAutoClipService {
     );
     debugPrint('[AutoClip] 候選: audio=${audioPeaks.length} '
         'live=${liveImpacts.length} → 合併 ${candidates.length} 桿');
-    if (candidates.isEmpty) return [];
+
+    // 每輪診斷 log（寫進 session 資料夾，供比對「即時判斷 vs session 最終」）
+    final log = StringBuffer()
+      ..writeln('=== AutoClip 偵測診斷 @ ${DateTime.now().toIso8601String()} ===')
+      ..writeln('video=$videoPath  totalDur=${totalDur.toStringAsFixed(2)}s')
+      ..writeln('即時擊球 liveImpacts (${liveImpacts.length}): '
+          '${liveImpacts.map((t) => t.toStringAsFixed(2)).join(", ")}')
+      ..writeln('音訊峰值 audioPeaks (${audioPeaks.length}): '
+          '${audioPeaks.map((t) => t.toStringAsFixed(2)).join(", ")}')
+      ..writeln('合併候選 candidates (${candidates.length}): '
+          '${candidates.map((c) => "${c.sec.toStringAsFixed(2)}${c.fromAudio ? "(音)" : "(骨)"}").join(", ")}');
+    if (candidates.isEmpty) {
+      log.writeln('→ 無候選，不切片');
+      await _writeDetectLog(sessionDir, log.toString());
+      return [];
+    }
 
     // ── 2. 切 5 秒 clip（V2 式，不需要骨架）────────────────────────────
     onProgress?.call('切片中...');
@@ -108,22 +124,45 @@ class SwingAutoClipService {
       onProgress?.call('分析第 ${i + 1}/${clips.length} 桿...');
       var entry = clips[i].entry;
       try {
-        entry = await analyzeClipEntry(entry);
+        entry = await analyzeClipEntry(entry, preserveHitSec: true);
       } catch (e) {
         debugPrint('[AutoClip] clip ${i + 1} 分析失敗（保留切片）: $e');
       }
       await RecordingHistoryStorage.instance.upsertEntry(entry);
       entries.add(entry);
+      // 比對：候選（即時判斷）秒數 vs 離線 SwingImpactDetector 重算的 clip 內 hitSec
+      final candSec = i < candidates.length ? candidates[i].sec : double.nan;
+      log.writeln('桿 ${i + 1}: 候選=${candSec.toStringAsFixed(2)}s '
+          '(${i < candidates.length && candidates[i].fromAudio ? "音訊精修" : "骨架/即時"}) '
+          '→ 採用即時判定 clip 內 hitSec=${entry.hitSecond?.toStringAsFixed(2) ?? "—"}s '
+          '${entry.goodShot == true ? "甜蜜點" : ""}');
     }
     debugPrint('[AutoClip] ✅ 完成 ${entries.length} 桿');
+    log.writeln('→ 完成 ${entries.length} 桿（最終 hitSec 採即時判定，離線只供 8 階段）');
+    await _writeDetectLog(sessionDir, log.toString());
     return entries;
+  }
+
+  /// 寫每輪偵測診斷 log 到 session 資料夾（detect_log.txt，附加模式保留歷次）。
+  static Future<void> _writeDetectLog(String sessionDir, String content) async {
+    try {
+      final f = File(p.join(sessionDir, 'detect_log.txt'));
+      await f.writeAsString('$content\n', mode: FileMode.append);
+      debugPrint('[AutoClip] 診斷 log → ${f.path}');
+    } catch (e) {
+      debugPrint('[AutoClip] detect_log.txt 寫入失敗: $e');
+    }
   }
 
   /// 對單一 5 秒 clip 跑逐幀骨架分析，並以 clip CSV 重新定位精確擊球點與 8 階段。
   /// 之後對 clip 的 audio.wav 跑 5 特徵音訊評分（甜蜜點），結果寫入 entry。
   /// （公開供「偵測擊球」V2 流程於切片後背景補分析）
+  ///
+  /// [preserveHitSec]：true 時**保留 entry 既有的擊球時刻**（＝即時 LiveSwingDetector
+  /// 的判定，已含嚴格雙手/門檻/錨點 V4），離線偵測只用來產生 8 階段，不覆蓋 hitSecond。
+  /// 錄影自動切片走此路徑，讓 session 結果與即時光暈一致；手動「偵測揮桿」維持離線精修。
   static Future<RecordingHistoryEntry> analyzeClipEntry(
-      RecordingHistoryEntry entry) async {
+      RecordingHistoryEntry entry, {bool preserveHitSec = false}) async {
     final clipDir = p.dirname(entry.filePath);
     final csvPath = p.join(clipDir, 'pose_landmarks.csv');
 
@@ -146,8 +185,10 @@ class SwingAutoClipService {
       hit: hit,
       clipActualStartSec: 0.0,  // clip CSV 為 clip 相對時間
     );
-    return scoreClipAudio(
-        entry.copyWith(hitSecond: hit.hitSec, isAnalyzed: true));
+    // 即時判定為準：保留 entry.hitSecond（不採離線 hit.hitSec）；否則用離線精修
+    return scoreClipAudio(preserveHitSec
+        ? entry.copyWith(isAnalyzed: true)
+        : entry.copyWith(hitSecond: hit.hitSec, isAnalyzed: true));
   }
 
   /// 對 clip 的 audio.wav 跑 5 特徵音訊評分並寫入 entry（失敗回傳原 entry）。
@@ -225,6 +266,62 @@ class SwingAutoClipService {
       await f.writeAsString(jsonEncode({'impacts': impacts}));
     } catch (e) {
       debugPrint('[AutoClip] live_impacts.json 寫入失敗: $e');
+    }
+  }
+
+  // ── anchor.json：錄製時使用的擊球錨點（歸一化），供離線 V4 偵測 ──────────────
+
+  /// 存錄製時的擊球錨點到 session（離線 V4 用）。x/y 任一為 null 則不寫。
+  static Future<void> saveAnchor(
+      String sessionDir, double? x, double? y) async {
+    if (x == null || y == null) return;
+    try {
+      final f = File(p.join(sessionDir, 'anchor.json'));
+      await f.writeAsString(jsonEncode({'x': x, 'y': y}));
+    } catch (e) {
+      debugPrint('[AutoClip] anchor.json 寫入失敗: $e');
+    }
+  }
+
+  /// 把 session 內的診斷小檔（detect_log.txt / anchor.json / live_impacts.json /
+  /// audio_peaks.json / phases.json）打包成單一 meta.json 字串，供上傳。
+  /// 各檔不存在則略過；全無則回傳僅含基本資訊的 JSON。
+  static Future<String> buildSessionMetaJson(String sessionDir) async {
+    final meta = <String, dynamic>{
+      'sessionDir': p.basename(sessionDir),
+    };
+    Future<void> addJson(String name, String key) async {
+      try {
+        final f = File(p.join(sessionDir, name));
+        if (await f.exists()) meta[key] = jsonDecode(await f.readAsString());
+      } catch (_) {/* 損壞略過 */}
+    }
+    Future<void> addText(String name, String key) async {
+      try {
+        final f = File(p.join(sessionDir, name));
+        if (await f.exists()) meta[key] = await f.readAsString();
+      } catch (_) {}
+    }
+    await addJson('anchor.json', 'anchor');
+    await addJson('live_impacts.json', 'liveImpacts');
+    await addJson('audio_peaks.json', 'audioPeaks');
+    await addJson('phases.json', 'phases');
+    await addText('detect_log.txt', 'detectLog');
+    return jsonEncode(meta);
+  }
+
+  /// 讀 session 的擊球錨點（歸一化）；無則回 null（→ 該影片不顯示離線 V4）。
+  static Future<(double, double)?> loadAnchor(String sessionDir) async {
+    try {
+      final f = File(p.join(sessionDir, 'anchor.json'));
+      if (!await f.exists()) return null;
+      final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      final x = (m['x'] as num?)?.toDouble(), y = (m['y'] as num?)?.toDouble();
+      if (x == null || y == null) return null;
+      return (x, y);
+    } catch (e) {
+      debugPrint('[AutoClip] anchor.json 讀取失敗: $e');
+      return null;
     }
   }
 

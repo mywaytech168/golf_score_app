@@ -66,6 +66,7 @@ namespace UploadServer.Controllers
             var clipUploadUrl  = _b2.GenerateClipUploadUrl(analysis.Id);
             var csvUploadUrl   = req.HasCsv   ? _b2.GenerateCsvUploadUrl(analysis.Id)   : null;
             var audioUploadUrl = req.HasAudio ? _b2.GenerateAudioUploadUrl(analysis.Id) : null;
+            var metaUploadUrl  = _b2.GenerateMetaUploadUrl(analysis.Id);
 
             List<string>? keyframeUploadUrls = null;
             if (req.KeyframeCount > 0)
@@ -84,6 +85,7 @@ namespace UploadServer.Controllers
                 CsvUploadUrl      = csvUploadUrl,
                 AudioUploadUrl    = audioUploadUrl,
                 KeyframeUploadUrls = keyframeUploadUrls,
+                MetaUploadUrl     = metaUploadUrl,
             });
         }
 

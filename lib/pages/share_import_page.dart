@@ -112,10 +112,10 @@ class _ShareImportPageState extends State<ShareImportPage> {
         elevation: 0,
         foregroundColor: context.textPrimary,
       ),
-      body: Padding(
+      body: SafeArea(top: false, child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: _buildBody(),
-      ),
+      )),
     );
   }
 

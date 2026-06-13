@@ -2,8 +2,10 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import 'auth_token_storage.dart';
+import 'swing_auto_clip_service.dart';
 import 'v3_analysis_service.dart';
 
 const _baseUrl = 'https://orvia.api.atk.tw';
@@ -20,6 +22,8 @@ class AnalysisRequestResult {
   final String? audioUploadUrl;
   /// keyframeCount>0 時才有值；依序上傳 keyframe_0.jpg ... keyframe_N.jpg
   final List<String>? keyframeUploadUrls;
+  /// 診斷 meta.json 上傳 URL（偵測 log/錨點/即時擊球等）
+  final String? metaUploadUrl;
 
   AnalysisRequestResult({
     required this.analysisId,
@@ -27,6 +31,7 @@ class AnalysisRequestResult {
     this.csvUploadUrl,
     this.audioUploadUrl,
     this.keyframeUploadUrls,
+    this.metaUploadUrl,
   });
 
   factory AnalysisRequestResult.fromJson(Map<String, dynamic> j) =>
@@ -36,6 +41,7 @@ class AnalysisRequestResult {
         csvUploadUrl:       j['csvUploadUrl']   as String?,
         audioUploadUrl:     j['audioUploadUrl'] as String?,
         keyframeUploadUrls: (j['keyframeUploadUrls'] as List<dynamic>?)?.cast<String>(),
+        metaUploadUrl:      j['metaUploadUrl']  as String?,
       );
 }
 
@@ -444,6 +450,27 @@ class AnalysisService {
     debugPrint('✅ CSV 上傳完成: ${bytes.length ~/ 1024}KB');
   }
 
+  /// 直傳診斷 meta.json（偵測 log/錨點/即時擊球等）到 B2（Presigned PUT）。
+  Future<void> uploadMeta({
+    required String metaUploadUrl,
+    required String metaJson,
+  }) async {
+    final bytes = utf8.encode(metaJson);
+    await _dio.put(
+      metaUploadUrl,
+      data: bytes,
+      options: Options(
+        headers: {
+          'Content-Type':   'application/json',
+          'Content-Length': bytes.length.toString(),
+        },
+        sendTimeout:    const Duration(minutes: 2),
+        receiveTimeout: const Duration(minutes: 2),
+      ),
+    );
+    debugPrint('✅ meta 上傳完成: ${bytes.length} bytes');
+  }
+
   // ── 步驟 2c ───────────────────────────────────────────────────
 
   /// 直傳單一 keyframe JPEG（base64 bytes）到 B2（Presigned PUT）—— V3 專用
@@ -595,6 +622,17 @@ class AnalysisService {
         } catch (e) {
           debugPrint('⚠️ Keyframe[$i] 上傳失敗（略過）: $e');
         }
+      }
+    }
+
+    // 診斷 meta.json（偵測 log/錨點/即時擊球等；失敗略過不阻斷分析）
+    if (req.metaUploadUrl != null) {
+      try {
+        final meta = await SwingAutoClipService.buildSessionMetaJson(
+            p.dirname(clipPath));
+        await uploadMeta(metaUploadUrl: req.metaUploadUrl!, metaJson: meta);
+      } catch (e) {
+        debugPrint('⚠️ meta 上傳失敗（略過）: $e');
       }
     }
 
