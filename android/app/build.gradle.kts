@@ -97,8 +97,12 @@ android {
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
+            // ★ 用非 optimize 基底：optimize 版會做 method inlining，把呼叫 MediaPipe 的
+            //   stack frame（MediaPipePoseHelper.build）內聯掉，導致 Graph.<clinit> 走 stack
+            //   找不到 caller → IllegalStateException「no caller found on the stack」→
+            //   ExceptionInInitializerError → PoseLandmarker init 失敗 → 骨架全無（僅 release）。
             proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
+                getDefaultProguardFile("proguard-android.txt"),
                 "proguard-rules.pro"
             )
         }

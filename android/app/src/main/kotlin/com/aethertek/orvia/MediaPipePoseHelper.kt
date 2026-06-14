@@ -214,6 +214,7 @@ class MediaPipePoseHelper(
     /** 從 assets 讀模型成 direct ByteBuffer（繞開 openFd 對未壓縮 asset 的依賴）。 */
     private fun loadModelBuffer(assetPath: String): java.nio.ByteBuffer {
         val bytes = context.assets.open(assetPath).use { it.readBytes() }
+        Log.i(TAG, "model loaded: $assetPath ${bytes.size} bytes")
         return java.nio.ByteBuffer.allocateDirect(bytes.size).apply {
             put(bytes)
             rewind()

@@ -28,7 +28,13 @@
 
 # MediaPipe Tasks（PoseLandmarker 走 JNI，類名不可混淆）
 -keep class com.google.mediapipe.** { *; }
+-keepnames class com.google.mediapipe.** { *; }
 -dontwarn com.google.mediapipe.**
+
+# Protobuf（MediaPipe Tasks 內部 graph/proto 註冊依賴）
+-keep class com.google.protobuf.** { *; }
+-keepnames class com.google.protobuf.** { *; }
+-dontwarn com.google.protobuf.**
 
 # 保留所有含 native 方法的類別與方法名（golf_native.so JNI 綁定）
 -keepclasseswithmembernames class * {
