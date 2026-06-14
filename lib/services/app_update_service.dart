@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_store_lookup_service.dart';
 import 'video_server_client.dart';
 
 // ─────────────────────────────────────────────────────────────────
@@ -63,61 +64,114 @@ class AppUpdateService {
     await prefs.setString(_snoozeKey, version);
   }
 
-  /// 向後端查詢最新版本，回傳更新結果。
+  /// 查詢最新版本，回傳更新結果。
   ///
-  /// 若網路不可用或後端異常，回傳 [UpdateStatus.none]，不阻擋使用者。
+  /// 檢查來源依平台對齊實際發佈通路：
+  /// - iOS → App Store（iTunes lookup）為「有沒有新版」的真實來源，
+  ///   強制政策仍由後端決定；查不到時退回後端檢查。
+  /// - Android → 後端 orvia.api（側載 APK 通路由後端掌控版本號）。
+  ///
+  /// 若網路不可用或異常，回傳 [UpdateStatus.none]，不阻擋使用者。
   static Future<AppUpdateResult> check() async {
     try {
       final info = await PackageInfo.fromPlatform();
       final currentVersion = info.version; // e.g. "1.0.0"
 
-      final platform = Platform.isIOS ? 'ios' : 'android';
-
-      final data = await VideoServerClient.instance.checkVersion(
-        platform: platform,
-        version: currentVersion,
-      );
-
-      if (data == null) {
-        return _noUpdate(currentVersion);
+      if (Platform.isIOS) {
+        return await _checkIos(currentVersion, info.packageName);
       }
-
-      final latestVersion = (data['latestVersion'] as String?) ?? currentVersion;
-      final minRequired  = (data['minRequiredVersion'] as String?) ?? '0.0.0';
-      final forceUpdate  = (data['forceUpdate'] as bool?) ?? false;
-      final updateUrl    = (data['updateUrl'] as String?) ?? '';
-      final releaseDate  = (data['releaseDate'] as String?) ?? '';
-      final rawNotes     = data['releaseNotes'];
-      final releaseNotes = rawNotes is List
-          ? rawNotes.whereType<String>().toList()
-          : <String>[];
-
-      // 判斷是否需要更新
-      final isNewer = _isOlderThan(currentVersion, latestVersion);
-      if (!isNewer) return _noUpdate(currentVersion);
-
-      // 強制 or 選用：優先看後端 forceUpdate 旗標，
-      // 若後端未設定則用 minRequired 自動計算
-      final isForcedByVersion = _isOlderThan(currentVersion, minRequired);
-      final status = (forceUpdate || isForcedByVersion)
-          ? UpdateStatus.forced
-          : UpdateStatus.optional;
-
-      debugPrint('[AppUpdate] current=$currentVersion latest=$latestVersion '
-          'min=$minRequired status=$status');
-
-      return AppUpdateResult(
-        status: status,
-        currentVersion: currentVersion,
-        latestVersion: latestVersion,
-        updateUrl: updateUrl,
-        releaseNotes: releaseNotes,
-        releaseDate: releaseDate,
-      );
+      return await _checkBackend(currentVersion, 'android');
     } catch (e) {
       debugPrint('[AppUpdate] 版本檢查失敗（略過）: $e');
       return _noUpdate('');
     }
+  }
+
+  /// iOS：以 App Store 上架版本為準判斷是否有新版。
+  static Future<AppUpdateResult> _checkIos(
+      String currentVersion, String bundleId) async {
+    final store = await AppStoreLookupService.lookup(bundleId);
+
+    // App Store 查不到（未上架 / TestFlight / 網路失敗）→ 退回後端檢查
+    if (store == null) {
+      return _checkBackend(currentVersion, 'ios');
+    }
+
+    final isNewer = _isOlderThan(currentVersion, store.version);
+    if (!isNewer) return _noUpdate(currentVersion);
+
+    // 強制更新政策仍由後端決定（minRequiredVersion / forceUpdate），
+    // 後端不可用時退回「非強制」，不阻擋使用者。
+    bool forced = false;
+    try {
+      final data = await VideoServerClient.instance
+          .checkVersion(platform: 'ios', version: currentVersion);
+      if (data != null) {
+        final minRequired = (data['minRequiredVersion'] as String?) ?? '0.0.0';
+        final forceUpdate = (data['forceUpdate'] as bool?) ?? false;
+        forced = forceUpdate || _isOlderThan(currentVersion, minRequired);
+      }
+    } catch (_) {
+      // 後端不可用 → 非強制
+    }
+
+    debugPrint('[AppUpdate][iOS] current=$currentVersion '
+        'store=${store.version} forced=$forced');
+
+    return AppUpdateResult(
+      status: forced ? UpdateStatus.forced : UpdateStatus.optional,
+      currentVersion: currentVersion,
+      latestVersion: store.version,
+      updateUrl: store.trackViewUrl,
+      releaseNotes: store.releaseNotes,
+      releaseDate: '',
+    );
+  }
+
+  /// 後端 orvia.api 版本檢查（Android 主用；iOS 在 App Store 查不到時退回）。
+  static Future<AppUpdateResult> _checkBackend(
+      String currentVersion, String platform) async {
+    final data = await VideoServerClient.instance.checkVersion(
+      platform: platform,
+      version: currentVersion,
+    );
+
+    if (data == null) {
+      return _noUpdate(currentVersion);
+    }
+
+    final latestVersion = (data['latestVersion'] as String?) ?? currentVersion;
+    final minRequired  = (data['minRequiredVersion'] as String?) ?? '0.0.0';
+    final forceUpdate  = (data['forceUpdate'] as bool?) ?? false;
+    final updateUrl    = (data['updateUrl'] as String?) ?? '';
+    final releaseDate  = (data['releaseDate'] as String?) ?? '';
+    final rawNotes     = data['releaseNotes'];
+    final releaseNotes = rawNotes is List
+        ? rawNotes.whereType<String>().toList()
+        : <String>[];
+
+    // 判斷是否需要更新
+    final isNewer = _isOlderThan(currentVersion, latestVersion);
+    if (!isNewer) return _noUpdate(currentVersion);
+
+    // 強制 or 選用：優先看後端 forceUpdate 旗標，
+    // 若後端未設定則用 minRequired 自動計算
+    final isForcedByVersion = _isOlderThan(currentVersion, minRequired);
+    final status = (forceUpdate || isForcedByVersion)
+        ? UpdateStatus.forced
+        : UpdateStatus.optional;
+
+    debugPrint('[AppUpdate] current=$currentVersion latest=$latestVersion '
+        'min=$minRequired status=$status');
+
+    return AppUpdateResult(
+      status: status,
+      currentVersion: currentVersion,
+      latestVersion: latestVersion,
+      updateUrl: updateUrl,
+      releaseNotes: releaseNotes,
+      releaseDate: releaseDate,
+    );
   }
 
   // ── 工具方法 ──────────────────────────────────────────────────

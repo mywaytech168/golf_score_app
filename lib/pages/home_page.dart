@@ -22,9 +22,11 @@ import '../services/purchase_service.dart';
 import '../services/announcement_service.dart';
 import '../services/reward_service.dart';
 import '../services/audio_analysis_service.dart';
+import '../services/p_system_trend_service.dart';
 import '../widgets/audio_feature_pass_row.dart';
 import '../widgets/green_page_header.dart';
 import '../widgets/posture_breakdown_card.dart';
+import '../widgets/p_system_trend_card.dart';
 import 'announcement_page.dart';
 import 'reward_page.dart';
 import 'settings_page.dart';
@@ -518,6 +520,18 @@ class _HomePageState extends State<HomePage> {
               PostureBreakdownCard(
                 breakdown: today?.postureBreakdown ?? {},
                 title: AppLocalizations.of(context).homeTodayPosture,
+              ),
+              const SizedBox(height: kSpaceMD),
+              // 修正追蹤：跨 clip 讀 angles.json 算 P-System 趨勢（無資料→不顯示）
+              FutureBuilder<List<DefectTrend>>(
+                future: PSystemTrendService.loadRecent(),
+                builder: (ctx, snap) {
+                  final trends = snap.data;
+                  if (trends == null || trends.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return PSystemTrendCard(trends: trends);
+                },
               ),
             ],
           ),

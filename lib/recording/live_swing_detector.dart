@@ -81,6 +81,13 @@ class LiveSwingDetector {
   static const int _bufSize = 60;
   final _speedBuf = Queue<double>();
 
+  // 自校準噪音地板：校準期累計腕速，期滿取 p90 當「靜止/waggle/呼吸晃動」基線；
+  // 開火門檻額外不低於 baseline×k → 框景近/雜訊大時自動提高，抑制晃動誤觸。
+  // 純加性（只會抬高門檻、不會放寬）→ 不增誤報；靜止校準時 baseline≈0 無作用。
+  final List<double> _calibSpeeds = [];
+  double _calibBaseline = 0.0;
+  static const double _calibFloorK = 2.5;
+
   SwingDetectState _state = SwingDetectState.calibrating;
   double _calibrationEndTime = 0;
   double _cooldownEndTime    = 0;
@@ -142,6 +149,8 @@ class LiveSwingDetector {
     _speedBuf.clear();
     _state             = SwingDetectState.calibrating;
     _calibrationEndTime = 0;
+    _calibSpeeds.clear();
+    _calibBaseline      = 0.0;
     _cooldownEndTime   = 0;
     _peakSpeed         = 0;
     _peakTimeSec       = 0;
@@ -227,12 +236,14 @@ class LiveSwingDetector {
     _speedBuf.addLast(speed);
     if (_speedBuf.length > _bufSize) _speedBuf.removeFirst();
 
-    // 校準期
+    // 校準期：累計腕速分佈，期滿取 p90 當自校準噪音基線。
     if (_state == SwingDetectState.calibrating) {
       if (_calibrationEndTime == 0) _calibrationEndTime = timeSec + calibrationSec;
+      if (speed > 0) _calibSpeeds.add(speed);
       if (timeSec < _calibrationEndTime) return;
+      _calibBaseline = _percentile(_calibSpeeds, 90);
       _state = SwingDetectState.listening;
-      debugPrint('[LiveSwing] 校準完成 → 開始偵測');
+      debugPrint('[LiveSwing] 校準完成（baseline=${_calibBaseline.toStringAsFixed(4)}）→ 開始偵測');
     }
 
     // 冷卻期
@@ -334,7 +345,7 @@ class LiveSwingDetector {
         } else if (depth < _bottomDepth! - _riseEps) {
           // 開始遠離 → 累計確認幀
           _riseFrames++;
-          final fireFloor = math.max(thr * 1.5, swingSpeedFloor);
+          final fireFloor = _fireFloor(thr);
           // 錨點時刻模式：最近距離（=−_bottomDepth）須在命中半徑內，否則不採此路徑開火
           final anchorClose =
               !_anchorHit || (_bottomDepth! >= -anchorHitRadius);
@@ -360,7 +371,7 @@ class LiveSwingDetector {
       // --- fallback：回落已確認但未抓到垂直反轉（純水平揮桿）→ 退回峰值時刻 ---
       if (_fallFrames >= _minFallFrames) {
         // 邊際峰值（< max(thr×1.5, 絕對下限)）或雙手判斷未確認（單手動作）→ 視為誤觸，不開火
-        final fireFloor = math.max(thr * 1.5, swingSpeedFloor);
+        final fireFloor = _fireFloor(thr);
         // 速度不足／單手／錨點閘門未通過（揮桿未經過錨點）→ 視為誤觸，不開火
         if (_peakSpeed < fireFloor || !_bothConfirmed() || !_anchorGatePass) {
           debugPrint('[LiveSwing] 忽略（速度不足或單手或未過錨點）peak=${_peakSpeed.toStringAsFixed(4)} '
@@ -427,5 +438,17 @@ class LiveSwingDetector {
     final sorted = _speedBuf.toList()..sort();
     final idx = (0.80 * (sorted.length - 1)).round().clamp(0, sorted.length - 1);
     return math.max(_minThreshold, sorted[idx] * 1.8);
+  }
+
+  /// 開火門檻：動態 thr×1.5、使用者門檻 swingSpeedFloor、自校準基線×k 三者取最大。
+  /// 純加性下限——只會抬高、不會放寬，故不會新增誤報，只抑制雜訊誤觸。
+  double _fireFloor(double thr) =>
+      math.max(math.max(thr * 1.5, swingSpeedFloor), _calibBaseline * _calibFloorK);
+
+  static double _percentile(List<double> values, double pct) {
+    if (values.isEmpty) return 0;
+    final s = [...values]..sort();
+    final idx = (pct / 100 * (s.length - 1)).round().clamp(0, s.length - 1);
+    return s[idx];
   }
 }

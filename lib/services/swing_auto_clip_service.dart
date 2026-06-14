@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -233,19 +234,41 @@ class SwingAutoClipService {
       return [for (final s in sorted) (sec: s, fromAudio: true)];
     }
 
-    // 骨架為主：每個 live impact 為一桿，窗口內有音訊峰值就取峰值時間
-    final refined = <({double sec, bool fromAudio})>[];
-    for (final s in liveImpacts) {
-      double? best;
-      for (final a in audioPeaks) {
-        if (a < s - _audioRefineEarlySec || a > s + _audioRefineLateSec) {
-          continue;
-        }
-        if (best == null || (a - s).abs() < (best - s).abs()) best = a;
+    // 骨架為主：每個 live impact 為一桿。音訊峰值精修採「自適應對稱窗 + 全域一對一指派」：
+    //  ・前窗自適應：min(4.0, 與前一桿間隔×0.45) → 連續打球（間隔<4s）不會把前一桿的
+    //    音峰誤配給當前桿（原固定 4s 前窗在快速連擊時誤配）。
+    //  ・一對一指派：所有 (live,peak) 配對依距離排序貪婪指派，禁止一個峰值被兩桿共用
+    //    （原邏輯兩桿可吃同一峰 → 事後去重把兩桿併成一桿、漏掉一桿）。
+    final lives = [...liveImpacts]..sort();
+    final peaks = [...audioPeaks]..sort();
+
+    final pairs = <({int li, int pj, double dist})>[];
+    for (int i = 0; i < lives.length; i++) {
+      final s = lives[i];
+      final gapPrev = i > 0 ? s - lives[i - 1] : double.infinity;
+      final frontWin = math.min(_audioRefineEarlySec, gapPrev * 0.45);
+      for (int j = 0; j < peaks.length; j++) {
+        final a = peaks[j];
+        if (a < s - frontWin || a > s + _audioRefineLateSec) continue;
+        pairs.add((li: i, pj: j, dist: (a - s).abs()));
       }
-      refined.add(best != null
-          ? (sec: best, fromAudio: true)
-          : (sec: s, fromAudio: false));
+    }
+    pairs.sort((x, y) => x.dist.compareTo(y.dist));
+
+    final liveToPeak = <int, int>{};
+    final usedPeak = <int>{};
+    for (final pr in pairs) {
+      if (liveToPeak.containsKey(pr.li) || usedPeak.contains(pr.pj)) continue;
+      liveToPeak[pr.li] = pr.pj;
+      usedPeak.add(pr.pj);
+    }
+
+    final refined = <({double sec, bool fromAudio})>[];
+    for (int i = 0; i < lives.length; i++) {
+      final pj = liveToPeak[i];
+      refined.add(pj != null
+          ? (sec: peaks[pj], fromAudio: true)
+          : (sec: lives[i], fromAudio: false));
     }
     refined.sort((a, b) => a.sec.compareTo(b.sec));
 

@@ -21,6 +21,7 @@ import 'golfer_mask.dart';
 import 'video_analysis_service.dart';
 import 'video_clip_service.dart';
 import 'skeleton_csv_locator.dart';
+import 'p_system_analyzer.dart';
 
 /// 骨架分析模式。
 ///
@@ -318,7 +319,7 @@ class ClipPipelineService {
     required double clipActualStartSec,
   }) async {
     double clip(double srcSec) => (srcSec - clipActualStartSec).clamp(0.0, 3600.0);
-    final map = {
+    final map = <String, double>{
       'address':       clip(hit.addressSec),
       'takeaway':      clip(hit.takeawaySec),
       'backswing':     clip(hit.backswingSec),
@@ -328,6 +329,26 @@ class ClipPipelineService {
       'followthrough': clip(hit.followThroughSec),
       'finish':        clip(hit.finishSec),
     };
+
+    // P1-P10（附加，向後相容）：p1=address / p4=top / p7=impact / p10=finish 為強錨點，
+    // 其餘 P2/P3/P5/P6/P8/P9 由 PSystemAnalyzer 從 clip 骨架幾何偵測；同時寫 angles.json。
+    // 既有 8 key 不動，新 p1..p10 key 並存 → 舊消費端零破壞，新 UI 讀 p-key。
+    try {
+      final ps = await PSystemAnalyzer.analyze(
+        sessionDir: sessionDir,
+        p1Sec: map['address']!,
+        p4Sec: map['top']!,
+        p7Sec: map['impact']!,
+        p10Sec: map['finish']!,
+      );
+      if (ps != null) {
+        ps.pSec.forEach((k, v) => map[k] = v);
+        await ps.save(sessionDir);
+      }
+    } catch (e) {
+      debugPrint('[Pipeline] P-System 分析失敗: $e');
+    }
+
     try {
       await File(p.join(sessionDir, 'phases.json'))
           .writeAsString(jsonEncode(map));

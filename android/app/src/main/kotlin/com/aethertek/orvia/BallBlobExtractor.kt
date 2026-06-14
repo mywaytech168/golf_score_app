@@ -135,13 +135,17 @@ class BallBlobExtractor {
         val videoW    = inputFormat.getInteger(MediaFormat.KEY_WIDTH)
         val videoH    = inputFormat.getInteger(MediaFormat.KEY_HEIGHT)
         val videoMime = inputFormat.getString(MediaFormat.KEY_MIME) ?: "video/avc"
-        val fps       = runCatching {
+        // 真實 fps：優先 KEY_FRAME_RATE、其次 KEY_CAPTURE_RATE（高速/slow-mo 錄影的擷取率），
+        // 皆缺才退 30。逐幀真實時間以 ptsUs 為準（Dart 端拋物線擬合已改吃 ptsUs），此 fps 僅供
+        // Kalman dt / 幀數估計——避免「硬退 30」在 120/240fps 影片嚴重低估。
+        val frameRateKey = runCatching {
             inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble()
-        }.getOrElse { 30.0 }  // ✅ 改為 30fps，保持與原錄影一致
-        
-        // 🎬 明確記錄 fps 來源
-        val fpsFromMetadata = runCatching { inputFormat.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
-        Log.d(TAG, "[BallBlobExtractor] 🎬 fps 檢測: metadata=${fpsFromMetadata} → 使用=$fps")
+        }.getOrNull()
+        val captureRateKey = runCatching {
+            inputFormat.getFloat(MediaFormat.KEY_CAPTURE_RATE).toDouble()
+        }.getOrNull()
+        val fps = frameRateKey ?: captureRateKey ?: 30.0
+        Log.d(TAG, "[BallBlobExtractor] 🎬 fps: frameRate=$frameRateKey captureRate=$captureRateKey → 使用=$fps")
 
         val (rotation, totalFrames) = android.media.MediaMetadataRetriever().use { mmr ->
             mmr.setDataSource(inputPath)

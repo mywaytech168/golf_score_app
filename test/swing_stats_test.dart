@@ -98,6 +98,20 @@ void main() {
       expect(stats.tempoRatio, isNull);
       expect(stats.downswingSec, closeTo(0.03, 1e-9));
     });
+
+    test('合理區間 3:1 → tempoConfident=true', () {
+      final stats = SwingStats.compute(
+          phases: {'takeaway': 1.0, 'top': 1.9, 'impact': 2.2});
+      expect(stats.tempoConfident, isTrue);
+    });
+
+    test('極端節奏比（>4:1）→ tempoConfident=false', () {
+      // 上桿 1.0s / 下桿 0.2s = 5:1（偵測雜訊或極端）
+      final stats = SwingStats.compute(
+          phases: {'takeaway': 1.0, 'top': 2.0, 'impact': 2.2});
+      expect(stats.tempoRatio, closeTo(5.0, 1e-9));
+      expect(stats.tempoConfident, isFalse);
+    });
   });
 
   test('無軌跡無階段 → isEmpty', () {

@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -226,12 +227,34 @@ class ShareService {
     File(zipPath).deleteSync();
 
     // 找主影片（優先 swing.mp4，次選 clip.mp4）
+    // swing.mov 兜底：涵蓋治本前 iOS 匯入存成 .mov 的舊 session。
     String? mainVideo;
-    for (final name in ['swing.mp4', 'clip.mp4', 'analyzed.mp4']) {
+    for (final name in ['swing.mp4', 'clip.mp4', 'analyzed.mp4', 'swing.mov']) {
       final f = File('$sessionDir/$name');
       if (f.existsSync()) { mainVideo = f.path; break; }
     }
     if (mainVideo == null) throw Exception('解壓縮後找不到影片檔案');
+
+    // 接收端正規化：治本前 iOS 匯入存成 swing.mov 的舊 session，在本機轉成
+    // 標準 swing.mp4——與匯入端一致。Android MediaCodec 切片器無法處理 .mov
+    // 容器，不轉的話收到的舊片可匯入/播放卻無法切片/分析（remux 只換容器，秒級）。
+    if (p.basename(mainVideo).toLowerCase() == 'swing.mov') {
+      final mp4Path = '$sessionDir/swing.mp4';
+      try {
+        onStatus?.call('轉檔中…');
+        const ch = MethodChannel('com.example.golf_score_app/video_transcoder');
+        final out = await ch.invokeMethod<String>(
+          'transcodeToMp4',
+          {'srcPath': mainVideo, 'dstPath': mp4Path},
+        );
+        if (out != null && File(mp4Path).existsSync()) {
+          File(mainVideo).deleteSync(); // 移除原 .mov，全鏈路只留 swing.mp4
+          mainVideo = mp4Path;
+        }
+      } catch (_) {
+        // 轉檔失敗：保留 .mov（至少可匯入/播放），不阻斷分享匯入
+      }
+    }
 
     // 讀取 session_meta.json 重建 entry（含原始分析結果）
     RecordingHistoryEntry entry;
@@ -263,7 +286,7 @@ class ShareService {
           : existing.map((e) => e.roundIndex).reduce((a, b) => a > b ? a : b) + 1;
 
       entry = original.copyWith(
-        filePath: mainVideo,
+        filePath: mainVideo!,
         roundIndex: nextIndex,
         thumbnailPath: remappedThumb,
         createdAt: DateTime.now(),   // 匯入時刻，確保出現在歷史最上方
@@ -278,7 +301,7 @@ class ShareService {
           : existing.map((e) => e.roundIndex).reduce((a, b) => a > b ? a : b) + 1;
 
       entry = RecordingHistoryEntry(
-        filePath: mainVideo,
+        filePath: mainVideo!,
         roundIndex: nextIndex,
         recordedAt: DateTime.now(),
         createdAt: DateTime.now(),

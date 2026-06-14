@@ -36,6 +36,9 @@ namespace UploadServer.DTOs
         /// <summary>客戶端音訊分析結果 JSON（含 pass_count / passes / features）；null = 無音訊分析</summary>
         public string? AudioAnalysisJson { get; set; }
 
+        /// <summary>裝置端 P-System 角度量化 JSON（angles.json 內容）；注入 Gemini 當客觀依據；null = 無</summary>
+        public string? SwingMetricsJson { get; set; }
+
         /// <summary>v2：每秒取樣幀數（覆蓋 server 設定）；null = 使用 server 預設值</summary>
         public int? V2Fps { get; set; }
 

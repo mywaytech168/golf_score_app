@@ -875,6 +875,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateCannotOpenStore => '無法開啟商店頁面，請手動前往更新';
 
   @override
+  String get updateDownloadedReady => '更新已下載完成，重新啟動即可套用';
+
+  @override
+  String get updateRestartNow => '重新啟動';
+
+  @override
   String get updateRequiredTitle => '必要更新';
 
   @override
@@ -2208,6 +2214,145 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get playerPhaseFinish => '收桿';
+
+  @override
+  String get pSystemTitle => 'P 動作分析';
+
+  @override
+  String get pSystemViewpointWarn => '旋轉角需正面拍攝';
+
+  @override
+  String get pSystemNoMetrics => '此位置無可量化指標';
+
+  @override
+  String get metricSpineTilt => '脊椎角';
+
+  @override
+  String get metricHeadMove => '頭部位移';
+
+  @override
+  String get metricXFactor => 'X-factor';
+
+  @override
+  String get metricWeightShift => '重心轉移';
+
+  @override
+  String get metricOverall => '整體';
+
+  @override
+  String get trendTitle => '修正追蹤';
+
+  @override
+  String get trendImproving => '改善中';
+
+  @override
+  String get trendDeclining => '退步';
+
+  @override
+  String get trendStable => '持平';
+
+  @override
+  String get trendInsufficient => '資料不足';
+
+  @override
+  String get pLabelP1 => '預備';
+
+  @override
+  String get pLabelP2 => '起桿';
+
+  @override
+  String get pLabelP3 => '半上';
+
+  @override
+  String get pLabelP4 => '頂點';
+
+  @override
+  String get pLabelP5 => '半下';
+
+  @override
+  String get pLabelP6 => '觸前';
+
+  @override
+  String get pLabelP7 => '擊球';
+
+  @override
+  String get pLabelP8 => '送桿';
+
+  @override
+  String get pLabelP9 => '半收';
+
+  @override
+  String get pLabelP10 => '收桿';
+
+  @override
+  String get chartTabStage => '階段';
+
+  @override
+  String get chartTabCharts => '圖表';
+
+  @override
+  String get chartTabAudio => '音頻';
+
+  @override
+  String get chartTabPosture => '姿勢';
+
+  @override
+  String get pSystemNoData => '此切片無 P 動作資料，請重新偵測揮桿';
+
+  @override
+  String get pSystemHelpTitle => 'P 動作分析說明';
+
+  @override
+  String get pSystemHelpIntro =>
+      'P1–P10 是揮桿從預備到收桿的 10 個關鍵位置。每個位置量測幾項生物力學角度並評分，幫你看出哪個環節需要調整。';
+
+  @override
+  String get pSystemHelpPositionsHeader => '十個位置';
+
+  @override
+  String get pSystemHelpReliable => '可靠錨點';
+
+  @override
+  String get pSystemHelpProxy => '代理估計 (beta)';
+
+  @override
+  String get pSystemHelpScoringHeader => '分數怎麼算';
+
+  @override
+  String get pSystemHelpScoringBody =>
+      '每個指標依是否落在理想區間給分：良好＝100、警示＝60、偏差＝20、量不到＝不計。每個位置取其指標平均；整體分數＝各位置分數再平均。';
+
+  @override
+  String get gradeGood => '良好';
+
+  @override
+  String get gradeWarn => '警示';
+
+  @override
+  String get gradeBad => '偏差';
+
+  @override
+  String get pSystemHelpMetricsHeader => '動作指標';
+
+  @override
+  String get metricSpineTiltDesc => '脊椎相對地面的前傾角。理想是上桿到擊球維持與預備時相近（不抬起、不塌陷）。';
+
+  @override
+  String get metricHeadMoveDesc => '頭部相對預備位置的位移。越穩越好；大幅晃動代表重心或軸心跑掉。';
+
+  @override
+  String get metricXFactorDesc => '上半身（肩線）與骨盆（髖線）的旋轉分離量，是力量來源。僅正面拍攝可量。';
+
+  @override
+  String get metricWeightShiftDesc => '擊球時髖部是否轉向前腳（目標側）。重心轉移不足會少力、易打薄球。';
+
+  @override
+  String get pSystemHelpViewpoint =>
+      '旋轉角（X-factor）以 2D 投影估計，只有正面（面對鏡頭）拍攝才準；側面拍攝時此項不顯示。';
+
+  @override
+  String get pSystemHelpBeta =>
+      '桿身相關位置（P2/P6/P8）以前臂代理、旋轉以 2D 估計，皆標 beta；理想區間為通用暫定值，僅供練習趨勢參考，非實驗室量測。';
 
   @override
   String get postureTitle => '姿勢分析';
@@ -4562,6 +4707,12 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get updateCannotOpenStore => '无法打开商店页面，请手动前往更新';
 
   @override
+  String get updateDownloadedReady => '更新已下载完成，重新启动即可应用';
+
+  @override
+  String get updateRestartNow => '重新启动';
+
+  @override
   String get updateRequiredTitle => '必要更新';
 
   @override
@@ -5895,6 +6046,145 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get playerPhaseFinish => '收杆';
+
+  @override
+  String get pSystemTitle => 'P 动作分析';
+
+  @override
+  String get pSystemViewpointWarn => '旋转角需正面拍摄';
+
+  @override
+  String get pSystemNoMetrics => '此位置无可量化指标';
+
+  @override
+  String get metricSpineTilt => '脊椎角';
+
+  @override
+  String get metricHeadMove => '头部位移';
+
+  @override
+  String get metricXFactor => 'X-factor';
+
+  @override
+  String get metricWeightShift => '重心转移';
+
+  @override
+  String get metricOverall => '整体';
+
+  @override
+  String get trendTitle => '修正追踪';
+
+  @override
+  String get trendImproving => '改善中';
+
+  @override
+  String get trendDeclining => '退步';
+
+  @override
+  String get trendStable => '持平';
+
+  @override
+  String get trendInsufficient => '数据不足';
+
+  @override
+  String get pLabelP1 => '预备';
+
+  @override
+  String get pLabelP2 => '起杆';
+
+  @override
+  String get pLabelP3 => '半上';
+
+  @override
+  String get pLabelP4 => '顶点';
+
+  @override
+  String get pLabelP5 => '半下';
+
+  @override
+  String get pLabelP6 => '触前';
+
+  @override
+  String get pLabelP7 => '击球';
+
+  @override
+  String get pLabelP8 => '送杆';
+
+  @override
+  String get pLabelP9 => '半收';
+
+  @override
+  String get pLabelP10 => '收杆';
+
+  @override
+  String get chartTabStage => '阶段';
+
+  @override
+  String get chartTabCharts => '图表';
+
+  @override
+  String get chartTabAudio => '音频';
+
+  @override
+  String get chartTabPosture => '姿势';
+
+  @override
+  String get pSystemNoData => '此切片无 P 动作资料，请重新侦测挥杆';
+
+  @override
+  String get pSystemHelpTitle => 'P 动作分析说明';
+
+  @override
+  String get pSystemHelpIntro =>
+      'P1–P10 是挥杆从预备到收杆的 10 个关键位置。每个位置量测几项生物力学角度并评分，帮你看出哪个环节需要调整。';
+
+  @override
+  String get pSystemHelpPositionsHeader => '十个位置';
+
+  @override
+  String get pSystemHelpReliable => '可靠锚点';
+
+  @override
+  String get pSystemHelpProxy => '代理估计 (beta)';
+
+  @override
+  String get pSystemHelpScoringHeader => '分数怎么算';
+
+  @override
+  String get pSystemHelpScoringBody =>
+      '每个指标依是否落在理想区间给分：良好＝100、警示＝60、偏差＝20、量不到＝不计。每个位置取其指标平均；整体分数＝各位置分数再平均。';
+
+  @override
+  String get gradeGood => '良好';
+
+  @override
+  String get gradeWarn => '警示';
+
+  @override
+  String get gradeBad => '偏差';
+
+  @override
+  String get pSystemHelpMetricsHeader => '动作指标';
+
+  @override
+  String get metricSpineTiltDesc => '脊椎相对地面的前倾角。理想是上杆到击球维持与预备时相近（不抬起、不塌陷）。';
+
+  @override
+  String get metricHeadMoveDesc => '头部相对预备位置的位移。越稳越好；大幅晃动代表重心或轴心跑掉。';
+
+  @override
+  String get metricXFactorDesc => '上半身（肩线）与骨盆（髋线）的旋转分离量，是力量来源。仅正面拍摄可量。';
+
+  @override
+  String get metricWeightShiftDesc => '击球时髋部是否转向前脚（目标侧）。重心转移不足会少力、易打薄球。';
+
+  @override
+  String get pSystemHelpViewpoint =>
+      '旋转角（X-factor）以 2D 投影估计，只有正面（面对镜头）拍摄才准；侧面拍摄时此项不显示。';
+
+  @override
+  String get pSystemHelpBeta =>
+      '杆身相关位置（P2/P6/P8）以前臂代理、旋转以 2D 估计，皆标 beta；理想区间为通用暂定值，仅供练习趋势参考，非实验室量测。';
 
   @override
   String get postureTitle => '姿势分析';
@@ -8249,6 +8539,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get updateCannotOpenStore => '無法開啟商店頁面，請手動前往更新';
 
   @override
+  String get updateDownloadedReady => '更新已下載完成，重新啟動即可套用';
+
+  @override
+  String get updateRestartNow => '重新啟動';
+
+  @override
   String get updateRequiredTitle => '必要更新';
 
   @override
@@ -9582,6 +9878,145 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get playerPhaseFinish => '收桿';
+
+  @override
+  String get pSystemTitle => 'P 動作分析';
+
+  @override
+  String get pSystemViewpointWarn => '旋轉角需正面拍攝';
+
+  @override
+  String get pSystemNoMetrics => '此位置無可量化指標';
+
+  @override
+  String get metricSpineTilt => '脊椎角';
+
+  @override
+  String get metricHeadMove => '頭部位移';
+
+  @override
+  String get metricXFactor => 'X-factor';
+
+  @override
+  String get metricWeightShift => '重心轉移';
+
+  @override
+  String get metricOverall => '整體';
+
+  @override
+  String get trendTitle => '修正追蹤';
+
+  @override
+  String get trendImproving => '改善中';
+
+  @override
+  String get trendDeclining => '退步';
+
+  @override
+  String get trendStable => '持平';
+
+  @override
+  String get trendInsufficient => '資料不足';
+
+  @override
+  String get pLabelP1 => '預備';
+
+  @override
+  String get pLabelP2 => '起桿';
+
+  @override
+  String get pLabelP3 => '半上';
+
+  @override
+  String get pLabelP4 => '頂點';
+
+  @override
+  String get pLabelP5 => '半下';
+
+  @override
+  String get pLabelP6 => '觸前';
+
+  @override
+  String get pLabelP7 => '擊球';
+
+  @override
+  String get pLabelP8 => '送桿';
+
+  @override
+  String get pLabelP9 => '半收';
+
+  @override
+  String get pLabelP10 => '收桿';
+
+  @override
+  String get chartTabStage => '階段';
+
+  @override
+  String get chartTabCharts => '圖表';
+
+  @override
+  String get chartTabAudio => '音頻';
+
+  @override
+  String get chartTabPosture => '姿勢';
+
+  @override
+  String get pSystemNoData => '此切片無 P 動作資料，請重新偵測揮桿';
+
+  @override
+  String get pSystemHelpTitle => 'P 動作分析說明';
+
+  @override
+  String get pSystemHelpIntro =>
+      'P1–P10 是揮桿從預備到收桿的 10 個關鍵位置。每個位置量測幾項生物力學角度並評分，幫你看出哪個環節需要調整。';
+
+  @override
+  String get pSystemHelpPositionsHeader => '十個位置';
+
+  @override
+  String get pSystemHelpReliable => '可靠錨點';
+
+  @override
+  String get pSystemHelpProxy => '代理估計 (beta)';
+
+  @override
+  String get pSystemHelpScoringHeader => '分數怎麼算';
+
+  @override
+  String get pSystemHelpScoringBody =>
+      '每個指標依是否落在理想區間給分：良好＝100、警示＝60、偏差＝20、量不到＝不計。每個位置取其指標平均；整體分數＝各位置分數再平均。';
+
+  @override
+  String get gradeGood => '良好';
+
+  @override
+  String get gradeWarn => '警示';
+
+  @override
+  String get gradeBad => '偏差';
+
+  @override
+  String get pSystemHelpMetricsHeader => '動作指標';
+
+  @override
+  String get metricSpineTiltDesc => '脊椎相對地面的前傾角。理想是上桿到擊球維持與預備時相近（不抬起、不塌陷）。';
+
+  @override
+  String get metricHeadMoveDesc => '頭部相對預備位置的位移。越穩越好；大幅晃動代表重心或軸心跑掉。';
+
+  @override
+  String get metricXFactorDesc => '上半身（肩線）與骨盆（髖線）的旋轉分離量，是力量來源。僅正面拍攝可量。';
+
+  @override
+  String get metricWeightShiftDesc => '擊球時髖部是否轉向前腳（目標側）。重心轉移不足會少力、易打薄球。';
+
+  @override
+  String get pSystemHelpViewpoint =>
+      '旋轉角（X-factor）以 2D 投影估計，只有正面（面對鏡頭）拍攝才準；側面拍攝時此項不顯示。';
+
+  @override
+  String get pSystemHelpBeta =>
+      '桿身相關位置（P2/P6/P8）以前臂代理、旋轉以 2D 估計，皆標 beta；理想區間為通用暫定值，僅供練習趨勢參考，非實驗室量測。';
 
   @override
   String get postureTitle => '姿勢分析';

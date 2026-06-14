@@ -49,6 +49,7 @@ namespace UploadServer.Controllers
                     ? System.Text.Json.JsonSerializer.Serialize(req.PhaseTimestamps)
                     : null,
                 AudioAnalysisJson    = req.AudioAnalysisJson,
+                SwingMetricsJson     = req.SwingMetricsJson,
                 V2Fps                = req.V2Fps,
                 V2Resolution         = req.V2Resolution,
             };

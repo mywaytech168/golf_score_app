@@ -125,17 +125,30 @@ class SwingDetectPrefs {
 
   static const _kUseAnchor = 'impact_use_anchor';
 
-  /// 讀取「錨點擊球（V4）」開關（預設啟用：已設錨點時用錨點當擊球點）。
-  /// 關閉時保留錨點座標但不啟用，退回手腕弧底（V1）判定。
+  /// 讀取「錨點擊球（V4）」開關（**預設關閉**：退回手腕弧底 V1 判定；
+  /// 使用者於設定開啟後，已設錨點時才用錨點當擊球點）。
   static Future<bool> getUseAnchor() async {
     final sp = await SharedPreferences.getInstance();
-    return sp.getBool(_kUseAnchor) ?? true;
+    return sp.getBool(_kUseAnchor) ?? false;
   }
 
   /// 寫入「錨點擊球（V4）」開關。
   static Future<void> setUseAnchor(bool value) async {
     final sp = await SharedPreferences.getInstance();
     await sp.setBool(_kUseAnchor, value);
+  }
+
+  static const _kPSysTextLabel = 'psystem_text_label';
+
+  /// P-System 標籤樣式：true=文字簡稱（預備/桿平上…）、false=字母簡稱（P1…P10，預設）。
+  static Future<bool> getPSystemTextLabel() async {
+    final sp = await SharedPreferences.getInstance();
+    return sp.getBool(_kPSysTextLabel) ?? false;
+  }
+
+  static Future<void> setPSystemTextLabel(bool value) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kPSysTextLabel, value);
   }
 
   static const _kAnchorX = 'impact_anchor_x';

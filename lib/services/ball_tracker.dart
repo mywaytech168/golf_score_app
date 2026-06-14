@@ -550,7 +550,12 @@ class BallTracker {
 
   _ParabolaFit? _robustParabolaFit(List<TrackPoint> pts) {
     if (pts.length < 3) return null;
-    final fi = [for (final p in pts) p.frameIdx.toDouble()];
+    // 自變數改用 ptsUs 真實呈現時間（秒）→ VFR/掉幀時 y(t) 二次重力項不偏（取代等間隔
+    // frameIdx 假設）；ptsUs 退化（無跨度/未落地）時 fallback 回 frameIdx。
+    final byPts = pts.last.ptsUs > pts.first.ptsUs;
+    final fi = byPts
+        ? [for (final p in pts) p.ptsUs / 1e6]
+        : [for (final p in pts) p.frameIdx.toDouble()];
     final xs = [for (final p in pts) p.rawX.toDouble()];
     final ys = [for (final p in pts) p.rawY.toDouble()];
     final t0 = fi.reduce(math.min);
@@ -583,7 +588,7 @@ class BallTracker {
       for (int i = 0; i < t.length; i++)
         _hypot(xs[i] - _polyval(cx, t[i]), ys[i] - _polyval(cy, t[i]))
     ]..sort();
-    return _ParabolaFit(cx, cy, t0, inlier, resAll[resAll.length ~/ 2]);
+    return _ParabolaFit(cx, cy, t0, inlier, resAll[resAll.length ~/ 2], byPts);
   }
 
   /// 用擬合曲線輸出平滑座標，剔除離群點（保留 raw 供 debug）。
@@ -591,7 +596,7 @@ class BallTracker {
     final out = <TrackPoint>[];
     for (int i = 0; i < pts.length; i++) {
       if (!fit.inlier[i]) continue; // 丟棄偏離曲線的錯點
-      final t = pts[i].frameIdx - fit.t0;
+      final t = (fit.byPts ? pts[i].ptsUs / 1e6 : pts[i].frameIdx.toDouble()) - fit.t0;
       out.add(TrackPoint(
         x: _polyval(fit.cx, t).round(),
         y: _polyval(fit.cy, t).round(),
@@ -1238,5 +1243,6 @@ class _ParabolaFit {
   final double t0;
   final List<bool> inlier; // 與 trackPts 等長
   final double medianRes;  // 全點到擬合曲線的中位殘差（px）
-  const _ParabolaFit(this.cx, this.cy, this.t0, this.inlier, this.medianRes);
+  final bool byPts;        // true=自變數為 ptsUs 秒、false=frameIdx（退化 fallback）
+  const _ParabolaFit(this.cx, this.cy, this.t0, this.inlier, this.medianRes, this.byPts);
 }

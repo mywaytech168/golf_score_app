@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 import '../models/recording_history_entry.dart';
+import '../models/p_system_metrics.dart';
 import 'ball_tuning_page.dart';
 import '../models/swing_posture.dart';
 import '../recording/pose_csv_loader.dart';
@@ -22,10 +23,12 @@ import '../services/recording_history_storage.dart';
 import '../services/skeleton_csv_locator.dart';
 import '../services/swing_detect_prefs.dart';
 import '../services/swing_stats_service.dart';
+import '../services/biomechanics_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/clip_candidates_sheet.dart';
 import '../widgets/zoomable_timeline.dart';
 import 'ai_coach_page.dart';
+import 'p_system_help_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
@@ -95,6 +98,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   // 揮桿 8 階段關鍵禎
   // key = phase key (e.g. 'address'), value = seconds in clip
   Map<String, double>? _phases;
+
+  // P1-P10 動作分析（angles.json）；null = 無（V2 音訊切片 / 舊片）
+  PSystemMetrics? _pSystem;
+
+  // P-System 標籤樣式：false=字母簡稱(P1…P10)、true=文字簡稱(預備/桿平上…)。可切換+持久化。
+  bool _pSysTextLabel = false;
 
   // 長影片：已切出片段的擊球時間點（秒，相對原始影片），供時間軸標記與快速跳轉
   List<({double sec, int index})> _clipMarks = const [];
@@ -182,6 +191,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     if (entry != null &&
         (entry.videoType == VideoType.localClip || entry.isAnalyzed)) {
       _loadPhases();
+      _loadPSystem();
       _loadCharts();
     }
 
@@ -237,6 +247,13 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     } catch (e) {
       debugPrint('[VideoPlayer] phases.json 讀取失敗: $e');
     }
+  }
+
+  Future<void> _loadPSystem() async {
+    final ps = await PSystemMetrics.load(p.dirname(widget.videoPath));
+    if (ps == null) return;
+    final textLabel = await SwingDetectPrefs.getPSystemTextLabel();
+    if (mounted) setState(() { _pSystem = ps; _pSysTextLabel = textLabel; });
   }
 
   Future<void> _initController(String path, {bool isOriginal = false}) async {
@@ -463,6 +480,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     if (mounted && track != null) setState(() => _trajTrack = track);
   }
 
+  /// 擊球光暈中心：取球軌跡起始點（球的靜止位置）的 display 正規化座標；
+  /// 無軌跡時回傳 null → painter 退回預設比例。
+  Offset? _impactBallNorm() {
+    final t = _trajTrack;
+    if (t == null || t.points.isEmpty) return null;
+    return t.normalizedDisplay(t.points.first);
+  }
+
   // ── UI ──────────────────────────────────────────────────────
 
   @override
@@ -476,7 +501,12 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             Expanded(child: _buildVideo()),
             if (_initialized) _buildOverlayToggles(),
             if (_initialized) _buildControls(),
-            if (_initialized && _phases != null) _buildPhaseStrip(),
+            // 合併：有 P-System(angles.json) → P1-P10 條（點=seek＋長按=角度＋播放高亮）；
+            // 否則（舊片/V2 無角度）退回 8 階段條（純 seek）。
+            if (_initialized && _pSystem != null)
+              _buildPSystemPanel()
+            else if (_initialized && _phases != null)
+              _buildPhaseStrip(),
             _buildStatsPanel(),
             _buildChartsPanel(),
             _buildAiPanel(),
@@ -663,46 +693,56 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          if (_hasSkeletonCsv)
-            toggle(
-              label: l10n.playerOverlaySkeleton,
-              icon: Icons.person,
-              value: _showSkeleton,
-              onChanged: (v) {
-                setState(() => _showSkeleton = v);
-                if (v) _ensureSkeletonTrack();
-              },
+          // 左側 toggle 群在窄機橫向可捲，避免整列超寬溢出（黃黑條）；右側調參鈕固定。
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  if (_hasSkeletonCsv)
+                    toggle(
+                      label: l10n.playerOverlaySkeleton,
+                      icon: Icons.person,
+                      value: _showSkeleton,
+                      onChanged: (v) {
+                        setState(() => _showSkeleton = v);
+                        if (v) _ensureSkeletonTrack();
+                      },
+                    ),
+                  if (_hasTrajectory) ...[
+                    const SizedBox(width: 8),
+                    toggle(
+                      label: l10n.playerOverlayTrajectory,
+                      icon: Icons.sports_golf,
+                      value: _showTrajectory,
+                      onChanged: (v) {
+                        setState(() => _showTrajectory = v);
+                        if (v) _ensureTrajectoryTrack();
+                      },
+                    ),
+                  ],
+                  if (_hasImpactFx) ...[
+                    const SizedBox(width: 8),
+                    toggle(
+                      label: l10n.playerOverlayEffect,
+                      icon: Icons.auto_awesome,
+                      value: _showImpactFx,
+                      onChanged: (v) => setState(() => _showImpactFx = v),
+                    ),
+                  ],
+                  // 骨架/影片時間差校正：疊圖落後→調大、超前→調小
+                  if (_hasSkeletonCsv || _hasTrajectory)
+                    IconButton(
+                      tooltip: l10n.playerOverlaySync,
+                      onPressed: _showOverlaySyncSheet,
+                      icon: const Icon(Icons.sync_alt_rounded,
+                          color: Colors.white54, size: 18),
+                    ),
+                ],
+              ),
             ),
-          if (_hasTrajectory) ...[
-            const SizedBox(width: 8),
-            toggle(
-              label: l10n.playerOverlayTrajectory,
-              icon: Icons.sports_golf,
-              value: _showTrajectory,
-              onChanged: (v) {
-                setState(() => _showTrajectory = v);
-                if (v) _ensureTrajectoryTrack();
-              },
-            ),
-          ],
-          if (_hasImpactFx) ...[
-            const SizedBox(width: 8),
-            toggle(
-              label: l10n.playerOverlayEffect,
-              icon: Icons.auto_awesome,
-              value: _showImpactFx,
-              onChanged: (v) => setState(() => _showImpactFx = v),
-            ),
-          ],
-          // 骨架/影片時間差校正（查看影片設定）：疊圖落後→調大、超前→調小
-          if (_hasSkeletonCsv || _hasTrajectory)
-            IconButton(
-              tooltip: l10n.playerOverlaySync,
-              onPressed: _showOverlaySyncSheet,
-              icon: const Icon(Icons.sync_alt_rounded, color: Colors.white54, size: 18),
-            ),
-          const Spacer(),
-          // 球軌跡調參（排查用）：對本 clip 即時調參重跑
+          ),
+          // 球軌跡調參（排查用）：對本 clip 即時調參重跑（固定右側）
           TextButton.icon(
             onPressed: () {
               final clip = File('${_sessionDir}clip.mp4').existsSync()
@@ -846,6 +886,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       progress: _impactAnim.value,
                       goodShot: entry!.goodShot,
                       passCount: entry.audioPassCount ?? 0,
+                      centerNorm: _impactBallNorm(),
                     ),
                   ),
                 ),
@@ -1156,6 +1197,288 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     );
   }
 
+  // ── P1-P10 動作分析面板（讀 angles.json）────────────────────
+
+  Widget _buildPSystemPanel() {
+    final l10n = AppLocalizations.of(context);
+    final ps = _pSystem!;
+    return Container(
+      color: const Color(0xFF101010),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(l10n.pSystemTitle,
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(width: 6),
+              if (ps.overallScore != null)
+                Text('${ps.overallScore!.round()}',
+                    style: TextStyle(
+                        color: _scoreColor(ps.overallScore),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800)),
+              const Spacer(),
+              if (ps.viewpoint != SwingViewpoint.faceOn)
+                Flexible(
+                  child: Text(l10n.pSystemViewpointWarn,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(color: Colors.white30, fontSize: 9)),
+                ),
+              // 切換：字母簡稱 P1…P10 ↔ 文字簡稱 預備/桿平上…
+              GestureDetector(
+                onTap: _togglePLabelStyle,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(Icons.translate,
+                      size: 16,
+                      color: _pSysTextLabel ? kBrandPrimary : Colors.white38),
+                ),
+              ),
+              // 說明頁入口
+              GestureDetector(
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const PSystemHelpPage())),
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(Icons.help_outline,
+                      size: 16, color: Colors.white38),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _buildPSystemStrip(ps),
+        ],
+      ),
+    );
+  }
+
+  /// 合併後的 P1-P10 條：點=seek（取代 8 階段條）、長按=開角度明細、播放位置高亮。
+  Widget _buildPSystemStrip(PSystemMetrics ps) {
+    final l10n = AppLocalizations.of(context);
+    final ctrl = _controller;
+    final posSec = ctrl != null && ctrl.value.isInitialized
+        ? ctrl.value.position.inMilliseconds / 1000.0
+        : 0.0;
+    String? currentP;
+    for (int i = PSystemMetrics.order.length - 1; i >= 0; i--) {
+      final t = ps.pSec[PSystemMetrics.order[i]];
+      if (t != null && posSec >= t - 0.05) {
+        currentP = PSystemMetrics.order[i];
+        break;
+      }
+    }
+    return SizedBox(
+      height: 42,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: PSystemMetrics.order.length,
+        itemBuilder: (c, i) {
+          final key = PSystemMetrics.order[i];
+          final metrics = ps.perP[key] ?? const <BiomechMetric>[];
+          final color = _scoreColor(_pScore(metrics));
+          final sec = ps.pSec[key];
+          final isActive = currentP == key;
+          return GestureDetector(
+            onTap: sec != null && ctrl != null
+                ? () => ctrl.seekTo(Duration(milliseconds: (sec * 1000).round()))
+                : null,
+            onLongPress: () => _showPMetrics(key, metrics, sec),
+            child: Container(
+              width: _pSysTextLabel ? 48 : 40,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: isActive ? 0.30 : 0.14),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                    color: color.withValues(alpha: isActive ? 1.0 : 0.6),
+                    width: isActive ? 1.5 : 1.0),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                      _pSysTextLabel ? _pLabel(l10n, key) : key.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: color,
+                          fontSize: _pSysTextLabel ? 10 : 11,
+                          fontWeight: FontWeight.w800)),
+                  if (sec != null)
+                    Text('${sec.toStringAsFixed(1)}s',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 8)),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showPMetrics(String pKey, List<BiomechMetric> metrics, double? sec) {
+    final l10n = AppLocalizations.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(pKey.toUpperCase(),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800)),
+                  const Spacer(),
+                  if (sec != null)
+                    TextButton.icon(
+                      onPressed: () {
+                        _controller?.seekTo(
+                            Duration(milliseconds: (sec * 1000).round()));
+                        Navigator.pop(c);
+                      },
+                      icon: const Icon(Icons.my_location, size: 16),
+                      label: Text('${sec.toStringAsFixed(1)}s'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (metrics.isEmpty)
+                Text(l10n.pSystemNoMetrics,
+                    style: const TextStyle(color: Colors.white54))
+              else
+                ...metrics.map((m) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                                color: _gradeColor(m.grade),
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _metricName(l10n, m.key) +
+                                  (m.beta ? ' (beta)' : ''),
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 13),
+                            ),
+                          ),
+                          Text(m.value != null ? _fmtVal(m) : '--',
+                              style: TextStyle(
+                                  color: _gradeColor(m.grade),
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  double? _pScore(List<BiomechMetric> metrics) {
+    final v = <double>[];
+    for (final m in metrics) {
+      switch (m.grade) {
+        case BiomechGrade.good:
+          v.add(100);
+          break;
+        case BiomechGrade.warn:
+          v.add(60);
+          break;
+        case BiomechGrade.bad:
+          v.add(20);
+          break;
+        case BiomechGrade.unknown:
+          break;
+      }
+    }
+    return v.isEmpty ? null : v.reduce((a, b) => a + b) / v.length;
+  }
+
+  Color _scoreColor(double? s) {
+    if (s == null) return Colors.white30;
+    if (s >= 80) return kGoodColor;
+    if (s >= 50) return const Color(0xFFFFB74D);
+    return const Color(0xFFE0584F);
+  }
+
+  Color _gradeColor(BiomechGrade g) {
+    switch (g) {
+      case BiomechGrade.good:
+        return kGoodColor;
+      case BiomechGrade.warn:
+        return const Color(0xFFFFB74D);
+      case BiomechGrade.bad:
+        return const Color(0xFFE0584F);
+      case BiomechGrade.unknown:
+        return Colors.white30;
+    }
+  }
+
+  void _togglePLabelStyle() {
+    setState(() => _pSysTextLabel = !_pSysTextLabel);
+    SwingDetectPrefs.setPSystemTextLabel(_pSysTextLabel);
+  }
+
+  String _pLabel(AppLocalizations l, String key) {
+    switch (key) {
+      case 'p1': return l.pLabelP1;
+      case 'p2': return l.pLabelP2;
+      case 'p3': return l.pLabelP3;
+      case 'p4': return l.pLabelP4;
+      case 'p5': return l.pLabelP5;
+      case 'p6': return l.pLabelP6;
+      case 'p7': return l.pLabelP7;
+      case 'p8': return l.pLabelP8;
+      case 'p9': return l.pLabelP9;
+      case 'p10': return l.pLabelP10;
+      default: return key.toUpperCase();
+    }
+  }
+
+  String _metricName(AppLocalizations l, String key) {
+    switch (key) {
+      case 'spine_tilt':
+        return l.metricSpineTilt;
+      case 'head_move':
+        return l.metricHeadMove;
+      case 'x_factor':
+        return l.metricXFactor;
+      case 'weight_shift':
+        return l.metricWeightShift;
+      default:
+        return key;
+    }
+  }
+
+  String _fmtVal(BiomechMetric m) {
+    final v = m.value!;
+    if (m.unit == 'deg') return '${v.toStringAsFixed(0)}°';
+    if (m.unit == 'norm') return v.toStringAsFixed(3);
+    return v.toStringAsFixed(2);
+  }
+
   // ── 揮桿統計面板（發射角 / 節奏 / 飛行時間）────────────────────
 
   Widget _buildStatsPanel() {
@@ -1218,7 +1541,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         stat(
           l10n.playerStatTempo,
           stats.tempoRatio != null
-              ? '${stats.tempoRatio!.toStringAsFixed(1)} : 1'
+              ? '${stats.tempoRatio!.toStringAsFixed(1)} : 1${stats.tempoConfident ? '' : ' ?'}'
               : '--',
           color: tempoColor,
         ),
@@ -2349,11 +2672,13 @@ class _SweetSpotRingPainter extends CustomPainter {
   final double progress; // 0 → 1
   final bool? goodShot;
   final int passCount;
+  final Offset? centerNorm; // 球位（display 正規化 0~1）；null 時退預設比例
 
   const _SweetSpotRingPainter({
     required this.progress,
     required this.goodShot,
     required this.passCount,
+    this.centerNorm,
   });
 
   Color get _baseColor {
@@ -2367,7 +2692,9 @@ class _SweetSpotRingPainter extends CustomPainter {
     if (goodShot == null || progress <= 0) return;
 
     final color  = _baseColor;
-    final center = Offset(size.width * 0.5194, size.height * 0.8469);
+    final center = centerNorm != null
+        ? Offset(size.width * centerNorm!.dx, size.height * centerNorm!.dy)
+        : Offset(size.width * 0.5194, size.height * 0.8469);
 
     for (int i = 0; i < 3; i++) {
       final delay = i * 0.18;
@@ -2391,7 +2718,10 @@ class _SweetSpotRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SweetSpotRingPainter old) =>
-      old.progress != progress || old.goodShot != goodShot || old.passCount != passCount;
+      old.progress != progress ||
+      old.goodShot != goodShot ||
+      old.passCount != passCount ||
+      old.centerNorm != centerNorm;
 }
 
 // ════════════════════════════════════════════════════════════════

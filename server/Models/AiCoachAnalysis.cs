@@ -63,6 +63,9 @@ namespace UploadServer.Models
         /// <summary>Flutter 客戶端音訊分析結果 JSON（含 pass_count / passes / features）；null = 無音訊分析</summary>
         public string? AudioAnalysisJson { get; set; }
 
+        /// <summary>裝置端 P-System 生物力學量化 JSON（angles.json 內容）；注入 Gemini prompt 當客觀依據；null = 無</summary>
+        public string? SwingMetricsJson { get; set; }
+
         /// <summary>v3：上傳到 B2 的關鍵禎數量（0 = 未使用 v3 keyframe 流程）</summary>
         public int KeyframeCount { get; set; } = 0;
 

@@ -146,4 +146,8 @@ dependencies {
 
     // SAF DocumentFile
     implementation("androidx.documentfile:documentfile:1.0.1")
+
+    // ✅ Play In-App Update（自寫 Kotlin 直呼 Play Core，不經 Flutter 套件）
+    //    純 Android AAR，與 Flutter plugin 的 Kotlin 版本無耦合，規避套件版本衝突
+    implementation("com.google.android.play:app-update:2.1.0")
 }

@@ -58,7 +58,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   bool _bothHands = false; // 雙手判斷（設定可切換）
   int _glowDelayMs = SwingDetectPrefs.defaultGlowDelayMs; // 擊球光暈延遲（設定可調）
   double? _anchorX, _anchorY; // 擊球錨點（點選預覽設定的球位，歸一化）
-  bool _useAnchor = true; // 擊球時刻 V4（錨點）；關閉＝V1 弧底
+  bool _useAnchor = false; // 擊球時刻 V4（錨點）；預設關閉＝V1 弧底（載入 prefs 後同步）
   bool _anchorGate = false; // 錨點偵測閘門：揮桿須經過錨點才算
   double _anchorRadius = SwingDetectPrefs.defaultAnchorRadius; // 錨點命中半徑
   double _swingFloor = SwingDetectPrefs.defaultSwingSpeedFloor; // 揮桿速度門檻

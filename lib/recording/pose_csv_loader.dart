@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:csv/csv.dart';
 
+import 'one_euro_filter.dart';
 import 'pose_result.dart';
 
 /// 載入 `pose_landmarks.csv`，提供「依播放秒數取樣骨架」的能力，
@@ -115,26 +116,25 @@ class PoseTrack {
     return PoseTrack._(frames);
   }
 
-  /// 雙向 EMA：前向 + 後向 pass，等效零延遲 Gaussian（對齊原生 alpha=0.35）。
-  static void _smooth(List<_SampledFrame> frames, {double alpha = 0.35}) {
+  /// 雙向 One-Euro：前向（自適應低通：慢速重平滑去抖、快速放寬避免拖尾）+ 後向 pass，
+  /// 等效零延遲。取代固定 alpha EMA——靜止 address 與高速 downswing 雙態下表現更佳，
+  /// 直接提升 P-System / BiomechanicsService 角度量化的穩定度。缺幀（NaN）跳過不更新。
+  static void _smooth(List<_SampledFrame> frames) {
     if (frames.length < 3) return;
     for (var lm = 0; lm < 33; lm++) {
-      double px = double.nan, py = double.nan;
+      final fx = OneEuroFilter(), fy = OneEuroFilter();
       for (final f in frames) {
         if (f.x[lm].isNaN) continue;
-        if (px.isNaN) { px = f.x[lm]; py = f.y[lm]; continue; }
-        px = alpha * f.x[lm] + (1 - alpha) * px;
-        py = alpha * f.y[lm] + (1 - alpha) * py;
-        f.x[lm] = px; f.y[lm] = py;
+        f.x[lm] = fx.filter(f.x[lm], f.timeSec);
+        f.y[lm] = fy.filter(f.y[lm], f.timeSec);
       }
-      px = double.nan; py = double.nan;
+      // 後向 pass（時間軸取負使 dt 為正）→ 抵銷前向相位延遲。
+      final bx = OneEuroFilter(), by = OneEuroFilter();
       for (var i = frames.length - 1; i >= 0; i--) {
         final f = frames[i];
         if (f.x[lm].isNaN) continue;
-        if (px.isNaN) { px = f.x[lm]; py = f.y[lm]; continue; }
-        px = alpha * f.x[lm] + (1 - alpha) * px;
-        py = alpha * f.y[lm] + (1 - alpha) * py;
-        f.x[lm] = px; f.y[lm] = py;
+        f.x[lm] = bx.filter(f.x[lm], -f.timeSec);
+        f.y[lm] = by.filter(f.y[lm], -f.timeSec);
       }
     }
   }

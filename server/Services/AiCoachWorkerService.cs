@@ -185,6 +185,7 @@ namespace UploadServer.Services
                         analysis.PromptVersion,
                         phaseTimestamps:  phaseTimestamps,
                         audioAnalysisJson: analysis.AudioAnalysisJson,
+                        swingMetricsJson:  analysis.SwingMetricsJson,
                         keyframesBase64:  keyframesBase64,
                         audioWavBytes:    audioWavBytes,
                         v2Fps:            analysis.V2Fps,

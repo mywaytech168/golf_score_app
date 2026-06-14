@@ -303,6 +303,7 @@ server/.nuget/
 *.sln.docstates
 server/appsettings.local.json
 server/appsettings.json
+server/secrets/
 
 ## Misc junk / temp artifacts
 mediapipe-samples-main.zip

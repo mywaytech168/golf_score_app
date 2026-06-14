@@ -1750,6 +1750,18 @@ abstract class AppLocalizations {
   /// **'Cannot open store. Please update manually.'**
   String get updateCannotOpenStore;
 
+  /// No description provided for @updateDownloadedReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Update downloaded. Restart to apply.'**
+  String get updateDownloadedReady;
+
+  /// No description provided for @updateRestartNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart'**
+  String get updateRestartNow;
+
   /// No description provided for @updateRequiredTitle.
   ///
   /// In en, this message translates to:
@@ -4173,6 +4185,276 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Finish'**
   String get playerPhaseFinish;
+
+  /// No description provided for @pSystemTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'P-System'**
+  String get pSystemTitle;
+
+  /// No description provided for @pSystemViewpointWarn.
+  ///
+  /// In en, this message translates to:
+  /// **'Rotation needs face-on view'**
+  String get pSystemViewpointWarn;
+
+  /// No description provided for @pSystemNoMetrics.
+  ///
+  /// In en, this message translates to:
+  /// **'No measurable metrics here'**
+  String get pSystemNoMetrics;
+
+  /// No description provided for @metricSpineTilt.
+  ///
+  /// In en, this message translates to:
+  /// **'Spine angle'**
+  String get metricSpineTilt;
+
+  /// No description provided for @metricHeadMove.
+  ///
+  /// In en, this message translates to:
+  /// **'Head movement'**
+  String get metricHeadMove;
+
+  /// No description provided for @metricXFactor.
+  ///
+  /// In en, this message translates to:
+  /// **'X-factor'**
+  String get metricXFactor;
+
+  /// No description provided for @metricWeightShift.
+  ///
+  /// In en, this message translates to:
+  /// **'Weight shift'**
+  String get metricWeightShift;
+
+  /// No description provided for @metricOverall.
+  ///
+  /// In en, this message translates to:
+  /// **'Overall'**
+  String get metricOverall;
+
+  /// No description provided for @trendTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Correction tracking'**
+  String get trendTitle;
+
+  /// No description provided for @trendImproving.
+  ///
+  /// In en, this message translates to:
+  /// **'Improving'**
+  String get trendImproving;
+
+  /// No description provided for @trendDeclining.
+  ///
+  /// In en, this message translates to:
+  /// **'Declining'**
+  String get trendDeclining;
+
+  /// No description provided for @trendStable.
+  ///
+  /// In en, this message translates to:
+  /// **'Stable'**
+  String get trendStable;
+
+  /// No description provided for @trendInsufficient.
+  ///
+  /// In en, this message translates to:
+  /// **'Not enough data'**
+  String get trendInsufficient;
+
+  /// No description provided for @pLabelP1.
+  ///
+  /// In en, this message translates to:
+  /// **'Setup'**
+  String get pLabelP1;
+
+  /// No description provided for @pLabelP2.
+  ///
+  /// In en, this message translates to:
+  /// **'Take'**
+  String get pLabelP2;
+
+  /// No description provided for @pLabelP3.
+  ///
+  /// In en, this message translates to:
+  /// **'Bk½'**
+  String get pLabelP3;
+
+  /// No description provided for @pLabelP4.
+  ///
+  /// In en, this message translates to:
+  /// **'Top'**
+  String get pLabelP4;
+
+  /// No description provided for @pLabelP5.
+  ///
+  /// In en, this message translates to:
+  /// **'Dn½'**
+  String get pLabelP5;
+
+  /// No description provided for @pLabelP6.
+  ///
+  /// In en, this message translates to:
+  /// **'Pre'**
+  String get pLabelP6;
+
+  /// No description provided for @pLabelP7.
+  ///
+  /// In en, this message translates to:
+  /// **'Impact'**
+  String get pLabelP7;
+
+  /// No description provided for @pLabelP8.
+  ///
+  /// In en, this message translates to:
+  /// **'Foll'**
+  String get pLabelP8;
+
+  /// No description provided for @pLabelP9.
+  ///
+  /// In en, this message translates to:
+  /// **'Fin½'**
+  String get pLabelP9;
+
+  /// No description provided for @pLabelP10.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish'**
+  String get pLabelP10;
+
+  /// No description provided for @chartTabStage.
+  ///
+  /// In en, this message translates to:
+  /// **'Stages'**
+  String get chartTabStage;
+
+  /// No description provided for @chartTabCharts.
+  ///
+  /// In en, this message translates to:
+  /// **'Charts'**
+  String get chartTabCharts;
+
+  /// No description provided for @chartTabAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get chartTabAudio;
+
+  /// No description provided for @chartTabPosture.
+  ///
+  /// In en, this message translates to:
+  /// **'Posture'**
+  String get chartTabPosture;
+
+  /// No description provided for @pSystemNoData.
+  ///
+  /// In en, this message translates to:
+  /// **'No P-System data for this clip — re-run swing detection'**
+  String get pSystemNoData;
+
+  /// No description provided for @pSystemHelpTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'P-System Guide'**
+  String get pSystemHelpTitle;
+
+  /// No description provided for @pSystemHelpIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'P1–P10 are 10 key positions of the swing from setup to finish. Each measures a few biomechanics angles and is scored, so you can see which part needs work.'**
+  String get pSystemHelpIntro;
+
+  /// No description provided for @pSystemHelpPositionsHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'The 10 positions'**
+  String get pSystemHelpPositionsHeader;
+
+  /// No description provided for @pSystemHelpReliable.
+  ///
+  /// In en, this message translates to:
+  /// **'Reliable anchor'**
+  String get pSystemHelpReliable;
+
+  /// No description provided for @pSystemHelpProxy.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy estimate (beta)'**
+  String get pSystemHelpProxy;
+
+  /// No description provided for @pSystemHelpScoringHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'How scoring works'**
+  String get pSystemHelpScoringHeader;
+
+  /// No description provided for @pSystemHelpScoringBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Each metric is scored by whether it falls in the ideal range: good=100, warn=60, off=20, not-measurable=excluded. Each position averages its metrics; the overall score averages the positions.'**
+  String get pSystemHelpScoringBody;
+
+  /// No description provided for @gradeGood.
+  ///
+  /// In en, this message translates to:
+  /// **'Good'**
+  String get gradeGood;
+
+  /// No description provided for @gradeWarn.
+  ///
+  /// In en, this message translates to:
+  /// **'Warn'**
+  String get gradeWarn;
+
+  /// No description provided for @gradeBad.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get gradeBad;
+
+  /// No description provided for @pSystemHelpMetricsHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Motion metrics'**
+  String get pSystemHelpMetricsHeader;
+
+  /// No description provided for @metricSpineTiltDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Spine forward-tilt vs the ground. Ideally kept close to your setup angle from backswing through impact (no lifting or collapsing).'**
+  String get metricSpineTiltDesc;
+
+  /// No description provided for @metricHeadMoveDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Head displacement from the setup position. Steadier is better; large movement means your center/axis drifted.'**
+  String get metricHeadMoveDesc;
+
+  /// No description provided for @metricXFactorDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Rotational separation between shoulders and hips — the power source. Only measurable when filmed face-on.'**
+  String get metricXFactorDesc;
+
+  /// No description provided for @metricWeightShiftDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Whether the hips turn toward the lead foot at impact. Insufficient shift loses power and causes thin contact.'**
+  String get metricWeightShiftDesc;
+
+  /// No description provided for @pSystemHelpViewpoint.
+  ///
+  /// In en, this message translates to:
+  /// **'X-factor (rotation) is estimated from a 2D projection and is accurate only when filmed face-on; it is hidden for down-the-line footage.'**
+  String get pSystemHelpViewpoint;
+
+  /// No description provided for @pSystemHelpBeta.
+  ///
+  /// In en, this message translates to:
+  /// **'Club-related positions (P2/P6/P8) use the forearm as a proxy and rotation is a 2D estimate — all marked beta. Ideal ranges are generic placeholders for trend reference, not lab-grade measurement.'**
+  String get pSystemHelpBeta;
 
   /// No description provided for @postureTitle.
   ///

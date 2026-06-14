@@ -21,12 +21,12 @@ class VideoAnalysisPipelineService {
     required String videoPath,
     required String sessionDir,
     required int durationSeconds,
-    void Function(String label)? onProgress,
+    void Function(double progress, String label)? onProgress,
   }) {
     final running = _inflight[sessionDir];
     if (running != null) {
       debugPrint('[VideoAnalysisPipeline] ⏳ 同 session 分析進行中，共用結果');
-      onProgress?.call('分析骨架中...');
+      onProgress?.call(0.5, '分析骨架中...');
       return running;
     }
     final future = _analyzeBasicImpl(
@@ -43,7 +43,7 @@ class VideoAnalysisPipelineService {
     required String videoPath,
     required String sessionDir,
     required int durationSeconds,
-    void Function(String label)? onProgress,
+    void Function(double progress, String label)? onProgress,
   }) async {
     try {
       final csvPath    = p.join(sessionDir, 'pose_landmarks.csv');
@@ -62,7 +62,7 @@ class VideoAnalysisPipelineService {
         final existingAudioPath = wavExists ? audioWavPath : audioPcmPath;
         debugPrint('[VideoAnalysisPipeline] ✅ 骨架與音訊已存在 '
             '(audio=${wavExists ? "wav" : "pcm"})，略過分析');
-        onProgress?.call('使用既有分析資料...');
+        onProgress?.call(1.0, '使用既有分析資料...');
         return BasicAnalysisResult(
           csvPath: csvPath,
           audioPath: existingAudioPath,
@@ -71,12 +71,12 @@ class VideoAnalysisPipelineService {
       }
 
       // 執行分析（骨架 + 音訊）
-      onProgress?.call('分析骨架中...');
+      onProgress?.call(0.05, '分析骨架中...');
       final analysis = await VideoAnalysisService().analyze(
         videoPath: videoPath,
         sessionDir: sessionDir,
         durationSeconds: durationSeconds,
-        onProgress: (progress, label) => onProgress?.call(label),
+        onProgress: (progress, label) => onProgress?.call(progress, label),
       );
 
       final hasCSV = await File(csvPath).exists();

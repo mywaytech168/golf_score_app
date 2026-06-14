@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:fl_chart/fl_chart.dart';
@@ -6,23 +5,20 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
-import 'package:video_player/video_player.dart';
 
 import '../models/export_spec.dart';
 import '../models/recording_history_entry.dart';
+import '../models/p_system_metrics.dart';
 import '../providers/plan_provider.dart';
 import '../services/plan_service.dart';
-import '../recording/pose_csv_loader.dart';
-import '../recording/skeleton_painter.dart';
 import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
-import '../services/clip_pipeline_service.dart';
+import '../services/biomechanics_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/overlay_burn_service.dart';
 import '../services/skeleton_csv_locator.dart';
-import '../services/swing_impact_detector.dart';
 import '../services/video_export_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/custom_export_sheet.dart';
@@ -244,13 +240,6 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
               tooltip: AppLocalizations.of(context).exportCustomTitle,
               onPressed: _customExportFlow,
             ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () {
-              setState(() => _loading = true);
-              _loadData();
-            },
-          ),
         ],
       ),
       body: SafeArea(top: false, child: Column(
@@ -341,256 +330,327 @@ class _ChartsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-      children: [
-        _SwingPhasesCard(entry: entry),
-        const SizedBox(height: 16),
-        // 骨架預覽：逐幀 CSV 優先、live CSV 退補（與播放頁同機制）
-        if (resolveSkeletonCsv(p.dirname(entry.filePath)) != null) ...[
-          _SkeletonPreviewCard(entry: entry),
-          const SizedBox(height: 16),
+    final l10n = AppLocalizations.of(context);
+    const pad = EdgeInsets.fromLTRB(16, 16, 16, 32);
+    return DefaultTabController(
+      length: 4,
+      child: Column(
+        children: [
+          TabBar(
+            isScrollable: true,
+            labelColor: kBrandPrimary,
+            unselectedLabelColor: context.textHint,
+            indicatorColor: kBrandPrimary,
+            tabAlignment: TabAlignment.start,
+            tabs: [
+              Tab(text: l10n.chartTabStage),
+              Tab(text: l10n.chartTabCharts),
+              Tab(text: l10n.chartTabAudio),
+              Tab(text: l10n.chartTabPosture),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                // ① 揮桿階段：P1-P10 各階段量化數值
+                ListView(padding: pad, children: [
+                  _PSystemValuesCard(entry: entry),
+                ]),
+                // ② 圖表：聲音峰值 / 手腕 Y / 速度 三線圖
+                ListView(padding: pad, children: [
+                  if (data.audioRms.isNotEmpty)
+                    _ChartCard(
+                      title: l10n.recDetailAudioPeak,
+                      subtitle: l10n.recDetailAudioPeakSubtitle,
+                      icon: Icons.graphic_eq_rounded,
+                      color: const Color(0xFFE53935),
+                      points: data.audioRms,
+                      hitSecond: hitSecond,
+                      yLabel: (v) => '${v.toStringAsFixed(0)}dB',
+                      invertY: false,
+                    )
+                  else
+                    _MissingDataCard(
+                      label: l10n.recDetailAudioPeak,
+                      hint: l10n.recDetailAudioPeakMissing,
+                    ),
+                  const SizedBox(height: 16),
+                  if (data.wristY.isNotEmpty)
+                    _ChartCard(
+                      title: l10n.recDetailWristY,
+                      subtitle: l10n.recDetailWristYSubtitle,
+                      icon: Icons.sports_golf_rounded,
+                      color: const Color(0xFF1565C0),
+                      points: data.wristY,
+                      hitSecond: hitSecond,
+                      yLabel: (v) => '${v.toStringAsFixed(0)}px',
+                      invertY: true,
+                    )
+                  else
+                    _MissingDataCard(
+                      label: l10n.recDetailWristY,
+                      hint: l10n.recDetailPoseMissing,
+                    ),
+                  const SizedBox(height: 16),
+                  if (data.wristSpeed.isNotEmpty)
+                    _ChartCard(
+                      title: 'Speed',
+                      subtitle: l10n.recDetailSpeedSubtitle,
+                      icon: Icons.speed_rounded,
+                      color: kBrandPrimary,
+                      points: data.wristSpeed,
+                      hitSecond: hitSecond,
+                      yLabel: (v) => v.toStringAsFixed(0),
+                      invertY: false,
+                    )
+                  else
+                    _MissingDataCard(
+                      label: l10n.recDetailSpeedMissing,
+                      hint: l10n.recDetailPoseMissing,
+                    ),
+                ]),
+                // ③ 音頻：音頻特徵 5 項
+                ListView(padding: pad, children: [
+                  if (entry.audioFeatureValues != null &&
+                      entry.audioFeatureValues!.isNotEmpty)
+                    _AudioFeaturesCard(entry: entry)
+                  else
+                    _MissingDataCard(
+                      label: l10n.recDetailAudioFeaturesTitle,
+                      hint: l10n.recDetailAudioPeakMissing,
+                    ),
+                ]),
+                // ④ 姿勢：ONNX 分析
+                ListView(padding: pad, children: [
+                  if (postureAnalysisId != null)
+                    _OnnxPostureCard(analysisId: postureAnalysisId!)
+                  else if (isAutoAnalyzing)
+                    _AutoAnalyzingPostureCard()
+                  else
+                    _MissingDataCard(
+                      label: l10n.postureTitle,
+                      hint: l10n.postureNoData,
+                    ),
+                ]),
+              ],
+            ),
+          ),
         ],
-        if (postureAnalysisId != null)
-          _OnnxPostureCard(analysisId: postureAnalysisId!)
-        else if (isAutoAnalyzing)
-          _AutoAnalyzingPostureCard(),
-        if (postureAnalysisId != null || isAutoAnalyzing) const SizedBox(height: 16),
-        if (data.audioRms.isNotEmpty)
-          _ChartCard(
-            title: AppLocalizations.of(context).recDetailAudioPeak,
-            subtitle: AppLocalizations.of(context).recDetailAudioPeakSubtitle,
-            icon: Icons.graphic_eq_rounded,
-            color: const Color(0xFFE53935),
-            points: data.audioRms,
-            hitSecond: hitSecond,
-            yLabel: (v) => '${v.toStringAsFixed(0)}dB',
-            invertY: false,
-          )
-        else
-          _MissingDataCard(
-            label: AppLocalizations.of(context).recDetailAudioPeak,
-            hint: AppLocalizations.of(context).recDetailAudioPeakMissing,
-          ),
-        const SizedBox(height: 16),
-        if (data.wristY.isNotEmpty)
-          _ChartCard(
-            title: AppLocalizations.of(context).recDetailWristY,
-            subtitle: AppLocalizations.of(context).recDetailWristYSubtitle,
-            icon: Icons.sports_golf_rounded,
-            color: const Color(0xFF1565C0),
-            points: data.wristY,
-            hitSecond: hitSecond,
-            yLabel: (v) => '${v.toStringAsFixed(0)}px',
-            invertY: true,  // 螢幕 Y 向下，圖表反轉較直覺
-          )
-        else
-          _MissingDataCard(
-            label: AppLocalizations.of(context).recDetailWristY,
-            hint: AppLocalizations.of(context).recDetailPoseMissing,
-          ),
-        const SizedBox(height: 16),
-        if (data.wristSpeed.isNotEmpty)
-          _ChartCard(
-            title: 'Speed',
-            subtitle: AppLocalizations.of(context).recDetailSpeedSubtitle,
-            icon: Icons.speed_rounded,
-            color: kBrandPrimary,
-            points: data.wristSpeed,
-            hitSecond: hitSecond,
-            yLabel: (v) => v.toStringAsFixed(0),
-            invertY: false,
-          )
-        else
-          _MissingDataCard(
-            label: AppLocalizations.of(context).recDetailSpeedMissing,
-            hint: AppLocalizations.of(context).recDetailPoseMissing,
-          ),
-        // 音頻特徵分析卡片
-        if (entry.audioFeatureValues != null && entry.audioFeatureValues!.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          _AudioFeaturesCard(entry: entry),
-        ],
-      ],
+      ),
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// 骨架預覽卡片：乾淨 clip 上即時疊 CSV 骨架（與播放頁骨架 Tab 同機制）
+// 揮桿階段（P1-P10）各階段量化數值卡（讀 angles.json）
 // ════════════════════════════════════════════════════════════════
 
-class _SkeletonPreviewCard extends StatefulWidget {
+class _PSystemValuesCard extends StatefulWidget {
   final RecordingHistoryEntry entry;
-  const _SkeletonPreviewCard({required this.entry});
-
+  const _PSystemValuesCard({required this.entry});
   @override
-  State<_SkeletonPreviewCard> createState() => _SkeletonPreviewCardState();
+  State<_PSystemValuesCard> createState() => _PSystemValuesCardState();
 }
 
-class _SkeletonPreviewCardState extends State<_SkeletonPreviewCard> {
-  VideoPlayerController? _ctrl;
-  PoseTrack? _track;
+class _PSystemValuesCardState extends State<_PSystemValuesCard> {
+  PSystemMetrics? _ps;
   bool _loading = true;
-  String? _error;
 
-  String get _sessionDir => p.dirname(widget.entry.filePath);
+  static const _goodColor = kGoodColor;
+  static const _warnColor = Color(0xFFFFB74D);
+  static const _badColor = Color(0xFFE05252);
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _load();
   }
 
-  Future<void> _init() async {
-    try {
-      // base 影片須與 CSV 時間軸一致：clip 紀錄用 clip.mp4，否則用 entry 本身影片
-      final clip = p.join(_sessionDir, 'clip.mp4');
-      final basePath = File(clip).existsSync() ? clip : widget.entry.filePath;
-      if (!File(basePath).existsSync()) {
-        throw Exception('影片不存在');
-      }
-      final track = await PoseTrack.load(resolveSkeletonCsv(_sessionDir)!);
-      final ctrl = VideoPlayerController.file(File(basePath));
-      await ctrl.initialize();
-      ctrl.setLooping(true);
-      ctrl.addListener(_onTick);
-      // 起始定位到擊球點，第一眼就有骨架姿勢
-      final hit = widget.entry.hitSecond;
-      if (hit != null && hit > 0) {
-        await ctrl.seekTo(Duration(milliseconds: (hit * 1000).round()));
-      }
-      if (!mounted) {
-        ctrl.dispose();
-        return;
-      }
-      setState(() {
-        _track = track;
-        _ctrl = ctrl;
-        _loading = false;
-      });
-    } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; });
-    }
-  }
-
-  void _onTick() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _ctrl?.removeListener(_onTick);
-    _ctrl?.dispose();
-    super.dispose();
+  Future<void> _load() async {
+    final ps = await PSystemMetrics.load(p.dirname(widget.entry.filePath));
+    if (mounted) setState(() { _ps = ps; _loading = false; });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: context.bgCard,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: context.cardShadow,
+    final l10n = AppLocalizations.of(context);
+    if (_loading) {
+      return const Card(
+        elevation: 2,
+        child: Padding(
+          padding: EdgeInsets.all(28),
+          child: Center(child: CircularProgressIndicator(color: kBrandPrimary)),
+        ),
+      );
+    }
+    final ps = _ps;
+    if (ps == null) {
+      return Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(children: [
+            Icon(Icons.timeline_rounded, color: context.textHint, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(l10n.pSystemNoData,
+                  style: TextStyle(color: context.textSecondary, fontSize: 13)),
+            ),
+          ]),
+        ),
+      );
+    }
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.timeline_rounded, color: kBrandPrimary, size: 18),
+              const SizedBox(width: 8),
+              Text(l10n.pSystemTitle,
+                  style: const TextStyle(
+                      color: kBrandPrimary, fontSize: 15, fontWeight: FontWeight.w700)),
+              const SizedBox(width: 8),
+              if (ps.overallScore != null)
+                Text('${ps.overallScore!.round()}',
+                    style: TextStyle(
+                        color: _scoreColor(ps.overallScore),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800)),
+              const Spacer(),
+              if (ps.viewpoint != SwingViewpoint.faceOn)
+                Flexible(
+                  child: Text(l10n.pSystemViewpointWarn,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(color: context.textHint, fontSize: 10)),
+                ),
+            ]),
+            const SizedBox(height: 6),
+            for (final key in PSystemMetrics.order) _pTile(context, l10n, ps, key),
+          ],
+        ),
       ),
-      padding: const EdgeInsets.all(16),
+    );
+  }
+
+  Widget _pTile(BuildContext context, AppLocalizations l10n, PSystemMetrics ps,
+      String key) {
+    final metrics = ps.perP[key] ?? const <BiomechMetric>[];
+    final score = _pScore(metrics);
+    final color = _scoreColor(score);
+    final sec = ps.pSec[key];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.person_rounded, color: kBrandPrimary, size: 18),
-              const SizedBox(width: 8),
-              Text(AppLocalizations.of(context).recDetailSkeletonPreview,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (_loading)
-            const SizedBox(
-              height: 160,
-              child: Center(child: CircularProgressIndicator(color: kBrandPrimary)),
-            )
-          else if (_error != null || _ctrl == null)
+          Row(children: [
             SizedBox(
-              height: 80,
-              child: Center(
-                child: Text(AppLocalizations.of(context).recDetailSkeletonLoadFailed,
-                    style: TextStyle(color: context.textHint, fontSize: 13)),
-              ),
-            )
-          else
-            _buildPlayer(),
+              width: 34,
+              child: Text(key.toUpperCase(),
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w800, color: color)),
+            ),
+            Text(_pName(l10n, key),
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            if (sec != null) ...[
+              const SizedBox(width: 6),
+              Text('${sec.toStringAsFixed(1)}s',
+                  style: TextStyle(fontSize: 10, color: context.textHint)),
+            ],
+            const Spacer(),
+            if (score != null)
+              Text('${score.round()}',
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+          ]),
+          if (metrics.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 34, top: 3),
+              child: Wrap(spacing: 10, runSpacing: 4, children: [
+                for (final m in metrics) _metricChip(l10n, m),
+              ]),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildPlayer() {
-    final ctrl = _ctrl!;
-    final posSec = ctrl.value.position.inMilliseconds / 1000.0;
-    final pose = _track?.sampleAt(posSec);
-    return Column(
-      children: [
-        Center(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              height: 320,
-              child: AspectRatio(
-                aspectRatio: 9 / 16,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    VideoPlayer(ctrl),
-                    if (pose != null)
-                      CustomPaint(
-                        painter: SkeletonPainter(pose: pose),
-                      ),
-                    // 點擊播放/暫停
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => setState(() {
-                          ctrl.value.isPlaying ? ctrl.pause() : ctrl.play();
-                        }),
-                        child: !ctrl.value.isPlaying
-                            ? const Center(
-                                child: Icon(Icons.play_circle_fill_rounded,
-                                    color: Colors.white70, size: 48),
-                              )
-                            : const SizedBox.expand(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                ),
-                child: Slider(
-                  value: posSec.clamp(
-                      0, ctrl.value.duration.inMilliseconds / 1000.0),
-                  max: ctrl.value.duration.inMilliseconds / 1000.0,
-                  activeColor: kBrandPrimary,
-                  onChanged: (v) =>
-                      ctrl.seekTo(Duration(milliseconds: (v * 1000).round())),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
+  Widget _metricChip(AppLocalizations l10n, BiomechMetric m) {
+    return Text(
+      '${_metricName(l10n, m.key)} ${_fmtVal(m)}${m.beta ? " ·beta" : ""}',
+      style: TextStyle(fontSize: 11, color: _gradeColor(m.grade)),
     );
+  }
+
+  double? _pScore(List<BiomechMetric> metrics) {
+    final v = <double>[];
+    for (final m in metrics) {
+      switch (m.grade) {
+        case BiomechGrade.good: v.add(100); break;
+        case BiomechGrade.warn: v.add(60); break;
+        case BiomechGrade.bad: v.add(20); break;
+        case BiomechGrade.unknown: break;
+      }
+    }
+    return v.isEmpty ? null : v.reduce((a, b) => a + b) / v.length;
+  }
+
+  Color _scoreColor(double? s) {
+    if (s == null) return Colors.grey;
+    if (s >= 80) return _goodColor;
+    if (s >= 50) return _warnColor;
+    return _badColor;
+  }
+
+  Color _gradeColor(BiomechGrade g) {
+    switch (g) {
+      case BiomechGrade.good: return _goodColor;
+      case BiomechGrade.warn: return _warnColor;
+      case BiomechGrade.bad: return _badColor;
+      case BiomechGrade.unknown: return Colors.grey;
+    }
+  }
+
+  String _fmtVal(BiomechMetric m) {
+    final v = m.value;
+    if (v == null) return '--';
+    if (m.unit == 'deg') return '${v.toStringAsFixed(0)}°';
+    if (m.unit == 'norm') return v.toStringAsFixed(3);
+    return v.toStringAsFixed(2);
+  }
+
+  String _pName(AppLocalizations l, String key) {
+    switch (key) {
+      case 'p1': return l.pLabelP1;
+      case 'p2': return l.pLabelP2;
+      case 'p3': return l.pLabelP3;
+      case 'p4': return l.pLabelP4;
+      case 'p5': return l.pLabelP5;
+      case 'p6': return l.pLabelP6;
+      case 'p7': return l.pLabelP7;
+      case 'p8': return l.pLabelP8;
+      case 'p9': return l.pLabelP9;
+      case 'p10': return l.pLabelP10;
+      default: return key;
+    }
+  }
+
+  String _metricName(AppLocalizations l, String key) {
+    switch (key) {
+      case 'spine_tilt': return l.metricSpineTilt;
+      case 'head_move': return l.metricHeadMove;
+      case 'x_factor': return l.metricXFactor;
+      case 'weight_shift': return l.metricWeightShift;
+      default: return key;
+    }
   }
 }
 
@@ -1358,214 +1418,5 @@ class _OnnxPostureCardState extends State<_OnnxPostureCard> {
         ),
       );
     }).toList();
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
-// 揮桿 8 階段關鍵禎時間軸（文字版，讀取 phases.json）
-// ════════════════════════════════════════════════════════════════
-
-class _SwingPhasesCard extends StatefulWidget {
-  final RecordingHistoryEntry entry;
-  const _SwingPhasesCard({required this.entry});
-
-  @override
-  State<_SwingPhasesCard> createState() => _SwingPhasesCardState();
-}
-
-class _SwingPhasesCardState extends State<_SwingPhasesCard> {
-  static List<(String, String)> _buildPhaseOrder(AppLocalizations l10n) => [
-    ('address',       l10n.recDetailPhaseAddress),
-    ('takeaway',      l10n.recDetailPhaseTakeaway),
-    ('backswing',     l10n.recDetailPhaseBackswing),
-    ('top',           l10n.recDetailPhaseTop),
-    ('downswing',     l10n.recDetailPhaseDownswing),
-    ('impact',        l10n.recDetailPhaseImpact),
-    ('followthrough', l10n.recDetailPhaseFollowthrough),
-    ('finish',        l10n.recDetailPhaseFinish),
-  ];
-
-  Map<String, double>? _phases;
-  bool _generating = false;
-
-  String get _sessionDir => p.dirname(widget.entry.filePath);
-  bool get _canGenerate  => widget.entry.videoType == VideoType.localClip;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPhases();
-  }
-
-  Future<void> _loadPhases() async {
-    final f = File(p.join(_sessionDir, 'phases.json'));
-    if (!f.existsSync()) return;
-    try {
-      final raw = jsonDecode(await f.readAsString());
-      if (raw is Map && mounted) {
-        setState(() {
-          _phases = raw.map((k, v) => MapEntry(k as String, (v as num).toDouble()));
-        });
-      }
-    } catch (e) {
-      debugPrint('[SwingPhasesCard] phases.json 讀取失敗: $e');
-    }
-  }
-
-  Future<void> _generate() async {
-    if (_generating) return;
-    setState(() => _generating = true);
-    try {
-      final csvPath = p.join(_sessionDir, 'pose_landmarks.csv');
-      if (!File(csvPath).existsSync()) return;
-
-      final hits = await SwingImpactDetector.detect(csvPath: csvPath);
-      if (hits.isEmpty) return;
-
-      await ClipPipelineService.savePhasesJson(
-        sessionDir: _sessionDir,
-        hit: hits.first,
-        clipActualStartSec: 0.0,
-      );
-      await _loadPhases();
-    } catch (e) {
-      debugPrint('[SwingPhasesCard] 生成失敗: $e');
-    } finally {
-      if (mounted) setState(() => _generating = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_phases == null && !_canGenerate) return const SizedBox.shrink();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: context.bgCard,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: context.cardShadow,
-      ),
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.sports_golf_rounded, color: kBrandPrimary, size: 18),
-              const SizedBox(width: 6),
-              Text(AppLocalizations.of(context).recDetailSwingPhases, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-              const Spacer(),
-              if (_canGenerate)
-                _generating
-                    ? const SizedBox(
-                        width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: kBrandPrimary),
-                      )
-                    : GestureDetector(
-                        onTap: _generate,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _phases != null ? Icons.refresh_rounded : Icons.auto_awesome_rounded,
-                              size: 15,
-                              color: kBrandPrimary,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              _phases != null ? AppLocalizations.of(context).recDetailRegenerate : AppLocalizations.of(context).recDetailGeneratePhases,
-                              style: const TextStyle(fontSize: 11, color: kBrandPrimary, fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _phases != null ? _buildTimeline(context) : _buildPlaceholder(context),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTimeline(BuildContext context) {
-    final phases = _phases!;
-    final phaseOrder = _buildPhaseOrder(AppLocalizations.of(context));
-    // 分兩列 4+4
-    Widget row(int start) => Row(
-      children: List.generate(4, (i) {
-        final (key, label) = phaseOrder[start + i];
-        final sec = phases[key];
-        return Expanded(
-          child: _PhaseChip(label: label, sec: sec),
-        );
-      }),
-    );
-
-    return Column(
-      children: [
-        row(0),
-        const SizedBox(height: 6),
-        row(4),
-      ],
-    );
-  }
-
-  Widget _buildPlaceholder(BuildContext context) {
-    final phaseOrder = _buildPhaseOrder(AppLocalizations.of(context));
-    return Row(
-      children: phaseOrder.take(4).map((e) => Expanded(
-        child: _PhaseChip(label: e.$2, sec: null),
-      )).toList(),
-    );
-  }
-}
-
-class _PhaseChip extends StatelessWidget {
-  final String label;
-  final double? sec;
-  const _PhaseChip({required this.label, required this.sec});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Column(
-        children: [
-          Container(
-            height: 42,
-            decoration: BoxDecoration(
-              color: sec != null
-                  ? (context.isDarkMode
-                      ? kBrandPrimary.withValues(alpha: 0.12)
-                      : const Color(0xFFF0FAF4))
-                  : context.bgInset,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: sec != null ? kBrandPrimary.withValues(alpha: 0.35) : context.borderColor,
-              ),
-            ),
-            child: Center(
-              child: sec != null
-                  ? Text(
-                      '${sec!.toStringAsFixed(1)}s',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: kBrandPrimary,
-                      ),
-                    )
-                  : Icon(Icons.hourglass_empty_rounded, color: context.textHint, size: 16),
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            style: TextStyle(fontSize: 9, color: context.textSecondary, fontWeight: FontWeight.w500),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
   }
 }

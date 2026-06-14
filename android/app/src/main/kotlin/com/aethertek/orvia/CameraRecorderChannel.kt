@@ -117,6 +117,12 @@ class CameraRecorderChannel(
     @Volatile private var analysisReader : ImageReader?          = null  // AI 分析
     @Volatile private var mediaRecorder  : MediaRecorder?        = null
     @Volatile private var isRecording     = false
+    // Zoom：目前數位變焦裁切區（null=無變焦）。applyZoom 只更新此值並重發「當前狀態」的
+    // repeating request（reissueWithCrop），三種狀態各自 surface 集/模板/callback 都正確——
+    // 避免舊版寫死 [preview,analysis,(recorder)] 與當前 session 不符（prepareForRecording 為
+    // 2-stream 不含 analysisReader）→ IllegalArgumentException「unconfigured surface」→ 卡死。
+    private var currentZoomCrop: Rect? = null
+    private var reissueWithCrop: (() -> Unit)? = null
     @Volatile private var recordStartTsMs = 0L   // rec.start() 的 elapsedRealtime（CSV 對時用）
     // preparedRecPath 已移至 camera operation serialization 區塊
 
@@ -280,6 +286,9 @@ class CameraRecorderChannel(
     // ── Open camera ───────────────────────────────────────────────────────────
 
     private fun openCamera(facing: Int, quality: String, fps: Int, result: MethodChannel.Result) {
+        // 新相機/翻轉 → 重置變焦狀態（Dart 端 _currentZoom 同步歸零）。
+        currentZoomCrop = null
+        reissueWithCrop = null
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) {
             releaseOp("openCamera")
@@ -587,8 +596,10 @@ class CameraRecorderChannel(
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                 // ★ 鎖定固定 FPS：防止 AE 自動降到 8fps
                 set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, previewFpsRange)
+                currentZoomCrop?.let { set(CaptureRequest.SCALER_CROP_REGION, it) }
                 applyStabilizationOff()
             }
+            reissueWithCrop = { issuePreviewRequest(s, cam, previewSurface, analysisSurface) }
             s.setRepeatingRequest(req.build(), null, cameraHandler)
             // 給 analysisReader 500ms 緩衝，避免第一幀 preview 就誤判 stale
             lastAnalysisFrameAtMs = SystemClock.uptimeMillis()
@@ -846,8 +857,10 @@ class CameraRecorderChannel(
                 set(CaptureRequest.CONTROL_AE_MODE,  CaptureRequest.CONTROL_AE_MODE_ON)
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, previewFpsRange)
+                currentZoomCrop?.let { set(CaptureRequest.SCALER_CROP_REGION, it) }
                 applyStabilizationOff()
             }
+            reissueWithCrop = { issuePreviewOnly(s, cam, preview) }
             s.setRepeatingRequest(req.build(), null, cameraHandler)
             previewFrameSeq = 0
             Log.d(TAG, "issuePreviewOnly: 1 target fps=$previewFpsRange")
@@ -869,8 +882,10 @@ class CameraRecorderChannel(
                 set(CaptureRequest.CONTROL_AE_MODE,  CaptureRequest.CONTROL_AE_MODE_ON)
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, previewFpsRange)
+                currentZoomCrop?.let { set(CaptureRequest.SCALER_CROP_REGION, it) }
                 applyStabilizationOff()
             }
+            reissueWithCrop = { issueRecordRequest(s, cam, preview, recorder) }
             s.setRepeatingRequest(req.build(), recordCaptureCallback, cameraHandler)
             lastAnalysisFrameAtMs = SystemClock.uptimeMillis()
             previewFrameSeq = 0
@@ -1285,38 +1300,25 @@ class CameraRecorderChannel(
     // ── Zoom ─────────────────────────────────────────────────────────────────
 
     private fun applyZoom(frac: Float) {
-        val s   = captureSession ?: return
-        val cam = cameraDevice   ?: return
-        val id  = currentCameraId ?: return
+        val id     = currentCameraId ?: return
         val chars  = cameraManager.getCameraCharacteristics(id)
         val maxZ   = chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
         val sensor = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
-        val ratio  = 1f + frac * (maxZ - 1f)
-        val cropW  = (sensor.width()  / ratio).toInt()
-        val cropH  = (sensor.height() / ratio).toInt()
-        val cropX  = (sensor.width()  - cropW) / 2
-        val cropY  = (sensor.height() - cropH) / 2
-        val pr = previewReader ?: return
-        val ar = analysisReader
-
-        val tpl = if (isRecording) CameraDevice.TEMPLATE_RECORD else CameraDevice.TEMPLATE_PREVIEW
-        val surfaces = buildList<Surface> {
-            add(pr.surface)
-            ar?.let { add(it.surface) }
-            if (isRecording) mediaRecorder?.surface?.let { add(it) }
+        val ratio  = 1f + frac.coerceIn(0f, 1f) * (maxZ - 1f)
+        currentZoomCrop = if (frac <= 0.001f) {
+            null // 歸零 → 取消裁切（回全幅）
+        } else {
+            val cropW = (sensor.width()  / ratio).toInt()
+            val cropH = (sensor.height() / ratio).toInt()
+            val cropX = (sensor.width()  - cropW) / 2
+            val cropY = (sensor.height() - cropH) / 2
+            Rect(cropX, cropY, cropX + cropW, cropY + cropH)
         }
+        // 重發「當前狀態」的 repeating request——surface 集/模板/callback 由各 issue 函式
+        // 在發出時記住（reissueWithCrop），保證與當前 session 一致；不再自行拼 surface。
         try {
-            val req = cam.createCaptureRequest(tpl).apply {
-                surfaces.forEach { addTarget(it) }
-                set(CaptureRequest.SCALER_CROP_REGION,
-                    Rect(cropX, cropY, cropX + cropW, cropY + cropH))
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, previewFpsRange)
-                applyStabilizationOff()
-            }
-            s.setRepeatingRequest(req.build(), null, cameraHandler)
-        } catch (e: Exception) { Log.w(TAG, "applyZoom: $e") }
+            reissueWithCrop?.invoke()
+        } catch (e: Exception) { Log.w(TAG, "applyZoom reissue: $e") }
     }
 
     // ── Clean close（解決競態問題）────────────────────────────────────────────

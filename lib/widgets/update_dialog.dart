@@ -1,8 +1,8 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_update_service.dart';
+import '../services/install_source_service.dart';
 import '../theme/app_theme.dart';
 
 /// 顯示更新對話框。
@@ -35,9 +35,10 @@ class _UpdateDialog extends StatelessWidget {
   }
 
   Future<void> _openStore(BuildContext context) async {
-    if (result.updateUrl.isEmpty) return;
-    final uri = Uri.parse(result.updateUrl);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    // 依安裝來源分流：Play 安裝 → Play 商店頁；側載/iOS → 後端外部連結。
+    // Play 安裝時不依賴後端 updateUrl，故不在此處因 updateUrl 空就提前 return。
+    final ok = await InstallSourceService.launchUpdate(result.updateUrl);
+    if (!ok) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppLocalizations.of(context).updateCannotOpenStore)),

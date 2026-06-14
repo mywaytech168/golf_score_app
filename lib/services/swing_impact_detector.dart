@@ -201,11 +201,11 @@ List<SwingHit> _detectIsolate(_DetectArgs args) {
 
     // 8 階段關鍵禎偵測
     final addrFrame  = _addressFrame(speedDn, c.topFrame, fps);
-    final tkwFrame   = _takeawayFrame(speedDn, addrFrame, c.topFrame);
-    final bswFrame   = _backswingFrame(tkwFrame, c.topFrame);
-    final downFrame  = _downswingFrame(c.topFrame, c.yLowFrame);
+    final tkwFrame   = _takeawayFrame(speedDn, addrFrame, c.topFrame, p90);
+    final bswFrame   = _backswingFrame(ySmooth, tkwFrame, c.topFrame);
+    final downFrame  = _downswingFrame(ySmooth, c.topFrame, c.yLowFrame);
     final ftFrame    = _followThroughFrame(ySmooth, c.yLowFrame, fps, n);
-    final finFrame   = _finishFrame(speedDn, ftFrame, fps, n);
+    final finFrame   = _finishFrame(speedDn, ftFrame, fps, n, p90);
 
     hits.add(SwingHit(
       hitIndex:   i + 1,
@@ -709,11 +709,11 @@ int _addressFrame(List<double> speed, int topFrame, double fps) {
   return best;
 }
 
-/// 下桿中段禎：topFrame 與 hitFrame 中間，Y 座標接近兩者均值的禎。
-int _downswingFrame(int topFrame, int hitFrame) {
-  if (hitFrame <= topFrame) return topFrame;
-  return (topFrame + hitFrame) ~/ 2;
-}
+/// ⑤ 下桿中段禎：top→hit 之間「手腕 Y 行程過半」那一幀（位置中點，非時間中點）。
+/// 下桿手腕由高到低（Y 由小變大），取 Y 跨越 (yTop+yHit)/2 的真實幀；
+/// 失敗（端點 NaN / 無交越）退回算術中點，保證不退化、向後相容。
+int _downswingFrame(List<double> y, int topFrame, int hitFrame) =>
+    _yTravelHalfwayFrame(y, topFrame, hitFrame);
 
 /// 送桿禎：hitFrame 後 0.3–2.0 秒窗口中，Y 局部最小值（手腕最高點）。
 int _followThroughFrame(List<double> y, int hitFrame, double fps, int n) {
@@ -739,11 +739,12 @@ int _followThroughFrame(List<double> y, int hitFrame, double fps, int n) {
 // ── 新增：起桿 / 上桿中段 / 收桿 ──────────────────────────────────────────────
 
 /// ② 起桿禎：addressFrame 之後到 topFrame 之前，速度首次超過低門檻。
-/// 低門檻 = max(0.3 px/frame, 20% of top speed near FAST frame)。
-int _takeawayFrame(List<double> speed, int addressFrame, int topFrame) {
+/// 低門檻改尺度無關：max(0.4 px/frame 保底, p90×0.08)，消除解析度/拍攝距離相依
+/// （px/frame 在 360p 與 1080p 差數倍 → 原寫死 0.4 在高解析度過低、誤抓起桿）。
+int _takeawayFrame(List<double> speed, int addressFrame, int topFrame, double speedP90) {
   if (topFrame <= addressFrame + 2) return addressFrame;
-  // 低速門檻：0.4 px/frame 代表手開始移動
-  const lowThr = 0.4;
+  // 低速門檻：手開始移動。保底 0.4，並隨揮桿速度尺度等比放大。
+  final lowThr = math.max(0.4, speedP90 * 0.08);
   for (int i = addressFrame + 1; i < topFrame; i++) {
     if (!speed[i].isNaN && speed[i] >= lowThr) return i;
   }
@@ -751,20 +752,38 @@ int _takeawayFrame(List<double> speed, int addressFrame, int topFrame) {
   return addressFrame + (topFrame - addressFrame) ~/ 4;
 }
 
-/// ③ 上桿中段禎：takeaway 到 top 的中間點。
-int _backswingFrame(int takeawayFrame, int topFrame) {
-  if (topFrame <= takeawayFrame) return takeawayFrame;
-  return (takeawayFrame + topFrame) ~/ 2;
+/// ③ 上桿中段禎：takeaway→top 之間「手腕 Y 行程過半」那一幀（位置中點，非時間中點）。
+/// 上桿手腕由低到高（Y 由大變小），取 Y 跨越中點值的真實幀；失敗退回算術中點。
+int _backswingFrame(List<double> y, int takeawayFrame, int topFrame) =>
+    _yTravelHalfwayFrame(y, takeawayFrame, topFrame);
+
+/// 在 [fromFrame, toFrame] 區間找「手腕 Y 位置行程過半」那一幀：
+/// target = (y[from]+y[to])/2，回傳 Y 首次跨越 target 的幀（位置中點，方向無關）。
+/// 任一端點 NaN 或無交越 → 退回算術時間中點（不退化、向後相容）。
+int _yTravelHalfwayFrame(List<double> y, int fromFrame, int toFrame) {
+  final mid = (fromFrame + toFrame) ~/ 2;
+  if (toFrame <= fromFrame + 1) return math.max(fromFrame, mid);
+  final n = y.length;
+  if (fromFrame < 0 || toFrame >= n) return mid;
+  final yFrom = y[fromFrame], yTo = y[toFrame];
+  if (yFrom.isNaN || yTo.isNaN) return mid;
+  final target = (yFrom + yTo) / 2;
+  for (int i = fromFrame + 1; i <= toFrame; i++) {
+    final prev = y[i - 1], cur = y[i];
+    if (prev.isNaN || cur.isNaN) continue;
+    if ((prev - target) * (cur - target) <= 0) return i; // 跨越（含等於）
+  }
+  return mid;
 }
 
 /// ⑧ 收桿禎：followThroughFrame 之後，速度持續低於門檻（身體靜止）。
-int _finishFrame(List<double> speed, int followThroughFrame, double fps, int n) {
+int _finishFrame(List<double> speed, int followThroughFrame, double fps, int n, double speedP90) {
   final lo = math.min(n - 1, followThroughFrame + (0.2 * fps).round());
   final hi = math.min(n,     followThroughFrame + (2.5 * fps).round());
   if (lo >= hi) return math.min(n - 1, lo);
 
-  // 尋找速度持續低於 0.5 px/frame 的起點（連續至少 3 幀）
-  const lowThr = 0.5;
+  // 尋找速度持續低於門檻的起點（連續至少 3 幀）；門檻尺度無關：max(0.5 保底, p90×0.06)
+  final lowThr = math.max(0.5, speedP90 * 0.06);
   const minStableFrames = 3;
   for (int i = lo; i < hi - minStableFrames; i++) {
     if (speed[i].isNaN || speed[i] >= lowThr) continue;

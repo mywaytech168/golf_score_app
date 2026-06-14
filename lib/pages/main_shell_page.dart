@@ -13,6 +13,7 @@ import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
 import '../services/app_update_service.dart';
+import '../services/install_source_service.dart';
 import '../services/statistics_service.dart';
 import '../widgets/update_dialog.dart';
 
@@ -38,8 +39,26 @@ class _MainShellPageState extends State<MainShellPage> {
     super.initState();
     _pageController = PageController(initialPage: 0);
     _loadHistory();
+    // Play Flexible 更新下載完成 → 顯示「重啟套用」提示（不自動重啟，避免打斷使用者）
+    InstallSourceService.onFlexibleUpdateDownloaded = _promptFlexibleRestart;
     // 在首幀繪製完成後才做教學引導 / 版本檢查，避免阻塞 UI
     WidgetsBinding.instance.addPostFrameCallback((_) => _runPostFrameChecks());
+  }
+
+  /// Play Flexible 更新已下載：提示使用者於安全時機重啟套用。
+  void _promptFlexibleRestart() {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(l10n.updateDownloadedReady),
+        duration: const Duration(days: 365), // 持續顯示直到使用者操作
+        action: SnackBarAction(
+          label: l10n.updateRestartNow,
+          onPressed: InstallSourceService.completeFlexibleUpdate,
+        ),
+      ),
+    );
   }
 
   /// 首幀後流程：先顯示初次教學引導（若未看過），再做版本檢查
@@ -49,9 +68,19 @@ class _MainShellPageState extends State<MainShellPage> {
     await _checkForUpdate();
   }
 
-  /// 向後端查詢更新，依結果決定顯示強制 / 非強制對話框
+  /// 依安裝來源檢查更新：
+  /// - Play 安裝 → 走 Play Core 原生應用內更新（Play 自己判斷版本 + 下載安裝），
+  ///   不顯示自訂對話框，免疫上架審查不同步。
+  /// - iOS / 側載 → 向 App Store / 後端查詢，顯示自訂強制/非強制對話框。
   Future<void> _checkForUpdate() async {
     if (!mounted) return;
+
+    // Play 安裝：交給 Play Core，整個檢查 + 更新 UI 由 Play 負責
+    if (await InstallSourceService.isPlayInstall) {
+      await InstallSourceService.runPlayUpdateFlow();
+      return;
+    }
+
     final result = await AppUpdateService.check();
     if (!mounted || !result.needsUpdate) return;
 
@@ -75,6 +104,7 @@ class _MainShellPageState extends State<MainShellPage> {
 
   @override
   void dispose() {
+    InstallSourceService.onFlexibleUpdateDownloaded = null;
     _pageController.dispose();
     super.dispose();
   }

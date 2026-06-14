@@ -51,19 +51,18 @@ class ExternalVideoImporter {
       final sessionDir = p.join(appDir.path, 'golf_recordings', sessionId);
       await Directory(sessionDir).create(recursive: true);
 
-      // iOS：直接複製 .mov，不轉檔（iOS 原生支援，轉檔太慢）
-      // Android：轉檔為標準 MP4（H.264 + AAC）
-      // 其他平台：直接複製
+      // iOS / Android：統一經原生 VideoTranscoder 正規化為標準 swing.mp4。
+      //   Android = MOV remux（保留 H.264/HEVC bitstream）/ 非標準格式重編 H.264。
+      //   iOS     = MP4/M4V 直接複製、MOV passthrough remux（保留 codec，與 Android 同策略）。
+      // 治本：全鏈路只存在 swing.mp4——避免 iOS 留 swing.mov 導致分享接收端
+      //       （只認 swing.mp4）匯入失敗、上傳 content-type 與實際容器不符。
+      // 其他平台：直接複製。
       final String videoPath;
-      if (Platform.isIOS) {
-        videoPath = p.join(sessionDir, 'swing.mov');
-        onProgress?.call(0.0, l10n?.extImportProgressCopying ?? '複製影片中...');
-        await File(sourcePath).copy(videoPath);
-      } else if (Platform.isAndroid) {
+      if (Platform.isIOS || Platform.isAndroid) {
         videoPath = p.join(sessionDir, 'swing.mp4');
         onProgress?.call(0.0, l10n?.extImportProgressTranscoding ?? '轉檔準備中...');
 
-        // 監聽 Kotlin sendProgress("transcode") → EventChannel → 更新進度 Dialog
+        // 監聽原生 sendProgress("transcode") → EventChannel → 更新進度 Dialog
         final progressSvc = AnalysisProgressService.instance;
         void onTranscodeProgress() {
           if (progressSvc.currentOp == 'transcode') {

@@ -29,5 +29,7 @@
 	<ItemGroup>
 		<!-- 將 ONNX 模型複製到輸出目錄，路徑: Assets/Models/pose_error_tcn.onnx -->
 		<Content Include="Assets\Models\*.onnx" CopyToOutputDirectory="PreserveNewest" />
+		<!-- 機密金鑰（gitignored）複製到輸出（SDK 已隱含納入，用 Update 設定複製） -->
+		<Content Update="secrets\*.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 </Project>

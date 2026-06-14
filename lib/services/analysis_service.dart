@@ -377,6 +377,7 @@ class AnalysisService {
     String promptVersion = 'v1',
     Map<String, double>? phaseTimestamps,
     String? audioAnalysisJson,
+    String? swingMetricsJson,
     int? v2Fps,
     String? v2Resolution,
   }) async {
@@ -391,6 +392,7 @@ class AnalysisService {
         'promptVersion':  promptVersion,
         if (phaseTimestamps != null)   'phaseTimestamps':  phaseTimestamps,
         if (audioAnalysisJson != null) 'audioAnalysisJson': audioAnalysisJson,
+        if (swingMetricsJson != null)  'swingMetricsJson':  swingMetricsJson,
         if (v2Fps != null)             'v2Fps':            v2Fps,
         if (v2Resolution != null)      'v2Resolution':     v2Resolution,
       },
@@ -579,6 +581,13 @@ class AnalysisService {
       }
     }
 
+    // 裝置端 P-System 角度量化（angles.json）→ inline 注入 Gemini 當客觀依據（失敗略過）
+    String? swingMetricsJson;
+    try {
+      final af = File(p.join(p.dirname(clipPath), 'angles.json'));
+      if (af.existsSync()) swingMetricsJson = await af.readAsString();
+    } catch (_) {/* 無 angles.json（V2 切片/舊片）→ 略過 */}
+
     final req = await requestAnalysis(
       videoId:           videoId,
       hasCsv:            hasCsv,
@@ -588,6 +597,7 @@ class AnalysisService {
       promptVersion:     promptVersion,
       phaseTimestamps:   phaseTimestamps,
       audioAnalysisJson: audioAnalysisJson,
+      swingMetricsJson:  swingMetricsJson,
       v2Fps:             v2Fps,
       v2Resolution:      v2Resolution,
     );

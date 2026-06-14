@@ -475,5 +475,47 @@ void main() {
       feedIdle(det, 10.0, 13.5);
       expect(det.state, SwingDetectState.listening);
     });
+
+    test('自校準：校準期雜訊抬高門檻 → 抑制 waggle 級中等揮動', () {
+      var impacts = 0;
+      final det = LiveSwingDetector(calibrationSec: 3.0, onImpact: (_) => impacts++);
+      // 校準期腕點來回晃動，每禎位移 ~0.07（waggle/手抖等級）→ baseline≈0.07、floor≈0.175
+      var t = 0.0;
+      var fwd = true;
+      while (t < 3.5) {
+        det.feed(poseAtWrist(fwd ? 0.57 : 0.5, 0.5), t);
+        fwd = !fwd;
+        t += 1 / 30;
+      }
+      // 中等揮動 peak ~0.16（> 預設 floor 0.15，靜止校準下會開火，但 < 自校準 floor 0.175）
+      var x = 0.5;
+      for (final dx in [0.04, 0.09, 0.16]) {
+        x += dx;
+        det.feed(poseAtWrist(x, 0.5), t);
+        t += 1 / 30;
+      }
+      for (var i = 0; i < 10; i++) {
+        det.feed(poseAtWrist(x, 0.5), t);
+        t += 1 / 30;
+      }
+      expect(impacts, 0, reason: '自校準基線抬高門檻應抑制 waggle 級揮動');
+    });
+
+    test('自校準對照：靜止校準下同等中等揮動 → 正常開火', () {
+      var impacts = 0;
+      final det = LiveSwingDetector(calibrationSec: 3.0, onImpact: (_) => impacts++);
+      var t = feedIdle(det, 0, 3.5); // 靜止校準 → baseline≈0
+      var x = 0.5;
+      for (final dx in [0.04, 0.09, 0.16]) {
+        x += dx;
+        det.feed(poseAtWrist(x, 0.5), t);
+        t += 1 / 30;
+      }
+      for (var i = 0; i < 10; i++) {
+        det.feed(poseAtWrist(x, 0.5), t);
+        t += 1 / 30;
+      }
+      expect(impacts, 1);
+    });
   });
 }

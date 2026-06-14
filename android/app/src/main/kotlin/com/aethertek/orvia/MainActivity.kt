@@ -17,6 +17,13 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.core.content.FileProvider
+import com.google.android.play.core.appupdate.AppUpdateInfo
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.InstallStateUpdatedListener
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.install.model.InstallStatus
+import com.google.android.play.core.install.model.UpdateAvailability
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -46,6 +53,8 @@ class MainActivity: FlutterActivity() {
     private val TRANSCODER_CHANNEL = "com.example.golf_score_app/video_transcoder"
     private val GOLF_ANALYSIS_CHANNEL = "com.example.golf_score_app/golf_analysis"
     private val EXPORT_COMPOSER_CHANNEL = "com.example.golf_score_app/export_composer"
+    private val APP_INFO_CHANNEL = "com.example.golf_score_app/app_info"
+    private val APP_UPDATE_CHANNEL = "com.example.golf_score_app/app_update"
     private val overlayExecutor = Executors.newSingleThreadExecutor()
     private val audioExtractorExecutor = Executors.newSingleThreadExecutor()
     private val skeletonExecutor = Executors.newSingleThreadExecutor()
@@ -58,6 +67,19 @@ class MainActivity: FlutterActivity() {
     @Volatile private var pendingFolderSrc: String? = null
     @Volatile private var pendingFolderFileName: String? = null
     private val REQUEST_FOLDER_PICK = 1001
+
+    // ── Play In-App Update ──────────────────────────────────────────
+    private val REQ_PLAY_UPDATE = 1002
+    private val appUpdateManager by lazy { AppUpdateManagerFactory.create(this) }
+    // check() 取得的 AppUpdateInfo 暫存，供 start() 直接啟動更新流程
+    @Volatile private var cachedAppUpdateInfo: AppUpdateInfo? = null
+    // Flexible 下載完成監聽器（下載好通知 Dart 顯示重啟提示），用後即註銷避免洩漏
+    private var flexibleInstallListener: InstallStateUpdatedListener? = null
+    // app_update channel 參考：供下載完成時由原生回呼 Dart（onFlexibleDownloaded）
+    private var appUpdateChannel: MethodChannel? = null
+    // 是否曾啟動 Immediate 更新：唯有如此 onResume 才需向 Play 查詢恢復，
+    // 避免側載/無 Play 服務的裝置每次回前景都白打 Play API
+    @Volatile private var immediateUpdateStarted = false
 
     private val golfAnalysisExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "MainActivity"
@@ -97,6 +119,17 @@ class MainActivity: FlutterActivity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == REQ_PLAY_UPDATE) {
+            // RESULT_OK＝使用者接受並啟動更新；其餘＝取消/失敗 → 清理 Flexible 監聽
+            if (resultCode != RESULT_OK) {
+                Log.w(logTag, "[app_update] 取消或失敗 resultCode=$resultCode")
+                immediateUpdateStarted = false
+                unregisterFlexibleListener()
+            }
+            return
+        }
+
         if (requestCode != REQUEST_FOLDER_PICK) return
 
         val result   = pendingFolderResult   ?: return
@@ -217,6 +250,109 @@ class MainActivity: FlutterActivity() {
                             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                         }
                         result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // ── 安裝來源查詢（區分 Play 安裝 vs 側載/外部分發） ──────────
+        // installer == "com.android.vending" → 由 Google Play 安裝，
+        // App 自我更新必須走 Play 管道（policy 禁止外部下載 APK 自我更新）。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_INFO_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getInstallerPackageName" -> {
+                        val installer: String? = try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                packageManager
+                                    .getInstallSourceInfo(packageName)
+                                    .installingPackageName
+                            } else {
+                                @Suppress("DEPRECATION")
+                                packageManager.getInstallerPackageName(packageName)
+                            }
+                        } catch (e: Exception) {
+                            // 查不到（例如 adb install / 部分 ROM）→ 視為未知，交由 Dart 端退回外部更新
+                            Log.w(logTag, "[app_info] 取得安裝來源失敗: ${e.message}")
+                            null
+                        }
+                        result.success(installer)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // ── Play In-App Update（自寫 Kotlin 直呼 Play Core） ──────────
+        // check  → 問裝置上的 Play Store「有沒有我能裝的更新」（版本真實來源＝Play，
+        //          免疫審查不同步）；start → 啟動 Immediate/Flexible 原生更新流程。
+        appUpdateChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, APP_UPDATE_CHANNEL)
+        appUpdateChannel!!
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "check" -> {
+                        appUpdateManager.appUpdateInfo
+                            .addOnSuccessListener { info ->
+                                cachedAppUpdateInfo = info
+                                val available = info.updateAvailability() ==
+                                    UpdateAvailability.UPDATE_AVAILABLE
+                                result.success(mapOf(
+                                    "available" to available,
+                                    "immediateAllowed" to
+                                        info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE),
+                                    "flexibleAllowed" to
+                                        info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE),
+                                    "versionCode" to info.availableVersionCode(),
+                                    // Play Console 發版時設定的更新優先級(0-5)，
+                                    // Dart 端據此決定 Immediate(強制) vs Flexible
+                                    "priority" to info.updatePriority(),
+                                ))
+                            }
+                            .addOnFailureListener { e ->
+                                // 非 Play 安裝 / 無 Play 服務 / 離線 → 視為無更新，不報錯阻斷
+                                Log.w(logTag, "[app_update] check 失敗: ${e.message}")
+                                result.success(mapOf("available" to false))
+                            }
+                    }
+                    "start" -> {
+                        val immediate = call.argument<Boolean>("immediate") ?: false
+                        val info = cachedAppUpdateInfo
+                        if (info == null || info.updateAvailability() !=
+                                UpdateAvailability.UPDATE_AVAILABLE) {
+                            result.error("no_update", "無可用更新（請先 check）", null)
+                            return@setMethodCallHandler
+                        }
+                        val type = if (immediate) AppUpdateType.IMMEDIATE
+                                   else AppUpdateType.FLEXIBLE
+                        if (!info.isUpdateTypeAllowed(type)) {
+                            result.error("type_not_allowed", "Play 不允許此更新模式", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            // Flexible：背景下載，下載完成由監聽器觸發安裝
+                            if (!immediate) registerFlexibleListener()
+                            if (immediate) immediateUpdateStarted = true
+                            appUpdateManager.startUpdateFlowForResult(
+                                info,
+                                this,
+                                AppUpdateOptions.newBuilder(type).build(),
+                                REQ_PLAY_UPDATE,
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "[app_update] start 失敗: ${e.message}", e)
+                            unregisterFlexibleListener()
+                            result.error("start_failed", e.message, null)
+                        }
+                    }
+                    "complete" -> {
+                        // 使用者在重啟提示點「重新啟動」→ 安裝已下載的 Flexible 更新
+                        try {
+                            appUpdateManager.completeUpdate()
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "[app_update] complete 失敗: ${e.message}", e)
+                            result.error("complete_failed", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -888,8 +1024,54 @@ class MainActivity: FlutterActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    // ── Play In-App Update 輔助 ─────────────────────────────────────
+
+    /** 註冊 Flexible 下載完成監聽器：下載好通知 Dart 顯示「重啟套用」提示，
+     *  由使用者在安全時機點擊才真正安裝（避免錄影中被自動重啟打斷）。*/
+    private fun registerFlexibleListener() {
+        if (flexibleInstallListener != null) return
+        val listener = InstallStateUpdatedListener { state ->
+            if (state.installStatus() == InstallStatus.DOWNLOADED) {
+                runOnUiThread {
+                    appUpdateChannel?.invokeMethod("onFlexibleDownloaded", null)
+                }
+                unregisterFlexibleListener()
+            }
+        }
+        flexibleInstallListener = listener
+        appUpdateManager.registerListener(listener)
+    }
+
+    private fun unregisterFlexibleListener() {
+        flexibleInstallListener?.let { appUpdateManager.unregisterListener(it) }
+        flexibleInstallListener = null
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Immediate 更新若被中斷（使用者切出去），回前景時恢復，避免卡在半更新狀態。
+        // 僅在曾啟動 Immediate 時查詢，避免非 Play 裝置每次回前景白打 Play API。
+        if (!immediateUpdateStarted) return
+        appUpdateManager.appUpdateInfo.addOnSuccessListener { info ->
+            if (info.updateAvailability() ==
+                    UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
+                try {
+                    appUpdateManager.startUpdateFlowForResult(
+                        info,
+                        this,
+                        AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build(),
+                        REQ_PLAY_UPDATE,
+                    )
+                } catch (e: Exception) {
+                    Log.w(logTag, "[app_update] onResume 恢復失敗: ${e.message}")
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        unregisterFlexibleListener()
         overlayExecutor.shutdown()
         audioExtractorExecutor.shutdown()
         skeletonExecutor.shutdown()

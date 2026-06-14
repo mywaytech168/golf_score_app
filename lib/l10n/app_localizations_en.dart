@@ -897,6 +897,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Cannot open store. Please update manually.';
 
   @override
+  String get updateDownloadedReady => 'Update downloaded. Restart to apply.';
+
+  @override
+  String get updateRestartNow => 'Restart';
+
+  @override
   String get updateRequiredTitle => 'Required Update';
 
   @override
@@ -2265,6 +2271,150 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get playerPhaseFinish => 'Finish';
+
+  @override
+  String get pSystemTitle => 'P-System';
+
+  @override
+  String get pSystemViewpointWarn => 'Rotation needs face-on view';
+
+  @override
+  String get pSystemNoMetrics => 'No measurable metrics here';
+
+  @override
+  String get metricSpineTilt => 'Spine angle';
+
+  @override
+  String get metricHeadMove => 'Head movement';
+
+  @override
+  String get metricXFactor => 'X-factor';
+
+  @override
+  String get metricWeightShift => 'Weight shift';
+
+  @override
+  String get metricOverall => 'Overall';
+
+  @override
+  String get trendTitle => 'Correction tracking';
+
+  @override
+  String get trendImproving => 'Improving';
+
+  @override
+  String get trendDeclining => 'Declining';
+
+  @override
+  String get trendStable => 'Stable';
+
+  @override
+  String get trendInsufficient => 'Not enough data';
+
+  @override
+  String get pLabelP1 => 'Setup';
+
+  @override
+  String get pLabelP2 => 'Take';
+
+  @override
+  String get pLabelP3 => 'Bk½';
+
+  @override
+  String get pLabelP4 => 'Top';
+
+  @override
+  String get pLabelP5 => 'Dn½';
+
+  @override
+  String get pLabelP6 => 'Pre';
+
+  @override
+  String get pLabelP7 => 'Impact';
+
+  @override
+  String get pLabelP8 => 'Foll';
+
+  @override
+  String get pLabelP9 => 'Fin½';
+
+  @override
+  String get pLabelP10 => 'Finish';
+
+  @override
+  String get chartTabStage => 'Stages';
+
+  @override
+  String get chartTabCharts => 'Charts';
+
+  @override
+  String get chartTabAudio => 'Audio';
+
+  @override
+  String get chartTabPosture => 'Posture';
+
+  @override
+  String get pSystemNoData =>
+      'No P-System data for this clip — re-run swing detection';
+
+  @override
+  String get pSystemHelpTitle => 'P-System Guide';
+
+  @override
+  String get pSystemHelpIntro =>
+      'P1–P10 are 10 key positions of the swing from setup to finish. Each measures a few biomechanics angles and is scored, so you can see which part needs work.';
+
+  @override
+  String get pSystemHelpPositionsHeader => 'The 10 positions';
+
+  @override
+  String get pSystemHelpReliable => 'Reliable anchor';
+
+  @override
+  String get pSystemHelpProxy => 'Proxy estimate (beta)';
+
+  @override
+  String get pSystemHelpScoringHeader => 'How scoring works';
+
+  @override
+  String get pSystemHelpScoringBody =>
+      'Each metric is scored by whether it falls in the ideal range: good=100, warn=60, off=20, not-measurable=excluded. Each position averages its metrics; the overall score averages the positions.';
+
+  @override
+  String get gradeGood => 'Good';
+
+  @override
+  String get gradeWarn => 'Warn';
+
+  @override
+  String get gradeBad => 'Off';
+
+  @override
+  String get pSystemHelpMetricsHeader => 'Motion metrics';
+
+  @override
+  String get metricSpineTiltDesc =>
+      'Spine forward-tilt vs the ground. Ideally kept close to your setup angle from backswing through impact (no lifting or collapsing).';
+
+  @override
+  String get metricHeadMoveDesc =>
+      'Head displacement from the setup position. Steadier is better; large movement means your center/axis drifted.';
+
+  @override
+  String get metricXFactorDesc =>
+      'Rotational separation between shoulders and hips — the power source. Only measurable when filmed face-on.';
+
+  @override
+  String get metricWeightShiftDesc =>
+      'Whether the hips turn toward the lead foot at impact. Insufficient shift loses power and causes thin contact.';
+
+  @override
+  String get pSystemHelpViewpoint =>
+      'X-factor (rotation) is estimated from a 2D projection and is accurate only when filmed face-on; it is hidden for down-the-line footage.';
+
+  @override
+  String get pSystemHelpBeta =>
+      'Club-related positions (P2/P6/P8) use the forearm as a proxy and rotation is a 2D estimate — all marked beta. Ideal ranges are generic placeholders for trend reference, not lab-grade measurement.';
 
   @override
   String get postureTitle => 'Posture Analysis';

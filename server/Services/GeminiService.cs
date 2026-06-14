@@ -273,10 +273,11 @@ namespace UploadServer.Services
             byte[]? audioWavBytes = null,
             int? v2Fps = null,
             string? v2Resolution = null,
+            string? swingMetricsJson = null,
             CancellationToken ct = default)
         {
             var modelAnalysis = BuildModelAnalysis(clipBytes, errorTypeHint);
-            var prompt        = RenderPrompt(modelAnalysis, promptVersion, phaseTimestamps, audioAnalysisJson);
+            var prompt        = RenderPrompt(modelAnalysis, promptVersion, phaseTimestamps, audioAnalysisJson, swingMetricsJson);
 
             return promptVersion switch
             {
@@ -555,7 +556,8 @@ namespace UploadServer.Services
             object modelAnalysis,
             string promptVersion,
             Dictionary<string, double>? phaseTimestamps,
-            string? audioAnalysisJson = null)
+            string? audioAnalysisJson = null,
+            string? swingMetricsJson = null)
         {
             var modelJson = JsonSerializer.Serialize(modelAnalysis, new JsonSerializerOptions { WriteIndented = true });
 
@@ -578,6 +580,16 @@ namespace UploadServer.Services
             var audioBlock = BuildAudioAnalysisBlock(audioAnalysisJson);
             result = result.Replace("{{AUDIO_ANALYSIS_JSON}}", audioBlock);
 
+            // 裝置端生物力學量化（P1-P10 角度/分級）：若 client 提供，附加為客觀依據。
+            // 「數值由規則、評語由 LLM」——要求 evidence 引用具體角度而非自行臆測。
+            if (!string.IsNullOrWhiteSpace(swingMetricsJson))
+            {
+                result += "\n\n── 裝置端生物力學量化（P1-P10 角度/分級，客觀可重現數值）──\n"
+                    + "請優先以下列數值為依據，coach_feedback / evidence 須引用具體角度"
+                    + "（例：『P4 X-factor 偏小，上桿身體分離不足』）；勿自行臆測未提供的角度。\n"
+                    + swingMetricsJson;
+            }
+
             return result;
         }
 
@@ -596,11 +608,24 @@ namespace UploadServer.Services
                 "impact"        => "⑥擊球",
                 "followthrough" => "⑦送桿",
                 "finish"        => "⑧收桿",
+                // P-System（P2/P6/P8 桿身、P3/P5/P9 手臂為代理估計）
+                "p1"  => "P1 預備",   "p2" => "P2 桿水平(上)", "p3" => "P3 臂水平(上)",
+                "p4"  => "P4 頂點",   "p5" => "P5 臂水平(下)", "p6" => "P6 桿水平(下)",
+                "p7"  => "P7 擊球",   "p8" => "P8 桿水平(送)", "p9" => "P9 臂水平(送)",
+                "p10" => "P10 收桿",
                 _               => key,
             };
 
-            var order = new[] { "address", "takeaway", "backswing", "top", "downswing", "impact", "followthrough", "finish" };
-            var lines = new System.Text.StringBuilder("揮桿關鍵時間點（請重點觀察這些秒數的畫面）：\n");
+            // 有 P1-P10 → 用 P-System 順序（業界標準）；否則退回舊 8 階段。
+            var pOrder = new[] { "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10" };
+            var hasP = pOrder.Any(phases.ContainsKey);
+            var order = hasP
+                ? pOrder
+                : new[] { "address", "takeaway", "backswing", "top", "downswing", "impact", "followthrough", "finish" };
+            var header = hasP
+                ? "P-System 關鍵時間點（P1-P10，請重點觀察這些秒數的畫面）：\n"
+                : "揮桿關鍵時間點（請重點觀察這些秒數的畫面）：\n";
+            var lines = new System.Text.StringBuilder(header);
             foreach (var key in order)
             {
                 if (phases.TryGetValue(key, out var sec))

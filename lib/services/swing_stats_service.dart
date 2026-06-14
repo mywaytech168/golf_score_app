@@ -26,6 +26,9 @@ class SwingStats {
   /// 節奏比（上桿:下桿，職業選手約 3.0）
   final double? tempoRatio;
 
+  /// 節奏比是否落在合理區間（2:1~4:1）；false = 數值可疑（偵測雜訊/極端），UI 標低信心
+  final bool tempoConfident;
+
   const SwingStats({
     this.launchAngleDeg,
     this.flightTimeSec,
@@ -33,6 +36,7 @@ class SwingStats {
     this.backswingSec,
     this.downswingSec,
     this.tempoRatio,
+    this.tempoConfident = true,
   });
 
   bool get hasTrajectoryStats => launchAngleDeg != null || flightTimeSec != null;
@@ -44,7 +48,7 @@ class SwingStats {
     Map<String, double>? phases,
   }) {
     final (angle, flight, count) = _trajectoryStats(track);
-    final (back, down, tempo) = _tempoStats(phases);
+    final (back, down, tempo, tempoOk) = _tempoStats(phases);
     return SwingStats(
       launchAngleDeg: angle,
       flightTimeSec: flight,
@@ -52,6 +56,7 @@ class SwingStats {
       backswingSec: back,
       downswingSec: down,
       tempoRatio: tempo,
+      tempoConfident: tempoOk,
     );
   }
 
@@ -94,8 +99,8 @@ class SwingStats {
     return (angleDeg, flight, pts.length);
   }
 
-  static (double?, double?, double?) _tempoStats(Map<String, double>? phases) {
-    if (phases == null) return (null, null, null);
+  static (double?, double?, double?, bool) _tempoStats(Map<String, double>? phases) {
+    if (phases == null) return (null, null, null, true);
     final takeaway = phases['takeaway'];
     final top      = phases['top'];
     final impact   = phases['impact'];
@@ -109,6 +114,8 @@ class SwingStats {
     final tempo = (back != null && down != null && down > 0.05)
         ? back / down
         : null;
-    return (back, down, tempo);
+    // 合理節奏比 2:1~4:1；超出視為偵測雜訊/極端 → 標低信心（UI 加「?」）
+    final tempoOk = tempo == null || (tempo >= 2.0 && tempo <= 4.0);
+    return (back, down, tempo, tempoOk);
   }
 }

@@ -1687,8 +1687,10 @@ class _HistoryTileState extends State<_HistoryTile> {
           videoPath: widget.entry.filePath,
           sessionDir: sessionDir,
           durationSeconds: widget.entry.durationSeconds,
-          onProgress: (label) {
-            progressNotifier.value = (0.3, label);
+          onProgress: (progress, label) {
+            // 骨架分析佔整體 0~0.45（偵測擊球從 0.5 起算）→ bar 隨真實 pct 前進，
+            // 不再釘死 0.3（修「進度條不動 + 卡在『完成』label」）。
+            progressNotifier.value = (progress * 0.45, label);
           },
         );
         if (cancelToken.isCancelled) return;
@@ -2070,8 +2072,9 @@ class _HistoryTileState extends State<_HistoryTile> {
           videoPath: clipPath,
           sessionDir: sessionDir,
           durationSeconds: durationSeconds,
-          onProgress: (label) {
-            progressNotifier.value = (0.35, label);
+          onProgress: (progress, label) {
+            // 基礎分析隨真實 pct 前進 0~0.35（不再釘死 0.35）
+            progressNotifier.value = (progress * 0.35, label);
           },
         );
 

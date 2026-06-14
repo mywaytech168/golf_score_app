@@ -692,6 +692,29 @@ namespace UploadServer.Services
         }
 
         /// <summary>
+        /// 取得 Google Play 服務帳戶 JSON 內容。
+        /// 優先讀 GooglePlay:ServiceAccountJsonPath（檔案路徑，private key 留在檔案不外露），
+        /// 未設或讀取失敗才退回 inline GooglePlay:ServiceAccountJson。
+        /// </summary>
+        private string? ResolveGooglePlayServiceAccountJson()
+        {
+            var path = _config["GooglePlay:ServiceAccountJsonPath"];
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                try
+                {
+                    if (File.Exists(path)) return File.ReadAllText(path);
+                    _logger.LogWarning("GooglePlay:ServiceAccountJsonPath 指定的檔案不存在: {Path}", path);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "讀取 GooglePlay:ServiceAccountJsonPath 失敗: {Path}", path);
+                }
+            }
+            return _config["GooglePlay:ServiceAccountJson"];
+        }
+
+        /// <summary>
         /// 驗證 Google Play 訂閱（subscriptions API）並回傳到期資訊。
         /// 測試模式下接受 GooglePlay:TestTokens 設定中的 token。
         /// </summary>
@@ -712,7 +735,7 @@ namespace UploadServer.Services
             }
 
             var packageName        = _config["GooglePlay:PackageName"];
-            var serviceAccountJson = _config["GooglePlay:ServiceAccountJson"];
+            var serviceAccountJson = ResolveGooglePlayServiceAccountJson();
 
             if (string.IsNullOrEmpty(packageName) || string.IsNullOrEmpty(serviceAccountJson)
                 || string.IsNullOrEmpty(subscriptionId))
@@ -880,7 +903,7 @@ namespace UploadServer.Services
             }
 
             var packageName        = _config["GooglePlay:PackageName"];
-            var serviceAccountJson = _config["GooglePlay:ServiceAccountJson"];
+            var serviceAccountJson = ResolveGooglePlayServiceAccountJson();
 
             if (string.IsNullOrEmpty(packageName) || string.IsNullOrEmpty(serviceAccountJson))
             {

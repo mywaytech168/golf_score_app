@@ -76,6 +76,8 @@ class MediaPipePoseHelper(
     @Volatile private var poseLandmarker: PoseLandmarker? = null
     @Volatile private var isSetup = false
     private val pendingFrames = mutableMapOf<Long, PendingFrames>()  // timestamp -> both bitmaps
+    // 註：即時路徑不做 One-Euro 平滑（因果平滑會讓即時骨架繪製產生延遲）。平滑只在離線
+    // 回放/分析路徑（Dart pose_csv_loader 雙向 One-Euro，零延遲）做，餵 P-System。
 
     // ── 分段 timing 統計（每 TIMING_EVERY 幀彙整輸出一次）──────────────────────
     @Volatile private var delegateName = "?"
