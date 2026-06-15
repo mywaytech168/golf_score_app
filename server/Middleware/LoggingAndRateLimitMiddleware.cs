@@ -93,6 +93,7 @@ namespace UploadServer.Middleware
             { "/api/auth/google-login",    (10, 15) },
             { "/api/auth/forgot-password", (5,  60) },
             { "/api/auth/reset-password",  (5,  60) },
+            { "/api/contact",              (5,  60) },  // 聯絡表單防灌爆
         };
 
         public IpRateLimitMiddleware(RequestDelegate next, ILogger<IpRateLimitMiddleware> logger)

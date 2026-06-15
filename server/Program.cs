@@ -101,6 +101,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("MobileApp", policy =>
         policy.WithOrigins(
                 "https://orvia.com",
+                "https://orvia.atk.tw",      // 官網（聯絡表單跨域 POST）
                 "https://orvia.api.atk.tw",  // 管理後臺同站請求
                 "http://localhost:3000"           // 本機開發用
             )

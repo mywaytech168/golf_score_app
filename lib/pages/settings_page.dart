@@ -16,6 +16,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../models/export_quality.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/user_provider.dart';
+import '../services/analytics_service.dart';
 import '../services/app_update_service.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
@@ -25,6 +26,7 @@ import '../widgets/update_dialog.dart';
 import 'login_page.dart';
 import 'onboarding_page.dart';
 import 'privacy_settings_page.dart';
+import 'reward_page.dart';
 import 'terms_of_service_page.dart';
 import 'upgrade_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
@@ -64,6 +66,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('settings');
     _loadAll();
   }
 
@@ -348,11 +351,15 @@ class _SettingsPageState extends State<SettingsPage> {
         final msg = res['message']?.toString() ?? '';
         // 若伺服器回報已連結，視為成功刷新狀態
         if (_googleLinked) {
+          AnalyticsService.instance
+              .logEvent('account_link', {'provider': 'google'});
           _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
         } else {
           _showSnack(msg.isNotEmpty ? msg : AppLocalizations.of(context).settingsGoogleLinkFailed, isError: true);
         }
       } else {
+        AnalyticsService.instance
+            .logEvent('account_link', {'provider': 'google'});
         _showSnack(AppLocalizations.of(context).settingsGoogleLinked);
       }
     } catch (e) {
@@ -390,11 +397,15 @@ class _SettingsPageState extends State<SettingsPage> {
       if (res['success'] == false) {
         final msg = res['message']?.toString() ?? '';
         if (_appleLinked) {
+          AnalyticsService.instance
+              .logEvent('account_link', {'provider': 'apple'});
           _showSnack(AppLocalizations.of(context).settingsAppleLinked);
         } else {
           _showSnack(msg.isNotEmpty ? msg : AppLocalizations.of(context).settingsAppleLinkFailed, isError: true);
         }
       } else {
+        AnalyticsService.instance
+            .logEvent('account_link', {'provider': 'apple'});
         _showSnack(AppLocalizations.of(context).settingsAppleLinked);
       }
     } on SignInWithAppleAuthorizationException catch (e) {
@@ -459,12 +470,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(width: 12),
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(q.label, style: TextStyle(
+                      Text(q.localizedLabel(l), style: TextStyle(
                         fontSize: 14, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                         color: isSelected ? kBrandPrimary : ctx.textPrimary,
                       )),
                       const SizedBox(height: 2),
-                      Text(q.sizeHint, style: TextStyle(fontSize: 12, color: ctx.textSecondary)),
+                      Text(q.localizedSizeHint(l), style: TextStyle(fontSize: 12, color: ctx.textSecondary)),
                     ])),
                     Text(q.bitrateHint, style: TextStyle(
                       fontSize: 11, fontWeight: FontWeight.w500,
@@ -495,7 +506,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (result == null || result == _quality) return;
     setState(() => _quality = result);
     await _SkipHelperQuality.saveQuality(result);
-    if (mounted) _showSnack(AppLocalizations.of(context).settingsQualityUpdated(result.label));
+    if (mounted) _showSnack(AppLocalizations.of(context).settingsQualityUpdated(result.localizedLabel(AppLocalizations.of(context))));
   }
 
   // ── 外觀主題 ──────────────────────────────────────────────────
@@ -581,6 +592,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (result == null || !mounted) return;
+    AnalyticsService.instance.logEvent('settings_theme_changed');
     appState.setThemeMode(result);
   }
 
@@ -610,6 +622,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (confirm != true || !mounted) return;
+    AnalyticsService.instance.logEvent('user_logout');
     await AuthTokenStorage.instance.clearTokens();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -726,6 +739,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     // 刪除成功：清除本地憑證並回登入頁。
+    AnalyticsService.instance.logEvent('account_delete');
     await AuthTokenStorage.instance.clearTokens();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -751,6 +765,64 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) _showSnack(AppLocalizations.of(context).settingsUpdateCheckFailed, isError: true);
     } finally {
       if (mounted) setState(() => _isCheckingUpdate = false);
+    }
+  }
+
+  // ── 聯絡我們：選擇 Email 或意見表單 ────────────────────────────
+  Future<void> _showContactSheet() async {
+    final l = AppLocalizations.of(context);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  l.settingsContactUs,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.mail_outline_rounded, color: kBrandPrimary),
+              title: Text(l.settingsContactViaEmail),
+              subtitle: Text(kSupportEmail),
+              onTap: () => Navigator.pop(ctx, 'email'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_note_rounded, color: kBrandPrimary),
+              title: Text(l.settingsContactViaForm),
+              subtitle: Text(l.settingsContactViaFormDesc),
+              onTap: () => Navigator.pop(ctx, 'form'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+
+    if (choice == 'email') {
+      final l2 = AppLocalizations.of(context);
+      final ok = await openContactSupport();
+      if (!ok && mounted) {
+        // 無郵件 App 時退回複製信箱
+        await Clipboard.setData(const ClipboardData(text: kSupportEmail));
+        if (mounted) {
+          _showSnack('${l2.settingsContactEmailCopied}：$kSupportEmail');
+        }
+      }
+    } else if (choice == 'form') {
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const RewardPage()),
+      );
     }
   }
 
@@ -838,7 +910,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.high_quality_rounded,
             iconColor: const Color(0xFF0288D1),
             title: l.settingsAnalysisQuality,
-            subtitle: _quality.label,
+            subtitle: _quality.localizedLabel(l),
             onTap: _showQualityPicker,
           ),
           _SettingsTile(
@@ -869,7 +941,10 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.language_rounded,
             iconColor: const Color(0xFF0288D1),
             title: l.settingsLanguage,
-            onTap: () => LanguageSelectorSheet.show(context),
+            onTap: () {
+              AnalyticsService.instance.logEvent('settings_language_changed');
+              LanguageSelectorSheet.show(context);
+            },
           ),
           _SettingsTile(
             icon: Icons.dark_mode_outlined,
@@ -937,6 +1012,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 );
               }
             },
+          ),
+          _SettingsTile(
+            icon: Icons.mail_outline_rounded,
+            iconColor: const Color(0xFF607D8B),
+            title: l.settingsContactUs,
+            subtitle: l.settingsContactSubtitle,
+            onTap: _showContactSheet,
           ),
           _SettingsTile(
             icon: Icons.info_outline_rounded,

@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/recording_history_entry.dart';
 import '../services/ad_service.dart';
+import '../services/analytics_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/reward_service.dart';
 import '../services/video_server_client.dart';
@@ -39,6 +40,7 @@ class _RewardPageState extends State<RewardPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('reward');
     _load();
   }
 
@@ -66,21 +68,6 @@ class _RewardPageState extends State<RewardPage> {
       ),
     );
     _load(); // 重整狀態
-  }
-
-  void _showUploadSubmitted(int pending) {
-    if (!mounted) return;
-    final l10n = AppLocalizations.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(pending > 0
-            ? l10n.rewardUploadSubmittedPending(pending)
-            : l10n.rewardUploadSubmittedDuplicate),
-        backgroundColor: kBrandPrimary,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-    _load();
   }
 
   void _showError(String msg) {
@@ -175,11 +162,7 @@ class _RewardPageState extends State<RewardPage> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  _UploadCard(
-                    status: _status,
-                    onSubmitted: _showUploadSubmitted,
-                    onError: _showError,
-                  ),
+                  const _UploadCard(),
                 ],
               ),
             ),
@@ -452,6 +435,7 @@ class _WatchAdCardState extends State<_WatchAdCard> {
         return;
       }
       final balls = await RewardService.claimAdReward();
+      AnalyticsService.instance.logEvent('reward_watch_ad');
       widget.onEarned(balls);
     } catch (e) {
       if (mounted) widget.onError(AppLocalizations.of(context).rewardAdFailed(e.toString()));
@@ -872,6 +856,7 @@ class _EnterInviteCodeCardState extends State<_EnterInviteCodeCard> {
       if (r.success) {
         _ctrl.clear();
         setState(() { _expanded = false; });
+        AnalyticsService.instance.logEvent('reward_invite_applied');
         widget.onEarned(r.balls);
         widget.onApplied(); // 刷新狀態，卡片消失
       } else {
@@ -1092,6 +1077,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
         videoId: videoId,
         imageB2Key: imageB2Key,
       );
+      AnalyticsService.instance.logEvent('reward_feedback_submit');
       _ctrl.clear();
       setState(() {
         _expanded = false;
@@ -1556,36 +1542,28 @@ class _MiniThumb extends StatelessWidget {
 // 5. 上傳分析資料（手動選擇）
 // ════════════════════════════════════════════════════════════════
 
+// 資料貢獻狀態卡：資料集不再由使用者手動挑片上傳。按「AI 完整分析」時，
+// 分析所上傳的 clip/CSV 由後端自動納入訓練資料集送審（審核通過後 +1 球）。
+// 此卡僅被動顯示審核狀態，無上傳按鈕。
 class _UploadCard extends StatefulWidget {
-  final RewardStatus status;
-
-  /// 審核制：送出後回傳本次新建立的待審核筆數（不立即發球）
-  final void Function(int pending) onSubmitted;
-  final void Function(String) onError;
-
-  const _UploadCard({required this.status, required this.onSubmitted, required this.onError});
+  const _UploadCard();
 
   @override
   State<_UploadCard> createState() => _UploadCardState();
 }
 
 class _UploadCardState extends State<_UploadCard> {
-  bool _busy         = false;
-  bool _loaded       = false;
-  List<RecordingHistoryEntry> _uploadable = [];   // 可選取
-  int  _alreadyCount = 0;                          // 已上傳數
-  int? _pendingCount;                              // 審核中筆數（server）
-  int? _approvedCount;                             // 已通過筆數（server）
-  int? _rejectedCount;                             // 未通過筆數（server，不可重送）
+  int? _pendingCount;    // 審核中筆數（server）
+  int? _approvedCount;   // 已通過筆數（server）
+  int? _rejectedCount;   // 未通過筆數（server）
 
   @override
   void initState() {
     super.initState();
-    _loadCandidates();
     _loadReviewStatus();
   }
 
-  /// 取得伺服器端審核狀態摘要（審核中 / 已通過）
+  /// 取得伺服器端審核狀態摘要（審核中 / 已通過 / 未通過）
   Future<void> _loadReviewStatus() async {
     try {
       final r = await RewardService.getUploadReviewStatus(pageSize: 1);
@@ -1599,126 +1577,17 @@ class _UploadCardState extends State<_UploadCard> {
     } catch (_) {}
   }
 
-  Future<void> _loadCandidates() async {
-    try {
-      final all = await RecordingHistoryStorage.instance.loadHistory();
-      final uploadable  = all.where((e) => e.isAnalyzed && !e.isEffectivelyUploaded).toList();
-      final alreadyDone = all.where((e) => e.isEffectivelyUploaded).length;
-      if (mounted) {
-        setState(() {
-          _uploadable   = uploadable;
-          _alreadyCount = alreadyDone;
-          _loaded       = true;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _loaded = true);
-      }
-    }
-  }
-
-  Future<void> _openPicker() async {
-    if (_uploadable.isEmpty) {
-      widget.onError(AppLocalizations.of(context).rewardNoUploadable);
-      return;
-    }
-    if (!mounted) return;
-
-    final selected = await showModalBottomSheet<List<RecordingHistoryEntry>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _UploadPickerSheet(candidates: _uploadable),
-    );
-
-    if (selected == null || selected.isEmpty || !mounted) return;
-
-    setState(() => _busy = true);
-    try {
-      // 逐筆真實上傳影片 + CSV；任一筆失敗就略過該筆
-      final uploaded = <RecordingHistoryEntry>[];
-      final payload  = <Map<String, dynamic>>[];
-      var failed = 0;
-      for (final e in selected) {
-        try {
-          final uploadId = await RewardService.uploadSessionFiles(e);
-          uploaded.add(e);
-          payload.add(_entryToJson(e, uploadId));
-        } catch (err) {
-          failed++;
-          debugPrint('上傳資料集失敗（略過）: ${e.filePath} → $err');
-        }
-      }
-
-      if (payload.isEmpty) {
-        if (mounted) widget.onError(AppLocalizations.of(context).rewardUploadFailed);
-        return;
-      }
-      if (failed > 0 && mounted) {
-        widget.onError(AppLocalizations.of(context).rewardUploadPartialFail(failed));
-      }
-
-      final pending = await RewardService.claimUploadReward(sessions: payload);
-
-      // pending=0 = 送審未建立（網路失敗或全為重複提交，含被拒絕者不可重送），
-      // 不標記 isUploaded，讓使用者可在排除問題後重試。
-      if (pending == 0) {
-        if (mounted) {
-          widget.onError(AppLocalizations.of(context).rewardUploadResubmitBlocked);
-        }
-        return;
-      }
-
-      // 標記為已上傳（防重複提交；被拒絕者依政策不開放重送）
-      for (final e in uploaded) {
-        await RecordingHistoryStorage.instance.upsertEntry(
-          e.copyWith(isUploaded: true),
-        );
-      }
-
-      // 重新計算可上傳數與審核狀態
-      await _loadCandidates();
-      await _loadReviewStatus();
-
-      if (mounted) widget.onSubmitted(pending);
-    } catch (e) {
-      if (mounted) widget.onError(AppLocalizations.of(context).rewardUploadError(e.toString()));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  static Map<String, dynamic> _entryToJson(
-      RecordingHistoryEntry e, String? uploadId) => {
-    'filePath':        e.filePath,
-    'recordedAt':      e.recordedAt.toIso8601String(),
-    'durationSeconds': e.durationSeconds,
-    'goodShot':        e.goodShot,
-    'audioCrispness':  e.audioCrispness,
-    'audioLabel':      e.audioLabel,
-    'videoType':       e.videoType.name,
-    'uploadId':        uploadId,
-  };
-
   @override
   Widget build(BuildContext context) {
-    final canUpload = _uploadable.isNotEmpty;
-
     final l10n = AppLocalizations.of(context);
     return _RewardCard(
       iconBg: const Color(0xFF00897B),
-      icon: Icons.cloud_upload_rounded,
+      icon: Icons.cloud_done_rounded,
       title: l10n.rewardUploadDataTitle,
-      description: RewardType.uploadData.description,
+      description: l10n.rewardUploadAutoNote(RewardType.uploadData.ballsPerAction),
       balls: RewardType.uploadData.ballsPerAction,
-      bottomWidget: !_loaded
-          ? const SizedBox(
-              height: 32,
-              child: Center(child: SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))),
-            )
+      bottomWidget: _pendingCount == null
+          ? null
           : Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
@@ -1736,303 +1605,24 @@ class _UploadCardState extends State<_UploadCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        canUpload
-                            ? l10n.rewardUploadAvailableCount(_uploadable.length, _alreadyCount)
-                            : l10n.rewardUploadAllDone(_alreadyCount),
+                        l10n.rewardUploadReviewStatus(_pendingCount!, _approvedCount!) +
+                        ((_rejectedCount ?? 0) > 0 ? l10n.rewardUploadRejectedSuffix(_rejectedCount!) : ''),
                         style: TextStyle(
-                            fontSize: 12,
-                            color: canUpload
-                                ? const Color(0xFF00695C)
-                                : context.textSecondary),
+                            fontSize: 12, color: context.textSecondary),
                       ),
-                      if (_pendingCount != null) ...[
+                      if ((_rejectedCount ?? 0) > 0) ...[
                         const SizedBox(height: 2),
                         Text(
-                          l10n.rewardUploadReviewStatus(_pendingCount!, _approvedCount!) +
-                          ((_rejectedCount ?? 0) > 0 ? l10n.rewardUploadRejectedSuffix(_rejectedCount!) : ''),
-                          style: TextStyle(
-                              fontSize: 11, color: context.textSecondary),
+                          l10n.rewardUploadRejectedNote,
+                          style: const TextStyle(
+                              fontSize: 11, color: Color(0xFFE65100)),
                         ),
-                        if ((_rejectedCount ?? 0) > 0) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            l10n.rewardUploadRejectedNote,
-                            style: const TextStyle(
-                                fontSize: 11, color: Color(0xFFE65100)),
-                          ),
-                        ],
                       ],
                     ],
                   ),
                 ),
               ]),
             ),
-      buttonLabel: canUpload ? l10n.rewardSelectUploadVideo : null,
-      buttonBusy: _busy,
-      onTap: canUpload ? _openPicker : null,
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
-// 上傳選擇器 Bottom Sheet（多選）
-// ════════════════════════════════════════════════════════════════
-
-class _UploadPickerSheet extends StatefulWidget {
-  final List<RecordingHistoryEntry> candidates;
-  const _UploadPickerSheet({required this.candidates});
-
-  @override
-  State<_UploadPickerSheet> createState() => _UploadPickerSheetState();
-}
-
-class _UploadPickerSheetState extends State<_UploadPickerSheet> {
-  String? _selectedPath;
-
-  void _select(String path) => setState(() => _selectedPath = path);
-
-  void _confirm() {
-    final result = widget.candidates
-        .where((e) => e.filePath == _selectedPath)
-        .toList();
-    Navigator.pop(context, result);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.65,
-      minChildSize:     0.40,
-      maxChildSize:     0.90,
-      builder: (_, scrollCtrl) => Container(
-        decoration: BoxDecoration(
-          color: context.bgCard,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          children: [
-            // 把手
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 40, height: 4,
-                decoration: BoxDecoration(
-                  color: context.borderColor,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-
-            // 標題列
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 16, 0),
-              child: Row(
-                children: [
-                  const Icon(Icons.cloud_upload_rounded,
-                      color: Color(0xFF00897B), size: 22),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(AppLocalizations.of(context).rewardSelectUploadVideo,
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: context.textPrimary)),
-                        Text(AppLocalizations.of(context).rewardSelectUploadSubtitle,
-                            style: TextStyle(
-                                fontSize: 12, color: context.textSecondary)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 16),
-
-            // 列表
-            Expanded(
-              child: ListView.builder(
-                controller: scrollCtrl,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 4),
-                itemCount: widget.candidates.length,
-                itemBuilder: (_, i) {
-                  final e   = widget.candidates[i];
-                  final sel = e.filePath == _selectedPath;
-                  return _UploadCandidateTile(
-                    entry:    e,
-                    selected: sel,
-                    onTap:    () => _select(e.filePath),
-                  );
-                },
-              ),
-            ),
-
-            // 底部確認列
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Row(
-                  children: [
-                    Text(
-                      _selectedPath == null ? AppLocalizations.of(context).rewardNoneSelected : AppLocalizations.of(context).rewardOneSelected,
-                      style: TextStyle(
-                          fontSize: 13, color: context.textSecondary),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, null),
-                      child: Text(AppLocalizations.of(context).commonCancel),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: _selectedPath == null ? null : _confirm,
-                      icon: const Icon(Icons.upload_rounded, size: 16),
-                      label: Text(
-                          AppLocalizations.of(context).rewardConfirmUpload(RewardType.uploadData.ballsPerAction)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00897B),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── 單筆候選卡片 ──────────────────────────────────────────────────
-
-class _UploadCandidateTile extends StatelessWidget {
-  final RecordingHistoryEntry entry;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _UploadCandidateTile({
-    required this.entry,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = const Color(0xFF00897B);
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: selected
-              ? color.withValues(alpha: 0.06)
-              : context.bgCard,
-          border: Border.all(
-            color: selected ? color : context.borderColor,
-            width: selected ? 1.5 : 1,
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            // Radio
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: 22, height: 22,
-              decoration: BoxDecoration(
-                color: selected ? color : Colors.transparent,
-                border: Border.all(
-                  color: selected ? color : context.textHint,
-                  width: 1.5,
-                ),
-                shape: BoxShape.circle,
-              ),
-              child: selected
-                  ? const Icon(Icons.circle, color: Colors.white, size: 10)
-                  : null,
-            ),
-            const SizedBox(width: 10),
-
-            // 縮圖
-            ClipRRect(
-              borderRadius: BorderRadius.circular(7),
-              child: _buildThumb(context),
-            ),
-            const SizedBox(width: 10),
-
-            // 文字資訊
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.displayTitle,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 3),
-                  Row(children: [
-                    Icon(Icons.access_time_rounded,
-                        size: 11, color: context.textHint),
-                    const SizedBox(width: 3),
-                    Text(AppLocalizations.of(context).rewardDurationSec(entry.durationSeconds),
-                        style: TextStyle(
-                            fontSize: 11, color: context.textSecondary)),
-                    if (entry.isAnalyzed) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00897B)
-                              .withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(AppLocalizations.of(context).rewardAnalyzed,
-                            style: const TextStyle(
-                                fontSize: 10,
-                                color: Color(0xFF00695C),
-                                fontWeight: FontWeight.w600)),
-                      ),
-                    ],
-                    if (entry.goodShot == true) ...[
-                      const SizedBox(width: 6),
-                      const Text('⛳', style: TextStyle(fontSize: 11)),
-                    ],
-                  ]),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildThumb(BuildContext context) {
-    final tp = entry.thumbnailPath;
-    if (tp != null && File(tp).existsSync()) {
-      return Image.file(File(tp),
-          width: 56, height: 42, fit: BoxFit.cover);
-    }
-    return Container(
-      width: 56, height: 42,
-      color: context.bgInset,
-      child: Icon(Icons.videocam_rounded,
-          color: context.textHint, size: 22),
     );
   }
 }

@@ -111,6 +111,10 @@ namespace UploadServer.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("keyframe_count");
 
+                    b.Property<string>("Lang")
+                        .HasMaxLength(16)
+                        .HasColumnType("varchar(16)");
+
                     b.Property<string>("Mode")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -542,6 +546,77 @@ namespace UploadServer.Migrations
                         .HasDatabaseName("idx_btraj_video_id");
 
                     b.ToTable("ball_trajectory_analyses", (string)null);
+                });
+
+            modelBuilder.Entity("UploadServer.Models.ContactMessage", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(36)
+                        .HasColumnType("varchar(36)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AdminNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("admin_note");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("email");
+
+                    b.Property<bool>("Handled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(false)
+                        .HasColumnName("handled");
+
+                    b.Property<DateTime?>("HandledAt")
+                        .HasColumnType("datetime")
+                        .HasColumnName("handled_at");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("message");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("varchar(10)")
+                        .HasDefaultValue("web")
+                        .HasColumnName("source");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)")
+                        .HasColumnName("subject");
+
+                    b.Property<string>("UserId")
+                        .HasMaxLength(36)
+                        .HasColumnType("varchar(36)")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("idx_contact_created_at");
+
+                    b.HasIndex("Handled")
+                        .HasDatabaseName("idx_contact_handled");
+
+                    b.ToTable("contact_messages", (string)null);
                 });
 
             modelBuilder.Entity("UploadServer.Models.DatasetUpload", b =>

@@ -24,6 +24,7 @@ namespace UploadServer.Data
         public DbSet<Announcement> Announcements { get; set; }
         public DbSet<DatasetUpload> DatasetUploads { get; set; }
         public DbSet<AdRewardEvent> AdRewardEvents { get; set; }
+        public DbSet<ContactMessage> ContactMessages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -960,6 +961,73 @@ namespace UploadServer.Data
                 entity.HasIndex(e => e.VideoId) .HasDatabaseName("idx_btraj_video_id");
                 entity.HasIndex(e => e.Status)  .HasDatabaseName("idx_btraj_status");
                 entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_btraj_created_at");
+            });
+
+            // ============================================================
+            // ContactMessages（聯絡我們表單；App + 官網共用，匿名可送）
+            // ============================================================
+            modelBuilder.Entity<ContactMessage>(entity =>
+            {
+                entity.ToTable("contact_messages");
+
+                entity.HasKey(e => e.Id);
+
+                entity.Property(e => e.Id)
+                    .HasColumnName("id")
+                    .HasMaxLength(36)
+                    .IsRequired();
+
+                entity.Property(e => e.Source)
+                    .HasColumnName("source")
+                    .HasMaxLength(10)
+                    .HasDefaultValue("web")
+                    .IsRequired();
+
+                entity.Property(e => e.Name)
+                    .HasColumnName("name")
+                    .HasMaxLength(100)
+                    .IsRequired(false);
+
+                entity.Property(e => e.Email)
+                    .HasColumnName("email")
+                    .HasMaxLength(255)
+                    .IsRequired();
+
+                entity.Property(e => e.Subject)
+                    .HasColumnName("subject")
+                    .HasMaxLength(200)
+                    .IsRequired(false);
+
+                entity.Property(e => e.Message)
+                    .HasColumnName("message")
+                    .HasColumnType("TEXT")
+                    .IsRequired();
+
+                entity.Property(e => e.UserId)
+                    .HasColumnName("user_id")
+                    .HasMaxLength(36)
+                    .IsRequired(false);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("datetime");
+
+                entity.Property(e => e.Handled)
+                    .HasColumnName("handled")
+                    .HasDefaultValue(false);
+
+                entity.Property(e => e.HandledAt)
+                    .HasColumnName("handled_at")
+                    .HasColumnType("datetime")
+                    .IsRequired(false);
+
+                entity.Property(e => e.AdminNote)
+                    .HasColumnName("admin_note")
+                    .HasMaxLength(500)
+                    .IsRequired(false);
+
+                entity.HasIndex(e => e.Handled).HasDatabaseName("idx_contact_handled");
+                entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_contact_created_at");
             });
         }
     }

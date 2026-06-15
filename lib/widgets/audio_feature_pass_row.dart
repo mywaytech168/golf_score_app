@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../services/audio_analysis_service.dart';
 import '../theme/app_theme.dart';
 
@@ -8,6 +9,7 @@ class AudioFeaturePassRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final feats = AudioAnalysisService.featureLabels.entries.toList();
     final dimColor = context.textHint;
     return Container(
@@ -44,7 +46,7 @@ class AudioFeaturePassRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    feat.value,
+                    AudioAnalysisService.localizedFeatureLabel(l10n, feat.key),
                     style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
                     textAlign: TextAlign.center,
                   ),

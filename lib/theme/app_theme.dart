@@ -75,6 +75,9 @@ extension AppColorsX on BuildContext {
   Color get textSecondary => isDarkMode ? kTextSecondaryDark : kTextSecondary;
   Color get textHint      => isDarkMode ? kTextHintDark : kTextHint;
 
+  /// 金額專用色：暗模式黑底白字、亮模式白底黑字(高對比，不帶品牌色)
+  Color get priceColor => isDarkMode ? Colors.white : Colors.black;
+
   Color get borderColor => isDarkMode ? kBorderDark : kBorderLight;
   Color get mintTint    => isDarkMode ? kMintTintDark : kMintTintLight;
 

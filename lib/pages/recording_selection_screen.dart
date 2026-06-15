@@ -12,6 +12,8 @@ import 'external_video_importer_local.dart';
 import '../services/recording_history_storage.dart';
 import 'share_import_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
+import 'package:golf_score_app/l10n/progress_label_localizer.dart';
+import '../services/analytics_service.dart';
 
 /// 通知類型枚舉
 enum NotificationType {
@@ -44,6 +46,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
   /// Shot Mode：即時揮桿自動切片
   void _startShotMode() {
+    AnalyticsService.instance.logEvent('record_select', {'option': 'shot'});
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -56,6 +59,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
   /// 選項 1: 開始錄製
   void _startRecording() {
+    AnalyticsService.instance.logEvent('record_select', {'option': 'record'});
     debugPrint('[RecordingSelection] 使用者選擇開始錄製');
 
     Navigator.push(
@@ -92,6 +96,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
   /// 選項 3: 從分享連結取得
   void _importFromShare() {
+    AnalyticsService.instance.logEvent('record_select', {'option': 'share'});
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -107,6 +112,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
   /// 選項 2: 選擇本地影片
   void _selectLocalVideo() async {
+    AnalyticsService.instance.logEvent('record_select', {'option': 'import'});
     debugPrint('[RecordingSelection] 使用者選擇本地影片');
     final l10n = AppLocalizations.of(context);
 
@@ -226,7 +232,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  val.$2,
+                  localizeProgressLabel(l10n, val.$2),
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
@@ -400,7 +406,7 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
 
         // ── 選項卡片 ──────────────────────────────────────────
         Expanded(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
             child: Column(
               children: [

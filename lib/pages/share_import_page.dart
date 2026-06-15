@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/user_provider.dart';
 import '../theme/app_theme.dart';
+import '../services/analytics_service.dart';
 import '../services/share_service.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
@@ -27,6 +28,12 @@ class _ShareImportPageState extends State<ShareImportPage> {
   ShareGetResult? _info;
   double _downloadProgress = 0;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    AnalyticsService.instance.logScreen('share_import');
+  }
 
   @override
   void dispose() {

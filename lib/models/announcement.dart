@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 enum AnnouncementType {
   info,
@@ -6,11 +7,20 @@ enum AnnouncementType {
   event,
   update;
 
+  /// 中文 fallback（向後相容）；UI 顯示請優先用 [localizedLabel]。
   String get label => switch (this) {
     info      => '通知',
     important => '重要',
     event     => '活動',
     update    => '更新',
+  };
+
+  /// 多語系顯示標籤（跟隨介面語言切換）。
+  String localizedLabel(AppLocalizations l) => switch (this) {
+    info      => l.announcementTypeInfo,
+    important => l.announcementTypeImportant,
+    event     => l.announcementTypeEvent,
+    update    => l.announcementTypeUpdate,
   };
 
   Color get color => switch (this) {

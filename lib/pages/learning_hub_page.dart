@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
+import '../services/analytics_service.dart';
+
 class LearningHubPage extends StatelessWidget {
   const LearningHubPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    AnalyticsService.instance.logScreen('learning_hub');
     final contents = _buildDemoContents(context);
     return Scaffold(
       appBar: AppBar(title: Text(AppLocalizations.of(context).learningTitle)),

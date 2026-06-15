@@ -13,6 +13,7 @@ import '../providers/plan_provider.dart';
 import '../services/plan_service.dart';
 import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
+import '../services/analytics_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../services/biomechanics_service.dart';
@@ -22,6 +23,7 @@ import '../services/skeleton_csv_locator.dart';
 import '../services/video_export_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/custom_export_sheet.dart';
+import 'p_system_help_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 錄影詳情頁：顯示聲音峰值、手腕 Y、Speed 三張圖表
@@ -46,6 +48,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('recording_detail');
     _postureAnalysisId = widget.entry.postureAnalysisId;
     _loadData();
     if (_postureAnalysisId == null && widget.entry.isAnalyzed) {
@@ -144,6 +147,7 @@ class _RecordingDetailPageState extends State<RecordingDetailPage> {
   /// 自訂匯出：勾選疊加元素 → 單 pass 合成 → 下載。
   /// 浮水印由方案決定（免費強制，UI 不可關）。
   Future<void> _customExportFlow() async {
+    AnalyticsService.instance.logEvent('custom_export');
     final l10n = AppLocalizations.of(context);
     final sessionDir = p.dirname(widget.entry.filePath);
     if (!OverlayBurnService.canCompose(sessionDir)) {
@@ -522,15 +526,50 @@ class _PSystemValuesCardState extends State<_PSystemValuesCard> {
                         color: _scoreColor(ps.overallScore),
                         fontSize: 15,
                         fontWeight: FontWeight.w800)),
-              const Spacer(),
-              if (ps.viewpoint != SwingViewpoint.faceOn)
-                Flexible(
-                  child: Text(l10n.pSystemViewpointWarn,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: TextStyle(color: context.textHint, fontSize: 10)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (ps.viewpoint != SwingViewpoint.faceOn)
+                      Flexible(
+                        child: GestureDetector(
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => const PSystemHelpPage())),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: kCrispColor.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: kCrispColor.withValues(alpha: 0.40),
+                                  width: 0.8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.camera_front,
+                                    size: 13, color: kCrispColor),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(l10n.pSystemViewpointWarn,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: kCrispColor,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
+              ),
             ]),
             const SizedBox(height: 6),
             for (final key in PSystemMetrics.order) _pTile(context, l10n, ps, key),
@@ -1036,18 +1075,24 @@ class _AudioFeaturesCard extends StatelessWidget {
     final passCount = passes.values.where((v) => v).length;
     final isGood    = passCount >= AudioAnalysisService.goodBadThreshold;
     final goodShot  = entry.goodShot;
-    final label     = entry.audioLabel;
+    final l10n = AppLocalizations.of(context);
+    // 由 passCount 重建命中/未命中標籤（多語系），取代後端存的固定中文字串。
+    final scorePass = entry.audioPassCount ?? passCount;
+    final String label = (entry.audioLabel?.isNotEmpty == true)
+        ? (goodShot == true
+            ? l10n.audioScoreHit(scorePass)
+            : l10n.audioScoreMiss(scorePass))
+        : '';
 
     // 品質等級對應色彩
     final Color qualityColor;
     final String qualityText;
-    final l10n = AppLocalizations.of(context);
     if (goodShot == true) {
       qualityColor = kBrandPrimary;
-      qualityText  = label?.isNotEmpty == true ? label! : l10n.recDetailSweetSpot;
+      qualityText  = label.isNotEmpty ? label : l10n.recDetailSweetSpot;
     } else {
       qualityColor = const Color(0xFFE05252);
-      qualityText  = label?.isNotEmpty == true ? label! : l10n.recDetailOffCenter;
+      qualityText  = label.isNotEmpty ? label : l10n.recDetailOffCenter;
     }
 
     return Card(
@@ -1127,7 +1172,7 @@ class _AudioFeaturesCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _AudioFeatureGaugeRow(
-                  label: feat.value,
+                  label: AudioAnalysisService.localizedFeatureLabel(l10n, feat.key),
                   featureKey: feat.key,
                   value: featureValues[feat.key],
                   passed: passes[feat.key] ?? false,
@@ -1372,7 +1417,7 @@ class _OnnxPostureCardState extends State<_OnnxPostureCard> {
       ..sort((a, b) => b.value.compareTo(a.value));
 
     return sorted.map((e) {
-      final label     = SwingPosture.zhName(e.key);
+      final label     = SwingPosture.localizedName(AppLocalizations.of(context), e.key);
       final score     = e.value.clamp(0.0, 1.0);
       final isOfficial = result.officialErrors.contains(e.key);
       final isSuspect  = result.suspectErrors.contains(e.key);

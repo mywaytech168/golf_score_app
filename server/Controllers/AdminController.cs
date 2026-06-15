@@ -469,6 +469,78 @@ namespace UploadServer.Controllers
         }
 
         // ════════════════════════════════════════════════════════════════
+        // 聯絡我們訊息（App + 官網表單）
+        // ════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// GET /api/admin/contact-messages — 聯絡表單訊息列表
+        /// Query: handled (true|false，可省略=全部)、source (app|web，可省略)、page、size
+        /// </summary>
+        [HttpGet("contact-messages")]
+        public async Task<IActionResult> GetContactMessages(
+            [FromQuery] bool? handled = null,
+            [FromQuery] string? source = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int size = 50)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            page = Math.Max(1, page);
+            size = Math.Clamp(size, 1, 200);
+
+            var query = _db.ContactMessages.AsQueryable();
+            if (handled.HasValue)
+                query = query.Where(m => m.Handled == handled.Value);
+            if (!string.IsNullOrEmpty(source))
+                query = query.Where(m => m.Source == source);
+
+            var total       = await query.CountAsync();
+            var pendingCount = await _db.ContactMessages.CountAsync(m => !m.Handled);
+            var items = await query
+                .OrderByDescending(m => m.CreatedAt)
+                .Skip((page - 1) * size)
+                .Take(size)
+                .Select(m => new AdminContactMessageDto(
+                    m.Id,
+                    m.Source,
+                    m.Name,
+                    m.Email,
+                    m.Subject,
+                    m.Message,
+                    m.UserId,
+                    m.Handled,
+                    m.HandledAt.HasValue ? m.HandledAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : null,
+                    m.AdminNote,
+                    m.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")))
+                .ToListAsync();
+
+            return Ok(new { total, pendingCount, page, size, data = items });
+        }
+
+        /// <summary>
+        /// POST /api/admin/contact-messages/{id}/handle — 標記聯絡訊息為已/未處理
+        /// Body: { "handled": true, "note": "已回信" }
+        /// </summary>
+        [HttpPost("contact-messages/{id}/handle")]
+        public async Task<IActionResult> HandleContactMessage(
+            string id, [FromBody] HandleContactMessageRequest req)
+        {
+            if (!IsAdmin()) return StatusCode(403, new { message = "需要管理員權限" });
+
+            var msg = await _db.ContactMessages.FindAsync(id);
+            if (msg == null) return NotFound(new { message = "訊息不存在" });
+
+            msg.Handled   = req.Handled;
+            msg.HandledAt = req.Handled ? DateTime.UtcNow : null;
+            var note = req.Note?.Trim();
+            msg.AdminNote = string.IsNullOrWhiteSpace(note) ? null : note[..Math.Min(500, note.Length)];
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("管理員標記聯絡訊息 id={Id} handled={Handled}", id, req.Handled);
+            return Ok(new { message = "已更新", id });
+        }
+
+        // ════════════════════════════════════════════════════════════════
         // 資料上傳審核（上傳獎勵審核制）
         // ════════════════════════════════════════════════════════════════
 
@@ -549,7 +621,7 @@ namespace UploadServer.Controllers
         /// <summary>
         /// POST /api/admin/dataset-uploads/{id}/review — 審核資料上傳
         /// Body: { "approve": true|false, "note": "..." }
-        /// 核准 → 發 +3 球（僅一次）；已審核過回 409 防重複發球
+        /// 核准 → 發 +1 球（僅一次）；已審核過回 409 防重複發球
         /// </summary>
         [HttpPost("dataset-uploads/{id}/review")]
         public async Task<IActionResult> ReviewDatasetUpload(

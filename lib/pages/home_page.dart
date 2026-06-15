@@ -286,7 +286,6 @@ class _HomePageState extends State<HomePage> {
                     final today = _statisticsService.todayStatistics;
                     final isLoading = loadingSnap.data?.isLoading ?? false;
 
-                    final l = AppLocalizations.of(context);
                     return RefreshIndicator(
                       onRefresh: () async {
                         await _initializeStatistics();
@@ -313,50 +312,7 @@ class _HomePageState extends State<HomePage> {
                               onTap: () => _showAnalysisDetailSheet(
                                   context, today, isLoading),
                             ),
-                            const SizedBox(height: kSpaceMD),
-                            if (_currentSuggestionEntry == null &&
-                                !isLoading &&
-                                ((today?.goodShot ?? 0) +
-                                        (today?.badShot ?? 0)) ==
-                                    0)
-                              Padding(
-                                padding: const EdgeInsets.only(top: kSpaceSM),
-                                child: Column(
-                                  children: [
-                                    Text(
-                                      l.homeEmptyHint,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: context.textHint),
-                                    ),
-                                    const SizedBox(height: kSpaceMD),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: FilledButton.icon(
-                                        onPressed: widget.onStartRecording,
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: kBrandPrimary,
-                                          padding: const EdgeInsets.symmetric(
-                                              vertical: 14),
-                                          shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(14)),
-                                        ),
-                                        icon: const Icon(
-                                            Icons.videocam_rounded, size: 20),
-                                        label: Text(
-                                          l.homeStartRecording,
-                                          style: const TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w700),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
+],
                         ),
                       ),
                     );
@@ -1412,19 +1368,16 @@ class _SuggestionTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(child: Text(suggestion.drill, style: titleStyle)),
-                      if (suggestion.reps.trim().isNotEmpty) ...[
-                        const SizedBox(width: kSpaceXS),
-                        Text(
-                          suggestion.reps,
-                          style: const TextStyle(
-                              fontSize: 11, color: kBrandPrimary),
-                        ),
-                      ],
-                    ],
-                  ),
+                  Text(suggestion.drill, style: titleStyle),
+                  if (suggestion.reps.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        suggestion.reps,
+                        style: const TextStyle(
+                            fontSize: 11, color: kBrandPrimary),
+                      ),
+                    ),
                   if (suggestion.instruction.trim().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),

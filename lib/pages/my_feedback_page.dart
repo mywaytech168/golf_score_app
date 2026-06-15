@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:intl/intl.dart';
 
+import '../services/analytics_service.dart';
 import '../services/video_server_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
@@ -70,6 +71,7 @@ class _MyFeedbackPageState extends State<MyFeedbackPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('my_feedback');
     _loadMore();
     _scrollCtrl.addListener(_onScroll);
   }

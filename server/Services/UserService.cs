@@ -19,7 +19,7 @@ namespace UploadServer.Services
         private const int AdDailyCap    = 5;
         private const int AdBalls       = 1;
         private const int FeedbackBalls = 2;
-        private const int UploadBalls   = 3;
+        private const int UploadBalls   = 1;
         private const int InviteBalls   = 5;
 
         public UserService(
@@ -480,7 +480,7 @@ namespace UploadServer.Services
 
         /// <summary>
         /// 審核制：提交上傳資料 → 建立 pending 列，不立即發球；
-        /// 後台核准（ReviewDatasetUploadAsync）後才發 +3 球。
+        /// 後台核准（ReviewDatasetUploadAsync）後才發 +1 球。
         /// 去重：同 user + ClientFilePath 已有任何狀態的列（含 rejected）→ 跳過，
         /// 不允許重新提交。
         /// </summary>
@@ -544,7 +544,7 @@ namespace UploadServer.Services
         }
 
         /// <summary>
-        /// 後台審核資料上傳：核准 → 發 +3 球（每列僅一次）；拒絕 → 標記 rejected。
+        /// 後台審核資料上傳：核准 → 發 +1 球（每列僅一次）；拒絕 → 標記 rejected。
         /// 已審核過的列回 null（呼叫端回 409 防重複發球）。
         /// 回傳 (found, reviewed)：found=false 表示列不存在。
         /// </summary>
@@ -584,7 +584,7 @@ namespace UploadServer.Services
             await _db.SaveChangesAsync();
 
             _logger.LogInformation("資料上傳 {UploadId} 審核 {Result}（用戶 {UserId}）",
-                uploadId, approve ? "核准 +3 球" : "拒絕", upload.UserId);
+                uploadId, approve ? $"核准 +{UploadBalls} 球" : "拒絕", upload.UserId);
             return (true, true);
         }
 

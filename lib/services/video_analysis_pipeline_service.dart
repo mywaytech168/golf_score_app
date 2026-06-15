@@ -23,9 +23,10 @@ class VideoAnalysisPipelineService {
     required int durationSeconds,
     void Function(double progress, String label)? onProgress,
   }) {
+    debugPrint('[DIAG2] analyzeBasic ENTER session=$sessionDir inflight=${_inflight.containsKey(sessionDir)}');
     final running = _inflight[sessionDir];
     if (running != null) {
-      debugPrint('[VideoAnalysisPipeline] ⏳ 同 session 分析進行中，共用結果');
+      debugPrint('[DIAG2] analyzeBasic DEDUP → 回傳進行中的 future');
       onProgress?.call(0.5, '分析骨架中...');
       return running;
     }
@@ -34,8 +35,12 @@ class VideoAnalysisPipelineService {
       sessionDir: sessionDir,
       durationSeconds: durationSeconds,
       onProgress: onProgress,
-    ).whenComplete(() => _inflight.remove(sessionDir));
+    ).whenComplete(() {
+      debugPrint('[DIAG2] analyzeBasic whenComplete → 移除 inflight');
+      _inflight.remove(sessionDir);
+    });
     _inflight[sessionDir] = future;
+    debugPrint('[DIAG2] analyzeBasic 已建立並註冊 future，return');
     return future;
   }
 
@@ -86,6 +91,7 @@ class VideoAnalysisPipelineService {
           'Audio=${hasAudio ? "✅" : "❌ 無音訊（略過）"}');
 
       // 無音訊屬正常情況（例如無聲錄製或靜音影片），骨架存在即視為完整
+      debugPrint('[DIAG2] _analyzeBasicImpl 即將 return result (hasCSV=$hasCSV)');
       return BasicAnalysisResult(
         csvPath: csvPath,
         audioPath: analysis.audioPath,

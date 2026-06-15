@@ -123,6 +123,15 @@ flutter {
     source = "../.."
 }
 
+// ── Firebase（Google Services）外掛條件式套用 ──
+// 現有 google-services.json 是 google_sign_in 的 OAuth 設定（無 project_info）；
+// 在 Firebase Console 產生「真正的」Firebase google-services.json（含 project_info）並覆蓋前，
+// 不套用外掛，避免破壞 Android build。覆蓋後此處自動生效，firebase_analytics native 依賴隨之啟用。
+val googleServicesJson = file("google-services.json")
+if (googleServicesJson.exists() && googleServicesJson.readText().contains("project_info")) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // ── 強制降版：避免部分 AndroidX 依賴要求 AGP 8.9.1+（目前環境使用 8.6.0）
 // androidx.browser 1.9.0 / core 1.17.0 的 AAR metadata 有 minAndroidGradlePlugin=8.9.1
 // 固定在這裡的版本不含該限制，功能上完全相容

@@ -35,6 +35,7 @@ import 'widgets/recording_indicator.dart';
 import 'widgets/impact_glow_overlay.dart';
 import '../theme/app_theme.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
+import '../services/analytics_service.dart';
 
 const int _autoNextShotDelaySec = 3;
 
@@ -143,6 +144,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('shot_record'); // SHOT 即時揮桿畫面
     _pulseCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
@@ -434,6 +436,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
     );
     // ★ 不震動：開錄瞬間的馬達嗡聲/機身晃動會進 mp4 音軌與畫面（手機固定於腳架）。
     setState(() => _state = ShotState.recording);
+    AnalyticsService.instance.logEvent('record_start', {'mode': 'shot'});
   }
 
   /// 回傳 true 表示影片成功封口；false 表示本次錄製無有效影像（壞檔已被 native 刪除）。
@@ -460,6 +463,10 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
       recordOk = false;
     }
     if (_pauseAnalysis && mounted) setState(() => _pauseAnalysis = false);
+    AnalyticsService.instance.logEvent('record_stop', {
+      'mode': 'shot',
+      'ok': recordOk ? 1 : 0,
+    });
     return recordOk;
   }
 

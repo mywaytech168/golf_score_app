@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
+import 'package:golf_score_app/l10n/progress_label_localizer.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -36,8 +37,8 @@ import '../services/audio_export_models.dart';
 import '../services/clip_audio_score_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/ad_service.dart';
-import '../services/reward_service.dart';
 import '../services/analysis_service.dart';
+import '../services/analytics_service.dart';
 import '../services/plan_service.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../widgets/hits_summary_widget.dart';
@@ -51,9 +52,9 @@ import '../widgets/clip_candidates_sheet.dart';
 import '../services/video_export_service.dart';
 
 /// 列表操作選項
-enum _HistoryMenuAction { rename, note, detectHits, addClip, analyze, compare, share, customExport, uploadReward, delete }
+enum _HistoryMenuAction { rename, note, detectHits, addClip, analyze, compare, share, customExport, delete }
 
-enum _ClipMenuAction { rename, note, share, customExport, uploadReward, delete }
+enum _ClipMenuAction { rename, note, share, customExport, delete }
 
 /// 排序選項
 enum _SortBy {
@@ -220,6 +221,8 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
     if (confirm != true) {
       return;
     }
+
+    AnalyticsService.instance.logEvent('video_delete');
 
     final index = _entries.indexWhere((item) =>
         item.filePath == entry.filePath && item.recordedAt == entry.recordedAt);
@@ -514,6 +517,22 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
 
   /// 將篩選狀態寫入 SharedPreferences（每次改值後呼叫）
   void _saveFilters() async {
+    // 紀錄使用者套用篩選（filter 參數標示目前作用中的篩選類型）
+    final active = <String>[
+      if (_selectedGoodShot != null) 'shot_quality',
+      if (_videoTypeIsLong != null) 'video_type',
+      if (_aiAnalyzedFilter != null) 'analyzed',
+      if (_aiCoachFilter != null) 'ai_coach',
+      if (_clippedFilter != null) 'clipped',
+      if (_postureFilter != null) 'posture',
+      if (_datePreset != null) 'date',
+      if (_sortBy != _SortBy.date) 'sort',
+    ];
+    AnalyticsService.instance.logEvent(
+      'history_filter_applied',
+      {'filter': active.isEmpty ? 'none' : active.join(',')},
+    );
+
     final prefs = await SharedPreferences.getInstance();
     _setPrefBool(prefs, _kGoodShot,  _selectedGoodShot);
     _setPrefBool(prefs, _kVideoType, _videoTypeIsLong);
@@ -658,7 +677,7 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
       final color = SwingPosture.isPerfect(_postureFilter)
           ? const Color(0xFF4CAF50)
           : const Color(0xFFE57373);
-      items.add((SwingPosture.zhName(_postureFilter!), color));
+      items.add((SwingPosture.localizedName(l10n, _postureFilter!), color));
     }
     if (_datePreset == 'today')  items.add((l10n.historyFilterToday, const Color(0xFF2196F3)));
     if (_datePreset == 'week')   items.add((l10n.historyFilterWeek,  const Color(0xFF2196F3)));
@@ -1038,14 +1057,14 @@ class _RecordingHistoryPageState extends State<RecordingHistoryPage> {
                                 _filterRow(l10n.historyFilterLabelPosture, [
                                   _chip(l10n.historyFilterAll, _postureFilter == null, kBrandPrimary, () { setState(() => _postureFilter = null); _saveFilters(); }),
                                   _chip(
-                                    SwingPosture.zhName(SwingPosture.good),
+                                    SwingPosture.localizedName(l10n, SwingPosture.good),
                                     _postureFilter == SwingPosture.good,
                                     const Color(0xFF4CAF50),
                                     () { setState(() => _postureFilter = SwingPosture.good); _saveFilters(); },
                                   ),
                                   for (final label in SwingPosture.errorLabels)
                                     _chip(
-                                      SwingPosture.zhName(label),
+                                      SwingPosture.localizedName(l10n, label),
                                       _postureFilter == label,
                                       const Color(0xFFE57373),
                                       () { setState(() => _postureFilter = label); _saveFilters(); },
@@ -1301,6 +1320,7 @@ class _HistoryTileState extends State<_HistoryTile> {
     );
     if (selection == null || selection.manualRanges.isEmpty || !mounted) return;
 
+    AnalyticsService.instance.logEvent('manual_clip');
     setState(() => _isDetecting = true);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -1404,6 +1424,8 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (result.skipToday) await _SkipHelper.markSkipToday('detection');
     }
 
+    AnalyticsService.instance
+        .logEvent('detect_swing', {'mode': detectionMode.name});
     setState(() => _isDetecting = true);
 
     if (!mounted) return;
@@ -1682,7 +1704,9 @@ class _HistoryTileState extends State<_HistoryTile> {
       // 兩者都沒有時才執行逐幀基礎分析。live 版取樣較疏（~15fps），
       // 擊球幀可能落在兩幀之間 — 使用者已知並接受此 trade-off。
       var detectCsvPath = resolveSkeletonCsv(sessionDir);
+      debugPrint('[DIAG] V1 detectCsvPath=${detectCsvPath ?? "null→需分析"}');
       if (detectCsvPath == null) {
+        debugPrint('[DIAG] V1 about to await analyzeBasic, sessionDir=$sessionDir');
         final basicAnalysis = await VideoAnalysisPipelineService.analyzeBasic(
           videoPath: widget.entry.filePath,
           sessionDir: sessionDir,
@@ -1693,11 +1717,16 @@ class _HistoryTileState extends State<_HistoryTile> {
             progressNotifier.value = (progress * 0.45, label);
           },
         );
+        debugPrint('[DIAG] analyzeBasic 返回 null=${basicAnalysis == null} cancelled=${cancelToken.isCancelled}');
         if (cancelToken.isCancelled) return;
-        if (basicAnalysis == null || !await File(csvPath).exists()) {
+        debugPrint('[DIAG] 檢查 csv 是否存在: $csvPath');
+        final csvExists = await File(csvPath).exists();
+        debugPrint('[DIAG] csv exists=$csvExists');
+        if (basicAnalysis == null || !csvExists) {
           throw '基礎分析失敗：無法生成骨架';
         }
         detectCsvPath = csvPath;
+        debugPrint('[DIAG] detectCsvPath 已設定，準備讀 CSV');
       } else {
         debugPrint('[偵測擊球] ✅ 使用現成骨架: ${p.basename(detectCsvPath)}');
       }
@@ -1757,23 +1786,24 @@ class _HistoryTileState extends State<_HistoryTile> {
 
       if (hits.isEmpty) {
         debugPrint('[偵測擊球] ⚠️ 未檢測到任何擊球');
-        
+
         // 額外診斷
         debugPrint('[偵測擊球] 🔧 診斷信息:');
         debugPrint('  - CSV 有效: ${csvLines.isNotEmpty}');
-        
-        Navigator.pop(context);
-        setState(() => _isDetecting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              l10n.historyNoShotDetected,
-              style: const TextStyle(height: 1.5),
+
+        // 未自動偵測到擊球 → 不直接結束，改往下開切片頁讓使用者手動自由切片。
+        // 提示一次「未偵測到擊球」，但保留流程繼續（candidates 為空 = 純手動模式）。
+        if (mounted) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                l10n.historyNoShotDetected,
+                style: const TextStyle(height: 1.5),
+              ),
+              duration: const Duration(seconds: 4),
             ),
-            duration: const Duration(seconds: 5),
-          ),
-        );
-        return;
+          );
+        }
       }
 
       // ── 切片前確認：逐段預覽、勾選保留、自由切片（與 V2/V3 一致）────
@@ -2392,7 +2422,7 @@ class _HistoryTileState extends State<_HistoryTile> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(AppLocalizations.of(context).historyAiSubmitFailed(AnalysisService.friendlyError(e))),
+            content: Text(AppLocalizations.of(context).historyAiSubmitFailed(AnalysisService.friendlyErrorLocalized(AppLocalizations.of(context), e))),
             backgroundColor: Colors.red,
           ),
         );
@@ -2415,14 +2445,6 @@ class _HistoryTileState extends State<_HistoryTile> {
     }
   }
 
-  /// 上傳分析資料領獎勵
-  Future<void> _claimUploadReward() async {
-    final updated = await _runUploadRewardFlow(context, widget.entry);
-    if (updated != null && mounted) {
-      widget.onEntryUpdated?.call(widget.entry, updated);
-    }
-  }
-
   /// 編輯影片備註
   Future<void> _editNote() async {
     final newNote = await _showNoteDialog(context, widget.entry.note);
@@ -2436,6 +2458,7 @@ class _HistoryTileState extends State<_HistoryTile> {
 
   /// 分享 session
   void _shareSession() {
+    AnalyticsService.instance.logEvent('video_share');
     ShareUploadDialog.show(
       context,
       entry: widget.entry,
@@ -2669,13 +2692,13 @@ class _HistoryTileState extends State<_HistoryTile> {
                                   Icons.psychology_rounded),
                             if (widget.entry.swingPostureLabel != null)
                               _badgeWithIcon(
-                                SwingPosture.zhName(widget.entry.swingPostureLabel!),
+                                SwingPosture.localizedName(l10n, widget.entry.swingPostureLabel!),
                                 const Color(0xFF1565C0),
                                 Icons.memory_rounded,
                               ),
                             if (widget.entry.geminiPostureLabel != null)
                               _badgeWithIcon(
-                                SwingPosture.zhName(widget.entry.geminiPostureLabel!),
+                                SwingPosture.localizedName(l10n, widget.entry.geminiPostureLabel!),
                                 const Color(0xFF7C3AED),
                                 Icons.auto_awesome_rounded,
                               ),
@@ -2768,7 +2791,7 @@ class _HistoryTileState extends State<_HistoryTile> {
                                   const SizedBox(width: 4),
                                 Expanded(
                                   child: _AudioFeatureMiniBar(
-                                    label: feat.value,
+                                    label: AudioAnalysisService.localizedFeatureLabel(AppLocalizations.of(context), feat.key),
                                     featureKey: feat.key,
                                     value: widget.entry.audioPasses == null
                                         ? null
@@ -2906,9 +2929,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                   case _HistoryMenuAction.customExport:
                     _customExport();
                     break;
-                  case _HistoryMenuAction.uploadReward:
-                    _claimUploadReward();
-                    break;
                   case _HistoryMenuAction.delete:
                     widget.onDelete();
                     break;
@@ -3012,30 +3032,6 @@ class _HistoryTileState extends State<_HistoryTile> {
                         color: _isDownloading ? Colors.grey : kBrandPrimary),
                     const SizedBox(width: 8),
                     Text(_isDownloading ? l10n.historyMenuDownloading : l10n.exportCustomTitle),
-                  ]),
-                ),
-                PopupMenuItem<_HistoryMenuAction>(
-                  value: _HistoryMenuAction.uploadReward,
-                  enabled: widget.entry.isAnalyzed &&
-                      !widget.entry.isEffectivelyUploaded,
-                  child: Row(children: [
-                    Icon(Icons.cloud_upload_rounded,
-                        size: 16,
-                        color: (widget.entry.isAnalyzed &&
-                                !widget.entry.isEffectivelyUploaded)
-                            ? const Color(0xFF00897B)
-                            : Colors.grey),
-                    const SizedBox(width: 8),
-                    Text(
-                      widget.entry.isEffectivelyUploaded
-                          ? l10n.historyMenuUploaded
-                          : l10n.historyMenuUploadReward(RewardType.uploadData.ballsPerAction),
-                      style: TextStyle(
-                          color: (widget.entry.isAnalyzed &&
-                                  !widget.entry.isEffectivelyUploaded)
-                              ? null
-                              : Colors.grey),
-                    ),
                   ]),
                 ),
                 PopupMenuItem<_HistoryMenuAction>(
@@ -3223,14 +3219,6 @@ class _ClipSubCardState extends State<_ClipSubCard> {
     );
   }
 
-  /// 上傳分析資料領獎勵
-  Future<void> _claimUploadReward() async {
-    final updated = await _runUploadRewardFlow(context, widget.clip);
-    if (updated != null && mounted) {
-      widget.onEntryUpdated?.call(widget.clip, updated);
-    }
-  }
-
   /// 編輯切片備註
   Future<void> _editNote() async {
     final clip = widget.clip;
@@ -3242,6 +3230,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
 
   /// 分享切片
   void _share() {
+    AnalyticsService.instance.logEvent('video_share');
     ShareUploadDialog.show(
       context,
       entry: widget.clip,
@@ -3630,7 +3619,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content:
-                  Text(AppLocalizations.of(context).historyAiSubmitFailed(AnalysisService.friendlyError(e))),
+                  Text(AppLocalizations.of(context).historyAiSubmitFailed(AnalysisService.friendlyErrorLocalized(AppLocalizations.of(context), e))),
               backgroundColor: Colors.red),
         );
       }
@@ -3760,13 +3749,13 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                     _smallBadge('AI', const Color(0xFF7C3AED)),
                                   if (clip.swingPostureLabel != null)
                                     _smallBadgeWithIcon(
-                                      SwingPosture.zhName(clip.swingPostureLabel!),
+                                      SwingPosture.localizedName(l10n, clip.swingPostureLabel!),
                                       const Color(0xFF1565C0),
                                       Icons.memory_rounded,
                                     ),
                                   if (clip.geminiPostureLabel != null)
                                     _smallBadgeWithIcon(
-                                      SwingPosture.zhName(clip.geminiPostureLabel!),
+                                      SwingPosture.localizedName(l10n, clip.geminiPostureLabel!),
                                       const Color(0xFF7C3AED),
                                       Icons.auto_awesome_rounded,
                                     ),
@@ -3858,7 +3847,7 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                                       const SizedBox(width: 3),
                                     Expanded(
                                       child: _AudioFeatureMiniBar(
-                                        label: feat.value,
+                                        label: AudioAnalysisService.localizedFeatureLabel(AppLocalizations.of(context), feat.key),
                                         featureKey: feat.key,
                                         value: clip.audioPasses == null
                                             ? null
@@ -3950,9 +3939,6 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                     case _ClipMenuAction.note:
                       _editNote();
                       break;
-                    case _ClipMenuAction.uploadReward:
-                      _claimUploadReward();
-                      break;
                     case _ClipMenuAction.delete:
                       widget.onDelete?.call();
                       break;
@@ -3996,28 +3982,6 @@ class _ClipSubCardState extends State<_ClipSubCard> {
                         color: _isDownloading ? Colors.grey : kBrandPrimary),
                     const SizedBox(width: 8),
                     Text(_isDownloading ? l10n.historyMenuDownloading : l10n.exportCustomTitle),
-                  ]),
-                ),
-                PopupMenuItem<_ClipMenuAction>(
-                  value: _ClipMenuAction.uploadReward,
-                  enabled: clip.isAnalyzed && !clip.isEffectivelyUploaded,
-                  child: Row(children: [
-                    Icon(Icons.cloud_upload_rounded,
-                        size: 16,
-                        color: (clip.isAnalyzed && !clip.isEffectivelyUploaded)
-                            ? const Color(0xFF00897B)
-                            : Colors.grey),
-                    const SizedBox(width: 8),
-                    Text(
-                      clip.isEffectivelyUploaded
-                          ? l10n.historyMenuUploaded
-                          : l10n.historyMenuUploadReward(RewardType.uploadData.ballsPerAction),
-                      style: TextStyle(
-                          color: (clip.isAnalyzed &&
-                                  !clip.isEffectivelyUploaded)
-                              ? null
-                              : Colors.grey),
-                    ),
                   ]),
                 ),
                 PopupMenuItem<_ClipMenuAction>(
@@ -4826,10 +4790,14 @@ class _DetectionModeDialogState extends State<_DetectionModeDialog> {
                            : _kGreen,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
-          onPressed: () => Navigator.of(context).pop(
-            _DetectionModeResult(
-                mode: _mode, skipToday: _skipToday, bothHands: _bothHands),
-          ),
+          onPressed: () {
+            AnalyticsService.instance
+                .logEvent('detection_mode_selected', {'mode': _mode.name});
+            Navigator.of(context).pop(
+              _DetectionModeResult(
+                  mode: _mode, skipToday: _skipToday, bothHands: _bothHands),
+            );
+          },
           child: Text(AppLocalizations.of(context).historyStartDetect),
         ),
       ],
@@ -4968,7 +4936,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            q.label,
+                            q.localizedLabel(AppLocalizations.of(context)),
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight:
@@ -4980,7 +4948,7 @@ class _ExportQualityDialogState extends State<_ExportQualityDialog> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            q.sizeHint,
+                            q.localizedSizeHint(AppLocalizations.of(context)),
                             style: TextStyle(
                                 fontSize: 12, color: context.textSecondary),
                           ),
@@ -5173,7 +5141,7 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    val.$2,
+                    localizeProgressLabel(AppLocalizations.of(context), val.$2),
                     style: const TextStyle(
                         color: Colors.white70, fontSize: 14),
                     textAlign: TextAlign.center,
@@ -5194,118 +5162,6 @@ class _ProgressWithAdDialogState extends State<_ProgressWithAdDialog> {
             : null,
       ),
     );
-  }
-}
-
-/// 共用上傳獎勵流程（原始影片與切片皆走此路）：
-/// 確認 → 上傳分析資料領獎勵 → 標記 isUploaded。
-/// 回傳更新後的 entry（取消或失敗回傳 null）。
-///
-/// 條件：entry 需已分析；AI 分析過的影片（影片+CSV 已在伺服器）
-/// 視為已上傳（isEffectivelyUploaded），不可重複領取。
-Future<RecordingHistoryEntry?> _runUploadRewardFlow(
-    BuildContext context, RecordingHistoryEntry entry) async {
-  final balls = RewardType.uploadData.ballsPerAction;
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(AppLocalizations.of(context).historyUploadRewardTitle),
-      content: Text(
-        AppLocalizations.of(context).historyUploadRewardContent(entry.displayTitle, balls),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(false),
-          child: Text(AppLocalizations.of(context).commonCancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(ctx).pop(true),
-          child: Text(AppLocalizations.of(context).historyUploadSubmit),
-        ),
-      ],
-    ),
-  );
-  if (ok != true || !context.mounted) return null;
-
-  // 真實上傳影片 + CSV（可能 5-50MB，顯示進度提示）
-  String? uploadId;
-  showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => PopScope(
-      canPop: false,
-      child: AlertDialog(
-        content: Row(children: [
-          const SizedBox(
-              width: 24, height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.5)),
-          const SizedBox(width: 16),
-          Expanded(child: Text(AppLocalizations.of(context).historyUploadingProgress)),
-        ]),
-      ),
-    ),
-  );
-  try {
-    uploadId = await RewardService.uploadSessionFiles(entry);
-  } catch (e) {
-    if (context.mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(AppLocalizations.of(context).historyUploadFailed(e.toString())),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-    return null;
-  }
-  if (!context.mounted) return null;
-  Navigator.of(context, rootNavigator: true).pop();
-
-  try {
-    final pending = await RewardService.claimUploadReward(sessions: [
-      {
-        'filePath':        entry.filePath,
-        'recordedAt':      entry.recordedAt.toIso8601String(),
-        'durationSeconds': entry.durationSeconds,
-        'goodShot':        entry.goodShot,
-        'audioCrispness':  entry.audioCrispness,
-        'audioLabel':      entry.audioLabel,
-        'videoType':       entry.videoType.name,
-        'uploadId':        uploadId,
-      },
-    ]);
-    // pending=0 = 送審未建立（網路失敗或同檔已提交過，含被拒絕者——
-    // 審核制不允許重送），不標記 isUploaded，讓使用者可在排除問題後重試。
-    if (pending == 0) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(AppLocalizations.of(context).historyUploadSubmitFailed),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-      return null;
-    }
-    // isUploaded 標記：防止重複提交（被拒絕者依政策不開放重送）。
-    final updated = entry.copyWith(isUploaded: true);
-    await RecordingHistoryStorage.instance.upsertEntry(updated);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(AppLocalizations.of(context).historyUploadReviewPending(balls)),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-    return updated;
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(AppLocalizations.of(context).historyUploadFailed(e.toString())),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-    return null;
   }
 }
 

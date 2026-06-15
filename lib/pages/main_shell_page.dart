@@ -12,7 +12,9 @@ import 'video_player_page.dart';
 import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
+import '../services/analytics_service.dart';
 import '../services/app_update_service.dart';
+import '../services/auth_token_storage.dart';
 import '../services/camera_permission_service.dart';
 import '../services/install_source_service.dart';
 import '../services/statistics_service.dart';
@@ -39,11 +41,22 @@ class _MainShellPageState extends State<MainShellPage> {
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
+    AnalyticsService.instance.logScreen(_screenNameForIndex(0)); // 首屏分頁
+    _bindAnalyticsUser();
     _loadHistory();
     // Play Flexible 更新下載完成 → 顯示「重啟套用」提示（不自動重啟，避免打斷使用者）
     InstallSourceService.onFlexibleUpdateDownloaded = _promptFlexibleRestart;
     // 在首幀繪製完成後才做教學引導 / 版本檢查，避免阻塞 UI
     WidgetsBinding.instance.addPostFrameCallback((_) => _runPostFrameChecks());
+  }
+
+  /// 已登入時綁定 Analytics 使用者 ID（供後台依使用者分群）。取不到則略過。
+  void _bindAnalyticsUser() {
+    AuthTokenStorage.instance.getUserId().then((id) {
+      if (id != null && id.isNotEmpty) {
+        AnalyticsService.instance.setUserId(id);
+      }
+    }).catchError((_) {});
   }
 
   /// Play Flexible 更新已下載：提示使用者於安全時機重啟套用。
@@ -111,6 +124,24 @@ class _MainShellPageState extends State<MainShellPage> {
     InstallSourceService.onFlexibleUpdateDownloaded = null;
     _pageController.dispose();
     super.dispose();
+  }
+
+  /// 底部分頁序號對應 Analytics screen 名稱
+  String _screenNameForIndex(int index) {
+    switch (index) {
+      case 0:
+        return 'home';
+      case 1:
+        return 'today_info';
+      case 2:
+        return 'recording_selection';
+      case 3:
+        return 'recording_history';
+      case 4:
+        return 'upgrade';
+      default:
+        return 'unknown';
+    }
   }
 
   /// 處理底部導覽點擊，切換頁面
@@ -221,6 +252,8 @@ class _MainShellPageState extends State<MainShellPage> {
         controller: _pageController,
         onPageChanged: (index) {
           setState(() => _currentIndex = index);
+          // 分頁切換即記錄目前操作介面（含底部導覽觸發的 animateToPage）
+          AnalyticsService.instance.logScreen(_screenNameForIndex(index));
         },
         physics: const NeverScrollableScrollPhysics(),
         children: [
@@ -287,37 +320,47 @@ class _MainShellPageState extends State<MainShellPage> {
         top: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          // 各 tab 等寬（Expanded）避免長標籤（如英文 "Subscription"）擠歪間距或溢出
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-          _BottomNavItem(
-            icon: Icons.home_rounded,
-            label: l10n.navHome,
-            isActive: _currentIndex == 0,
-            onTap: () => _onBottomNavTap(0),
+          Expanded(
+            child: _BottomNavItem(
+              icon: Icons.home_rounded,
+              label: l10n.navHome,
+              isActive: _currentIndex == 0,
+              onTap: () => _onBottomNavTap(0),
+            ),
           ),
-          _BottomNavItem(
-            icon: Icons.calendar_today_rounded,
-            label: l10n.navData,
-            isActive: _currentIndex == 1,
-            onTap: () => _onBottomNavTap(1),
+          Expanded(
+            child: _BottomNavItem(
+              icon: Icons.calendar_today_rounded,
+              label: l10n.navData,
+              isActive: _currentIndex == 1,
+              onTap: () => _onBottomNavTap(1),
+            ),
           ),
-          _QuickStartNavItem(
-            label: l10n.navRecord,
-            isActive: _currentIndex == 2,
-            onTap: () => _onBottomNavTap(2),
+          Expanded(
+            child: _QuickStartNavItem(
+              label: l10n.navRecord,
+              isActive: _currentIndex == 2,
+              onTap: () => _onBottomNavTap(2),
+            ),
           ),
-          _BottomNavItem(
-            icon: Icons.bar_chart_rounded,
-            label: l10n.navHistory,
-            isActive: _currentIndex == 3,
-            onTap: () => _onBottomNavTap(3),
+          Expanded(
+            child: _BottomNavItem(
+              icon: Icons.bar_chart_rounded,
+              label: l10n.navHistory,
+              isActive: _currentIndex == 3,
+              onTap: () => _onBottomNavTap(3),
+            ),
           ),
-          _BottomNavItem(
-            icon: Icons.workspace_premium_rounded,
-            label: l10n.navPremium,
-            isActive: _currentIndex == 4,
-            onTap: () => _onBottomNavTap(4),
+          Expanded(
+            child: _BottomNavItem(
+              icon: Icons.workspace_premium_rounded,
+              label: l10n.navPremium,
+              isActive: _currentIndex == 4,
+              onTap: () => _onBottomNavTap(4),
+            ),
           ),
             ],
           ),
@@ -354,12 +397,18 @@ class _BottomNavItem extends StatelessWidget {
             size: 24,
           ),
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: isActive ? kBrandPrimary : Colors.grey,
+          // FittedBox 讓過長標籤（英文等）自動縮小不溢出、不換行，保留完整單字
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                color: isActive ? kBrandPrimary : Colors.grey,
+              ),
             ),
           ),
         ],
@@ -416,12 +465,17 @@ class _QuickStartNavItem extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: isActive ? kBrandPrimary : Colors.grey,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                color: isActive ? kBrandPrimary : Colors.grey,
+              ),
             ),
           ),
         ],

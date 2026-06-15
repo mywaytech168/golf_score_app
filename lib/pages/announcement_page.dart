@@ -2,6 +2,7 @@
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import '../models/announcement.dart';
+import '../services/analytics_service.dart';
 import '../services/announcement_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
@@ -22,6 +23,7 @@ class _AnnouncementPageState extends State<AnnouncementPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('announcement');
     _load();
   }
 
@@ -177,7 +179,7 @@ class _AnnouncementCard extends StatelessWidget {
                                   Icon(type.icon, size: 11, color: color),
                                   const SizedBox(width: 3),
                                   Text(
-                                    type.label,
+                                    type.localizedLabel(AppLocalizations.of(context)),
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
@@ -305,7 +307,7 @@ class _AnnouncementDetailPage extends StatelessWidget {
                           children: [
                             Icon(type.icon, size: 14, color: color),
                             const SizedBox(width: 4),
-                            Text(type.label,
+                            Text(type.localizedLabel(AppLocalizations.of(context)),
                                 style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,

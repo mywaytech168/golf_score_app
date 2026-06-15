@@ -19,13 +19,15 @@ namespace UploadServer.Controllers
         private readonly B2Service _b2;
         private readonly IConfiguration _config;
         private readonly ILogger<UserController> _logger;
+        private readonly IEmailService _email;
 
-        public UserController(UserService userService, B2Service b2, IConfiguration config, ILogger<UserController> logger)
+        public UserController(UserService userService, B2Service b2, IConfiguration config, ILogger<UserController> logger, IEmailService email)
         {
             _userService = userService;
             _b2          = b2;
             _config      = config;
             _logger      = logger;
+            _email       = email;
         }
 
         private bool IsAdmin() =>
@@ -262,6 +264,22 @@ namespace UploadServer.Controllers
             var result = await _userService.SubmitFeedbackAsync(
                 userId, req.Type, req.Text, req.VideoId, req.ImageB2Key);
             if (result == null) return NotFound(new { message = "用戶不存在" });
+
+            // 轉寄客服信箱通知（失敗不影響回饋已存 DB）
+            try
+            {
+                var me = await _userService.GetMeAsync(userId);
+                await _email.SendContactNotificationAsync(
+                    source: "app",
+                    name: me?.DisplayName,
+                    replyToEmail: me?.Email,
+                    subject: $"意見回饋（{req.Type}）",
+                    message: req.Text);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "回饋轉寄客服信箱失敗（已存 DB）");
+            }
 
             if (result.Balls == 0)
                 return Ok(new { data = result, message = "今日已提交過回饋" });

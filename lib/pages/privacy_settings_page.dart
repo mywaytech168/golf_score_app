@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/analytics_service.dart';
 import '../services/auth_token_storage.dart';
 import '../services/video_server_client.dart';
 import '../theme/app_theme.dart';
@@ -23,6 +24,12 @@ class PrivacySettingsPage extends StatefulWidget {
 }
 
 class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
+  @override
+  void initState() {
+    super.initState();
+    AnalyticsService.instance.logScreen('privacy_settings');
+  }
+
   void _showSnack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -142,6 +149,7 @@ class _PrivacySettingsPageState extends State<PrivacySettingsPage> {
     }
 
     // 刪除成功：清除本地憑證並回登入頁。
+    AnalyticsService.instance.logEvent('account_delete');
     await AuthTokenStorage.instance.clearTokens();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

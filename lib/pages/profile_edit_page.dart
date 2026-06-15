@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../services/analytics_service.dart';
 import '../theme/app_theme.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
@@ -58,6 +59,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('profile_edit');
     // ---------- 狀態初始化區 ----------
     // 將外部傳入的資料填入控制器，確保使用者進入頁面時即看到目前設定
     _displayNameController = TextEditingController(text: widget.initialDisplayName);

@@ -273,7 +273,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navHistory => 'History';
 
   @override
-  String get navPremium => 'Subscription';
+  String get navPremium => 'Premium';
 
   @override
   String get homeLogout => 'Logout';
@@ -585,6 +585,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsQualityHint => 'Saved as default for future analyses';
 
   @override
+  String get exportQualitySmallLabel => 'Compact';
+
+  @override
+  String get exportQualityStandardLabel => 'Standard';
+
+  @override
+  String get exportQualityHighLabel => 'High Definition';
+
+  @override
+  String get exportQualitySmallDesc => 'Smallest file, best for sharing';
+
+  @override
+  String get exportQualityStandardDesc => 'Balanced quality & size';
+
+  @override
+  String get exportQualityHighDesc => 'Best quality, larger file';
+
+  @override
   String get settingsApply => 'Apply';
 
   @override
@@ -631,6 +649,26 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsTermsOfService => 'Terms & Conditions';
+
+  @override
+  String get settingsContactUs => 'Contact Us';
+
+  @override
+  String get settingsContactEmailCopied =>
+      'No mail app found. Support email copied';
+
+  @override
+  String get settingsContactSubtitle => 'Email or feedback form';
+
+  @override
+  String get settingsContactViaEmail => 'Contact via Email';
+
+  @override
+  String get settingsContactViaForm => 'Fill out feedback form';
+
+  @override
+  String get settingsContactViaFormDesc =>
+      'Sign in to submit; attach a clip or screenshot';
 
   @override
   String get settingsVersion => 'Version';
@@ -1071,7 +1109,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get privacyDataCollectionDesc =>
-      'Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.';
+      'Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.';
 
   @override
   String get privacySectionPolicies => 'POLICIES';
@@ -1081,7 +1119,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get privacyUploadDesc =>
-      'You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.';
+      'When you run a full AI analysis, the swing video and sensor CSV used for that analysis are also retained and submitted to help improve and train the swing-analysis model. Each submission is reviewed manually; approved contributions earn bonus balls. Deleting a recording removes it from this use.';
 
   @override
   String get privacyUploadStatusEntry => 'View My Upload Review Status';
@@ -1152,6 +1190,24 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiCoachEvidence => 'Evidence';
+
+  @override
+  String get aiCoachErrorPerfect => 'Perfect Posture';
+
+  @override
+  String get aiCoachErrorEarlyRelease => 'Early Release';
+
+  @override
+  String get aiCoachErrorImpact => 'Impact Error';
+
+  @override
+  String get aiCoachErrorOverTheTop => 'Over the Top';
+
+  @override
+  String get aiCoachErrorSpineAngle => 'Spine Angle';
+
+  @override
+  String get aiCoachErrorWeightShift => 'Weight Shift';
 
   @override
   String get aiCoachSeverityHigh => 'Severe';
@@ -2627,6 +2683,54 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recDetailOffCenter => 'Off-Center';
 
   @override
+  String get audioFeatureVolume => 'Volume';
+
+  @override
+  String get audioFeatureFrequency => 'Frequency';
+
+  @override
+  String get audioFeatureCrisp => 'Crispness';
+
+  @override
+  String get audioFeatureHighFreq => 'High freq';
+
+  @override
+  String get audioFeaturePeak => 'Peak';
+
+  @override
+  String audioScoreHit(int pass) {
+    return 'Hit $pass/5';
+  }
+
+  @override
+  String audioScoreMiss(int pass) {
+    return 'Miss $pass/5';
+  }
+
+  @override
+  String get announcementTypeInfo => 'Notice';
+
+  @override
+  String get announcementTypeImportant => 'Important';
+
+  @override
+  String get announcementTypeEvent => 'Event';
+
+  @override
+  String get announcementTypeUpdate => 'Update';
+
+  @override
+  String get upgradeFeatureYes => 'Yes';
+
+  @override
+  String get errorServerUnreachable =>
+      'Cannot reach the server. Please check your network and try again.';
+
+  @override
+  String get errorServerTimeout =>
+      'The server timed out. Please try again later.';
+
+  @override
   String get recDetailAudioFeaturesTitle => 'Audio Feature Analysis';
 
   @override
@@ -3108,7 +3212,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get rewardShortVideo => 'Short video';
 
   @override
-  String get rewardUploadDataTitle => 'Upload Analysis Data';
+  String get rewardUploadDataTitle => 'Data Contribution';
+
+  @override
+  String rewardUploadAutoNote(int balls) {
+    return 'Running a full AI analysis automatically contributes your data for training; +$balls balls per item once approved';
+  }
+
+  @override
+  String aiCoachDataContributed(int balls) {
+    return 'Analysis data submitted for review; +$balls balls once approved';
+  }
 
   @override
   String get rewardNoUploadable => 'No analysis data available to upload';
@@ -3681,6 +3795,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get extImportProgressTranscoding => 'Preparing transcode...';
 
   @override
+  String extImportProgressTranscodingPct(int pct) {
+    return 'Converting $pct%';
+  }
+
+  @override
+  String get extImportProgressTranscodeDone => 'Conversion done ✅';
+
+  @override
   String get extImportProgressDurationInvalid =>
       'Video duration invalid (must be 1–600 seconds)';
 
@@ -3917,6 +4039,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get historyProgressAudioAnalysis => 'Analyzing audio...';
+
+  @override
+  String get analysisProgressPose => 'Analyzing pose...';
+
+  @override
+  String get analysisProgressAudio => 'Extracting audio...';
+
+  @override
+  String get analysisProgressPoseDone => 'Pose analysis done';
+
+  @override
+  String get analysisProgressDone => 'Done';
+
+  @override
+  String get analysisProgressUsingExisting => 'Using existing data...';
+
+  @override
+  String get analysisProgressBallTrack => 'Tracking ball...';
+
+  @override
+  String get analysisProgressP0 => 'Detecting P0...';
+
+  @override
+  String analysisProgressPosePct(int pct) {
+    return 'Analyzing pose $pct%';
+  }
 
   @override
   String get historyDlLabelFull => 'Full Analysis';

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>聯絡我們｜ORVIA AI 高爾夫揮桿分析 App</title>
+<meta name="description" content="聯絡 ORVIA 團隊。透過 Email support@atk.tw 或下方表單與我們聯繫，回報問題、提出建議或商務合作。Contact the ORVIA team.">
+<link rel="canonical" href="https://orvia.atk.tw/contact.html">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://orvia.atk.tw/contact.html">
+<meta property="og:title" content="聯絡我們｜ORVIA AI 高爾夫揮桿分析 App">
+<meta property="og:description" content="聯絡 ORVIA 團隊 — Email support@atk.tw 或填寫聯絡表單。">
+<meta property="og:image" content="https://orvia.atk.tw/images/og-banner.png">
+<link rel="icon" type="image/png" href="images/brand-icon.png">
+<link rel="apple-touch-icon" href="images/brand-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0A0A0A;
+  --bg-soft:#111111;
+  --card:#1A1A1A;
+  --border:#262626;
+  --border-bright:#3a3a3a;
+  --green:#4A7FFF;--grad:linear-gradient(135deg,#00E5CC,#4A7FFF,#6B4FD8);--grad-start:#00E5CC;--grad-end:#6B4FD8;
+  --green-dim:rgba(74,127,255,.12);
+  --text:#F5F5F5;
+  --muted:#8a8a8a;
+  --radius:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang TC','PingFang SC','Microsoft JhengHei','Microsoft YaHei',sans-serif;
+  line-height:1.7;-webkit-font-smoothing:antialiased;
+}
+a{color:inherit;text-decoration:none}
+.container{max-width:760px;margin:0 auto;padding:0 24px}
+
+/* ---------- Nav ---------- */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,10,10,.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+.nav-inner{max-width:760px;margin:0 auto;padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem;letter-spacing:.02em}
+.brand-logo{height:30px;display:block}
+.brand-name{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:800}
+.lang-switch{display:flex;gap:4px;border:1px solid var(--border);border-radius:999px;padding:3px;background:var(--bg-soft)}
+.lang-switch button{background:none;border:none;color:var(--muted);font:inherit;font-size:.78rem;font-weight:600;padding:4px 12px;border-radius:999px;cursor:pointer;transition:color .2s,background .2s}
+.lang-switch button.active{background:var(--grad);color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box}
+.lang-switch button:not(.active):hover{color:var(--text)}
+
+/* ---------- Layout ---------- */
+.wrap{max-width:760px;margin:0 auto;padding:120px 24px 80px}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;margin-bottom:14px}
+.eyebrow::before{content:"";width:24px;height:1px;background:var(--grad)}
+h1{font-size:2.2rem;font-weight:800;letter-spacing:-.02em;margin-bottom:12px}
+.lead{color:var(--muted);font-size:1.02rem;margin-bottom:40px;max-width:560px}
+h2{font-size:1.25rem;font-weight:700;margin:0 0 14px}
+
+/* ---------- Email block ---------- */
+.email-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:26px 28px;margin-bottom:40px}
+.email-card p{color:#d4d4d4;margin-bottom:18px}
+.email-btn{display:inline-flex;align-items:center;gap:10px;padding:13px 24px;border-radius:12px;font-weight:700;font-size:.98rem;background:var(--grad);color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box;transition:transform .15s ease,opacity .2s}
+.email-btn:hover{opacity:.9}
+.email-btn:active{transform:scale(.97)}
+.email-btn svg{width:20px;height:20px;flex-shrink:0;stroke:#001016;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- Form ---------- */
+.form-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px}
+.field{margin-bottom:18px}
+.field label{display:block;font-size:.86rem;font-weight:600;margin-bottom:7px;color:#cfcfcf}
+.field label .req{color:var(--green);margin-left:3px}
+.field input,.field textarea{
+  width:100%;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;
+  color:var(--text);font-family:inherit;font-size:.95rem;padding:12px 14px;transition:border-color .2s;
+}
+.field input::placeholder,.field textarea::placeholder{color:#5f5f5f}
+.field input:focus,.field textarea:focus{outline:none;border-color:var(--green)}
+.field textarea{resize:vertical;min-height:130px}
+.submit-btn{
+  display:inline-flex;align-items:center;gap:8px;width:100%;justify-content:center;
+  padding:14px 24px;border-radius:12px;font-weight:700;font-size:.98rem;border:none;cursor:pointer;
+  background:var(--grad);color:#001016;-webkit-text-fill-color:#001016;-webkit-background-clip:border-box;background-clip:border-box;
+  transition:transform .15s ease,opacity .2s;
+}
+.submit-btn:hover{opacity:.92}
+.submit-btn:active{transform:scale(.99)}
+.submit-btn:disabled{opacity:.6;cursor:not-allowed}
+#cf-status{margin-top:16px;font-size:.92rem;font-weight:600;min-height:1.2em}
+
+/* ---------- Footer ---------- */
+footer{padding:40px 0;border-top:1px solid var(--border)}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.footer-links{display:flex;gap:22px;align-items:center;font-size:.86rem;color:var(--muted);flex-wrap:wrap}
+.footer-links a:hover{color:var(--text)}
+.copyright{font-size:.8rem;color:#555;margin-top:24px}
+
+@media (max-width:560px){
+  h1{font-size:1.85rem}
+  .footer-inner{flex-direction:column;text-align:center}
+}
+</style>
+  <script defer src="js/analytics.js"></script>
+  <script defer src="js/contact.js"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileReady&render=explicit" async defer></script>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav>
+  <div class="nav-inner">
+    <a class="brand" href="index.html">
+      <img class="brand-logo" src="images/brand-icon.png" alt="ORVIA"><span class="brand-name">ORVIA</span>
+    </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button data-lang="zh">繁</button>
+      <button data-lang="cn">简</button>
+      <button data-lang="en">EN</button>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <span class="eyebrow" data-i18n="contact.eyebrow"></span>
+  <h1 data-i18n="contact.title"></h1>
+  <p class="lead" data-i18n="contact.lead"></p>
+
+  <!-- Email -->
+  <section class="email-card">
+    <h2 data-i18n="contact.emailTitle"></h2>
+    <p data-i18n="contact.emailDesc"></p>
+    <a class="email-btn" href="mailto:support@atk.tw">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+      support@atk.tw
+    </a>
+  </section>
+
+  <!-- Form -->
+  <section class="form-card">
+    <h2 data-i18n="contact.formTitle"></h2>
+    <form id="contact-form" novalidate>
+      <div class="field">
+        <label for="cf-name" data-i18n="contact.fName"></label>
+        <input type="text" id="cf-name" name="name" autocomplete="name" maxlength="100">
+      </div>
+      <div class="field">
+        <label for="cf-email"><span data-i18n="contact.fEmail"></span><span class="req">*</span></label>
+        <input type="email" id="cf-email" name="email" autocomplete="email" maxlength="200" required>
+      </div>
+      <div class="field">
+        <label for="cf-subject" data-i18n="contact.fSubject"></label>
+        <input type="text" id="cf-subject" name="subject" maxlength="200">
+      </div>
+      <div class="field">
+        <label for="cf-message"><span data-i18n="contact.fMessage"></span><span class="req">*</span></label>
+        <textarea id="cf-message" name="message" maxlength="4000" required></textarea>
+      </div>
+      <div class="field" id="cf-turnstile-field" style="display:none">
+        <div id="cf-turnstile-widget"></div>
+      </div>
+      <button type="submit" class="submit-btn" data-i18n="contact.submit"></button>
+      <p id="cf-status" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+</div>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <a class="brand" href="index.html">
+        <img class="brand-logo" src="images/orvia-logo.png" alt="ORVIA">
+      </a>
+      <div class="footer-links">
+        <a href="golf-swing-analysis.html" data-i18n="footer.swing"></a>
+        <a href="ai-golf-coach.html" data-i18n="footer.coach"></a>
+        <a href="app.html" data-i18n="footer.app"></a>
+        <a href="pricing.html" data-i18n="footer.pricing"></a>
+        <a href="privacy.html" data-i18n="footer.privacy"></a>
+        <a href="terms.html" data-i18n="footer.terms"></a>
+        <a href="contact.html" data-i18n="footer.contact"></a>
+        <a href="mailto:support@atk.tw">support@atk.tw</a>
+      </div>
+    </div>
+    <p class="copyright">© 2026 Aethertek Technology Co., Ltd. All rights reserved.</p>
+  </div>
+</footer>
+
+<script>
+var CONTACT_I18N = {
+  zh: {
+    "contact.eyebrow": "聯絡我們",
+    "contact.title": "聯絡 ORVIA",
+    "contact.lead": "有任何問題、建議或商務合作需求？歡迎透過 Email 或下方表單與我們聯繫，我們會盡快回覆。",
+    "contact.emailTitle": "Email 聯絡",
+    "contact.emailDesc": "直接寄信給我們，是最快的方式：",
+    "contact.formTitle": "聯絡表單",
+    "contact.fName": "姓名（選填）",
+    "contact.fEmail": "Email",
+    "contact.fSubject": "主旨（選填）",
+    "contact.fMessage": "訊息",
+    "contact.submit": "送出訊息",
+    "cf.sending": "傳送中…",
+    "cf.ok": "訊息已送出，我們會盡快回覆，謝謝！",
+    "cf.errEmail": "請輸入有效的 Email 地址。",
+    "cf.errMessage": "請填寫訊息內容。",
+    "cf.errRate": "請求過於頻繁，請稍後再試。",
+    "cf.errFail": "送出失敗，請稍後再試或直接來信 support@atk.tw。",
+    "cf.errNetwork": "網路連線發生問題，請檢查連線後再試。",
+    "cf.errCaptcha": "請先完成人機驗證。",
+    "footer.swing": "揮桿分析",
+    "footer.coach": "AI 教練",
+    "footer.app": "App",
+    "footer.pricing": "方案",
+    "footer.privacy": "隱私權政策",
+    "footer.terms": "使用條款",
+    "footer.contact": "聯絡我們"
+  },
+  en: {
+    "contact.eyebrow": "Contact Us",
+    "contact.title": "Contact ORVIA",
+    "contact.lead": "Questions, feedback, or partnership inquiries? Reach us by email or the form below and we'll get back to you as soon as we can.",
+    "contact.emailTitle": "Email Us",
+    "contact.emailDesc": "Emailing us directly is the fastest way to reach us:",
+    "contact.formTitle": "Contact Form",
+    "contact.fName": "Name (optional)",
+    "contact.fEmail": "Email",
+    "contact.fSubject": "Subject (optional)",
+    "contact.fMessage": "Message",
+    "contact.submit": "Send Message",
+    "cf.sending": "Sending…",
+    "cf.ok": "Your message has been sent. We'll reply as soon as we can — thank you!",
+    "cf.errEmail": "Please enter a valid email address.",
+    "cf.errMessage": "Please enter a message.",
+    "cf.errRate": "Too many requests. Please try again later.",
+    "cf.errFail": "Failed to send. Please try again later or email support@atk.tw directly.",
+    "cf.errNetwork": "A network problem occurred. Please check your connection and try again.",
+    "cf.errCaptcha": "Please complete the human verification first.",
+    "footer.swing": "Swing Analysis",
+    "footer.coach": "AI Coach",
+    "footer.app": "App",
+    "footer.pricing": "Plans",
+    "footer.privacy": "Privacy Policy",
+    "footer.terms": "Terms & Conditions",
+    "footer.contact": "Contact"
+  },
+  cn: {
+    "contact.eyebrow": "联系我们",
+    "contact.title": "联系 ORVIA",
+    "contact.lead": "有任何问题、建议或商务合作需求？欢迎通过 Email 或下方表单与我们联系，我们会尽快回复。",
+    "contact.emailTitle": "Email 联系",
+    "contact.emailDesc": "直接寄信给我们，是最快的方式：",
+    "contact.formTitle": "联系表单",
+    "contact.fName": "姓名（选填）",
+    "contact.fEmail": "Email",
+    "contact.fSubject": "主题（选填）",
+    "contact.fMessage": "信息",
+    "contact.submit": "发送信息",
+    "cf.sending": "发送中…",
+    "cf.ok": "信息已发送，我们会尽快回复，谢谢！",
+    "cf.errEmail": "请输入有效的 Email 地址。",
+    "cf.errMessage": "请填写信息内容。",
+    "cf.errRate": "请求过于频繁，请稍后再试。",
+    "cf.errFail": "发送失败，请稍后再试或直接来信 support@atk.tw。",
+    "cf.errNetwork": "网络连接发生问题，请检查连接后再试。",
+    "cf.errCaptcha": "请先完成人机验证。",
+    "footer.swing": "挥杆分析",
+    "footer.coach": "AI 教练",
+    "footer.app": "App",
+    "footer.pricing": "方案",
+    "footer.privacy": "隐私政策",
+    "footer.terms": "使用条款",
+    "footer.contact": "联系我们"
+  }
+};
+window.CONTACT_I18N = CONTACT_I18N;
+window.CONTACT_LANG = "zh";
+
+function setLang(lang){
+  if(!CONTACT_I18N[lang]) lang = "zh";
+  window.CONTACT_LANG = lang;
+  var dict = CONTACT_I18N[lang];
+  document.querySelectorAll("[data-i18n]").forEach(function(el){
+    var k = el.getAttribute("data-i18n");
+    if(dict[k] !== undefined) el.textContent = dict[k];
+  });
+  document.documentElement.lang = lang==="zh" ? "zh-TW" : (lang==="cn" ? "zh-CN" : lang);
+  document.querySelectorAll(".lang-switch button").forEach(function(b){
+    b.classList.toggle("active", b.dataset.lang===lang);
+  });
+  try{ localStorage.setItem("orvia_lang", lang); }catch(e){}
+}
+
+document.querySelectorAll(".lang-switch button").forEach(function(b){
+  b.addEventListener("click", function(){ setLang(b.dataset.lang); });
+});
+
+var saved = null;
+try{ saved = localStorage.getItem("orvia_lang"); }catch(e){}
+setLang(saved || "zh");
+</script>
+</body>
+</html>

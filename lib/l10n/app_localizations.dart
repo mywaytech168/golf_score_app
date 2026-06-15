@@ -595,7 +595,7 @@ abstract class AppLocalizations {
   /// No description provided for @navPremium.
   ///
   /// In en, this message translates to:
-  /// **'Subscription'**
+  /// **'Premium'**
   String get navPremium;
 
   /// No description provided for @homeLogout.
@@ -1198,6 +1198,42 @@ abstract class AppLocalizations {
   /// **'Saved as default for future analyses'**
   String get settingsQualityHint;
 
+  /// No description provided for @exportQualitySmallLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Compact'**
+  String get exportQualitySmallLabel;
+
+  /// No description provided for @exportQualityStandardLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Standard'**
+  String get exportQualityStandardLabel;
+
+  /// No description provided for @exportQualityHighLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'High Definition'**
+  String get exportQualityHighLabel;
+
+  /// No description provided for @exportQualitySmallDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Smallest file, best for sharing'**
+  String get exportQualitySmallDesc;
+
+  /// No description provided for @exportQualityStandardDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Balanced quality & size'**
+  String get exportQualityStandardDesc;
+
+  /// No description provided for @exportQualityHighDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Best quality, larger file'**
+  String get exportQualityHighDesc;
+
   /// No description provided for @settingsApply.
   ///
   /// In en, this message translates to:
@@ -1287,6 +1323,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Terms & Conditions'**
   String get settingsTermsOfService;
+
+  /// No description provided for @settingsContactUs.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact Us'**
+  String get settingsContactUs;
+
+  /// No description provided for @settingsContactEmailCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'No mail app found. Support email copied'**
+  String get settingsContactEmailCopied;
+
+  /// No description provided for @settingsContactSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Email or feedback form'**
+  String get settingsContactSubtitle;
+
+  /// No description provided for @settingsContactViaEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact via Email'**
+  String get settingsContactViaEmail;
+
+  /// No description provided for @settingsContactViaForm.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill out feedback form'**
+  String get settingsContactViaForm;
+
+  /// No description provided for @settingsContactViaFormDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in to submit; attach a clip or screenshot'**
+  String get settingsContactViaFormDesc;
 
   /// No description provided for @settingsVersion.
   ///
@@ -2065,7 +2137,7 @@ abstract class AppLocalizations {
   /// No description provided for @privacyDataCollectionDesc.
   ///
   /// In en, this message translates to:
-  /// **'Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.'**
+  /// **'Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.'**
   String get privacyDataCollectionDesc;
 
   /// No description provided for @privacySectionPolicies.
@@ -2083,7 +2155,7 @@ abstract class AppLocalizations {
   /// No description provided for @privacyUploadDesc.
   ///
   /// In en, this message translates to:
-  /// **'You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.'**
+  /// **'When you run a full AI analysis, the swing video and sensor CSV used for that analysis are also retained and submitted to help improve and train the swing-analysis model. Each submission is reviewed manually; approved contributions earn bonus balls. Deleting a recording removes it from this use.'**
   String get privacyUploadDesc;
 
   /// No description provided for @privacyUploadStatusEntry.
@@ -2211,6 +2283,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Evidence'**
   String get aiCoachEvidence;
+
+  /// No description provided for @aiCoachErrorPerfect.
+  ///
+  /// In en, this message translates to:
+  /// **'Perfect Posture'**
+  String get aiCoachErrorPerfect;
+
+  /// No description provided for @aiCoachErrorEarlyRelease.
+  ///
+  /// In en, this message translates to:
+  /// **'Early Release'**
+  String get aiCoachErrorEarlyRelease;
+
+  /// No description provided for @aiCoachErrorImpact.
+  ///
+  /// In en, this message translates to:
+  /// **'Impact Error'**
+  String get aiCoachErrorImpact;
+
+  /// No description provided for @aiCoachErrorOverTheTop.
+  ///
+  /// In en, this message translates to:
+  /// **'Over the Top'**
+  String get aiCoachErrorOverTheTop;
+
+  /// No description provided for @aiCoachErrorSpineAngle.
+  ///
+  /// In en, this message translates to:
+  /// **'Spine Angle'**
+  String get aiCoachErrorSpineAngle;
+
+  /// No description provided for @aiCoachErrorWeightShift.
+  ///
+  /// In en, this message translates to:
+  /// **'Weight Shift'**
+  String get aiCoachErrorWeightShift;
 
   /// No description provided for @aiCoachSeverityHigh.
   ///
@@ -4834,6 +4942,90 @@ abstract class AppLocalizations {
   /// **'Off-Center'**
   String get recDetailOffCenter;
 
+  /// No description provided for @audioFeatureVolume.
+  ///
+  /// In en, this message translates to:
+  /// **'Volume'**
+  String get audioFeatureVolume;
+
+  /// No description provided for @audioFeatureFrequency.
+  ///
+  /// In en, this message translates to:
+  /// **'Frequency'**
+  String get audioFeatureFrequency;
+
+  /// No description provided for @audioFeatureCrisp.
+  ///
+  /// In en, this message translates to:
+  /// **'Crispness'**
+  String get audioFeatureCrisp;
+
+  /// No description provided for @audioFeatureHighFreq.
+  ///
+  /// In en, this message translates to:
+  /// **'High freq'**
+  String get audioFeatureHighFreq;
+
+  /// No description provided for @audioFeaturePeak.
+  ///
+  /// In en, this message translates to:
+  /// **'Peak'**
+  String get audioFeaturePeak;
+
+  /// No description provided for @audioScoreHit.
+  ///
+  /// In en, this message translates to:
+  /// **'Hit {pass}/5'**
+  String audioScoreHit(int pass);
+
+  /// No description provided for @audioScoreMiss.
+  ///
+  /// In en, this message translates to:
+  /// **'Miss {pass}/5'**
+  String audioScoreMiss(int pass);
+
+  /// No description provided for @announcementTypeInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Notice'**
+  String get announcementTypeInfo;
+
+  /// No description provided for @announcementTypeImportant.
+  ///
+  /// In en, this message translates to:
+  /// **'Important'**
+  String get announcementTypeImportant;
+
+  /// No description provided for @announcementTypeEvent.
+  ///
+  /// In en, this message translates to:
+  /// **'Event'**
+  String get announcementTypeEvent;
+
+  /// No description provided for @announcementTypeUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Update'**
+  String get announcementTypeUpdate;
+
+  /// No description provided for @upgradeFeatureYes.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes'**
+  String get upgradeFeatureYes;
+
+  /// No description provided for @errorServerUnreachable.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot reach the server. Please check your network and try again.'**
+  String get errorServerUnreachable;
+
+  /// No description provided for @errorServerTimeout.
+  ///
+  /// In en, this message translates to:
+  /// **'The server timed out. Please try again later.'**
+  String get errorServerTimeout;
+
   /// No description provided for @recDetailAudioFeaturesTitle.
   ///
   /// In en, this message translates to:
@@ -5671,8 +5863,20 @@ abstract class AppLocalizations {
   /// No description provided for @rewardUploadDataTitle.
   ///
   /// In en, this message translates to:
-  /// **'Upload Analysis Data'**
+  /// **'Data Contribution'**
   String get rewardUploadDataTitle;
+
+  /// No description provided for @rewardUploadAutoNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Running a full AI analysis automatically contributes your data for training; +{balls} balls per item once approved'**
+  String rewardUploadAutoNote(int balls);
+
+  /// No description provided for @aiCoachDataContributed.
+  ///
+  /// In en, this message translates to:
+  /// **'Analysis data submitted for review; +{balls} balls once approved'**
+  String aiCoachDataContributed(int balls);
 
   /// No description provided for @rewardNoUploadable.
   ///
@@ -6658,6 +6862,18 @@ abstract class AppLocalizations {
   /// **'Preparing transcode...'**
   String get extImportProgressTranscoding;
 
+  /// No description provided for @extImportProgressTranscodingPct.
+  ///
+  /// In en, this message translates to:
+  /// **'Converting {pct}%'**
+  String extImportProgressTranscodingPct(int pct);
+
+  /// No description provided for @extImportProgressTranscodeDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversion done ✅'**
+  String get extImportProgressTranscodeDone;
+
   /// No description provided for @extImportProgressDurationInvalid.
   ///
   /// In en, this message translates to:
@@ -7095,6 +7311,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Analyzing audio...'**
   String get historyProgressAudioAnalysis;
+
+  /// No description provided for @analysisProgressPose.
+  ///
+  /// In en, this message translates to:
+  /// **'Analyzing pose...'**
+  String get analysisProgressPose;
+
+  /// No description provided for @analysisProgressAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Extracting audio...'**
+  String get analysisProgressAudio;
+
+  /// No description provided for @analysisProgressPoseDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Pose analysis done'**
+  String get analysisProgressPoseDone;
+
+  /// No description provided for @analysisProgressDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get analysisProgressDone;
+
+  /// No description provided for @analysisProgressUsingExisting.
+  ///
+  /// In en, this message translates to:
+  /// **'Using existing data...'**
+  String get analysisProgressUsingExisting;
+
+  /// No description provided for @analysisProgressBallTrack.
+  ///
+  /// In en, this message translates to:
+  /// **'Tracking ball...'**
+  String get analysisProgressBallTrack;
+
+  /// No description provided for @analysisProgressP0.
+  ///
+  /// In en, this message translates to:
+  /// **'Detecting P0...'**
+  String get analysisProgressP0;
+
+  /// No description provided for @analysisProgressPosePct.
+  ///
+  /// In en, this message translates to:
+  /// **'Analyzing pose {pct}%'**
+  String analysisProgressPosePct(int pct);
 
   /// No description provided for @historyDlLabelFull.
   ///

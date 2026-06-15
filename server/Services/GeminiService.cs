@@ -27,6 +27,7 @@ namespace UploadServer.Services
             - 用繁體中文回答。
             - 評語要像教練對學員說話，直接、具體、可執行。
             - 不要臆測影片外看不到的資訊。
+            - 請以 P-System（P1 預備→P10 收桿）逐位置觀察揮桿，從中找出最主要的問題。
             - 如果模型分析 JSON 與影片觀察不一致，請明確指出「模型結果可能需要複查」。
 
             ── 影片骨架模型（判斷動作錯誤）──
@@ -88,19 +89,22 @@ namespace UploadServer.Services
         /// v2：完整影片分析優化版本
         private const string PromptV2 = """
             你是一位頂尖高爾夫教練，現在要分析一段完整的揮桿影片，同時結合音訊分析判斷擊球品質。
-            請**逐幀仔細觀看**整段影片，從準備姿勢到收桿全程進行分析。
+            請**逐幀仔細觀看**整段影片，從 P1 預備到 P10 收桿全程進行分析。
 
-            分析要求（按順序逐一確認）：
-            ① 準備姿勢（Address）：站姿、握桿、重心分佈
-            ② 起桿（Takeaway）：手臂、肩膀與髖部的協調
-            ③ 上桿（Backswing）：手腕角度、肩膀轉動幅度
-            ④ 頂點（Top）：桿頭位置、脊柱角度保持
-            ⑤ 下桿（Downswing）：髖部先行、肩膀跟上的順序
-            ⑥ 擊球（Impact）：重心轉移完成、手部超前球
-            ⑦ 送桿（Follow-through）：手臂伸展、軀幹旋轉
-            ⑧ 收桿（Finish）：平衡與完整度
+            分析要求（P-System，依 P1→P10 順序逐一確認）：
+            P1 預備（Address）：站姿、握桿、重心分佈、脊椎前傾
+            P2 桿身水平·上桿（桿與地面平行）：起桿路徑、手臂與肩同動
+            P3 引導臂水平·上桿（引導臂與地面平行）：手腕鉸鏈、桿面方向
+            P4 頂點（Top）：肩膀轉動幅度、X-factor（肩髖分離）、脊椎角度保持
+            P5 引導臂水平·下桿：下桿順序（髖部先行）、桿落在身體前
+            P6 桿身水平·下桿（桿與地面平行）：是否外切、保留手腕角度（防早放）
+            P7 擊球（Impact）：手部超前球、重心轉移到前腳、脊椎角度維持
+            P8 桿身水平·送桿（桿與地面平行）：釋放與延展
+            P9 引導臂水平·送桿：軀幹持續旋轉、手臂伸展
+            P10 收桿（Finish）：平衡、完整度、重心完全到前腳
 
-            從以上8個階段找出最主要的問題，並結合下方 ONNX 推論結果綜合判斷。
+            註：P2/P3/P5/P6/P8/P9 為桿身/引導臂的「水平位置」，依影像中桿與手臂角度判讀。
+            從以上 P1-P10 找出最主要的問題，並結合下方 ONNX 推論結果綜合判斷。
 
             ── 影片骨架模型五種常見錯誤（error_type 英文 id）──
             - early_release_casting：早放拋桿（下桿過早釋放手腕角）
@@ -131,7 +135,7 @@ namespace UploadServer.Services
                 "error_type": "錯誤類型英文 id 或空字串",
                 "zh_name": "中文名稱",
                 "severity": "low|medium|high",
-                "evidence": ["階段①②…中觀察到的具體動作依據"]
+                "evidence": ["P1~P10 各位置觀察到的具體動作依據"]
               },
               "impact_quality": {
                 "audio_sweet_spot": true,
@@ -158,23 +162,26 @@ namespace UploadServer.Services
             {{AUDIO_ANALYSIS_JSON}}
             """;
 
-        /// v3：8 關鍵幀圖片 + 音訊版本（不傳影片，用圖片直接分析各揮桿階段）
+        /// v3：關鍵幀圖片 + 音訊版本（不傳影片，用圖片直接分析 P-System 各位置）
         private const string PromptV3 = """
-            你是一位高爾夫 AI 教練。以下提供揮桿動作的 8 張關鍵幀圖片（JPEG）以及擊球音訊（WAV），
+            你是一位高爾夫 AI 教練。以下提供揮桿動作的關鍵幀圖片（JPEG，依序對應 P-System 位置）以及擊球音訊（WAV），
             請仔細觀看每一張圖片，並聆聽音訊，綜合分析整個揮桿動作與擊球品質。
 
             {{PHASE_TIMESTAMPS}}
 
-            請依序對每張圖片分析對應的揮桿階段：
-            - 準備（address）：站姿、重心、握桿
-            - 起桿（takeaway）：手臂路徑是否內側
-            - 上桿（backswing）：肩膀轉動與手腕鉸鏈
-            - 頂點（top）：桿面角度、脊柱維持
-            - 下桿（downswing）：髖部開始時機
-            - 擊球（impact）：手部超前、重心在前腳
-            - 送桿（followthrough）：手臂伸展
-            - 收桿（finish）：完整平衡
+            請依序對每張關鍵幀分析對應的 P-System 位置：
+            - P1 預備（address）：站姿、重心、握桿
+            - P2 桿身水平·上桿：起桿路徑是否內側
+            - P3 引導臂水平·上桿：肩膀轉動與手腕鉸鏈
+            - P4 頂點（top）：桿面角度、X-factor、脊柱維持
+            - P5 引導臂水平·下桿：髖部開始時機、桿落在身體前
+            - P6 桿身水平·下桿：是否外切、保留手腕角度
+            - P7 擊球（impact）：手部超前、重心在前腳
+            - P8 桿身水平·送桿：釋放與延展
+            - P9 引導臂水平·送桿：手臂伸展、軀幹旋轉
+            - P10 收桿（finish）：完整平衡
 
+            註：P2/P3/P5/P6/P8/P9 為桿身/引導臂的水平位置，依影像中桿與手臂角度判讀。
             依以上關鍵幀圖片觀察，結合 ONNX 骨架推論結果，給出診斷。
 
             ── ONNX 骨架模型五種常見錯誤（error_type 英文 id）──
@@ -203,7 +210,7 @@ namespace UploadServer.Services
                 "error_type": "",
                 "zh_name": "",
                 "severity": "low|medium|high",
-                "evidence": ["基於哪張關鍵幀（第幾張、哪個階段）觀察到的"]
+                "evidence": ["基於哪張關鍵幀（第幾張、哪個 P 位置）觀察到的"]
               },
               "impact_quality": {
                 "audio_sweet_spot": true,
@@ -274,10 +281,11 @@ namespace UploadServer.Services
             int? v2Fps = null,
             string? v2Resolution = null,
             string? swingMetricsJson = null,
+            string? lang = null,
             CancellationToken ct = default)
         {
             var modelAnalysis = BuildModelAnalysis(clipBytes, errorTypeHint);
-            var prompt        = RenderPrompt(modelAnalysis, promptVersion, phaseTimestamps, audioAnalysisJson, swingMetricsJson);
+            var prompt        = RenderPrompt(modelAnalysis, promptVersion, phaseTimestamps, audioAnalysisJson, swingMetricsJson, lang);
 
             return promptVersion switch
             {
@@ -552,12 +560,41 @@ namespace UploadServer.Services
             };
         }
 
+        /// <summary>
+        /// 將語言代碼映射為輸出語言名稱（給 Gemini 的指示用）。
+        /// 預設繁體中文（lang 為 null / 未知時，向後相容）。
+        /// </summary>
+        private static string OutputLanguageName(string? lang) => lang switch
+        {
+            "en"                              => "English",
+            "zh_CN" or "zh-CN" or "zh_Hans"   => "简体中文（Simplified Chinese）",
+            _                                  => "繁體中文（Traditional Chinese）",
+        };
+
+        /// <summary>
+        /// 強化版輸出語言指示：所有自由文字用目標語言，但 JSON key 與 enum 值保持英文不變。
+        /// 放在 prompt 結尾再強調一次，提高遵循率。
+        /// </summary>
+        private static string OutputLanguageDirective(string? lang)
+        {
+            var name = OutputLanguageName(lang);
+            return "\n\n──────────────────────────────\n"
+                + $"【輸出語言 / OUTPUT LANGUAGE】所有「自由文字」欄位一律使用 {name}：\n"
+                + "summary、primary_error.zh_name、primary_error.evidence、impact_quality.audio_feedback、"
+                + "coach_feedback、practice_suggestions（drill / instruction / reps）、next_training_goal、model_check.notes。\n"
+                + "但 JSON 的 key 名稱與下列 enum 值必須保持原樣英文、不可翻譯："
+                + "error_type（over_the_top / early_release_casting / weight_shift / spine_angle / impact）、"
+                + "quality_level（poor / fair / near_sweet_spot / sweet_spot / premium_sweet_spot）、"
+                + "severity（low / medium / high）。\n";
+        }
+
         private static string RenderPrompt(
             object modelAnalysis,
             string promptVersion,
             Dictionary<string, double>? phaseTimestamps,
             string? audioAnalysisJson = null,
-            string? swingMetricsJson = null)
+            string? swingMetricsJson = null,
+            string? lang = null)
         {
             var modelJson = JsonSerializer.Serialize(modelAnalysis, new JsonSerializerOptions { WriteIndented = true });
 
@@ -569,6 +606,9 @@ namespace UploadServer.Services
             };
 
             var result = template.Replace("{{MODEL_ANALYSIS_JSON}}", modelJson);
+
+            // V1 內嵌的「用繁體中文回答。」改成依語系（V2/V3 無此句 → no-op，靠結尾指示）
+            result = result.Replace("用繁體中文回答。", $"使用 {OutputLanguageName(lang)} 回答。");
 
             if (promptVersion == "v3")
             {
@@ -590,13 +630,16 @@ namespace UploadServer.Services
                     + swingMetricsJson;
             }
 
+            // 結尾再強調輸出語言（所有版本），提高 LLM 遵循率
+            result += OutputLanguageDirective(lang);
+
             return result;
         }
 
         private static string BuildPhaseBlock(Dictionary<string, double>? phases)
         {
             if (phases == null || phases.Count == 0)
-                return "（未提供關鍵禎時間點，請自行從影片中識別8個揮桿階段）";
+                return "（未提供關鍵禎時間點，請自行從影片中識別 P-System P1-P10 各位置）";
 
             static string PhaseName(string key) => key switch
             {

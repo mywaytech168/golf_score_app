@@ -1,14 +1,6 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/recording_history_entry.dart';
-import 'skeleton_csv_locator.dart';
-import 'swing_auto_clip_service.dart';
 import 'video_server_client.dart';
 
 // ════════════════════════════════════════════════════════════════
@@ -260,107 +252,10 @@ class RewardService {
     return 0;
   }
 
-  // ── 上傳資料獎勵 ─────────────────────────────────────────────
-
-  /// 真實上傳該筆錄影的影片 + 骨架 CSV 到伺服器（presigned PUT）。
-  ///
-  /// - entry 已上傳過或做過 AI 分析（檔案已在伺服器）→ 回 null，不重傳。
-  /// - 否則：prepare 取得 uploadId 與 PUT URL → 上傳影片（entry.filePath）
-  ///   與 CSV（同目錄 pose_landmarks.csv，找不到就略過）→ 回 uploadId。
-  /// - 任一步失敗（含 prepare / 影片 PUT）丟例外。
-  static Future<String?> uploadSessionFiles(RecordingHistoryEntry entry) async {
-    if (entry.isEffectivelyUploaded) return null;
-
-    final videoFile = File(entry.filePath);
-    if (!videoFile.existsSync()) {
-      throw Exception('找不到影片檔案：${entry.filePath}');
-    }
-
-    final prep = await VideoServerClient.instance.prepareDatasetUpload();
-    if (prep == null) {
-      throw Exception('無法取得上傳授權，請稍後再試');
-    }
-    final uploadId = prep['uploadId'] as String?;
-    final videoUrl = prep['videoUploadUrl'] as String?;
-    final csvUrl   = prep['csvUploadUrl'] as String?;
-    final metaUrl  = prep['metaUploadUrl'] as String?;
-    if (uploadId == null || videoUrl == null) {
-      throw Exception('上傳授權回應格式錯誤');
-    }
-
-    final sessionDir = p.dirname(entry.filePath);
-
-    // 影片直傳（presigned PUT）
-    await _putFile(videoUrl, videoFile, 'video/mp4');
-    debugPrint('$_tag ✅ 資料集影片上傳完成 ($uploadId)');
-
-    // CSV 直傳（可能不存在，略過）
-    final csvPath = resolveSkeletonCsv(sessionDir);
-    if (csvPath != null && csvUrl != null) {
-      try {
-        await _putFile(csvUrl, File(csvPath), 'text/csv');
-        debugPrint('$_tag ✅ 資料集 CSV 上傳完成 ($uploadId)');
-      } catch (e) {
-        debugPrint('$_tag ⚠️ 資料集 CSV 上傳失敗（略過）: $e');
-      }
-    }
-
-    // 診斷 meta.json 直傳（偵測 log/錨點/即時擊球等；失敗略過不阻斷）
-    if (metaUrl != null) {
-      try {
-        final meta = await SwingAutoClipService.buildSessionMetaJson(sessionDir);
-        await _putBytes(metaUrl, utf8.encode(meta), 'application/json');
-        debugPrint('$_tag ✅ 資料集 meta 上傳完成 ($uploadId)');
-      } catch (e) {
-        debugPrint('$_tag ⚠️ 資料集 meta 上傳失敗（略過）: $e');
-      }
-    }
-
-    return uploadId;
-  }
-
-  static Future<void> _putFile(
-      String url, File file, String contentType) async {
-    await _putBytes(url, await file.readAsBytes(), contentType);
-  }
-
-  static Future<void> _putBytes(
-      String url, List<int> bytes, String contentType) async {
-    final resp = await http
-        .put(
-          Uri.parse(url),
-          headers: {'Content-Type': contentType},
-          body: bytes,
-        )
-        .timeout(const Duration(minutes: 5));
-    if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      throw Exception('檔案上傳失敗 (HTTP ${resp.statusCode})');
-    }
-  }
-
-  /// [sessions] = 精簡的錄影記錄清單（不含影片二進位）
-  ///
-  /// 審核制：送出後建立待審核紀錄，審核通過後才發球。
-  /// 回傳本次新建立的待審核筆數（重複提交 = 0）。
-  static Future<int> claimUploadReward({
-    required List<Map<String, dynamic>> sessions,
-  }) async {
-    try {
-      final result = await VideoServerClient.instance.claimUploadReward(
-        sessions: sessions,
-      );
-      if (result != null) {
-        final pending = (result['pending'] as int?) ?? 0;
-        debugPrint('$_tag ✅ 上傳送審: $pending 筆待審核');
-        return pending;
-      }
-    } on UnauthorizedException {
-      rethrow;
-    } catch (e) {
-      debugPrint('$_tag ❌ 上傳送審失敗: $e');
-    }
-    return 0;
-  }
+  // ── 資料貢獻審核狀態 ─────────────────────────────────────────
+  //
+  // 資料集不再由使用者手動上傳：按「AI 完整分析」時，分析所上傳的 clip/CSV
+  // 由後端自動納入訓練資料集送審（審核通過後 +1 球）。此處僅保留查詢審核狀態。
 
   /// 查詢自己的資料上傳審核狀態（審核中 / 已通過筆數摘要）
   static Future<Map<String, dynamic>?> getUploadReviewStatus({

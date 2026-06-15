@@ -108,7 +108,7 @@
   "navData": "Data",
   "navRecord": "Record",
   "navHistory": "History",
-  "navPremium": "Subscription",
+  "navPremium": "Premium",
   "homeLogout": "Logout",
   "homeConfirmLogout": "Confirm Logout",
   "homeConfirmLogoutMsg": "Are you sure you want to logout?",
@@ -232,6 +232,12 @@
   "settingsSectionAnalysis": "Analysis Preferences",
   "settingsAnalysisQuality": "Analysis Output Quality",
   "settingsQualityHint": "Saved as default for future analyses",
+  "exportQualitySmallLabel": "Compact",
+  "exportQualityStandardLabel": "Standard",
+  "exportQualityHighLabel": "High Definition",
+  "exportQualitySmallDesc": "Smallest file, best for sharing",
+  "exportQualityStandardDesc": "Balanced quality & size",
+  "exportQualityHighDesc": "Best quality, larger file",
   "settingsApply": "Apply",
   "settingsQualityUpdated": "Output quality updated to \"{quality}\"",
   "@settingsQualityUpdated": {
@@ -254,6 +260,12 @@
   "settingsAnalyticsDesc": "Anonymous usage statistics to help improve the app",
   "settingsPrivacyPolicy": "Privacy Policy",
   "settingsTermsOfService": "Terms & Conditions",
+  "settingsContactUs": "Contact Us",
+  "settingsContactEmailCopied": "No mail app found. Support email copied",
+  "settingsContactSubtitle": "Email or feedback form",
+  "settingsContactViaEmail": "Contact via Email",
+  "settingsContactViaForm": "Fill out feedback form",
+  "settingsContactViaFormDesc": "Sign in to submit; attach a clip or screenshot",
   "settingsVersion": "Version",
   "settingsPrivacyOpenFailed": "Unable to open the privacy policy page, please try again later",
   "settingsVersionCopied": "Version copied",
@@ -494,10 +506,10 @@
   },
   "privacySettingsTitle": "Privacy & Analytics",
   "privacySectionDataCollection": "DATA COLLECTION",
-  "privacyDataCollectionDesc": "Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, reward uploads, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.",
+  "privacyDataCollectionDesc": "Your videos and analysis data are uploaded only when you take an action yourself — AI analysis, sharing, or feedback attachments. ORVIA performs no background uploads and no hidden telemetry.",
   "privacySectionPolicies": "POLICIES",
   "privacySectionUpload": "ANALYSIS DATA UPLOAD",
-  "privacyUploadDesc": "You may voluntarily submit swing videos and sensor CSV data to help improve the swing detection model. Each submission is reviewed manually; approved uploads earn bonus balls.",
+  "privacyUploadDesc": "When you run a full AI analysis, the swing video and sensor CSV used for that analysis are also retained and submitted to help improve and train the swing-analysis model. Each submission is reviewed manually; approved contributions earn bonus balls. Deleting a recording removes it from this use.",
   "privacyUploadStatusEntry": "View My Upload Review Status",
   "privacySectionAccount": "ACCOUNT",
   "privacyDeleteAccountSubtitle": "Soft delete: you can no longer sign in and your data is anonymized",
@@ -536,6 +548,12 @@
   "aiCoachStartAnalysis": "Start AI Coach Analysis",
   "aiCoachAnalysisHint": "* AI Coach will provide detailed feedback and training suggestions based on posture analysis results",
   "aiCoachEvidence": "Evidence",
+  "aiCoachErrorPerfect": "Perfect Posture",
+  "aiCoachErrorEarlyRelease": "Early Release",
+  "aiCoachErrorImpact": "Impact Error",
+  "aiCoachErrorOverTheTop": "Over the Top",
+  "aiCoachErrorSpineAngle": "Spine Angle",
+  "aiCoachErrorWeightShift": "Weight Shift",
   "aiCoachSeverityHigh": "Severe",
   "aiCoachSeverityMedium": "Moderate",
   "aiCoachSeverityLow": "Minor",
@@ -1415,6 +1433,34 @@
   "recDetailSpeedMissing": "Speed",
   "recDetailSweetSpot": "Sweet Spot",
   "recDetailOffCenter": "Off-Center",
+  "audioFeatureVolume": "Volume",
+  "audioFeatureFrequency": "Frequency",
+  "audioFeatureCrisp": "Crispness",
+  "audioFeatureHighFreq": "High freq",
+  "audioFeaturePeak": "Peak",
+  "audioScoreHit": "Hit {pass}/5",
+  "@audioScoreHit": {
+    "placeholders": {
+      "pass": {
+        "type": "int"
+      }
+    }
+  },
+  "audioScoreMiss": "Miss {pass}/5",
+  "@audioScoreMiss": {
+    "placeholders": {
+      "pass": {
+        "type": "int"
+      }
+    }
+  },
+  "announcementTypeInfo": "Notice",
+  "announcementTypeImportant": "Important",
+  "announcementTypeEvent": "Event",
+  "announcementTypeUpdate": "Update",
+  "upgradeFeatureYes": "Yes",
+  "errorServerUnreachable": "Cannot reach the server. Please check your network and try again.",
+  "errorServerTimeout": "The server timed out. Please try again later.",
   "recDetailAudioFeaturesTitle": "Audio Feature Analysis",
   "recDetailFeaturePassCount": "{count} / 5 features within sweet spot range",
   "@recDetailFeaturePassCount": {
@@ -1724,7 +1770,19 @@
   "rewardNoVideoHistory": "No recorded videos yet",
   "rewardLongVideo": "Long video",
   "rewardShortVideo": "Short video",
-  "rewardUploadDataTitle": "Upload Analysis Data",
+  "rewardUploadDataTitle": "Data Contribution",
+  "rewardUploadAutoNote": "Running a full AI analysis automatically contributes your data for training; +{balls} balls per item once approved",
+  "@rewardUploadAutoNote": {
+    "placeholders": {
+      "balls": { "type": "int" }
+    }
+  },
+  "aiCoachDataContributed": "Analysis data submitted for review; +{balls} balls once approved",
+  "@aiCoachDataContributed": {
+    "placeholders": {
+      "balls": { "type": "int" }
+    }
+  },
   "rewardNoUploadable": "No analysis data available to upload",
   "rewardUploadPartialFail": "{count} item(s) failed to upload and were skipped",
   "@rewardUploadPartialFail": {
@@ -2086,6 +2144,15 @@
   },
   "extImportProgressCopying": "Copying video...",
   "extImportProgressTranscoding": "Preparing transcode...",
+  "extImportProgressTranscodingPct": "Converting {pct}%",
+  "@extImportProgressTranscodingPct": {
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      }
+    }
+  },
+  "extImportProgressTranscodeDone": "Conversion done ✅",
   "extImportProgressDurationInvalid": "Video duration invalid (must be 1–600 seconds)",
   "extImportProgressThumbnail": "Generating thumbnail...",
   "extImportProgressDone": "Import complete ✅",
@@ -2202,6 +2269,21 @@
   "historyProgressVideoAnalysis": "Analyzing video...",
   "historyProgressDetectingPhase": "Detecting swing phases...",
   "historyProgressAudioAnalysis": "Analyzing audio...",
+  "analysisProgressPose": "Analyzing pose...",
+  "analysisProgressAudio": "Extracting audio...",
+  "analysisProgressPoseDone": "Pose analysis done",
+  "analysisProgressDone": "Done",
+  "analysisProgressUsingExisting": "Using existing data...",
+  "analysisProgressBallTrack": "Tracking ball...",
+  "analysisProgressP0": "Detecting P0...",
+  "analysisProgressPosePct": "Analyzing pose {pct}%",
+  "@analysisProgressPosePct": {
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      }
+    }
+  },
   "historyDlLabelFull": "Full Analysis",
   "historyDlDescFull": "Skeleton + ball trajectory overlay",
   "historyDlLabelSkeleton": "Skeleton Version",

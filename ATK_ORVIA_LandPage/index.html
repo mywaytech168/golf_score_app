@@ -149,6 +149,8 @@ nav{
 
 /* ---------- CSS Phone Mockup ---------- */
 .phone-wrap{display:flex;justify-content:center;perspective:1000px}
+.hero-shot{display:block;width:100%;max-width:300px;height:auto;margin:0 auto;animation:float 3s ease-in-out infinite;filter:drop-shadow(0 30px 60px rgba(0,0,0,.55)) drop-shadow(0 0 60px rgba(74,127,255,.18))}
+.compare-shot{display:block;width:100%;max-width:240px;height:auto;margin:0 auto;filter:drop-shadow(0 24px 50px rgba(0,0,0,.5)) drop-shadow(0 0 50px rgba(74,127,255,.14))}
 .phone{
   width:270px;height:556px;border-radius:42px;
   background:#161616;
@@ -336,6 +338,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
   .cta .hero-ctas{align-items:center}
 }
 .brand-name{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:800}</style>
+  <script defer src="js/analytics.js"></script>
 </head>
 <body>
 
@@ -374,51 +377,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
     </div>
 
     <div class="phone-wrap">
-      <div class="phone" aria-hidden="true">
-        <div class="phone-screen">
-          <div class="phone-notch"></div>
-          <div class="ps-header">
-            <span class="ps-title">Swing Analysis</span>
-            <span class="ps-rec"><i></i>REC</span>
-          </div>
-          <div class="ps-canvas">
-            <svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">
-              <!-- ball trajectory -->
-              <path d="M55 235 Q 115 60 195 95" fill="none" stroke="#4A7FFF" stroke-width="2" stroke-dasharray="5 6" opacity=".8"/>
-              <circle cx="55" cy="235" r="4" fill="#fff"/>
-              <circle cx="118" cy="118" r="2.5" fill="#4A7FFF" opacity=".7"/>
-              <circle cx="160" cy="96" r="2.5" fill="#4A7FFF" opacity=".5"/>
-              <!-- skeleton -->
-              <g stroke="#4A7FFF" stroke-width="2.4" stroke-linecap="round">
-                <line x1="85" y1="120" x2="85" y2="170"/>
-                <line x1="85" y1="130" x2="62" y2="155"/>
-                <line x1="62" y1="155" x2="48" y2="125"/>
-                <line x1="85" y1="130" x2="106" y2="150"/>
-                <line x1="106" y1="150" x2="98" y2="118"/>
-                <line x1="85" y1="170" x2="70" y2="210"/>
-                <line x1="70" y1="210" x2="68" y2="245"/>
-                <line x1="85" y1="170" x2="100" y2="208"/>
-                <line x1="100" y1="208" x2="104" y2="244"/>
-              </g>
-              <!-- club -->
-              <line x1="48" y1="125" x2="40" y2="78" stroke="#9ca3af" stroke-width="1.8"/>
-              <g fill="#4A7FFF">
-                <circle cx="85" cy="108" r="7"/>
-                <circle cx="85" cy="130" r="3.4"/><circle cx="62" cy="155" r="3.4"/>
-                <circle cx="48" cy="125" r="3.4"/><circle cx="106" cy="150" r="3.4"/>
-                <circle cx="98" cy="118" r="3.4"/><circle cx="85" cy="170" r="3.4"/>
-                <circle cx="70" cy="210" r="3.4"/><circle cx="100" cy="208" r="3.4"/>
-                <circle cx="68" cy="245" r="3.4"/><circle cx="104" cy="244" r="3.4"/>
-              </g>
-            </svg>
-          </div>
-          <div class="ps-stats">
-            <div class="ps-stat"><b>92</b><span>Score</span></div>
-            <div class="ps-stat"><b>8/8</b><span>Phases</span></div>
-            <div class="ps-stat"><b>1.2s</b><span>Tempo</span></div>
-          </div>
-        </div>
-      </div>
+      <img class="hero-shot" src="images/orvia_phone_only_transparent.png" alt="ORVIA App — Swing Analysis">
     </div>
   </div>
 </header>
@@ -520,43 +479,7 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
     <!-- 4b. Compare -->
     <div class="show-row reveal">
       <div class="show-visual">
-        <div class="mini-phone"><div class="mini-screen">
-          <svg viewBox="0 0 190 380">
-            <!-- top bar: A / B titles -->
-            <rect x="10" y="30" width="170" height="24" rx="6" fill="#141414"/>
-            <rect x="38" y="36" width="56" height="12" rx="6" fill="#4A7FFF"/>
-            <text x="50" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing A</text>
-            <rect x="104" y="36" width="56" height="12" rx="6" fill="#1565C0"/>
-            <text x="116" y="45" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">Swing B</text>
-            <!-- two videos side-by-side, 1px divider -->
-            <rect x="10" y="60" width="170" height="200" fill="#0b0b0b"/>
-            <line x1="95" y1="60" x2="95" y2="260" stroke="#fff" stroke-width="1"/>
-            <text x="16" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:12 / 00:34</text>
-            <text x="101" y="73" font-family="Inter,sans-serif" font-size="6.5" fill="#8a8a8a">00:08 / 00:21</text>
-            <g stroke="#4A7FFF" stroke-width="2" stroke-linecap="round">
-              <line x1="52" y1="120" x2="52" y2="165"/><line x1="52" y1="132" x2="34" y2="150"/><line x1="52" y1="132" x2="68" y2="148"/>
-              <line x1="52" y1="165" x2="42" y2="200"/><line x1="52" y1="165" x2="62" y2="200"/>
-            </g>
-            <circle cx="52" cy="110" r="6" fill="#4A7FFF"/>
-            <g stroke="#1565C0" stroke-width="2" stroke-linecap="round">
-              <line x1="138" y1="120" x2="138" y2="165"/><line x1="138" y1="132" x2="118" y2="142"/><line x1="138" y1="132" x2="156" y2="146"/>
-              <line x1="138" y1="165" x2="128" y2="200"/><line x1="138" y1="165" x2="148" y2="200"/>
-            </g>
-            <circle cx="138" cy="110" r="6" fill="#1565C0"/>
-            <!-- controls: progress slider -->
-            <rect x="10" y="260" width="170" height="80" rx="0" fill="#141414"/>
-            <rect x="22" y="278" width="146" height="5" rx="2.5" fill="#3a3a3a"/>
-            <rect x="22" y="278" width="86" height="5" rx="2.5" fill="#4A7FFF"/>
-            <circle cx="108" cy="280.5" r="6" fill="#fff"/>
-            <!-- playback row: time / -1% play +1% / time -->
-            <text x="22" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:12</text>
-            <text x="62" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">-1%</text>
-            <circle cx="95" cy="313" r="13" fill="#4A7FFF"/>
-            <polygon points="91,306 103,313 91,320" fill="#fff"/>
-            <text x="113" y="316" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf">+1%</text>
-            <text x="148" y="316" font-family="Inter,sans-serif" font-size="7" fill="#8a8a8a">00:34</text>
-          </svg>
-        </div></div>
+        <img class="compare-shot" src="images/compare-mode.png" alt="ORVIA — Side-by-Side Compare">
       </div>
       <div class="show-text">
         <span class="tag" data-i18n="show.r2.tag"></span>
@@ -571,22 +494,22 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
         <div class="mini-phone"><div class="mini-screen">
           <svg viewBox="0 0 190 380">
             <!-- app bar -->
-            <text x="62" y="44" font-family="Inter,sans-serif" font-size="10" fill="#f5f5f5" font-weight="700">AI 教練分析</text>
+            <text x="62" y="44" font-family="Inter,sans-serif" font-size="10" fill="#f5f5f5" font-weight="700" data-i18n="show.r3m.title">AI 教練分析</text>
             <text x="18" y="44" font-family="Inter,sans-serif" font-size="11" fill="#8a8a8a">‹</text>
             <!-- summary card: posture label + severity badge -->
             <rect x="14" y="58" width="162" height="74" rx="10" fill="#141a14" stroke="#1f2a1f"/>
             <rect x="24" y="68" width="58" height="14" rx="7" fill="#4A7FFF"/>
-            <text x="31" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">早期伸展</text>
+            <text x="31" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700" data-i18n="show.r3m.posture">早期伸展</text>
             <rect x="88" y="68" width="30" height="14" rx="7" fill="#f97316"/>
-            <text x="95" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700">中等</text>
+            <text x="95" y="78" font-family="Inter,sans-serif" font-size="7.5" fill="#fff" font-weight="700" data-i18n="show.r3m.severity">中等</text>
             <rect x="24" y="92" width="138" height="6" rx="3" fill="#2a342a"/>
             <rect x="24" y="104" width="120" height="6" rx="3" fill="#1f2a1f"/>
             <rect x="24" y="116" width="96" height="6" rx="3" fill="#1f2a1f"/>
             <!-- impact quality card: 5-segment bar -->
             <rect x="14" y="142" width="162" height="62" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <text x="24" y="158" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">擊球品質（音訊）</text>
+            <text x="24" y="158" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700" data-i18n="show.r3m.impact">擊球品質（音訊）</text>
             <rect x="118" y="149" width="44" height="13" rx="6.5" fill="#7C3AED"/>
-            <text x="124" y="158.5" font-family="Inter,sans-serif" font-size="6.5" fill="#fff" font-weight="700">甜蜜點+</text>
+            <text x="124" y="158.5" font-family="Inter,sans-serif" font-size="6.5" fill="#fff" font-weight="700" data-i18n="show.r3m.sweet">甜蜜點+</text>
             <g>
               <rect x="24" y="168" width="26" height="7" rx="3.5" fill="#4A7FFF"/>
               <rect x="53" y="168" width="26" height="7" rx="3.5" fill="#4A7FFF"/>
@@ -598,14 +521,14 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
             <rect x="30" y="186" width="118" height="6" rx="3" fill="#1f2a1f"/>
             <!-- coach feedback card: green arrow bullets -->
             <rect x="14" y="214" width="162" height="64" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <text x="24" y="231" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">教練回饋</text>
+            <text x="24" y="231" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700" data-i18n="show.r3m.feedback">教練回饋</text>
             <text x="24" y="248" font-family="Inter,sans-serif" font-size="8" fill="#4A7FFF">›</text>
             <rect x="34" y="242" width="126" height="6" rx="3" fill="#2a342a"/>
             <text x="24" y="264" font-family="Inter,sans-serif" font-size="8" fill="#4A7FFF">›</text>
             <rect x="34" y="258" width="108" height="6" rx="3" fill="#1f2a1f"/>
             <!-- practice suggestions card: numbered drills -->
             <rect x="14" y="288" width="162" height="60" rx="10" fill="#141a14" stroke="#1f2a1f"/>
-            <text x="24" y="305" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700">練習建議</text>
+            <text x="24" y="305" font-family="Inter,sans-serif" font-size="8" fill="#cfcfcf" font-weight="700" data-i18n="show.r3m.drills">練習建議</text>
             <circle cx="29" cy="320" r="6" fill="none" stroke="#4A7FFF" stroke-width="1.4"/>
             <text x="26.6" y="323" font-family="Inter,sans-serif" font-size="7" fill="#4A7FFF">1</text>
             <rect x="42" y="317" width="110" height="6" rx="3" fill="#2a342a"/>
@@ -627,28 +550,79 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
       <div class="show-visual">
         <div class="mini-phone"><div class="mini-screen">
           <svg viewBox="0 0 190 380">
-            <rect x="16" y="34" width="158" height="26" rx="13" fill="#141a14" stroke="#1f2a1f"/>
-            <circle cx="32" cy="47" r="5" fill="none" stroke="#8a8a8a" stroke-width="1.6"/>
-            <line x1="36" y1="51" x2="40" y2="55" stroke="#8a8a8a" stroke-width="1.6"/>
-            <g font-family="Inter,sans-serif" font-size="8">
-              <rect x="16" y="70" width="52" height="18" rx="9" fill="#4A7FFF"/>
-              <text x="29" y="82" fill="#001016" font-weight="700">All</text>
-              <rect x="74" y="70" width="52" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
-              <text x="82" y="82" fill="#8a8a8a">Analyzed</text>
-              <rect x="132" y="70" width="42" height="18" rx="9" fill="#141a14" stroke="#1f2a1f"/>
-              <text x="140" y="82" fill="#8a8a8a">Clipped</text>
+            <!-- app bar -->
+            <text x="18" y="44" font-family="Inter,sans-serif" font-size="11" fill="#8a8a8a">‹</text>
+            <text x="62" y="44" font-family="Inter,sans-serif" font-size="10" fill="#f5f5f5" font-weight="700" data-i18n="show.r4m.title">影片管理</text>
+            <!-- filter chips -->
+            <g font-family="Inter,sans-serif" font-size="7" text-anchor="middle">
+              <rect x="16" y="56" width="34" height="17" rx="8.5" fill="#4A7FFF"/>
+              <text x="33" y="67.5" fill="#001016" font-weight="700" data-i18n="show.r4m.all">全部</text>
+              <rect x="54" y="56" width="50" height="17" rx="8.5" fill="#141a14" stroke="#1f2a1f"/>
+              <text x="79" y="67.5" fill="#8a8a8a" data-i18n="show.r4m.analyzed">已分析</text>
+              <rect x="108" y="56" width="48" height="17" rx="8.5" fill="#141a14" stroke="#1f2a1f"/>
+              <text x="132" y="67.5" fill="#8a8a8a" data-i18n="show.r4m.clipped">已切片</text>
             </g>
-            <g>
-              <rect x="16" y="100" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
-              <rect x="99" y="100" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
-              <rect x="16" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
-              <rect x="99" y="208" width="75" height="100" rx="8" fill="#141a14" stroke="#1f2a1f"/>
-              <polygon points="48,142 60,150 48,158" fill="#4A7FFF"/>
-              <polygon points="131,142 143,150 131,158" fill="#4A7FFF"/>
-              <polygon points="48,250 60,258 48,266" fill="#4A7FFF"/>
-              <polygon points="131,250 143,258 131,266" fill="#4A7FFF"/>
-              <rect x="22" y="180" width="40" height="12" rx="6" fill="#0f1a12" stroke="#4A7FFF" stroke-opacity=".5"/>
-              <rect x="105" y="180" width="40" height="12" rx="6" fill="#1c1c1c"/>
+            <!-- ── card 1：短影片 · 已分析 · 甜蜜點 ── -->
+            <g font-family="Inter,sans-serif">
+              <rect x="14" y="84" width="162" height="84" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+              <!-- thumbnail -->
+              <rect x="22" y="94" width="52" height="52" rx="7" fill="#0e140e" stroke="#243024"/>
+              <polygon points="44,107 54,115 44,123" fill="#4A7FFF"/>
+              <rect x="26" y="133" width="22" height="9" rx="3" fill="#000" fill-opacity=".55"/>
+              <text x="29.5" y="139.5" font-size="6" fill="#e8e8e8">0:08</text>
+              <!-- title -->
+              <rect x="82" y="96" width="80" height="7" rx="3.5" fill="#3a443a"/>
+              <!-- time row -->
+              <circle cx="85" cy="114" r="3.4" fill="none" stroke="#7a7a7a" stroke-width="1.1"/>
+              <line x1="85" y1="114" x2="85" y2="112" stroke="#7a7a7a" stroke-width="1.1"/>
+              <rect x="93" y="111" width="58" height="5" rx="2.5" fill="#1f2a1f"/>
+              <!-- badges -->
+              <rect x="82" y="124" width="28" height="12" rx="6" fill="#1565C0"/>
+              <text x="96" y="133" font-size="6.5" fill="#fff" font-weight="700" text-anchor="middle" data-i18n="show.r4m.short">短影片</text>
+              <rect x="114" y="124" width="36" height="12" rx="6" fill="#16a34a"/>
+              <text x="132" y="133" font-size="6.5" fill="#fff" font-weight="700" text-anchor="middle" data-i18n="show.r4m.analyzed">已分析</text>
+              <!-- speed + sweet spot -->
+              <circle cx="86" cy="153" r="4" fill="none" stroke="#1565C0" stroke-width="1.4"/>
+              <text x="93" y="156" font-size="8" fill="#1565C0" font-weight="700">38.2</text>
+              <circle cx="124" cy="153" r="4" fill="#4CAF50"/>
+              <text x="132" y="156" font-size="7.5" fill="#9aa6b2" data-i18n="show.r4m.sweet">甜蜜點</text>
+            </g>
+            <!-- ── card 2：短影片 · AI 教練 ── -->
+            <g font-family="Inter,sans-serif">
+              <rect x="14" y="178" width="162" height="84" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+              <rect x="22" y="188" width="52" height="52" rx="7" fill="#0e140e" stroke="#243024"/>
+              <polygon points="44,201 54,209 44,217" fill="#4A7FFF"/>
+              <rect x="26" y="227" width="22" height="9" rx="3" fill="#000" fill-opacity=".55"/>
+              <text x="29.5" y="233.5" font-size="6" fill="#e8e8e8">0:06</text>
+              <rect x="82" y="190" width="68" height="7" rx="3.5" fill="#3a443a"/>
+              <circle cx="85" cy="208" r="3.4" fill="none" stroke="#7a7a7a" stroke-width="1.1"/>
+              <line x1="85" y1="208" x2="85" y2="206" stroke="#7a7a7a" stroke-width="1.1"/>
+              <rect x="93" y="205" width="58" height="5" rx="2.5" fill="#1f2a1f"/>
+              <rect x="82" y="218" width="28" height="12" rx="6" fill="#1565C0"/>
+              <text x="96" y="227" font-size="6.5" fill="#fff" font-weight="700" text-anchor="middle" data-i18n="show.r4m.short">短影片</text>
+              <rect x="114" y="218" width="20" height="12" rx="6" fill="#7C3AED"/>
+              <text x="124" y="227" font-size="6.5" fill="#fff" font-weight="700" text-anchor="middle">AI</text>
+              <circle cx="86" cy="247" r="4" fill="none" stroke="#1565C0" stroke-width="1.4"/>
+              <text x="93" y="250" font-size="8" fill="#1565C0" font-weight="700">41.5</text>
+              <circle cx="124" cy="247" r="4" fill="#4CAF50"/>
+              <text x="132" y="250" font-size="7.5" fill="#9aa6b2" data-i18n="show.r4m.sweet">甜蜜點</text>
+            </g>
+            <!-- ── card 3：長影片 · 已切片 ── -->
+            <g font-family="Inter,sans-serif">
+              <rect x="14" y="272" width="162" height="84" rx="10" fill="#141a14" stroke="#1f2a1f"/>
+              <rect x="22" y="282" width="52" height="52" rx="7" fill="#0e140e" stroke="#243024"/>
+              <polygon points="44,295 54,303 44,311" fill="#4A7FFF"/>
+              <rect x="26" y="321" width="22" height="9" rx="3" fill="#000" fill-opacity=".55"/>
+              <text x="29.5" y="327.5" font-size="6" fill="#e8e8e8">1:24</text>
+              <rect x="82" y="284" width="74" height="7" rx="3.5" fill="#3a443a"/>
+              <circle cx="85" cy="302" r="3.4" fill="none" stroke="#7a7a7a" stroke-width="1.1"/>
+              <line x1="85" y1="302" x2="85" y2="300" stroke="#7a7a7a" stroke-width="1.1"/>
+              <rect x="93" y="299" width="58" height="5" rx="2.5" fill="#1f2a1f"/>
+              <rect x="82" y="312" width="28" height="12" rx="6" fill="#475569"/>
+              <text x="96" y="321" font-size="6.5" fill="#fff" font-weight="700" text-anchor="middle" data-i18n="show.r4m.long">長影片</text>
+              <rect x="114" y="312" width="34" height="12" rx="6" fill="#FF9800"/>
+              <text x="131" y="321" font-size="6.5" fill="#fff" font-weight="700" text-anchor="middle" data-i18n="show.r4m.clipped">已切片</text>
+              <text x="82" y="342" font-size="7.5" fill="#5a6a5a" data-i18n="show.r4m.clips">5 個切片 · 點擊展開</text>
             </g>
           </svg>
         </div></div>
@@ -762,7 +736,8 @@ footer{padding:48px 0;border-top:1px solid var(--border)}
         <a href="pricing.html">方案</a>
         <a href="privacy.html" data-i18n="footer.privacy"></a>
         <a href="terms.html" data-i18n="footer.terms"></a>
-        <a href="mailto:service@atk.tw">service@atk.tw</a>
+        <a href="contact.html" data-i18n="footer.contact"></a>
+        <a href="mailto:support@atk.tw">support@atk.tw</a>
       </div>
     </div>
     <p class="copyright">© 2026 Aethertek Technology Co., Ltd. All rights reserved.</p>
@@ -804,9 +779,24 @@ const I18N = {
     "show.r3.tag": "AI 教練建議",
     "show.r3.t": "不只評分，告訴你怎麼改",
     "show.r3.d": "AI 在影片上標記關鍵動作點，並依你的揮桿數據給出個人化訓練建議。",
-    "show.r4.tag": "歷史影片管理",
+    "show.r3m.title": "AI 教練分析",
+    "show.r3m.posture": "早期伸展",
+    "show.r3m.severity": "中等",
+    "show.r3m.impact": "擊球品質（音訊）",
+    "show.r3m.sweet": "甜蜜點+",
+    "show.r3m.feedback": "教練回饋",
+    "show.r3m.drills": "練習建議",
+    "show.r4.tag": "影片管理",
     "show.r4.t": "每一次練習，都找得回來",
     "show.r4.d": "依已分析、未分析、已切片快速篩選與搜尋，追蹤自己長期的進步軌跡。",
+    "show.r4m.title": "影片管理",
+    "show.r4m.all": "全部",
+    "show.r4m.analyzed": "已分析",
+    "show.r4m.clipped": "已切片",
+    "show.r4m.short": "短影片",
+    "show.r4m.long": "長影片",
+    "show.r4m.sweet": "甜蜜點",
+    "show.r4m.clips": "5 個切片 · 點擊展開",
     "price.title": "方案比較",
     "price.free.name": "Free",
     "price.free.price": "免費",
@@ -842,7 +832,8 @@ const I18N = {
     "cta.sub": "立即下載 ORVIA，每天 10 球免費分析額度。",
     "cta.apkSmall": "直接下載",
     "footer.privacy": "隱私權政策",
-    "footer.terms": "使用條款"
+    "footer.terms": "使用條款",
+    "footer.contact": "聯絡我們"
   },
   en: {
     "hero.eyebrow": "AI Golf Swing Analysis",
@@ -877,9 +868,24 @@ const I18N = {
     "show.r3.tag": "AI Coach Advice",
     "show.r3.t": "More than a score — how to improve",
     "show.r3.d": "AI marks key positions on your video and generates personalized training advice from your swing data.",
-    "show.r4.tag": "Video Library",
+    "show.r3m.title": "AI Coach",
+    "show.r3m.posture": "Extension",
+    "show.r3m.severity": "Mid",
+    "show.r3m.impact": "Impact (Audio)",
+    "show.r3m.sweet": "Sweet+",
+    "show.r3m.feedback": "Coach Feedback",
+    "show.r3m.drills": "Practice Drills",
+    "show.r4.tag": "Library",
     "show.r4.t": "Every session, easy to find",
     "show.r4.d": "Search and filter by analyzed, unanalyzed, or clipped to track your long-term progress.",
+    "show.r4m.title": "Videos",
+    "show.r4m.all": "All",
+    "show.r4m.analyzed": "Analyzed",
+    "show.r4m.clipped": "Clipped",
+    "show.r4m.short": "Short",
+    "show.r4m.long": "Long",
+    "show.r4m.sweet": "Sweet",
+    "show.r4m.clips": "5 clips · tap to open",
     "price.title": "Plans",
     "price.free.name": "Free",
     "price.free.price": "Free",
@@ -915,7 +921,8 @@ const I18N = {
     "cta.sub": "Download ORVIA now — 10 free analyses every day.",
     "cta.apkSmall": "DIRECT DOWNLOAD",
     "footer.privacy": "Privacy Policy",
-    "footer.terms": "Terms & Conditions"
+    "footer.terms": "Terms & Conditions",
+    "footer.contact": "Contact"
   },
   cn: {
     "hero.eyebrow": "AI 高尔夫挥杆分析",
@@ -950,9 +957,24 @@ const I18N = {
     "show.r3.tag": "AI 教练建议",
     "show.r3.t": "不只评分，告诉你怎么改",
     "show.r3.d": "AI 在视频上标记关键动作点，并依据你的挥杆数据给出个性化训练建议。",
-    "show.r4.tag": "历史视频管理",
+    "show.r3m.title": "AI 教练分析",
+    "show.r3m.posture": "早期伸展",
+    "show.r3m.severity": "中等",
+    "show.r3m.impact": "击球品质（音频）",
+    "show.r3m.sweet": "甜蜜点+",
+    "show.r3m.feedback": "教练反馈",
+    "show.r3m.drills": "练习建议",
+    "show.r4.tag": "视频管理",
     "show.r4.t": "每一次练习，都找得回来",
     "show.r4.d": "按已分析、未分析、已切片快速筛选与搜索，追踪自己长期的进步轨迹。",
+    "show.r4m.title": "视频管理",
+    "show.r4m.all": "全部",
+    "show.r4m.analyzed": "已分析",
+    "show.r4m.clipped": "已切片",
+    "show.r4m.short": "短视频",
+    "show.r4m.long": "长视频",
+    "show.r4m.sweet": "甜蜜点",
+    "show.r4m.clips": "5 个切片 · 点击展开",
     "price.title": "方案对比",
     "price.free.name": "Free",
     "price.free.price": "免费",
@@ -988,7 +1010,8 @@ const I18N = {
     "cta.sub": "立即下载 ORVIA，每天 10 球免费分析额度。",
     "cta.apkSmall": "直接下载",
     "footer.privacy": "隐私政策",
-    "footer.terms": "使用条款"
+    "footer.terms": "使用条款",
+    "footer.contact": "联系我们"
   }
 };
 

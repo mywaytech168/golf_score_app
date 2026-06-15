@@ -1847,6 +1847,23 @@ class MainActivity: FlutterActivity() {
                 }
             }, "PoseInferThread").apply { isDaemon = true; start() }
 
+            // ── 送幀進佇列：推論執行緒一旦死亡（inferError 設定或執行緒結束）即回傳 false。
+            //    原本用阻塞式 imageQueue.put()，當推論執行緒因 imageToNv21Scaled/nv21ToBitmap
+            //    丟例外而提前結束時，消費者消失 → put() 灌滿後永久阻塞 → 函式不返回 →
+            //    MethodChannel 不回呼 → Flutter 進度對話框卡死。改用帶超時的 offer 輪詢，
+            //    偵測到消費者已死即中止解碼，讓 finally 收尾並回報 inferError。
+            fun enqueueFrame(pkt: FramePacket): Boolean {
+                while (true) {
+                    if (inferError.get() != null || inferThread?.isAlive != true) return false
+                    if (cancelFlag.get()) return false
+                    try {
+                        if (imageQueue.offer(pkt, 100, java.util.concurrent.TimeUnit.MILLISECONDS)) return true
+                    } catch (_: InterruptedException) {
+                        return false
+                    }
+                }
+            }
+
             // ── 解碼主迴圈（在當前執行緒）──────────────────────────────────
             var queuedFrames = 0  // 已進 queue 的幀數（包含空幀），用於 frameIdx
 
@@ -1886,13 +1903,23 @@ class MainActivity: FlutterActivity() {
                             val image = runCatching { codec.getOutputImage(outIdx) }.getOrNull()
 
                             if (image != null) {
-                                // 送給推論執行緒（佇列滿時阻塞 → 自然 back-pressure）
-                                // ⚠️ 不在此 releaseOutputBuffer，由推論執行緒負責
-                                imageQueue.put(FramePacket(image, outIdx, ptsUs, queuedFrames))
+                                // 送給推論執行緒（佇列滿時 back-pressure）；正常路徑不在此
+                                // releaseOutputBuffer，由推論執行緒負責。推論執行緒已死時 enqueue
+                                // 失敗 → 此處自行釋放並中止解碼（否則 image/outIdx 洩漏）。
+                                if (!enqueueFrame(FramePacket(image, outIdx, ptsUs, queuedFrames))) {
+                                    runCatching { image.close() }
+                                    runCatching { codec.releaseOutputBuffer(outIdx, false) }
+                                    Log.e(logTag, "[PoseAnalyzer] 推論執行緒已中止，解碼迴圈提前結束")
+                                    break
+                                }
                             } else {
                                 // getOutputImage 失敗：送空封包，推論執行緒寫 NaN 行
-                                imageQueue.put(FramePacket(null, -1, ptsUs, queuedFrames))
+                                val enqueued = enqueueFrame(FramePacket(null, -1, ptsUs, queuedFrames))
                                 codec.releaseOutputBuffer(outIdx, false)
+                                if (!enqueued) {
+                                    Log.e(logTag, "[PoseAnalyzer] 推論執行緒已中止，解碼迴圈提前結束")
+                                    break
+                                }
                             }
                             queuedFrames++
                         } else {
@@ -1917,8 +1944,15 @@ class MainActivity: FlutterActivity() {
                 }
             }
 
-            // 送 EOS 給推論執行緒並等待完成（確保所有幀都寫入 CSV）
-            imageQueue.put(FramePacket(null, -1, 0L, -1, isEos = true))
+            // 送 EOS 給推論執行緒並等待完成（確保所有幀都寫入 CSV）。
+            // 推論執行緒若已死亡則略過 EOS（否則 put 在無消費者時阻塞）；
+            // join 隨即返回，下一行拋出 inferError 交由 catch 收尾並回報失敗。
+            while (inferThread?.isAlive == true && inferError.get() == null) {
+                try {
+                    if (imageQueue.offer(FramePacket(null, -1, 0L, -1, isEos = true),
+                            100, java.util.concurrent.TimeUnit.MILLISECONDS)) break
+                } catch (_: InterruptedException) { break }
+            }
             inferThread!!.join()
             inferError.get()?.let { throw RuntimeException("PoseInferThread failed", it) }
 

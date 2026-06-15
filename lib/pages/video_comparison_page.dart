@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/recording_history_entry.dart';
+import '../services/analytics_service.dart';
 import '../theme/app_theme.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 
@@ -46,6 +47,7 @@ class _VideoComparisonPageState extends State<VideoComparisonPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('video_comparison');
     _playerA = Player();
     _playerB = Player();
     _ctrlA = VideoController(_playerA);

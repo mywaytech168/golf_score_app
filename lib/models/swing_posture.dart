@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 /// 揮桿姿勢分類 label 常數
 /// 對應後端 模型 dataset.py 的 CLASS_TO_LABELS 定義：
@@ -42,6 +43,18 @@ class SwingPosture {
     'over_the_top'           => '外側切入',
     'spine_angle'            => '脊柱角度',
     'weight_shift'           => '重心轉移',
+    _                        => label,
+  };
+
+  /// 多語系名稱（單一真相）。error_type 為 enum 值，固定英文，
+  /// 顯示時用此方法翻成介面語言（不依賴 Gemini 回傳的 zh_name）。
+  static String localizedName(AppLocalizations l, String label) => switch (label) {
+    ''                       => l.aiCoachErrorPerfect,
+    'early_release_casting'  => l.aiCoachErrorEarlyRelease,
+    'impact'                 => l.aiCoachErrorImpact,
+    'over_the_top'           => l.aiCoachErrorOverTheTop,
+    'spine_angle'            => l.aiCoachErrorSpineAngle,
+    'weight_shift'           => l.aiCoachErrorWeightShift,
     _                        => label,
   };
 

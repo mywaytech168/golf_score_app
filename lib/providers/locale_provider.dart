@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/analytics_service.dart';
+
 class LocaleProvider extends ChangeNotifier {
   static const String _key = 'app_locale';
 
@@ -39,6 +41,9 @@ class LocaleProvider extends ChangeNotifier {
         ? '${locale.languageCode}_${locale.countryCode}'
         : locale.languageCode;
     await prefs.setString(_key, value);
+
+    // 同步更新 Analytics 使用者語言屬性
+    AnalyticsService.instance.setUserProperty('app_language', value);
   }
 
   String displayName(Locale locale) {

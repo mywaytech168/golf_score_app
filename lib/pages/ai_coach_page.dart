@@ -6,7 +6,9 @@ import 'package:golf_score_app/l10n/app_localizations.dart';
 import '../models/swing_posture.dart';
 import '../services/analysis_service.dart';
 import '../services/plan_service.dart';
+import '../services/reward_service.dart';
 import '../theme/app_theme.dart';
+import '../services/analytics_service.dart';
 
 /// AI Coach 分析頁面
 /// 接收 analysisId（已完成步驟 1~3），輪詢結果並顯示教練評語
@@ -151,6 +153,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('ai_coach');
     _startPolling();
   }
 
@@ -185,6 +188,7 @@ class _AiCoachPageState extends State<AiCoachPage> {
   // 重新分析入口暫時下架（appBar actions 已清空），流程保留供回復
   // ignore: unused_element
   Future<void> _reanalyze() async {
+    AnalyticsService.instance.logEvent('analysis_retry');
     _timer?.cancel();
     final vid  = widget.videoId;
     final clip = widget.clipPath;
@@ -244,6 +248,10 @@ class _AiCoachPageState extends State<AiCoachPage> {
         });
         if (status.isDone) {
           _timer?.cancel();
+          AnalyticsService.instance.logEvent(
+            status.isCompleted ? 'analysis_success' : 'analysis_failed',
+            status.isCompleted ? null : {'stage': 'server'},
+          );
           // 分析完成時回呼一次，傳出 errorType 供上層寫入 swingPostureLabel
           if (status.isCompleted && !_resultReported) {
             _resultReported = true;
@@ -260,6 +268,18 @@ class _AiCoachPageState extends State<AiCoachPage> {
                 ? rawOnnx
                 : null;
             widget.onAnalysisComplete?.call(geminiType, onnxType, widget.analysisId, status.result);
+            // 完整分析的上傳資料已由後端自動納入訓練資料集送審（審核通過後 +球）
+            if (mounted && status.mode == 'full') {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(AppLocalizations.of(context)
+                      .aiCoachDataContributed(RewardType.uploadData.ballsPerAction)),
+                  backgroundColor: const Color(0xFF00897B),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
           }
         }
       }
@@ -505,10 +525,12 @@ class _SummaryCard extends StatelessWidget {
     };
     final err      = result.primaryError;
     final sevColor = _severityColor(err.severity);
-    // primary_error 為 null（完美）時，zhName 為空 → fallback 到「完美姿勢」
-    final displayName = err.zhName.isNotEmpty
-        ? err.zhName
-        : SwingPosture.zhName(err.errorType); // '' → '完美姿勢'
+    // error_type 為 enum 值（固定英文）→ 用 ARB 翻成介面語言，跟隨多語系切換。
+    // 已知類型一律用 ARB；未知類型才退回 Gemini 回傳的 zhName。
+    final localized = SwingPosture.localizedName(l10n, err.errorType);
+    final displayName = localized != err.errorType
+        ? localized
+        : (err.zhName.isNotEmpty ? err.zhName : localized);
 
     return _Card(
       child: Column(

@@ -7,6 +7,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'plan_service.dart';
 import 'purchase_retry_queue.dart';
 import 'video_server_client.dart';
+import 'analytics_service.dart';
 
 // ── 商品 ID 對照 ────────────────────────────────────────────────
 
@@ -203,6 +204,10 @@ class InAppPurchaseService {
     final product = purchase.productID;
 
     debugPrint('[IAP] 購買成功 store=$store product=$product');
+    AnalyticsService.instance.logEvent('purchase_success', {
+      'product': product,
+      'store': store,
+    });
 
     // 先前已放棄（達重試上限）的交易：直接核銷以中止商店無限重派。
     if (await PurchaseRetryQueue.instance.isAbandoned(token)) {
@@ -230,6 +235,11 @@ class InAppPurchaseService {
         // 僅在後端確認加值成功後才核銷交易。
         await _safeComplete(purchase);
         await PurchaseRetryQueue.instance.remove(token);
+        AnalyticsService.instance.logEvent('purchase_verified', {
+          'product': product,
+          'store': store,
+          'type': 'ball_pack',
+        });
         _resultController.add(IapResult(IapEvent.success, message: 'balls:$newBalance'));
         debugPrint('[IAP] 球包購買成功，新餘額 $newBalance');
       } else {
@@ -273,6 +283,11 @@ class InAppPurchaseService {
       if (ok) {
         await _safeComplete(purchase);
         await PurchaseRetryQueue.instance.remove(token);
+        AnalyticsService.instance.logEvent('purchase_verified', {
+          'product': product,
+          'store': store,
+          'type': 'subscription',
+        });
         _resultController.add(IapResult(IapEvent.success, plan: plan));
         debugPrint('[IAP] 後端驗證成功，方案已升級至 ${plan.label}');
       } else {

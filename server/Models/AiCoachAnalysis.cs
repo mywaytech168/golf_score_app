@@ -66,6 +66,13 @@ namespace UploadServer.Models
         /// <summary>裝置端 P-System 生物力學量化 JSON（angles.json 內容）；注入 Gemini prompt 當客觀依據；null = 無</summary>
         public string? SwingMetricsJson { get; set; }
 
+        /// <summary>
+        /// 使用者介面語言（"zh_TW" | "zh_CN" | "en"）；決定 Gemini 輸出文字的語言。
+        /// null = 預設繁體中文（向後相容舊客戶端）。
+        /// </summary>
+        [MaxLength(16)]
+        public string? Lang { get; set; }
+
         /// <summary>v3：上傳到 B2 的關鍵禎數量（0 = 未使用 v3 keyframe 流程）</summary>
         public int KeyframeCount { get; set; } = 0;
 

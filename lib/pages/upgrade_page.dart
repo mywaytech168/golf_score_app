@@ -9,6 +9,36 @@ import '../services/in_app_purchase_service.dart';
 import '../services/plan_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/green_page_header.dart';
+import '../services/analytics_service.dart';
+
+// ════════════════════════════════════════════════════════════════
+// 幣別 / 在地定價（隨多語系切換：繁中 NT$ / 簡中 ¥ / 英文 US$）
+// ════════════════════════════════════════════════════════════════
+
+enum _Currency { twd, cny, usd }
+
+_Currency _currencyOf(BuildContext context) {
+  final l = Localizations.localeOf(context);
+  if (l.languageCode == 'en') return _Currency.usd;
+  if (l.languageCode == 'zh' && l.countryCode == 'CN') return _Currency.cny;
+  return _Currency.twd; // 繁中及其他預設台幣
+}
+
+/// 同一價格在三種幣別下的顯示字串（純展示用 fallback；實際扣款仍由商店回傳）
+class _PriceSet {
+  final String twd;
+  final String cny;
+  final String usd;
+  const _PriceSet({required this.twd, required this.cny, required this.usd});
+
+  String of(_Currency c) => switch (c) {
+        _Currency.twd => twd,
+        _Currency.cny => cny,
+        _Currency.usd => usd,
+      };
+
+  String inContext(BuildContext context) => of(_currencyOf(context));
+}
 
 // ════════════════════════════════════════════════════════════════
 // 資料模型
@@ -25,21 +55,24 @@ extension _PlanX on _Plan {
     }
   }
 
-  String get price {
+  _PriceSet get _monthlyPrices {
     switch (this) {
-      case _Plan.free:  return 'NT\$0';
-      case _Plan.pro:   return 'NT\$600';
-      case _Plan.elite: return 'NT\$1,200';
+      case _Plan.free:  return const _PriceSet(twd: 'NT\$0',     cny: '¥0',     usd: 'US\$0');
+      case _Plan.pro:   return const _PriceSet(twd: 'NT\$600',   cny: '¥138',   usd: 'US\$19');
+      case _Plan.elite: return const _PriceSet(twd: 'NT\$1,200', cny: '¥268',   usd: 'US\$38');
     }
   }
 
-  String get priceYearly {
+  _PriceSet get _yearlyPrices {
     switch (this) {
-      case _Plan.free:  return 'NT\$0';
-      case _Plan.pro:   return 'NT\$6,000';
-      case _Plan.elite: return 'NT\$12,000';
+      case _Plan.free:  return const _PriceSet(twd: 'NT\$0',      cny: '¥0',      usd: 'US\$0');
+      case _Plan.pro:   return const _PriceSet(twd: 'NT\$6,000',  cny: '¥1,380',  usd: 'US\$190');
+      case _Plan.elite: return const _PriceSet(twd: 'NT\$12,000', cny: '¥2,680',  usd: 'US\$380');
     }
   }
+
+  String price(BuildContext context) => _monthlyPrices.inContext(context);
+  String priceYearly(BuildContext context) => _yearlyPrices.inContext(context);
 
   String period(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -126,23 +159,25 @@ extension _BallBadgeX on _BallBadge {
 class _BallPack {
   final String productId;
   final int balls;
-  final String price;      // fallback hardcode price
+  final _PriceSet prices;   // 在地展示價（fallback；實際扣款由商店回傳）
   final _BallBadge? badge;
 
   const _BallPack({
     required this.productId,
     required this.balls,
-    required this.price,
+    required this.prices,
     this.badge,
   });
+
+  String price(BuildContext context) => prices.inContext(context);
 }
 
 const _ballPacks = <_BallPack>[
-  _BallPack(productId: 'orvia_golf_balls_1',   balls: 1,   price: 'NT\$60'),
-  _BallPack(productId: 'orvia_golf_balls_5',   balls: 5,   price: 'NT\$240'),
-  _BallPack(productId: 'orvia_golf_balls_10',  balls: 10,  price: 'NT\$400',   badge: _BallBadge.popular),
-  _BallPack(productId: 'orvia_golf_balls_50',  balls: 50,  price: 'NT\$1,600', badge: _BallBadge.value),
-  _BallPack(productId: 'orvia_golf_balls_100', balls: 100, price: 'NT\$2,600', badge: _BallBadge.bestDeal),
+  _BallPack(productId: 'orvia_golf_balls_1',   balls: 1,   prices: _PriceSet(twd: 'NT\$60',    cny: '¥12',  usd: 'US\$1.99')),
+  _BallPack(productId: 'orvia_golf_balls_5',   balls: 5,   prices: _PriceSet(twd: 'NT\$240',   cny: '¥48',  usd: 'US\$7.99')),
+  _BallPack(productId: 'orvia_golf_balls_10',  balls: 10,  prices: _PriceSet(twd: 'NT\$400',   cny: '¥88',  usd: 'US\$12.99'), badge: _BallBadge.popular),
+  _BallPack(productId: 'orvia_golf_balls_50',  balls: 50,  prices: _PriceSet(twd: 'NT\$1,600', cny: '¥348', usd: 'US\$49.99'), badge: _BallBadge.value),
+  _BallPack(productId: 'orvia_golf_balls_100', balls: 100, prices: _PriceSet(twd: 'NT\$2,600', cny: '¥588', usd: 'US\$79.99'), badge: _BallBadge.bestDeal),
 ];
 
 // ════════════════════════════════════════════════════════════════
@@ -175,7 +210,10 @@ class _UpgradePageState extends State<UpgradePage> {
               child: Column(
                 children: [
                   const SizedBox(height: 24),
-                  _PlanToggle(selected: _selected, onChanged: (p) => setState(() => _selected = p)),
+                  _PlanToggle(selected: _selected, onChanged: (p) {
+                    AnalyticsService.instance.logEvent('subscribe_plan_select', {'plan': p.name});
+                    setState(() => _selected = p);
+                  }),
                   const SizedBox(height: 20),
                   _SelectedPlanCard(plan: _selected, currentPlan: currentPlan),
                   const SizedBox(height: 28),
@@ -195,6 +233,7 @@ class _UpgradePageState extends State<UpgradePage> {
   }
 
   void _onBuyBalls(BuildContext context, _BallPack pack) {
+    AnalyticsService.instance.logEvent('ball_pack_select', {'product': pack.productId});
     showModalBottomSheet(
       context: context,
       backgroundColor: context.bgCard,
@@ -212,6 +251,7 @@ class _UpgradePageState extends State<UpgradePage> {
       );
       return;
     }
+    AnalyticsService.instance.logEvent('subscribe_cta_click', {'plan': _selected.name});
     _showPaySheet(context);
   }
 
@@ -345,7 +385,7 @@ class _SelectedPlanCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(plan.price, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: plan.primaryColor)),
+                  Text(plan.price(context), style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: context.priceColor)),
                   Text(plan.period(context), style: TextStyle(fontSize: 12, color: context.textSecondary)),
                 ],
               ),
@@ -589,7 +629,8 @@ class _ValueCell extends StatelessWidget {
       content = Icon(Icons.check_rounded, color: color, size: 18);
     } else if (value == '有') {
       // 廣告
-      content = Text('有', style: TextStyle(fontSize: 11, color: context.textSecondary));
+      content = Text(AppLocalizations.of(context).upgradeFeatureYes,
+          style: TextStyle(fontSize: 11, color: context.textSecondary));
     } else {
       // 文字說明
       content = Text(
@@ -712,6 +753,7 @@ class _PaySheetState extends State<_PaySheet> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('subscribe_sheet'); // 訂閱付款 sheet
     _queryProduct();
   }
 
@@ -742,6 +784,10 @@ class _PaySheetState extends State<_PaySheet> {
   Future<void> _subscribe() async {
     if (_loading || _productDetails == null) return;
     setState(() => _loading = true);
+    AnalyticsService.instance.logEvent('purchase_click', {
+      'type': 'subscription',
+      'product': _productDetails!.id,
+    });
     try {
       final param = PurchaseParam(productDetails: _productDetails!);
       await InAppPurchase.instance.buyNonConsumable(purchaseParam: param);
@@ -757,12 +803,11 @@ class _PaySheetState extends State<_PaySheet> {
     }
   }
 
-  /// 顯示的價格：優先用 Store 回傳的本地貨幣，fallback 用 hardcode
+  /// 顯示的價格：優先用語系幣別表（與全 App 一致），實際扣款仍由商店處理
   String _displayPrice(BuildContext context) {
-    if (_productDetails != null) return _productDetails!.price;
     return _yearly
-        ? '${widget.plan.priceYearly}${AppLocalizations.of(context).upgradePerYear}'
-        : '${widget.plan.price}${widget.plan.period(context)}';
+        ? '${widget.plan.priceYearly(context)}${AppLocalizations.of(context).upgradePerYear}'
+        : '${widget.plan.price(context)}${widget.plan.period(context)}';
   }
 
   @override
@@ -791,7 +836,7 @@ class _PaySheetState extends State<_PaySheet> {
                     else
                       Text(
                         _displayPrice(context),
-                        style: TextStyle(fontSize: 13, color: widget.plan.primaryColor, fontWeight: FontWeight.w600),
+                        style: TextStyle(fontSize: 13, color: context.priceColor, fontWeight: FontWeight.w600),
                       ),
                   ],
                 ),
@@ -808,7 +853,13 @@ class _PaySheetState extends State<_PaySheet> {
                 selected: {_yearly},
                 onSelectionChanged: _loading
                     ? null
-                    : (s) => setState(() => _yearly = s.first),
+                    : (s) {
+                        AnalyticsService.instance.logEvent(
+                          'subscribe_period_toggle',
+                          {'period': s.first ? 'yearly' : 'monthly'},
+                        );
+                        setState(() => _yearly = s.first);
+                      },
                 style: SegmentedButton.styleFrom(
                   selectedBackgroundColor:
                       widget.plan.primaryColor.withValues(alpha: 0.15),
@@ -981,8 +1032,8 @@ class _BallPackTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      pack.price,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kBrandPrimary),
+                      pack.price(context),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.priceColor),
                     ),
                     const SizedBox(height: 4),
                     Container(
@@ -1024,6 +1075,7 @@ class _BallBuySheetState extends State<_BallBuySheet> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('ball_shop_sheet'); // 球包購買 sheet
     _queryProduct();
   }
 
@@ -1050,6 +1102,10 @@ class _BallBuySheetState extends State<_BallBuySheet> {
   Future<void> _buy() async {
     if (_loading || _productDetails == null) return;
     setState(() => _loading = true);
+    AnalyticsService.instance.logEvent('purchase_click', {
+      'type': 'ball_pack',
+      'product': _productDetails!.id,
+    });
     try {
       await InAppPurchaseService.instance.buyBallPack(_productDetails!);
       if (mounted) Navigator.of(context).pop();
@@ -1063,10 +1119,8 @@ class _BallBuySheetState extends State<_BallBuySheet> {
     }
   }
 
-  String get _displayPrice {
-    if (_productDetails != null) return _productDetails!.price;
-    return widget.pack.price;
-  }
+  /// 顯示價格：優先用語系幣別表（與全 App 一致），實際扣款仍由商店處理
+  String _displayPrice(BuildContext context) => widget.pack.price(context);
 
   @override
   Widget build(BuildContext context) {
@@ -1089,8 +1143,8 @@ class _BallBuySheetState extends State<_BallBuySheet> {
                     if (_queryingProduct)
                       const SizedBox(width: 60, height: 14, child: LinearProgressIndicator(minHeight: 2))
                     else
-                      Text(_displayPrice,
-                          style: const TextStyle(fontSize: 13, color: kBrandPrimary, fontWeight: FontWeight.w600)),
+                      Text(_displayPrice(context),
+                          style: TextStyle(fontSize: 13, color: context.priceColor, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ],

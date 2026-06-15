@@ -3,10 +3,13 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import 'auth_token_storage.dart';
 import 'swing_auto_clip_service.dart';
 import 'v3_analysis_service.dart';
+import 'analytics_service.dart';
 
 const _baseUrl = 'https://orvia.api.atk.tw';
 
@@ -335,6 +338,7 @@ class AnalysisService {
   }
 
   /// 把 Dio 連線類錯誤轉成使用者看得懂的訊息（其餘原樣回傳）。
+  /// 中文 fallback（無 context 的呼叫端用）；UI 顯示請優先用 [friendlyErrorLocalized]。
   static String friendlyError(Object e) {
     if (e is DioException) {
       switch (e.type) {
@@ -349,6 +353,40 @@ class AnalysisService {
       }
     }
     return e.toString();
+  }
+
+  /// 多語系版本：連線類錯誤翻成介面語言，其餘原樣回傳（toString）。
+  static String friendlyErrorLocalized(AppLocalizations l, Object e) {
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.connectionError:
+          return l.errorServerUnreachable;
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return l.errorServerTimeout;
+        default:
+          break;
+      }
+    }
+    return e.toString();
+  }
+
+  /// 讀取使用者目前介面語言（LocaleProvider 持久化於 'app_locale'），
+  /// 傳給後端決定 Gemini 輸出文字的語言。讀取失敗預設繁體中文。
+  static Future<String> _resolveLang() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('app_locale');
+      if (saved == null || saved.isEmpty) return 'zh_TW';
+      // 已存格式即 'zh_TW' | 'zh_CN' | 'en'；其餘 zh 變體歸繁中
+      if (saved.startsWith('zh_CN')) return 'zh_CN';
+      if (saved.startsWith('en'))    return 'en';
+      if (saved.startsWith('zh'))    return 'zh_TW';
+      return saved;
+    } catch (_) {
+      return 'zh_TW';
+    }
   }
 
   Future<Map<String, String>> _authHeaders() async {
@@ -380,7 +418,10 @@ class AnalysisService {
     String? swingMetricsJson,
     int? v2Fps,
     String? v2Resolution,
+    String? lang,
   }) async {
+    // 介面語言：未指定則自動讀取（決定 Gemini 輸出文字語言）
+    lang ??= await _resolveLang();
     final resp = await _dio.post(
       '/api/analysis/request',
       data: {
@@ -390,6 +431,7 @@ class AnalysisService {
         'keyframeCount':  keyframeCount,
         'mode':           mode,
         'promptVersion':  promptVersion,
+        'lang':           lang,
         if (phaseTimestamps != null)   'phaseTimestamps':  phaseTimestamps,
         if (audioAnalysisJson != null) 'audioAnalysisJson': audioAnalysisJson,
         if (swingMetricsJson != null)  'swingMetricsJson':  swingMetricsJson,
@@ -563,6 +605,45 @@ class AnalysisService {
     String? v2Resolution,
     void Function(int sent, int total)? onUploadProgress,
   }) async {
+    // 漏斗：記 analysis_start；submit 階段（建立任務 / 上傳）失敗記 analysis_failed(submit)
+    // 後 rethrow，不改變呼叫端錯誤語意。伺服器端分析失敗由 ai_coach_page 輪詢記 (server)。
+    AnalyticsService.instance.logEvent('analysis_start', {
+      'mode': mode,
+      'prompt_version': promptVersion,
+    });
+    try {
+      return await _submitForAnalysisImpl(
+        videoId: videoId,
+        clipPath: clipPath,
+        csvPath: csvPath,
+        audioPath: audioPath,
+        mode: mode,
+        promptVersion: promptVersion,
+        phaseTimestamps: phaseTimestamps,
+        audioAnalysisJson: audioAnalysisJson,
+        v2Fps: v2Fps,
+        v2Resolution: v2Resolution,
+        onUploadProgress: onUploadProgress,
+      );
+    } catch (_) {
+      AnalyticsService.instance.logEvent('analysis_failed', {'stage': 'submit'});
+      rethrow;
+    }
+  }
+
+  Future<String> _submitForAnalysisImpl({
+    required String videoId,
+    required String clipPath,
+    String? csvPath,
+    String? audioPath,
+    String mode = 'full',
+    String promptVersion = 'v1',
+    Map<String, double>? phaseTimestamps,
+    String? audioAnalysisJson,
+    int? v2Fps,
+    String? v2Resolution,
+    void Function(int sent, int total)? onUploadProgress,
+  }) async {
     final hasCsv   = csvPath   != null && File(csvPath).existsSync();
     final hasAudio = audioPath != null && File(audioPath).existsSync()
         && promptVersion == 'v3';
@@ -663,6 +744,7 @@ class AnalysisService {
       '/api/analysis/$analysisId/upgrade',
       data: {
         if (promptVersion != null) 'promptVersion': promptVersion,
+        'lang': await _resolveLang(),
       },
       options: Options(headers: await _authHeaders()),
     );

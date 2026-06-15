@@ -30,6 +30,7 @@ import 'widgets/recording_indicator.dart';
 import 'widgets/impact_glow_overlay.dart';
 import '../theme/app_theme.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
+import '../services/analytics_service.dart';
 
 typedef RecordCompleteCallback = void Function({
   required String videoPath,
@@ -114,6 +115,7 @@ class _RecordScreenState extends State<RecordScreen> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('record'); // 一般錄影畫面
     _resetSession();
     _checkDeviceCapability();
     _initCamera();
@@ -531,6 +533,7 @@ class _RecordScreenState extends State<RecordScreen> {
     //   同時搶麥克風造成衝突。音訊改由錄製結束後從 mp4 音軌抽出 audio.wav 分析。
     _recording      = true;
     _startingRecording = false;
+    AnalyticsService.instance.logEvent('record_start', {'mode': 'record'});
     // 戶外看不清螢幕時，靠震動確認錄製已開始
     HapticFeedback.heavyImpact();
     _recordingStart = DateTime.now();
@@ -583,6 +586,11 @@ class _RecordScreenState extends State<RecordScreen> {
       recordOk = false;
     }
     if (_pauseAnalysis && mounted) setState(() => _pauseAnalysis = false);
+
+    AnalyticsService.instance.logEvent('record_stop', {
+      'mode': 'record',
+      'ok': recordOk ? 1 : 0,
+    });
 
     if (!recordOk) {
       // 丟棄 CSV/audio，提示重錄，並重新 pre-warm 下一次

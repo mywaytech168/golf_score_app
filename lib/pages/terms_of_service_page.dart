@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:golf_score_app/l10n/app_localizations.dart';
+import '../services/analytics_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/gradient_text.dart';
 import 'login_page.dart';
@@ -18,6 +19,15 @@ const String kPrivacyPolicyUrl = _kPrivacyPolicyUrl;
 
 /// 使用條款網址（供其他頁面使用，例如設定頁）
 const String kTermsUrl = _kTermsUrl;
+
+/// 客服聯絡信箱（供其他頁面使用，例如設定頁）
+const String kSupportEmail = 'support@atk.tw';
+
+/// 以系統郵件 App 開啟聯絡客服（mailto）；失敗回傳 false
+Future<bool> openContactSupport() async {
+  final uri = Uri(scheme: 'mailto', path: kSupportEmail);
+  return launchUrl(uri, mode: LaunchMode.externalApplication);
+}
 
 /// 以外部瀏覽器開啟隱私政策；失敗回傳 false
 Future<bool> openPrivacyPolicy() async {
@@ -73,6 +83,7 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('terms');
     _scrollController.addListener(_onScroll);
   }
 
@@ -154,7 +165,16 @@ class _TermsOfServicePageState extends State<TermsOfServicePage> {
                 padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
                 child: Row(
                   children: [
-                    Image.asset('assets/branding/logo_icon.png', width: 36, height: 36),
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 1.5),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.asset('assets/branding/orvia_pwa_icon.png', fit: BoxFit.cover),
+                    ),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

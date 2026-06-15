@@ -14,7 +14,9 @@ import 'package:golf_score_app/l10n/app_localizations.dart';
 
 import 'theme/app_theme.dart';
 import 'services/analysis_progress_service.dart';
+import 'services/analytics_service.dart';
 import 'services/auth_token_storage.dart';
+import 'services/install_source_service.dart';
 import 'services/ad_service.dart';
 import 'services/purchase_service.dart';
 import 'services/in_app_purchase_service.dart';
@@ -38,12 +40,38 @@ Future<void> main() async {
   MediaKit.ensureInitialized();
   AnalysisProgressService.instance.start();
 
+  // Firebase Analytics：於首屏前初始化，使路由 observer 從第一個畫面起即可記錄。
+  // init 內部已吞例外；外層 timeout 防止初始化卡住造成白屏。
+  try {
+    await AnalyticsService.instance.init().timeout(const Duration(seconds: 5));
+  } catch (e) {
+    debugPrint('⚠️ [App] Analytics 初始化逾時/失敗: $e');
+  }
+  unawaited(AnalyticsService.instance.logAppOpen());
+
   // 只有「載入語系」是進入畫面前的必要步驟，且加上 timeout 避免儲存層卡住白屏。
   final localeProvider = LocaleProvider();
   try {
     await localeProvider.loadSavedLocale().timeout(const Duration(seconds: 3));
   } catch (e) {
     debugPrint('⚠️ [App] 載入語系逾時/失敗，使用預設語系: $e');
+  }
+
+  // Analytics 使用者屬性：供事件依使用者類型分群。失敗不阻塞首屏。
+  try {
+    final loc = localeProvider.locale;
+    final lang = loc.countryCode != null
+        ? '${loc.languageCode}_${loc.countryCode}'
+        : loc.languageCode;
+    AnalyticsService.instance.setUserProperty('app_language', lang);
+  } catch (e) {
+    debugPrint('⚠️ [App] 設定 app_language 屬性失敗: $e');
+  }
+  try {
+    final dist = await InstallSourceService.distribution();
+    AnalyticsService.instance.setUserProperty('install_source', dist.name);
+  } catch (e) {
+    debugPrint('⚠️ [App] 設定 install_source 屬性失敗: $e');
   }
 
   // 廣告 / 內購 / 每日廣告等初始化不該阻塞首屏，改為背景執行。
@@ -155,6 +183,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               GlobalMaterialLocalizations.delegate,
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
+            ],
+            navigatorObservers: [
+              // 自動記錄具名路由（/home、/login 等）的 screen_view；
+              // PageView 分頁不是路由，於 MainShellPage 內手動記錄。
+              if (AnalyticsService.instance.observer != null)
+                AnalyticsService.instance.observer!,
             ],
             home: _buildHome(),
             routes: {

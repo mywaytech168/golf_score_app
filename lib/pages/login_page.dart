@@ -15,6 +15,7 @@ import '../services/video_server_client.dart';
 import '../services/auth_token_storage.dart';
 import '../theme/app_theme.dart';
 import 'main_shell_page.dart';
+import '../services/analytics_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -59,6 +60,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('login');
     _blePermissions = _buildRequiredPermissions();
     _permissionStatuses = {};
     _loadRememberedCredentials();
@@ -112,6 +114,7 @@ class _LoginPageState extends State<LoginPage> {
         }
 
         if (!mounted) return;
+        AnalyticsService.instance.logEvent('login_success', {'method': 'email'});
         _showSnackBar(AppLocalizations.of(context).msgLoginSuccess);
         final ok = await _ensureBlePermissions();
         if (!mounted || !ok) return;
@@ -249,6 +252,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (mounted) {
+        AnalyticsService.instance.logEvent('login_success', {'method': 'google'});
         _showSnackBar(AppLocalizations.of(context).msgGoogleLoginSuccess);
         await _navigateToHome();
       }
@@ -347,6 +351,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (mounted) {
+        AnalyticsService.instance.logEvent('login_success', {'method': 'apple'});
         _showSnackBar(AppLocalizations.of(context).msgAppleLoginSuccess);
         await _navigateToHome();
       }

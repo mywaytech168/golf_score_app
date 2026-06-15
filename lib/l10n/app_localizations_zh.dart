@@ -572,6 +572,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsQualityHint => '選擇後將作為預設值，下次分析自動套用';
 
   @override
+  String get exportQualitySmallLabel => '一般畫質';
+
+  @override
+  String get exportQualityStandardLabel => '標準畫質';
+
+  @override
+  String get exportQualityHighLabel => '高清畫質';
+
+  @override
+  String get exportQualitySmallDesc => '檔案最小，適合分享';
+
+  @override
+  String get exportQualityStandardDesc => '平衡畫質與大小';
+
+  @override
+  String get exportQualityHighDesc => '畫質最佳，檔案較大';
+
+  @override
   String get settingsApply => '套用';
 
   @override
@@ -617,6 +635,24 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsTermsOfService => '使用條款';
+
+  @override
+  String get settingsContactUs => '聯絡我們';
+
+  @override
+  String get settingsContactEmailCopied => '找不到郵件 App，已複製客服信箱';
+
+  @override
+  String get settingsContactSubtitle => 'Email 或意見表單';
+
+  @override
+  String get settingsContactViaEmail => '以 Email 聯絡';
+
+  @override
+  String get settingsContactViaForm => '填寫意見表單';
+
+  @override
+  String get settingsContactViaFormDesc => '登入後填寫，可附影片或截圖';
 
   @override
   String get settingsVersion => '版本';
@@ -1040,7 +1076,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get privacyDataCollectionDesc =>
-      '你的影片與分析資料只會在你主動操作時上傳——AI 分析、分享、上傳獎勵或回饋附件。ORVIA 沒有背景上傳，也沒有隱藏的遙測。';
+      '你的影片與分析資料只會在你主動操作時上傳——AI 分析、分享或回饋附件。ORVIA 沒有背景上傳，也沒有隱藏的遙測。';
 
   @override
   String get privacySectionPolicies => '政策文件';
@@ -1050,7 +1086,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get privacyUploadDesc =>
-      '你可以自願提交揮桿影片與感測 CSV 資料，協助改善揮桿偵測模型。每筆提交都會人工審核，通過後發放獎勵球。';
+      '當你執行 AI 完整分析時，該次分析使用的揮桿影片與感測 CSV 也會一併保留並提交，協助改善並訓練揮桿分析模型。每筆提交都會經人工審核，通過後發放獎勵球。刪除該筆錄影即可停止此用途。';
 
   @override
   String get privacyUploadStatusEntry => '查看我的上傳審核狀態';
@@ -1118,6 +1154,24 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aiCoachEvidence => '依據';
+
+  @override
+  String get aiCoachErrorPerfect => '完美姿勢';
+
+  @override
+  String get aiCoachErrorEarlyRelease => '早放拋桿';
+
+  @override
+  String get aiCoachErrorImpact => '撞擊失誤';
+
+  @override
+  String get aiCoachErrorOverTheTop => '外側切入';
+
+  @override
+  String get aiCoachErrorSpineAngle => '脊柱角度';
+
+  @override
+  String get aiCoachErrorWeightShift => '重心轉移';
 
   @override
   String get aiCoachSeverityHigh => '嚴重';
@@ -2556,6 +2610,52 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recDetailOffCenter => '擊球偏虛';
 
   @override
+  String get audioFeatureVolume => '音量';
+
+  @override
+  String get audioFeatureFrequency => '頻率';
+
+  @override
+  String get audioFeatureCrisp => '清脆';
+
+  @override
+  String get audioFeatureHighFreq => '高頻';
+
+  @override
+  String get audioFeaturePeak => '峰值';
+
+  @override
+  String audioScoreHit(int pass) {
+    return '命中 $pass/5';
+  }
+
+  @override
+  String audioScoreMiss(int pass) {
+    return '未命中 $pass/5';
+  }
+
+  @override
+  String get announcementTypeInfo => '通知';
+
+  @override
+  String get announcementTypeImportant => '重要';
+
+  @override
+  String get announcementTypeEvent => '活動';
+
+  @override
+  String get announcementTypeUpdate => '更新';
+
+  @override
+  String get upgradeFeatureYes => '有';
+
+  @override
+  String get errorServerUnreachable => '無法連線到伺服器，請確認網路後再試';
+
+  @override
+  String get errorServerTimeout => '伺服器回應逾時，請稍後再試';
+
+  @override
   String get recDetailAudioFeaturesTitle => '音頻特徵分析';
 
   @override
@@ -3019,7 +3119,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get rewardShortVideo => '短影片';
 
   @override
-  String get rewardUploadDataTitle => '上傳分析資料';
+  String get rewardUploadDataTitle => '資料貢獻';
+
+  @override
+  String rewardUploadAutoNote(int balls) {
+    return '完成 AI 完整分析時自動貢獻分析資料協助訓練，每筆審核通過後 +$balls 球';
+  }
+
+  @override
+  String aiCoachDataContributed(int balls) {
+    return '分析資料已送審，審核通過後 +$balls 球';
+  }
 
   @override
   String get rewardNoUploadable => '目前沒有可上傳的分析資料';
@@ -3572,6 +3682,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get extImportProgressTranscoding => '轉檔準備中...';
 
   @override
+  String extImportProgressTranscodingPct(int pct) {
+    return '轉檔中 $pct%';
+  }
+
+  @override
+  String get extImportProgressTranscodeDone => '轉換完成 ✅';
+
+  @override
   String get extImportProgressDurationInvalid => '影片時長不符 (需 1-600 秒)';
 
   @override
@@ -3797,6 +3915,32 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get historyProgressAudioAnalysis => '音頻分析中...';
+
+  @override
+  String get analysisProgressPose => '分析骨架中…';
+
+  @override
+  String get analysisProgressAudio => '提取音訊中…';
+
+  @override
+  String get analysisProgressPoseDone => '骨架分析完成';
+
+  @override
+  String get analysisProgressDone => '完成';
+
+  @override
+  String get analysisProgressUsingExisting => '使用既有分析資料…';
+
+  @override
+  String get analysisProgressBallTrack => '球追蹤分析中…';
+
+  @override
+  String get analysisProgressP0 => 'P0 偵測中…';
+
+  @override
+  String analysisProgressPosePct(int pct) {
+    return '骨架分析 $pct%';
+  }
 
   @override
   String get historyDlLabelFull => '完整分析';
@@ -4407,6 +4551,24 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get settingsQualityHint => '保存后作为默认值，下次分析自动应用';
 
   @override
+  String get exportQualitySmallLabel => '一般画质';
+
+  @override
+  String get exportQualityStandardLabel => '标准画质';
+
+  @override
+  String get exportQualityHighLabel => '高清画质';
+
+  @override
+  String get exportQualitySmallDesc => '文件最小，适合分享';
+
+  @override
+  String get exportQualityStandardDesc => '平衡画质与大小';
+
+  @override
+  String get exportQualityHighDesc => '画质最佳，文件较大';
+
+  @override
   String get settingsApply => '应用';
 
   @override
@@ -4452,6 +4614,24 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get settingsTermsOfService => '使用条款';
+
+  @override
+  String get settingsContactUs => '联系我们';
+
+  @override
+  String get settingsContactEmailCopied => '找不到邮件 App，已复制客服信箱';
+
+  @override
+  String get settingsContactSubtitle => 'Email 或意见表单';
+
+  @override
+  String get settingsContactViaEmail => '以 Email 联系';
+
+  @override
+  String get settingsContactViaForm => '填写意见表单';
+
+  @override
+  String get settingsContactViaFormDesc => '登录后填写，可附视频或截图';
 
   @override
   String get settingsVersion => '版本';
@@ -4875,7 +5055,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get privacyDataCollectionDesc =>
-      '你的视频与分析数据只会在你主动操作时上传——AI 分析、分享、上传奖励或反馈附件。ORVIA 没有后台上传，也没有隐藏的遥测。';
+      '你的视频与分析数据只会在你主动操作时上传——AI 分析、分享或反馈附件。ORVIA 没有后台上传，也没有隐藏的遥测。';
 
   @override
   String get privacySectionPolicies => '政策文件';
@@ -4885,7 +5065,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get privacyUploadDesc =>
-      '你可以自愿提交挥杆视频与传感 CSV 数据，帮助改善挥杆检测模型。每笔提交都会人工审核，通过后发放奖励球。';
+      '当你执行 AI 完整分析时，该次分析使用的挥杆视频与传感 CSV 也会一并保留并提交，帮助改善并训练挥杆分析模型。每笔提交都会经人工审核，通过后发放奖励球。删除该笔录影即可停止此用途。';
 
   @override
   String get privacyUploadStatusEntry => '查看我的上传审核状态';
@@ -4953,6 +5133,24 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get aiCoachEvidence => '依据';
+
+  @override
+  String get aiCoachErrorPerfect => '完美姿势';
+
+  @override
+  String get aiCoachErrorEarlyRelease => '早放抛杆';
+
+  @override
+  String get aiCoachErrorImpact => '撞击失误';
+
+  @override
+  String get aiCoachErrorOverTheTop => '外侧切入';
+
+  @override
+  String get aiCoachErrorSpineAngle => '脊柱角度';
+
+  @override
+  String get aiCoachErrorWeightShift => '重心转移';
 
   @override
   String get aiCoachSeverityHigh => '严重';
@@ -6391,6 +6589,52 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get recDetailOffCenter => '击球偏虚';
 
   @override
+  String get audioFeatureVolume => '音量';
+
+  @override
+  String get audioFeatureFrequency => '频率';
+
+  @override
+  String get audioFeatureCrisp => '清脆';
+
+  @override
+  String get audioFeatureHighFreq => '高频';
+
+  @override
+  String get audioFeaturePeak => '峰值';
+
+  @override
+  String audioScoreHit(int pass) {
+    return '命中 $pass/5';
+  }
+
+  @override
+  String audioScoreMiss(int pass) {
+    return '未命中 $pass/5';
+  }
+
+  @override
+  String get announcementTypeInfo => '通知';
+
+  @override
+  String get announcementTypeImportant => '重要';
+
+  @override
+  String get announcementTypeEvent => '活动';
+
+  @override
+  String get announcementTypeUpdate => '更新';
+
+  @override
+  String get upgradeFeatureYes => '有';
+
+  @override
+  String get errorServerUnreachable => '无法连接到服务器，请确认网络后再试';
+
+  @override
+  String get errorServerTimeout => '服务器响应超时，请稍后再试';
+
+  @override
   String get recDetailAudioFeaturesTitle => '音频特征分析';
 
   @override
@@ -6854,7 +7098,17 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get rewardShortVideo => '短影片';
 
   @override
-  String get rewardUploadDataTitle => '上传分析资料';
+  String get rewardUploadDataTitle => '数据贡献';
+
+  @override
+  String rewardUploadAutoNote(int balls) {
+    return '完成 AI 完整分析时自动贡献分析数据协助训练，每笔审核通过后 +$balls 球';
+  }
+
+  @override
+  String aiCoachDataContributed(int balls) {
+    return '分析数据已送审，审核通过后 +$balls 球';
+  }
 
   @override
   String get rewardNoUploadable => '目前没有可上传的分析资料';
@@ -7407,6 +7661,14 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get extImportProgressTranscoding => '转档准备中...';
 
   @override
+  String extImportProgressTranscodingPct(int pct) {
+    return '转档中 $pct%';
+  }
+
+  @override
+  String get extImportProgressTranscodeDone => '转换完成 ✅';
+
+  @override
   String get extImportProgressDurationInvalid => '视频时长不符 (需 1-600 秒)';
 
   @override
@@ -7632,6 +7894,32 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get historyProgressAudioAnalysis => '音频分析中...';
+
+  @override
+  String get analysisProgressPose => '分析骨架中…';
+
+  @override
+  String get analysisProgressAudio => '提取音频中…';
+
+  @override
+  String get analysisProgressPoseDone => '骨架分析完成';
+
+  @override
+  String get analysisProgressDone => '完成';
+
+  @override
+  String get analysisProgressUsingExisting => '使用既有分析资料…';
+
+  @override
+  String get analysisProgressBallTrack => '球追踪分析中…';
+
+  @override
+  String get analysisProgressP0 => 'P0 侦测中…';
+
+  @override
+  String analysisProgressPosePct(int pct) {
+    return '骨架分析 $pct%';
+  }
 
   @override
   String get historyDlLabelFull => '完整分析';
@@ -8242,6 +8530,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsQualityHint => '選擇後將作為預設值，下次分析自動套用';
 
   @override
+  String get exportQualitySmallLabel => '一般畫質';
+
+  @override
+  String get exportQualityStandardLabel => '標準畫質';
+
+  @override
+  String get exportQualityHighLabel => '高清畫質';
+
+  @override
+  String get exportQualitySmallDesc => '檔案最小，適合分享';
+
+  @override
+  String get exportQualityStandardDesc => '平衡畫質與大小';
+
+  @override
+  String get exportQualityHighDesc => '畫質最佳，檔案較大';
+
+  @override
   String get settingsApply => '套用';
 
   @override
@@ -8287,6 +8593,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get settingsTermsOfService => '使用條款';
+
+  @override
+  String get settingsContactUs => '聯絡我們';
+
+  @override
+  String get settingsContactEmailCopied => '找不到郵件 App，已複製客服信箱';
+
+  @override
+  String get settingsContactSubtitle => 'Email 或意見表單';
+
+  @override
+  String get settingsContactViaEmail => '以 Email 聯絡';
+
+  @override
+  String get settingsContactViaForm => '填寫意見表單';
+
+  @override
+  String get settingsContactViaFormDesc => '登入後填寫，可附影片或截圖';
 
   @override
   String get settingsVersion => '版本';
@@ -8710,7 +9034,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get privacyDataCollectionDesc =>
-      '你的影片與分析資料只會在你主動操作時上傳——AI 分析、分享、上傳獎勵或回饋附件。ORVIA 沒有背景上傳，也沒有隱藏的遙測。';
+      '你的影片與分析資料只會在你主動操作時上傳——AI 分析、分享或回饋附件。ORVIA 沒有背景上傳，也沒有隱藏的遙測。';
 
   @override
   String get privacySectionPolicies => '政策文件';
@@ -8720,7 +9044,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get privacyUploadDesc =>
-      '你可以自願提交揮桿影片與感測 CSV 資料，協助改善揮桿偵測模型。每筆提交都會人工審核，通過後發放獎勵球。';
+      '當你執行 AI 完整分析時，該次分析使用的揮桿影片與感測 CSV 也會一併保留並提交，協助改善並訓練揮桿分析模型。每筆提交都會經人工審核，通過後發放獎勵球。刪除該筆錄影即可停止此用途。';
 
   @override
   String get privacyUploadStatusEntry => '查看我的上傳審核狀態';
@@ -8788,6 +9112,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get aiCoachEvidence => '依據';
+
+  @override
+  String get aiCoachErrorPerfect => '完美姿勢';
+
+  @override
+  String get aiCoachErrorEarlyRelease => '早放拋桿';
+
+  @override
+  String get aiCoachErrorImpact => '撞擊失誤';
+
+  @override
+  String get aiCoachErrorOverTheTop => '外側切入';
+
+  @override
+  String get aiCoachErrorSpineAngle => '脊柱角度';
+
+  @override
+  String get aiCoachErrorWeightShift => '重心轉移';
 
   @override
   String get aiCoachSeverityHigh => '嚴重';
@@ -10226,6 +10568,52 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get recDetailOffCenter => '擊球偏虛';
 
   @override
+  String get audioFeatureVolume => '音量';
+
+  @override
+  String get audioFeatureFrequency => '頻率';
+
+  @override
+  String get audioFeatureCrisp => '清脆';
+
+  @override
+  String get audioFeatureHighFreq => '高頻';
+
+  @override
+  String get audioFeaturePeak => '峰值';
+
+  @override
+  String audioScoreHit(int pass) {
+    return '命中 $pass/5';
+  }
+
+  @override
+  String audioScoreMiss(int pass) {
+    return '未命中 $pass/5';
+  }
+
+  @override
+  String get announcementTypeInfo => '通知';
+
+  @override
+  String get announcementTypeImportant => '重要';
+
+  @override
+  String get announcementTypeEvent => '活動';
+
+  @override
+  String get announcementTypeUpdate => '更新';
+
+  @override
+  String get upgradeFeatureYes => '有';
+
+  @override
+  String get errorServerUnreachable => '無法連線到伺服器，請確認網路後再試';
+
+  @override
+  String get errorServerTimeout => '伺服器回應逾時，請稍後再試';
+
+  @override
   String get recDetailAudioFeaturesTitle => '音頻特徵分析';
 
   @override
@@ -10689,7 +11077,17 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get rewardShortVideo => '短影片';
 
   @override
-  String get rewardUploadDataTitle => '上傳分析資料';
+  String get rewardUploadDataTitle => '資料貢獻';
+
+  @override
+  String rewardUploadAutoNote(int balls) {
+    return '完成 AI 完整分析時自動貢獻分析資料協助訓練，每筆審核通過後 +$balls 球';
+  }
+
+  @override
+  String aiCoachDataContributed(int balls) {
+    return '分析資料已送審，審核通過後 +$balls 球';
+  }
 
   @override
   String get rewardNoUploadable => '目前沒有可上傳的分析資料';
@@ -11242,6 +11640,14 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get extImportProgressTranscoding => '轉檔準備中...';
 
   @override
+  String extImportProgressTranscodingPct(int pct) {
+    return '轉檔中 $pct%';
+  }
+
+  @override
+  String get extImportProgressTranscodeDone => '轉換完成 ✅';
+
+  @override
   String get extImportProgressDurationInvalid => '影片時長不符 (需 1-600 秒)';
 
   @override
@@ -11467,6 +11873,32 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get historyProgressAudioAnalysis => '音頻分析中...';
+
+  @override
+  String get analysisProgressPose => '分析骨架中…';
+
+  @override
+  String get analysisProgressAudio => '提取音訊中…';
+
+  @override
+  String get analysisProgressPoseDone => '骨架分析完成';
+
+  @override
+  String get analysisProgressDone => '完成';
+
+  @override
+  String get analysisProgressUsingExisting => '使用既有分析資料…';
+
+  @override
+  String get analysisProgressBallTrack => '球追蹤分析中…';
+
+  @override
+  String get analysisProgressP0 => 'P0 偵測中…';
+
+  @override
+  String analysisProgressPosePct(int pct) {
+    return '骨架分析 $pct%';
+  }
 
   @override
   String get historyDlLabelFull => '完整分析';

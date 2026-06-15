@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../services/ad_service.dart';
+import '../services/analytics_service.dart';
 import '../services/plan_service.dart';
 
 /// 全域方案狀態 Provider
@@ -29,6 +30,18 @@ class PlanProvider with ChangeNotifier {
       _status = await PlanService.getPlanStatus();
       // Pro / Elite 免廣告；Free 顯示廣告
       AdService.adsEnabled = _status.plan == UserPlan.free;
+
+      // Analytics 使用者屬性：方案與球數分桶（供事件分群）
+      AnalyticsService.instance.setUserProperty('user_plan', _status.plan.key);
+      final balls = _status.bonusBalls;
+      final bucket = balls <= 10
+          ? '0-10'
+          : balls <= 50
+              ? '11-50'
+              : balls <= 100
+                  ? '51-100'
+                  : '100+';
+      AnalyticsService.instance.setUserProperty('ball_balance_bucket', bucket);
     } catch (e) {
       debugPrint('[PlanProvider] refresh 失敗: $e');
     } finally {

@@ -1,3 +1,5 @@
+import 'package:golf_score_app/l10n/app_localizations.dart';
+
 /// 影片輸出品質模式（對應 Kotlin ExportQuality 枚舉）。
 enum ExportQuality {
   /// 低位元率（~10 Mbps 上限）；檔案最小，適合分享 / 上傳
@@ -31,5 +33,19 @@ enum ExportQuality {
         ExportQuality.small    => '檔案最小，適合分享',
         ExportQuality.standard => '平衡畫質與大小',
         ExportQuality.high     => '畫質最佳，檔案較大',
+      };
+
+  /// UI 顯示標題（多語系）
+  String localizedLabel(AppLocalizations l10n) => switch (this) {
+        ExportQuality.small    => l10n.exportQualitySmallLabel,
+        ExportQuality.standard => l10n.exportQualityStandardLabel,
+        ExportQuality.high     => l10n.exportQualityHighLabel,
+      };
+
+  /// 檔案大小說明（多語系）
+  String localizedSizeHint(AppLocalizations l10n) => switch (this) {
+        ExportQuality.small    => l10n.exportQualitySmallDesc,
+        ExportQuality.standard => l10n.exportQualityStandardDesc,
+        ExportQuality.high     => l10n.exportQualityHighDesc,
       };
 }

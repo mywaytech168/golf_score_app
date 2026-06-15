@@ -166,6 +166,9 @@
       <div class="nav-item" :class="{active: tab==='datasets'}" @click="switchTab('datasets')">
         <span class="nav-icon">📦</span> 資料審核
       </div>
+      <div class="nav-item" :class="{active: tab==='contacts'}" @click="switchTab('contacts')">
+        <span class="nav-icon">📨</span> 聯絡訊息
+      </div>
       <div class="nav-item" :class="{active: tab==='balls'}" @click="switchTab('balls')">
         <span class="nav-icon">🏌</span> 球數流水帳
       </div>
@@ -376,6 +379,73 @@
           <button class="btn btn-outline btn-sm" @click="loadDatasets(datasets.page-1)" :disabled="datasets.page<=1">◀</button>
           <span>第 {{ datasets.page }} / {{ Math.ceil(datasets.total/datasets.size) || 1 }} 頁</span>
           <button class="btn btn-outline btn-sm" @click="loadDatasets(datasets.page+1)" :disabled="datasets.page*datasets.size>=datasets.total">▶</button>
+        </div>
+      </div>
+
+      <!-- ── CONTACT MESSAGES（聯絡訊息）── -->
+      <div v-if="tab==='contacts'">
+        <div class="page-title">
+          📨 聯絡訊息
+          <span class="badge badge-yellow" style="margin-left:10px;font-size:.85rem;vertical-align:middle">未處理：{{ contacts.pendingCount }}</span>
+        </div>
+        <div class="toolbar">
+          <select v-model="contacts.filterHandled" @change="loadContacts(1)">
+            <option value="false">未處理</option>
+            <option value="true">已處理</option>
+            <option value="all">全部</option>
+          </select>
+          <select v-model="contacts.filterSource" @change="loadContacts(1)">
+            <option value="">全部來源</option>
+            <option value="app">App</option>
+            <option value="web">官網</option>
+          </select>
+          <span class="spacer"></span>
+          <span style="font-size:.82rem;color:var(--muted)">共 {{ contacts.total }} 筆</span>
+        </div>
+        <div class="table-wrap">
+          <div class="loading" v-if="contacts.loading">載入中...</div>
+          <table v-else>
+            <thead><tr>
+              <th>來源</th><th>姓名</th><th>Email</th><th>主旨</th><th>訊息內容</th>
+              <th>提交時間</th><th>狀態</th><th style="width:130px">操作</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="c in contacts.data" :key="c.id">
+                <td><span class="badge" :class="contactSourceBadge(c.source)">{{ contactSourceLabel(c.source) }}</span></td>
+                <td>{{ c.name || '—' }}</td>
+                <td>
+                  <a v-if="c.email" :href="'mailto:'+c.email" style="color:var(--accent)">{{ c.email }}</a>
+                  <span v-else style="color:var(--muted)">—</span>
+                </td>
+                <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="c.subject">{{ c.subject || '—' }}</td>
+                <td style="max-width:280px">
+                  <div v-if="contacts.expanded===c.id" style="white-space:pre-wrap">{{ c.message }}</div>
+                  <div v-else style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="c.message">{{ c.message }}</div>
+                  <a v-if="c.message && c.message.length>40" href="#" @click.prevent="contacts.expanded = (contacts.expanded===c.id ? null : c.id)"
+                     style="color:var(--accent);font-size:.78rem">
+                    {{ contacts.expanded===c.id ? '收起' : '展開' }}
+                  </a>
+                </td>
+                <td style="white-space:nowrap">{{ c.createdAt }}</td>
+                <td>
+                  <span class="badge" :class="c.handled ? 'badge-green' : 'badge-yellow'">{{ c.handled ? '已處理' : '未處理' }}</span>
+                  <div v-if="c.handled && c.adminNote" style="font-size:.72rem;color:var(--muted);margin-top:3px" :title="c.adminNote">📝 {{ c.adminNote }}</div>
+                </td>
+                <td>
+                  <button v-if="!c.handled" class="btn btn-success btn-sm" @click="openContactHandle(c)" :disabled="contacts.handling===c.id">標記已處理</button>
+                  <button v-else class="btn btn-outline btn-sm" @click="contactToggle(c, false, null)" :disabled="contacts.handling===c.id">取消處理</button>
+                </td>
+              </tr>
+              <tr v-if="!contacts.loading && contacts.data.length===0">
+                <td colspan="8" style="text-align:center;color:var(--muted);padding:28px">沒有符合的資料</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-outline btn-sm" @click="loadContacts(contacts.page-1)" :disabled="contacts.page<=1">◀</button>
+          <span>第 {{ contacts.page }} / {{ Math.ceil(contacts.total/contacts.size) || 1 }} 頁</span>
+          <button class="btn btn-outline btn-sm" @click="loadContacts(contacts.page+1)" :disabled="contacts.page*contacts.size>=contacts.total">▶</button>
         </div>
       </div>
 
@@ -658,6 +728,28 @@
     </div>
   </div>
 
+  <!-- ══ MODAL: 標記聯絡訊息已處理 ══ -->
+  <div class="modal-overlay" v-if="modal.contactHandle" @click.self="modal.contactHandle=false">
+    <div class="modal">
+      <h2>📨 標記已處理</h2>
+      <div class="detail-row"><span class="key">來源：</span>{{ contactSourceLabel(modal.contactTarget?.source) }}</div>
+      <div class="detail-row"><span class="key">姓名：</span>{{ modal.contactTarget?.name || '—' }}</div>
+      <div class="detail-row"><span class="key">Email：</span>{{ modal.contactTarget?.email || '—' }}</div>
+      <div class="detail-row"><span class="key">主旨：</span>{{ modal.contactTarget?.subject || '—' }}</div>
+      <div class="field" style="margin-top:14px">
+        <label>處理備註（選填，例如：已回信）</label>
+        <textarea v-model="modal.contactNote" placeholder="例如：已回信 / 已處理…"></textarea>
+      </div>
+      <div class="err-msg" v-if="modal.contactError">{{ modal.contactError }}</div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" @click="modal.contactHandle=false">取消</button>
+        <button class="btn btn-success" @click="submitContactHandle" :disabled="modal.contactLoading">
+          {{ modal.contactLoading ? '處理中...' : '確認標記已處理' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ MODAL: 新增 / 編輯公告 ══ -->
   <div class="modal-overlay" v-if="modal.annForm" @click.self="modal.annForm=false">
     <div class="modal" style="width:560px">
@@ -741,6 +833,7 @@ createApp({
     const feedbacks = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterType: '' });
     const balls     = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterUser: '', filterReason: '' });
     const datasets  = reactive({ data: [], total: 0, page: 1, size: 50, loading: false, filterStatus: 'pending', reviewing: null });
+    const contacts  = reactive({ data: [], total: 0, pendingCount: 0, page: 1, size: 50, loading: false, filterHandled: 'false', filterSource: '', handling: null, expanded: null });
     const ann = reactive({
       data: [], loading: false,
       filterType: '', filterActive: '',
@@ -759,6 +852,7 @@ createApp({
       annFormData() { return { title:'', body:'', type:'info', isActive:true, publishedAt:'', expiresAt:'', imageUrl:'' }; },
       annError: '', annLoading: false,
       rejectDataset: false, rejectTarget: null, rejectNote: '', rejectError: '', rejectLoading: false,
+      contactHandle: false, contactTarget: null, contactNote: '', contactError: '', contactLoading: false,
     });
 
     const toast = reactive({ show: false, msg: '' });
@@ -814,6 +908,7 @@ createApp({
       if (t === 'analyses')  loadAnalyses(1);
       if (t === 'feedbacks') loadFeedbacks(1);
       if (t === 'datasets')  loadDatasets(1);
+      if (t === 'contacts')  loadContacts(1);
       if (t === 'balls')     loadBalls(1);
       if (t === 'version')       loadVersions();
       if (t === 'announcements') loadAnnouncements();
@@ -912,6 +1007,63 @@ createApp({
       const parts = String(p).split(/[\\/]/);
       return parts[parts.length - 1] || p;
     }
+
+    // ── Contact Messages（聯絡訊息）──
+    async function loadContacts(page) {
+      if (page < 1) return;
+      contacts.loading = true; contacts.page = page; contacts.expanded = null;
+      try {
+        let url = `/contact-messages?page=${page}&size=${contacts.size}`;
+        if (contacts.filterHandled === 'true')  url += `&handled=true`;
+        if (contacts.filterHandled === 'false') url += `&handled=false`;
+        if (contacts.filterSource) url += `&source=${contacts.filterSource}`;
+        const res = await api(url);
+        const d   = await res.json();
+        if (!res.ok) { showToast('❌ ' + (d.message || '載入失敗')); contacts.data = []; return; }
+        contacts.data         = d.data || [];
+        contacts.total        = d.total || 0;
+        contacts.pendingCount = d.pendingCount || 0;
+      } catch(e) {
+        if (e.message === '未授權') { showToast('❌ 需登入或權限不足'); }
+        else { showToast('❌ 載入失敗：' + e.message); }
+        contacts.data = [];
+      } finally { contacts.loading = false; }
+    }
+
+    async function contactToggle(item, handled, note) {
+      contacts.handling = item.id;
+      try {
+        const res = await api(`/contact-messages/${item.id}/handle`, {
+          method: 'POST',
+          body: JSON.stringify({ handled, note: note || null }),
+        });
+        const d = await res.json();
+        if (!res.ok) { showToast('❌ ' + (d.message || '操作失敗')); return false; }
+        showToast(handled ? '✅ 已標記為已處理' : '↩ 已取消處理');
+        await loadContacts(contacts.page);
+        return true;
+      } catch(e) {
+        if (e.message === '未授權') { showToast('❌ 需登入或權限不足'); }
+        else { showToast('❌ 操作失敗：' + e.message); }
+        return false;
+      } finally { contacts.handling = null; }
+    }
+
+    function openContactHandle(item) {
+      modal.contactTarget = item; modal.contactNote = ''; modal.contactError = '';
+      modal.contactHandle = true;
+    }
+
+    async function submitContactHandle() {
+      modal.contactLoading = true; modal.contactError = '';
+      try {
+        const ok = await contactToggle(modal.contactTarget, true, modal.contactNote.trim());
+        if (ok) modal.contactHandle = false;
+      } finally { modal.contactLoading = false; }
+    }
+
+    function contactSourceLabel(s) { return s === 'app' ? 'App' : s === 'web' ? '官網' : (s || '—'); }
+    function contactSourceBadge(s) { return s === 'app' ? 'badge-blue' : s === 'web' ? 'badge-purple' : 'badge-gray'; }
 
     // ── Ball Records ──
     async function loadBalls(page) {
@@ -1173,10 +1325,11 @@ createApp({
 
     return {
       token, login, tab,
-      users, analyses, feedbacks, balls, datasets, version, ann, modal, toast,
+      users, analyses, feedbacks, balls, datasets, contacts, version, ann, modal, toast,
       doLogin, logout, switchTab,
       loadUsers, loadAnalyses, loadFeedbacks, loadBalls, loadVersions, saveVersion,
       loadDatasets, approveDataset, openRejectDataset, submitRejectDataset, fileName, datasetBadge,
+      loadContacts, contactToggle, openContactHandle, submitContactHandle, contactSourceLabel, contactSourceBadge,
       loadApkInfo, uploadApk, deleteApk,
       openAdjustBalls, submitAdjust,
       openReply, submitReply,

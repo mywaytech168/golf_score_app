@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/p_system_metrics.dart';
+import '../services/analytics_service.dart';
 import '../services/p_system_analyzer.dart';
 import '../theme/app_theme.dart';
 
@@ -17,6 +18,7 @@ class PSystemHelpPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AnalyticsService.instance.logScreen('p_system_help');
     final l10n = AppLocalizations.of(context);
     final descColor = Theme.of(context).hintColor;
     return Scaffold(

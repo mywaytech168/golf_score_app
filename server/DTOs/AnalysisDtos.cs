@@ -39,6 +39,9 @@ namespace UploadServer.DTOs
         /// <summary>裝置端 P-System 角度量化 JSON（angles.json 內容）；注入 Gemini 當客觀依據；null = 無</summary>
         public string? SwingMetricsJson { get; set; }
 
+        /// <summary>使用者介面語言（"zh_TW" | "zh_CN" | "en"）；決定 Gemini 輸出文字語言。null = 預設繁體中文</summary>
+        public string? Lang { get; set; }
+
         /// <summary>v2：每秒取樣幀數（覆蓋 server 設定）；null = 使用 server 預設值</summary>
         public int? V2Fps { get; set; }
 
@@ -50,6 +53,9 @@ namespace UploadServer.DTOs
     {
         /// <summary>升級時可選擇新的提示詞版本；null = 沿用原始版本</summary>
         public string? PromptVersion { get; set; }
+
+        /// <summary>升級時的介面語言（"zh_TW" | "zh_CN" | "en"）；null = 沿用原始語言</summary>
+        public string? Lang { get; set; }
     }
 
     public class AnalysisRequestResponse

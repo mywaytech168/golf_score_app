@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/analytics_service.dart';
 import '../theme/app_theme.dart';
 
 /// 初次使用教學引導：全螢幕 PageView 介紹核心流程
@@ -42,6 +43,12 @@ class _OnboardingPageState extends State<OnboardingPage> {
   int _currentPage = 0;
 
   @override
+  void initState() {
+    super.initState();
+    AnalyticsService.instance.logScreen('onboarding');
+  }
+
+  @override
   void dispose() {
     _pageController.dispose();
     super.dispose();
@@ -72,6 +79,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   void _next(int stepCount) {
     if (_currentPage >= stepCount - 1) {
+      AnalyticsService.instance.logEvent('onboarding_finish');
       Navigator.of(context).pop();
       return;
     }
@@ -102,8 +110,13 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   opacity: isLast ? 0 : 1,
                   duration: const Duration(milliseconds: 200),
                   child: TextButton(
-                    onPressed:
-                        isLast ? null : () => Navigator.of(context).pop(),
+                    onPressed: isLast
+                        ? null
+                        : () {
+                            AnalyticsService.instance
+                                .logEvent('onboarding_skip');
+                            Navigator.of(context).pop();
+                          },
                     child: Text(
                       l.onboardingSkip,
                       style: TextStyle(color: context.textSecondary),

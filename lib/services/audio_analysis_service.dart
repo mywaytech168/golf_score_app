@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
+import 'package:golf_score_app/l10n/app_localizations.dart';
 
 class AudioAnalysisService {
   const AudioAnalysisService();
@@ -18,7 +19,7 @@ class AudioAnalysisService {
   // Keep private alias for internal use
   static const Map<String, List<double>> _ruleIntervals = ruleIntervals;
 
-  /// 各特徵的中文顯示名稱
+  /// 各特徵的中文顯示名稱（fallback；UI 顯示請優先用 [localizedFeatureLabel]）
   static const Map<String, String> featureLabels = {
     'rms_dbfs':          '音量',
     'spectral_centroid': '頻率',
@@ -26,6 +27,19 @@ class AudioAnalysisService {
     'highband_amp':      '高頻',
     'peak_dbfs':         '峰值',
   };
+
+  /// 把音訊特徵 key 對應到當前介面語言的顯示名稱（單一真相）。
+  /// 未知 key 退回中文 [featureLabels]，再退回 key 本身。
+  static String localizedFeatureLabel(AppLocalizations l, String key) {
+    switch (key) {
+      case 'rms_dbfs':          return l.audioFeatureVolume;
+      case 'spectral_centroid': return l.audioFeatureFrequency;
+      case 'sharpness_hfxloud': return l.audioFeatureCrisp;
+      case 'highband_amp':      return l.audioFeatureHighFreq;
+      case 'peak_dbfs':         return l.audioFeaturePeak;
+      default:                  return featureLabels[key] ?? key;
+    }
+  }
 
   /// 格式化特徵值為簡短可讀字串（供 UI badge 顯示）
   /// 例如：formatFeatureValue('spectral_centroid', 4100) → '4.1k'

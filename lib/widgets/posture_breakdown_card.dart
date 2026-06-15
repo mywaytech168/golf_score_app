@@ -117,7 +117,7 @@ class _PostureTile extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            SwingPosture.zhName(label),
+            SwingPosture.localizedName(AppLocalizations.of(context), label),
             style: TextStyle(fontSize: 10, color: context.textSecondary),
             textAlign: TextAlign.center,
             maxLines: 1,

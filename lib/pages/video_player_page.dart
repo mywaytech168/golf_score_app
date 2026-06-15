@@ -32,6 +32,7 @@ import '../widgets/zoomable_timeline.dart';
 import 'ai_coach_page.dart';
 import 'p_system_help_page.dart';
 import 'package:golf_score_app/l10n/app_localizations.dart';
+import '../services/analytics_service.dart';
 
 /// Lightweight player for reviewing a recorded swing video.
 class VideoPlayerPage extends StatefulWidget {
@@ -158,6 +159,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.logScreen('video_player'); // 影片查看/分析畫面
 
     _note = widget.entry?.note;
     _hasSkeletonCsv = resolveSkeletonCsv(p.dirname(widget.videoPath)) != null;
@@ -1258,33 +1260,70 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                         color: _scoreColor(ps.overallScore),
                         fontSize: 12,
                         fontWeight: FontWeight.w800)),
-              const Spacer(),
-              if (ps.viewpoint != SwingViewpoint.faceOn)
-                Flexible(
-                  child: Text(l10n.pSystemViewpointWarn,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(color: Colors.white30, fontSize: 9)),
-                ),
-              // 切換：字母簡稱 P1…P10 ↔ 文字簡稱 預備/桿平上…
-              GestureDetector(
-                onTap: _togglePLabelStyle,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: Icon(Icons.translate,
-                      size: 16,
-                      color: _pSysTextLabel ? kBrandPrimary : Colors.white38),
-                ),
-              ),
-              // 說明頁入口
-              GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const PSystemHelpPage())),
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: Icon(Icons.help_outline,
-                      size: 16, color: Colors.white38),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (ps.viewpoint != SwingViewpoint.faceOn)
+                      Flexible(
+                        child: GestureDetector(
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => const PSystemHelpPage())),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: kCrispColor.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: kCrispColor.withValues(alpha: 0.40),
+                                  width: 0.8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.camera_front,
+                                    size: 12, color: kCrispColor),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(l10n.pSystemViewpointWarn,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: kCrispColor,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    // 切換：字母簡稱 P1…P10 ↔ 文字簡稱 預備/桿平上…
+                    GestureDetector(
+                      onTap: _togglePLabelStyle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Icon(Icons.translate,
+                            size: 16,
+                            color: _pSysTextLabel
+                                ? kBrandPrimary
+                                : Colors.white38),
+                      ),
+                    ),
+                    // 說明頁入口
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => const PSystemHelpPage())),
+                      child: const Padding(
+                        padding: EdgeInsets.only(left: 8),
+                        child: Icon(Icons.help_outline,
+                            size: 16, color: Colors.white38),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1762,7 +1801,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: sorted.map((e) {
-            final label     = SwingPosture.zhName(e.key);
+            final label     = SwingPosture.localizedName(AppLocalizations.of(context), e.key);
             final score     = e.value.clamp(0.0, 1.0);
             final isOfficial = onnxResult.officialErrors.contains(e.key);
             final isSuspect  = onnxResult.suspectErrors.contains(e.key);
@@ -1818,7 +1857,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
     // 只有頂層標籤（posture_only / fallback）
     final label = widget.entry?.swingPostureLabel;
     if (label != null) {
-      final zhName = SwingPosture.zhName(label);
+      final zhName = SwingPosture.localizedName(AppLocalizations.of(context), label);
       final isGood = label.isEmpty;
       final color  = isGood ? const Color(0xFF22C55E) : const Color(0xFF7C3AED);
 
@@ -1912,7 +1951,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    entry!.audioLabel!,
+                    goodShot == true
+                        ? AppLocalizations.of(context).audioScoreHit(entry!.audioPassCount ?? passCount)
+                        : AppLocalizations.of(context).audioScoreMiss(entry!.audioPassCount ?? passCount),
                     style: TextStyle(
                         color: scoreColor,
                         fontSize: 11,
@@ -1928,7 +1969,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _buildDarkGaugeRow(
-                label:        feat.value,
+                label:        AudioAnalysisService.localizedFeatureLabel(AppLocalizations.of(context), feat.key),
                 featureKey:   feat.key,
                 value:        featureValues[feat.key],
                 passed:       passes[feat.key] ?? false,
@@ -2213,12 +2254,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
           ],
           // ── 以下需要 result 物件 ─────────────────────────────
           if (result != null) ...[
-            // 主要錯誤
-            if (result.primaryError.zhName.isNotEmpty) ...[
+            // 主要錯誤（error_type 為 enum 固定英文 → ARB 翻譯，未知類型退回 Gemini zhName）
+            if (result.primaryError.zhName.isNotEmpty ||
+                result.primaryError.errorType.isNotEmpty) ...[
               const SizedBox(height: 10),
               _aiSectionTitle(l10n.playerAiPrimaryIssue),
               const SizedBox(height: 4),
-              _aiTag(result.primaryError.zhName, sevColor),
+              Builder(builder: (_) {
+                final localized = SwingPosture.localizedName(l10n, result.primaryError.errorType);
+                final displayName = localized != result.primaryError.errorType
+                    ? localized
+                    : (result.primaryError.zhName.isNotEmpty ? result.primaryError.zhName : localized);
+                return _aiTag(displayName, sevColor);
+              }),
               if (result.primaryError.evidence.isNotEmpty)
                 ...result.primaryError.evidence.map((e) => _aiBullet(e)),
             ],

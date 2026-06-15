@@ -50,6 +50,7 @@ namespace UploadServer.Controllers
                     : null,
                 AudioAnalysisJson    = req.AudioAnalysisJson,
                 SwingMetricsJson     = req.SwingMetricsJson,
+                Lang                 = req.Lang,
                 V2Fps                = req.V2Fps,
                 V2Resolution         = req.V2Resolution,
             };
@@ -133,6 +134,8 @@ namespace UploadServer.Controllers
             analysis.Status = "queued";
             if (dto?.PromptVersion != null)
                 analysis.PromptVersion = dto.PromptVersion;
+            if (dto?.Lang != null)
+                analysis.Lang = dto.Lang;
 
             // 重置重試計數，讓 Worker 可以重新處理
             analysis.RetryCount = 0;

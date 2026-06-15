@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using UploadServer.Data;
 using UploadServer.DTOs;
+using UploadServer.Models;
 
 namespace UploadServer.Services
 {
@@ -186,6 +187,7 @@ namespace UploadServer.Services
                         phaseTimestamps:  phaseTimestamps,
                         audioAnalysisJson: analysis.AudioAnalysisJson,
                         swingMetricsJson:  analysis.SwingMetricsJson,
+                        lang:             analysis.Lang,
                         keyframesBase64:  keyframesBase64,
                         audioWavBytes:    audioWavBytes,
                         v2Fps:            analysis.V2Fps,
@@ -249,6 +251,58 @@ namespace UploadServer.Services
             else
             {
                 await db.SaveChangesAsync(ct);
+            }
+
+            // 完整分析成功後，將其上傳的 clip/CSV 同時納入訓練資料集（送審制，
+            // 審核通過後 +1 球）。重用 ai_coach 的 B2 物件，不再要求使用者另外上傳。
+            // 獨立於扣球 transaction 之後執行，避免 BILLING_FAILURE 的 ChangeTracker
+            // 清空路徑把這筆 add 一併丟棄。
+            if (analysis.Status == "completed")
+                await EnsureDatasetContributionAsync(db, analysis, ct);
+        }
+
+        /// <summary>
+        /// 將一筆完成的完整分析納入資料集送審。
+        /// 去重：同 user + 同來源（VideoId，退回 analysis.Id）已有任何狀態的列則跳過，
+        /// 避免重複分析同一支影片重複發球。無上傳 clip 者不納入。
+        /// </summary>
+        private async Task EnsureDatasetContributionAsync(
+            VideoDbContext db, AiCoachAnalysis a, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(a.ClipB2Path)) return;
+
+            var sourceKey = !string.IsNullOrWhiteSpace(a.VideoId) ? a.VideoId! : a.Id;
+            var exists = await db.DatasetUploads.AnyAsync(
+                d => d.UserId == a.UserId && d.ClientFilePath == sourceKey, ct);
+            if (exists) return;
+
+            db.DatasetUploads.Add(new DatasetUpload
+            {
+                Id              = a.Id,
+                UserId          = a.UserId,
+                B2VideoKey      = a.ClipB2Path,
+                B2CsvKey        = a.CsvB2Path,
+                ClientFilePath  = sourceKey,
+                RecordedAt      = string.Empty,
+                DurationSeconds = 0,
+                GoodShot        = null,
+                VideoType       = "clip",
+                CreatedAt       = DateTime.UtcNow,
+                Status          = DatasetUploadStatus.Pending,
+            });
+
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                _logger.LogInformation(
+                    "完整分析資料納入資料集送審: analysis={Id} user={User} source={Src}",
+                    a.Id, a.UserId, sourceKey);
+            }
+            catch (Exception ex)
+            {
+                // 資料集納入失敗不影響分析交付（分析結果已存檔），僅記錄
+                _logger.LogWarning(ex,
+                    "資料集送審建立失敗（略過，不影響分析）: analysis={Id}", a.Id);
             }
         }
 
