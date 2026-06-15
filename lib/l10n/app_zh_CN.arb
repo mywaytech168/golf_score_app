@@ -82,7 +82,7 @@
   "navData": "数据",
   "navRecord": "录制",
   "navHistory": "历史",
-  "navPremium": "付费",
+  "navPremium": "订阅",
   "homeLogout": "退出登录",
   "homeConfirmLogout": "确认退出",
   "homeConfirmLogoutMsg": "您确定要退出登录吗？",
@@ -1107,6 +1107,7 @@
   "playerOverlaySkeleton": "骨架",
   "playerOverlayTrajectory": "轨迹",
   "playerOverlayEffect": "特效",
+  "playerOverlayAnchor": "锚点",
   "playerTrajectoryTuning": "轨迹调参",
   "playerShotLabel": "第{index}球 {time}",
   "@playerShotLabel": {

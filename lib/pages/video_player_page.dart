@@ -16,11 +16,13 @@ import '../models/swing_posture.dart';
 import '../recording/pose_csv_loader.dart';
 import '../recording/skeleton_painter.dart';
 import '../recording/trajectory_painter.dart';
+import '../recording/widgets/anchor_marker.dart';
 import '../services/analysis_service.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/chart_data_service.dart';
 import '../services/recording_history_storage.dart';
 import '../services/skeleton_csv_locator.dart';
+import '../services/swing_auto_clip_service.dart';
 import '../services/swing_detect_prefs.dart';
 import '../services/swing_stats_service.dart';
 import '../services/biomechanics_service.dart';
@@ -118,6 +120,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
   bool _showSkeleton   = false;
   bool _showTrajectory = false;
   bool _showImpactFx   = false;   // 擊球光圈 / Sweet Spot 徽章 / impact chip 金標
+  bool _showAnchor     = false;   // 擊球錨點標記（anchor.json 存在才可開）
+  (double, double)? _anchor;      // 歸一化錨點座標（display 空間，已對齊 base 影片）
   late final bool _hasTrajectory;   // trajectory.json 是否存在
   bool get _hasImpactFx =>
       widget.entry?.hitSecond != null && widget.entry?.goodShot != null;
@@ -197,6 +201,19 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
 
     // 長影片：載入已切片段的擊球時間點（時間軸標記 + 快速跳轉）
     if (_isLongVideo) _loadClipMarks();
+
+    // 擊球錨點：此 session 有 anchor.json 才顯示（切片切下時已連同錨點寫入）。
+    // 座標為 display 歸一化、已對齊 base 影片（切片翻轉時 x 已於切片階段鏡像）。
+    _loadAnchor();
+  }
+
+  Future<void> _loadAnchor() async {
+    final a = await SwingAutoClipService.loadAnchor(p.dirname(widget.videoPath));
+    if (!mounted || a == null) return;
+    setState(() {
+      _anchor = a;
+      _showAnchor = true; // 有錨點預設顯示
+    });
   }
 
   /// 查出此長影片切出的所有片段，換算擊球時刻回原始影片座標。
@@ -730,6 +747,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       onChanged: (v) => setState(() => _showImpactFx = v),
                     ),
                   ],
+                  if (_anchor != null) ...[
+                    const SizedBox(width: 8),
+                    toggle(
+                      label: l10n.playerOverlayAnchor,
+                      icon: Icons.gps_fixed,
+                      value: _showAnchor,
+                      onChanged: (v) => setState(() => _showAnchor = v),
+                    ),
+                  ],
                   // 骨架/影片時間差校正：疊圖落後→調大、超前→調小
                   if (_hasSkeletonCsv || _hasTrajectory)
                     IconButton(
@@ -867,6 +893,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage>
                       track: _trajTrack!,
                       positionSec: posSec + _overlayLeadSec,
                     ),
+                  ),
+                ),
+              ),
+            // 擊球錨點標記（歸一化座標 → Align 對位，整段播放固定顯示）
+            if (_showAnchor && _anchor != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Align(
+                    alignment: Alignment(_anchor!.$1 * 2 - 1, _anchor!.$2 * 2 - 1),
+                    child: const AnchorMarker(),
                   ),
                 ),
               ),

@@ -66,6 +66,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton<AppleTokenValidator>(); // JWKS 快取需跨請求共用
 builder.Services.AddSingleton<B2Service>();
 builder.Services.AddSingleton<AdMobSsvVerifier>(); // Google 公鑰快取需跨請求共用
+builder.Services.AddSingleton<AppleJwsVerifier>(); // Apple JWS x5c 驗簽
 builder.Services.AddScoped<ShareService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<SubscriptionService>();

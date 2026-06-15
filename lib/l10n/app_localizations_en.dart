@@ -273,7 +273,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navHistory => 'History';
 
   @override
-  String get navPremium => 'Premium';
+  String get navPremium => 'Subscription';
 
   @override
   String get homeLogout => 'Logout';
@@ -2089,6 +2089,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get playerOverlayEffect => 'Effects';
+
+  @override
+  String get playerOverlayAnchor => 'Anchor';
 
   @override
   String get playerTrajectoryTuning => 'Trajectory Tuning';

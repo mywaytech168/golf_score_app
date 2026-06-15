@@ -27,6 +27,7 @@ namespace UploadServer.Controllers
         };
 
         private readonly AdMobSsvVerifier _ssvVerifier;
+        private readonly AppleJwsVerifier _appleJws;
         private readonly VideoDbContext _db;
 
         public WebhookController(
@@ -34,12 +35,14 @@ namespace UploadServer.Controllers
             ILogger<WebhookController> logger,
             IConfiguration config,
             AdMobSsvVerifier ssvVerifier,
+            AppleJwsVerifier appleJws,
             VideoDbContext db)
         {
             _subscriptionService = subscriptionService;
             _logger              = logger;
             _config              = config;
             _ssvVerifier         = ssvVerifier;
+            _appleJws            = appleJws;
             _db                  = db;
         }
 
@@ -148,12 +151,19 @@ namespace UploadServer.Controllers
         {
             try
             {
-                // 解碼 JWS（不驗簽名，僅解析 payload）
-                // 生產環境建議：驗證 Apple 的 x5c 憑證鏈
-                var payload = DecodeJwsPayload(body.SignedPayload);
+                // 先驗簽（x5c 憑證鏈 → Apple Root CA - G3 + ES256），通過才取 payload
+                var payloadJson = _appleJws.VerifyAndGetPayload(body.SignedPayload);
+                if (payloadJson == null)
+                {
+                    // 驗簽失敗：可能是偽造請求，回 401 不處理
+                    _logger.LogWarning("Apple Notification: JWS 驗簽失敗，拒絕");
+                    return Unauthorized();
+                }
+
+                var payload = JsonSerializer.Deserialize<AppleJwsPayload>(payloadJson, _jsonOpts);
                 if (payload == null)
                 {
-                    _logger.LogWarning("Apple Notification: JWS payload 解碼失敗");
+                    _logger.LogWarning("Apple Notification: payload 反序列化失敗");
                     return Ok();
                 }
 
@@ -191,9 +201,6 @@ namespace UploadServer.Controllers
             var raw = DecodeJwsPayloadJson(jws);
             return raw == null ? null : JsonSerializer.Deserialize<T>(raw, _jsonOpts);
         }
-
-        private static AppleJwsPayload? DecodeJwsPayload(string jws)
-            => DecodeJwsPayload<AppleJwsPayload>(jws);
 
         private static string? DecodeJwsPayloadJson(string jws)
         {

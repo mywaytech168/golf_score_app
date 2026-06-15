@@ -595,7 +595,7 @@ abstract class AppLocalizations {
   /// No description provided for @navPremium.
   ///
   /// In en, this message translates to:
-  /// **'Premium'**
+  /// **'Subscription'**
   String get navPremium;
 
   /// No description provided for @homeLogout.
@@ -3843,6 +3843,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Effects'**
   String get playerOverlayEffect;
+
+  /// No description provided for @playerOverlayAnchor.
+  ///
+  /// In en, this message translates to:
+  /// **'Anchor'**
+  String get playerOverlayAnchor;
 
   /// No description provided for @playerTrajectoryTuning.
   ///

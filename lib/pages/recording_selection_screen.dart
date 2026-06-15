@@ -115,11 +115,21 @@ class _RecordingSelectionScreenState extends State<RecordingSelectionScreen> {
     if (Platform.isIOS) {
       final source = await _showIOSSourceSheet();
       if (source == null) return; // 使用者取消
-      result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['mov', 'm4v'],
-        allowMultiple: false,
-      );
+      if (source == _VideoSource.photoLibrary) {
+        // 相簿：FileType.video → iOS 開 PHPicker 照片圖庫（影片多存在這）。
+        // ★ 不可帶 allowedExtensions（僅 FileType.custom 允許，否則 file_picker 丟例外）。
+        result = await FilePicker.platform.pickFiles(
+          type: FileType.video,
+          allowMultiple: false,
+        );
+      } else {
+        // 檔案 App：FileType.custom → UIDocumentPicker（iCloud Drive / 我的 iPhone）。
+        result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['mov', 'm4v', 'mp4'],
+          allowMultiple: false,
+        );
+      }
     } else {
       result = await FilePicker.platform.pickFiles(
         type: FileType.custom,

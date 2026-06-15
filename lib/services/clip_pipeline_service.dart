@@ -175,6 +175,10 @@ class ClipPipelineService {
     // clip 實際從 key frame 開始，可能略早於 hit.startSec，用 actualStartSec 對齊 CSV
     final clipActualStartSec = trimResult.actualStartSec;
 
+    // 來源 session 若有擊球錨點 → 一併寫入此切片資料夾（供切片自身的離線 V4
+    // 偵測 / 錨點對位）。切片影片與 CSV 已隨 flipClip 水平翻轉，故錨點 x 同步鏡像。
+    await _copyAnchorToClip(srcSessionDir, sessionDir, flipClip);
+
     // 縮圖定位到擊球瞬間，使用多策略 fallback 處理 HEVC/MOV 相容性
     String? thumbPath;
     final thumbOutPath = p.join(sessionDir, 'thumbnail.jpg');
@@ -296,6 +300,26 @@ class ClipPipelineService {
         bestSpeedValue: hit.speedValue > 0 ? hit.speedValue : null,
       ),
     );
+  }
+
+  /// 將來源 session 的 anchor.json（歸一化擊球錨點）複製進切片資料夾。
+  /// 來源無錨點則略過（對齊「若有錨點才放」）。切片若水平翻轉（前鏡頭
+  /// Android），錨點 x 同步鏡像為 1-x 以對齊切片的影片 / CSV。
+  static Future<void> _copyAnchorToClip(
+      String srcSessionDir, String clipSessionDir, bool flip) async {
+    try {
+      final src = File(p.join(srcSessionDir, 'anchor.json'));
+      if (!await src.exists()) return;
+      final m = jsonDecode(await src.readAsString()) as Map<String, dynamic>;
+      final x = (m['x'] as num?)?.toDouble();
+      final y = (m['y'] as num?)?.toDouble();
+      if (x == null || y == null) return;
+      final outX = flip ? (1.0 - x) : x;
+      await File(p.join(clipSessionDir, 'anchor.json'))
+          .writeAsString(jsonEncode({'x': outX, 'y': y}));
+    } catch (e) {
+      debugPrint('[Pipeline] anchor.json 複製進切片失敗: $e');
+    }
   }
 
   /// 公開入口：供 UI 頁面對已存在的 clip 補存 phases.json。

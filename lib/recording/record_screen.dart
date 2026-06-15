@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import '../services/camera_permission_service.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../services/audio_analysis_service.dart';
@@ -161,45 +161,9 @@ class _RecordScreenState extends State<RecordScreen> {
     if (mounted) setState(() => _supportsVideoAndAnalysis = ok);
   }
 
-  /// 開相機前確保相機 + 麥克風權限；被拒時引導使用者至設定。
-  /// 回傳 false 表示權限不足，呼叫端不應繼續開相機。
-  Future<bool> _ensureRecordPermissions() async {
-    final statuses = await [Permission.camera, Permission.microphone].request();
-    final camOk = statuses[Permission.camera]?.isGranted ?? false;
-    final micOk = statuses[Permission.microphone]?.isGranted ?? false;
-    if (camOk && micOk) return true;
-
-    final permanentlyDenied =
-        (statuses[Permission.camera]?.isPermanentlyDenied ?? false) ||
-        (statuses[Permission.microphone]?.isPermanentlyDenied ?? false);
-    if (mounted) {
-      final l10n = AppLocalizations.of(context);
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(l10n.recordPermissionTitle),
-          content: Text(camOk
-              ? l10n.recordPermissionMicOnly
-              : l10n.recordPermissionCameraAndMic),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(l10n.commonCancel),
-            ),
-            FilledButton(
-              onPressed: () { Navigator.pop(ctx); if (permanentlyDenied) openAppSettings(); },
-              child: Text(permanentlyDenied ? l10n.recordGoToSettings : l10n.recordGotIt),
-            ),
-          ],
-        ),
-      );
-    }
-    return false;
-  }
-
   Future<void> _initCamera() async {
     if (mounted) setState(() => _cameraReady = false);
-    if (!await _ensureRecordPermissions()) return;
+    if (!await CameraPermissionService.ensure(context)) return;
     _poseSub?.cancel();
     try {
       final quality = switch (_config.quality) {

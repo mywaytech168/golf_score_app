@@ -108,7 +108,7 @@
   "navData": "Data",
   "navRecord": "Record",
   "navHistory": "History",
-  "navPremium": "Premium",
+  "navPremium": "Subscription",
   "homeLogout": "Logout",
   "homeConfirmLogout": "Confirm Logout",
   "homeConfirmLogoutMsg": "Are you sure you want to logout?",
@@ -1177,6 +1177,7 @@
   "playerOverlaySkeleton": "Skeleton",
   "playerOverlayTrajectory": "Trajectory",
   "playerOverlayEffect": "Effects",
+  "playerOverlayAnchor": "Anchor",
   "playerTrajectoryTuning": "Trajectory Tuning",
   "playerShotLabel": "Shot {index} {time}",
   "@playerShotLabel": {

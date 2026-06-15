@@ -33,9 +33,15 @@ import UIKit
     private var currentDevice: AVCaptureDevice?
     private var videoOutput = AVCaptureVideoDataOutput()
     private var audioOutput = AVCaptureAudioDataOutput()
+    // 麥克風 input 只在錄影期間動態掛上（預覽期不掛，避免通話佔麥克風時整個 session 被中斷）
+    private var micInput: AVCaptureDeviceInput?
+    private var micAttached = false
     private let sessionQueue = DispatchQueue(label: "cam.session", qos: .userInitiated)
     private let videoQueue   = DispatchQueue(label: "cam.video",   qos: .userInitiated)
     private let audioQueue   = DispatchQueue(label: "cam.audio",   qos: .userInitiated)
+    // 中斷/恢復通知監聽 token（被通訊軟體等佔用麥克風/相機時，session 會被 iOS 中斷；
+    // 中斷結束後自動重新 startRunning，否則畫面會永遠停住）。每次開相機重綁。
+    private var sessionObservers: [NSObjectProtocol] = []
 
     // ── Recording ──────────────────────────────────────────────────────────────
     private var assetWriter: AVAssetWriter?
@@ -219,8 +225,12 @@ import UIKit
     private func openCamera(quality: String, result: @escaping FlutterResult) {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
+            self.removeInterruptionObservers()
             self.captureSession?.stopRunning()
             self.captureSession = nil
+            // 新 session = 乾淨狀態：重置麥克風掛載旗標（舊旗標殘留會讓開錄誤判已掛 → 無音軌）
+            self.micAttached = false
+            self.micInput = nil
 
             let session = AVCaptureSession()
             session.beginConfiguration()
@@ -246,22 +256,13 @@ import UIKit
             session.addInput(input)
             self.currentDevice = device
 
-            // ── 音訊輸入：麥克風 → AVCaptureAudioDataOutput（錄進 mp4 音軌）──────────
-            //   注意：App 另有 PCM 收音管線（flutter_audio_capture）做擊球聲分析，
-            //   兩者共用麥克風，故 AVAudioSession 須設為可混音的 record 類別。
+            // ── 預覽期「不掛麥克風」（治本：通話中預覽不凍）─────────────────────────
+            //   通話/通訊軟體獨佔麥克風時，iOS 會以 audioDeviceInUseByAnotherClient
+            //   中斷「整個」capture session（視訊預覽一起凍）。故預覽期純視訊，
+            //   startRecording 才 attachMicLocked() 動態加麥克風、stopRecording 卸除
+            //   → 通話當下預覽不凍，與系統相機一致。
+            //   （realtime PCM 擊球分析走獨立 flutter_audio_capture，與此 session 無關。）
             self.configureAudioSession()
-            if let mic = AVCaptureDevice.default(for: .audio),
-               let micInput = try? AVCaptureDeviceInput(device: mic),
-               session.canAddInput(micInput) {
-                session.addInput(micInput)
-                self.audioOutput = AVCaptureAudioDataOutput()
-                self.audioOutput.setSampleBufferDelegate(self, queue: self.audioQueue)
-                if session.canAddOutput(self.audioOutput) {
-                    session.addOutput(self.audioOutput)
-                }
-            } else {
-                print("[MediaPipeCamera] mic unavailable → recording will have no audio track")
-            }
 
             // Lock to target fps (30 or 60) if supported
             let fps = self.targetFps
@@ -291,6 +292,7 @@ import UIKit
             }
 
             session.commitConfiguration()
+            self.installInterruptionObservers(for: session)
             session.startRunning()
             self.captureSession = session
 
@@ -326,6 +328,89 @@ import UIKit
         } catch {
             print("[MediaPipeCamera] AVAudioSession config failed: \(error)")
         }
+    }
+
+    // ── Capture session 中斷 / 恢復 ───────────────────────────────────────────
+    //   通訊軟體通話等會獨佔麥克風 / 相機 → iOS 中斷整個 session（含畫面預覽）。
+    //   中斷結束（通話掛斷、對方放開裝置）後需主動重新 startRunning，否則畫面永遠停住。
+    private func installInterruptionObservers(for session: AVCaptureSession) {
+        let nc = NotificationCenter.default
+
+        let interrupted = nc.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session, queue: nil
+        ) { note in
+            let reason = note.userInfo?[AVCaptureSessionInterruptionReasonKey]
+            print("[MediaPipeCamera] session interrupted, reason=\(String(describing: reason))")
+        }
+
+        let ended = nc.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session, queue: nil
+        ) { [weak self] _ in
+            self?.sessionQueue.async {
+                guard let self = self,
+                      let s = self.captureSession, s === session, !s.isRunning else { return }
+                s.startRunning()
+                print("[MediaPipeCamera] interruption ended → session resumed")
+            }
+        }
+
+        let runtimeErr = nc.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session, queue: nil
+        ) { [weak self] note in
+            let err = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            print("[MediaPipeCamera] runtime error: \(String(describing: err)) → try resume")
+            self?.sessionQueue.async {
+                guard let self = self,
+                      let s = self.captureSession, s === session, !s.isRunning else { return }
+                s.startRunning()
+            }
+        }
+
+        sessionObservers = [interrupted, ended, runtimeErr]
+    }
+
+    private func removeInterruptionObservers() {
+        for o in sessionObservers { NotificationCenter.default.removeObserver(o) }
+        sessionObservers.removeAll()
+    }
+
+    // ── 動態掛/卸麥克風（僅錄影期間）─────────────────────────────────────────────
+    //   必須在 sessionQueue 上呼叫（startRecording / stopRecording / dispose 皆在此佇列）。
+    private func attachMicLocked() {
+        guard !micAttached, let session = captureSession else { return }
+        configureAudioSession()
+        session.beginConfiguration()
+        if let mic = AVCaptureDevice.default(for: .audio),
+           let input = try? AVCaptureDeviceInput(device: mic),
+           session.canAddInput(input) {
+            session.addInput(input)
+            micInput = input
+            audioOutput = AVCaptureAudioDataOutput()
+            audioOutput.setSampleBufferDelegate(self, queue: audioQueue)
+            if session.canAddOutput(audioOutput) {
+                session.addOutput(audioOutput)
+            }
+            micAttached = true
+            print("[MediaPipeCamera] mic attached for recording")
+        } else {
+            print("[MediaPipeCamera] mic unavailable → recording will have no audio track")
+        }
+        session.commitConfiguration()
+    }
+
+    private func detachMicLocked() {
+        guard let session = captureSession else { micInput = nil; micAttached = false; return }
+        guard micAttached else { return }
+        session.beginConfiguration()
+        if let input = micInput { session.removeInput(input) }
+        session.removeOutput(audioOutput)
+        session.commitConfiguration()
+        micInput = nil
+        micAttached = false
+        print("[MediaPipeCamera] mic detached → preview audio-free")
     }
 
     // ── Model path resolution (Flutter assets live in App.framework/flutter_assets/) ──
@@ -447,6 +532,8 @@ import UIKit
     private func startRecording(path: String, result: @escaping FlutterResult) {
         sessionQueue.async { [weak self] in
             guard let self = self, !self.isRecording else { result(nil); return }
+            // 預覽期未掛麥克風 → 開錄前動態加上（小幅 reconfig，prewarm 的 writer 已備妥音軌 input）
+            self.attachMicLocked()
 
             let writer: AVAssetWriter
             let wrInput: AVAssetWriterInput
@@ -487,6 +574,7 @@ import UIKit
                 DispatchQueue.main.async { result(nil) }; return
             }
             self.isRecording = false
+            self.detachMicLocked() // 卸麥克風 → 預覽回到純視訊，通話不再凍住預覽
             let tmp      = self.recordingTmpPath
             let finalDst = self.recordingFinalPath
             let started  = self.recordingStarted
@@ -573,6 +661,8 @@ import UIKit
             }
             self.isRecording = false
             self.cleanupFailedRecording(tmp: self.recordingTmpPath)
+            self.detachMicLocked()
+            self.removeInterruptionObservers()
             self.captureSession?.stopRunning()
             self.captureSession = nil
             self.assetWriter = nil

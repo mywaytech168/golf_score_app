@@ -12,6 +12,7 @@ import '../models/swing_hit.dart';
 import '../pages/video_player_page.dart';
 import '../services/audio_analysis_service.dart';
 import '../services/audio_extraction_service.dart';
+import '../services/camera_permission_service.dart';
 import '../services/clip_audio_score_service.dart';
 import '../services/clip_pipeline_service.dart';
 import '../services/shot_sound_service.dart';
@@ -205,6 +206,7 @@ class _ShotRecordScreenState extends State<ShotRecordScreen>
 
   Future<void> _initCamera() async {
     if (mounted) setState(() => _cameraReady = false);
+    if (!await CameraPermissionService.ensure(context)) return;
     _poseSub?.cancel();
     try {
       final quality = switch (_config.quality) {

@@ -13,6 +13,7 @@ import 'recording_selection_screen.dart';
 import '../models/recording_history_entry.dart';
 import '../services/recording_history_storage.dart';
 import '../services/app_update_service.dart';
+import '../services/camera_permission_service.dart';
 import '../services/install_source_service.dart';
 import '../services/statistics_service.dart';
 import '../widgets/update_dialog.dart';
@@ -65,6 +66,9 @@ class _MainShellPageState extends State<MainShellPage> {
   Future<void> _runPostFrameChecks() async {
     if (!mounted) return;
     await OnboardingPage.maybeShow(context);
+    // 一進 App 即要求相機 + 麥克風權限（僅觸發系統對話框、不引導設定）；
+    // 真正進入錄影/SHOT 時 CameraPermissionService.ensure 仍會重複要求並引導。
+    await CameraPermissionService.requestSilently();
     await _checkForUpdate();
   }
 

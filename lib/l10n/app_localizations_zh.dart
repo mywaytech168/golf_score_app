@@ -265,7 +265,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get navHistory => '歷史';
 
   @override
-  String get navPremium => '付費';
+  String get navPremium => '訂閱';
 
   @override
   String get homeLogout => '登出';
@@ -2035,6 +2035,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get playerOverlayEffect => '特效';
+
+  @override
+  String get playerOverlayAnchor => '錨點';
 
   @override
   String get playerTrajectoryTuning => '軌跡調參';
@@ -4097,7 +4100,7 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
   String get navHistory => '历史';
 
   @override
-  String get navPremium => '付费';
+  String get navPremium => '订阅';
 
   @override
   String get homeLogout => '退出登录';
@@ -5867,6 +5870,9 @@ class AppLocalizationsZhCn extends AppLocalizationsZh {
 
   @override
   String get playerOverlayEffect => '特效';
+
+  @override
+  String get playerOverlayAnchor => '锚点';
 
   @override
   String get playerTrajectoryTuning => '轨迹调参';
@@ -7929,7 +7935,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get navHistory => '歷史';
 
   @override
-  String get navPremium => '付費';
+  String get navPremium => '訂閱';
 
   @override
   String get homeLogout => '登出';
@@ -9699,6 +9705,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get playerOverlayEffect => '特效';
+
+  @override
+  String get playerOverlayAnchor => '錨點';
 
   @override
   String get playerTrajectoryTuning => '軌跡調參';
